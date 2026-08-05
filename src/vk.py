@@ -83,22 +83,45 @@ def group_id() -> int:
     return resolve_group_id(raw)
 
 
-def post(text: str, *, photo_url: str = "") -> int:
-    """Публикует запись от имени сообщества. Возвращает id записи."""
+def post(text: str, *, photo_url: str = "", link: str = "") -> int:
+    """Публикует запись от имени сообщества. Возвращает id записи.
+
+    Картинку загрузить нельзя: методы photos.* закрыты для ключа сообщества.
+    Вместо этого прикладываем ссылку — ВКонтакте сам вытягивает из неё
+    обложку и делает карточку с картинкой.
+    """
     owner = -group_id()  # у сообществ идентификатор отрицательный
-    params = {
-        "owner_id": owner,
-        "from_group": 1,  # запись от имени сообщества, а не от лица админа
-        "message": to_plain_text(text)[:16000],
-    }
+    message = to_plain_text(text)
 
-    if photo_url:
-        attachment = _upload_photo(photo_url)
-        if attachment:
-            params["attachments"] = attachment
+    # Ссылку оставляем прямо в тексте: ВКонтакте сам разворачивает первую
+    # ссылку в карточку с обложкой. Передавать её через attachments нельзя —
+    # там требуется уже загруженное фото, а photos.* ключу сообщества закрыты.
+    target = link or _first_link(text)
+    if target and target not in message:
+        message = f"{message}\n\n{target}"
 
-    result = _call("wall.post", **params)
+    result = _call(
+        "wall.post",
+        owner_id=owner,
+        from_group=1,  # запись от имени сообщества, а не от лица админа
+        message=message[:16000],
+    )
     return int(result.get("post_id", 0))
+
+
+def _first_link(html: str) -> str:
+    """Первая ссылка из поста — она и станет карточкой с обложкой."""
+    match = re.search(r'<a\s+href="([^"]+)"', html, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    match = re.search(r"https?://\S+", html)
+    return match.group(0).rstrip(".,;)") if match else ""
+
+
+def _drop_link(text: str, url: str) -> str:
+    """Убирает из текста строку с адресом, который ушёл вложением."""
+    lines = [line for line in text.split("\n") if url not in line]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 def _upload_photo(url: str) -> str:

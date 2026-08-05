@@ -84,6 +84,22 @@ def shorten(text: str, limit: int = STORY_LIMIT) -> str:
     return result or text[:limit].rsplit(" ", 1)[0] + "…"
 
 
+def first_sentence(text: str, limit: int = 95) -> str:
+    """Первая законченная фраза поста — подпись к картинке.
+
+    Берём именно фразу целиком: обрубок посреди слова читается как поломка,
+    а не как лаконичность.
+    """
+    clean = strip_html(text)
+    sentences = re.split(r"(?<=[.!?])\s+", clean)
+    first = sentences[0].strip() if sentences else clean
+
+    if len(first) <= limit:
+        return first
+    # Фраза слишком длинная — режем по слову и честно ставим многоточие.
+    return first[:limit].rsplit(" ", 1)[0].rstrip(",;:—-") + "…"
+
+
 def background() -> Image.Image:
     """Кремовый пластик с фактурой — тот же материал, что у аватарки."""
     img = Image.new("RGB", (WIDTH, HEIGHT), CREAM)
@@ -102,8 +118,90 @@ def background() -> Image.Image:
     return img.filter(ImageFilter.GaussianBlur(0.4))
 
 
+def cover_background(url: str) -> Image.Image | None:
+    """Обложка альбома во весь экран: размытый фон плюс сама обложка по центру.
+
+    Историю смотрят, а не читают, поэтому картинка всегда важнее текста.
+    """
+    try:
+        response = requests.get(url, timeout=30)
+        if response.status_code != 200:
+            return None
+        from io import BytesIO
+
+        cover = Image.open(BytesIO(response.content)).convert("RGB")
+    except Exception:
+        return None
+
+    # Фон: обложка, растянутая на весь кадр и сильно размытая
+    ratio = max(WIDTH / cover.width, HEIGHT / cover.height)
+    blurred = cover.resize((int(cover.width * ratio * 1.2), int(cover.height * ratio * 1.2)))
+    left = (blurred.width - WIDTH) // 2
+    top = (blurred.height - HEIGHT) // 2
+    background_img = blurred.crop((left, top, left + WIDTH, top + HEIGHT))
+    background_img = background_img.filter(ImageFilter.GaussianBlur(38))
+
+    # Затемняем, иначе белый текст не читается
+    shade = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
+    background_img = Image.blend(background_img, shade, 0.45)
+
+    # Сама обложка — крупным квадратом в верхней трети
+    side = int(WIDTH * 0.78)
+    sharp = cover.resize((side, side), Image.LANCZOS)
+    x = (WIDTH - side) // 2
+    y = int(HEIGHT * 0.17)
+
+    # Тень под обложкой, чтобы она не сливалась с фоном
+    shadow = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rectangle(
+        [x + 12, y + 18, x + side + 12, y + side + 18], fill=(0, 0, 0, 150)
+    )
+    background_img = Image.alpha_composite(
+        background_img.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(26))
+    ).convert("RGB")
+
+    background_img.paste(sharp, (x, y))
+    return background_img
+
+
+def render_photo(text: str, cover_url: str, rubric_title: str = "") -> Image.Image | None:
+    """История с обложкой: картинка во весь экран, текста минимум."""
+    img = cover_background(cover_url)
+    if img is None:
+        return None
+
+    draw = ImageDraw.Draw(img)
+    margin = int(WIDTH * 0.09)
+
+    # Плашка рубрики над обложкой
+    if rubric_title:
+        f = font(40)
+        box = draw.textbbox((0, 0), rubric_title, font=f)
+        pad = 22
+        y = int(HEIGHT * 0.10)
+        draw.rectangle([margin, y, margin + box[2] + pad * 2, y + box[3] + pad * 1.4], fill=ACCENT)
+        draw.text((margin + pad, y + pad * 0.55), rubric_title, font=f, fill=(255, 255, 255))
+
+    # Подпись — только первая фраза целиком: обрыв на полуслове выглядит браком
+    caption = first_sentence(text, limit=95)
+    f = font(62)
+    y = int(HEIGHT * 0.74)
+    for line in textwrap.wrap(caption, width=24)[:3]:
+        draw.text((margin + 3, y + 3), line, font=f, fill=(0, 0, 0))
+        draw.text((margin, y), line, font=f, fill=(245, 243, 238))
+        y += 78
+
+    # Подпись канала
+    footer = font(38)
+    fy = HEIGHT - int(HEIGHT * 0.065)
+    draw.rectangle([margin, fy - 16, margin + 92, fy - 8], fill=ACCENT)
+    draw.text((margin, fy), "ПЛЁНКА", font=footer, fill=(245, 243, 238))
+
+    return img
+
+
 def render(text: str, rubric_title: str = "") -> Image.Image:
-    """Собирает карточку: плашка рубрики, текст, подпись канала."""
+    """Текстовая карточка — запасной вариант, когда картинки нет."""
     img = background()
     draw = ImageDraw.Draw(img)
 
@@ -184,18 +282,36 @@ def main() -> int:
     config.load_dotenv()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    cover_url = ""
     if args.text:
         text, title = args.text, ""
     else:
-        post = latest_post()
+        # Ищем в очереди пост с обложкой: история с картинкой сильнее текстовой.
+        posts = sorted(config.QUEUE.glob("*.json"))
+        post = None
+        for path in posts:
+            candidate = state.read_json(path, {})
+            if candidate.get("cover"):
+                post = candidate
+                break
+        post = post or (state.read_json(posts[0], {}) if posts else None)
+
         if not post:
             print("Очередь пуста — нечего показывать.")
             return 0
+
         text = post.get("text", "")
+        cover_url = post.get("cover", "")
         rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
         title = rubric.title if rubric else ""
 
-    card = render(text, title)
+    card = None
+    if cover_url:
+        card = render_photo(text, cover_url, title)
+        if card is None:
+            print("Обложка не загрузилась — делаю текстовую карточку.")
+    if card is None:
+        card = render(text, title)
     path = OUT_DIR / "story.jpg"
     card.convert("RGB").save(path, "JPEG", quality=92)
     print(f"Карточка готова: {path.relative_to(config.ROOT)} ({card.width}×{card.height})")
