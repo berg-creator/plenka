@@ -223,11 +223,20 @@ def push_state() -> None:
     if not os.environ.get("GITHUB_ACTIONS"):
         return
 
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=config.ROOT,
+        capture_output=True,
+        text=True,
+    ).stdout.strip() or "main"
+
     commands = (
         ["git", "add", "data/"],
         ["git", "commit", "-m", "дежурство: разборы и состояние бота"],
-        ["git", "pull", "--rebase", "--autostash", "origin", "HEAD"],
-        ["git", "push"],
+        # Пока идёт смена, в ветку пишут и другие задачи — публикация, сбор.
+        # Поэтому перед отправкой всегда подтягиваем чужое.
+        ["git", "pull", "--rebase", "--autostash", "origin", branch],
+        ["git", "push", "origin", f"HEAD:{branch}"],
     )
     for command in commands:
         result = subprocess.run(command, cwd=config.ROOT, capture_output=True, text=True)
