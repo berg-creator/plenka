@@ -91,6 +91,24 @@ def send(post: dict, chat_id: str) -> None:
     telegram.send_message(chat_id, text)
 
 
+def send_for_approval(post: dict, path: Path, chat_id: str) -> None:
+    """Показывает пост и подкладывает под него кнопки решения.
+
+    Кнопки идут отдельным сообщением: пост может оказаться фотографией или
+    опросом, а к ним клавиатуру приложить не всегда возможно.
+    """
+    rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
+    title = rubric.title if rubric else post.get("rubric", "")
+
+    telegram.send_message(chat_id, f"— — — <b>{title}</b> — — —")
+    send(post, chat_id)
+    telegram.send_message(
+        chat_id,
+        "Что делаем с постом?",
+        buttons=telegram.approval_buttons(path.name),
+    )
+
+
 def _poll_payload(text: str) -> dict | None:
     try:
         data = json.loads(text)
@@ -143,12 +161,8 @@ def main() -> int:
             f"<b>Очередь на просмотр — {len(posts)} постов.</b>\n"
             f"Это превью: в канал ничего не ушло.",
         )
-        for index, item in enumerate(posts, start=1):
-            post = state.read_json(item, {})
-            rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
-            title = rubric.title if rubric else post.get("rubric", "")
-            telegram.send_message(chat_id, f"— — — <b>{index}. {title}</b> — — —")
-            send(post, chat_id)
+        for item in posts:
+            send_for_approval(state.read_json(item, {}), item, chat_id)
         print(f"Отправлено на просмотр: {len(posts)} постов. Очередь не тронута.")
         return 0
 
@@ -176,15 +190,16 @@ def main() -> int:
         else config.secret("TELEGRAM_CHANNEL_ID")
     )
 
-    send(post, chat_id)
-
     if args.target == "channel":
+        send(post, chat_id)
         record(post, path, "channel")
         archive(path)
         print(f"Опубликовано в канал: {path.name}. Осталось в очереди: {len(list(config.QUEUE.glob('*.json')))}")
     else:
-        # В режиме превью пост остаётся в очереди — он ещё не вышел в канал.
-        print(f"Отправлено тебе в личку: {path.name} (пост остался в очереди)")
+        # В личку пост уходит с кнопками решения и остаётся в очереди,
+        # пока ты не нажмёшь «В канал» или «Удалить».
+        send_for_approval(post, path, chat_id)
+        print(f"Отправлено на утверждение: {path.name}")
 
     return 0
 

@@ -72,16 +72,69 @@ def _call(method: str, payload: dict[str, Any]) -> dict:
     return data["result"]
 
 
-def send_message(chat_id: str, text: str, *, preview: bool = False) -> dict:
+def send_message(
+    chat_id: str,
+    text: str,
+    *,
+    preview: bool = False,
+    buttons: list[list[dict]] | None = None,
+) -> dict:
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": sanitize(text)[:MAX_TEXT],
+        "parse_mode": "HTML",
+        "link_preview_options": json.dumps({"is_disabled": not preview}),
+    }
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    return _call("sendMessage", payload)
+
+
+def approval_buttons(post_id: str) -> list[list[dict]]:
+    """Кнопки под превью поста. В callback_data кладём имя файла в очереди."""
+    return [
+        [
+            {"text": "✅ В канал", "callback_data": f"pub:{post_id}"},
+            {"text": "🗑 Удалить", "callback_data": f"del:{post_id}"},
+        ],
+        [{"text": "⏭ Позже", "callback_data": f"skip:{post_id}"}],
+    ]
+
+
+def get_updates(offset: int = 0, timeout: int = 0) -> list[dict]:
+    """Забирает новые события бота — в том числе нажатия кнопок."""
     return _call(
-        "sendMessage",
+        "getUpdates",
         {
-            "chat_id": chat_id,
-            "text": sanitize(text)[:MAX_TEXT],
-            "parse_mode": "HTML",
-            "link_preview_options": json.dumps({"is_disabled": not preview}),
+            "offset": offset,
+            "timeout": timeout,
+            "allowed_updates": json.dumps(["callback_query", "message"]),
         },
     )
+
+
+def answer_callback(callback_id: str, text: str = "") -> None:
+    """Гасит «часики» на кнопке и показывает всплывающее уведомление."""
+    try:
+        _call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text[:200]})
+    except TelegramError:
+        # Уведомление живёт недолго: если запоздали — не повод падать.
+        pass
+
+
+def edit_markup(chat_id: str, message_id: int, buttons: list[list[dict]] | None) -> None:
+    """Меняет кнопки под уже отправленным сообщением (или убирает их)."""
+    try:
+        _call(
+            "editMessageReplyMarkup",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": json.dumps({"inline_keyboard": buttons or []}),
+            },
+        )
+    except TelegramError:
+        pass
 
 
 def send_photo(chat_id: str, photo_url: str, caption: str) -> dict:

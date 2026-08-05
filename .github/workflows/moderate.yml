@@ -1,0 +1,44 @@
+name: Модерация
+
+# Забирает нажатия кнопок под превью постов и выполняет решения.
+# Постоянного сервера у проекта нет, поэтому нажатия обрабатываются пачками:
+# между нажатием и публикацией проходит до пятнадцати минут.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: state-write
+  cancel-in-progress: false
+
+jobs:
+  moderate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Обработать нажатия
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python -m src.moderate
+
+      - name: Сохранить состояние
+        run: |
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/ content/
+          git diff --cached --quiet || git commit -m "модерация: решения по постам применены"
+          git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push
