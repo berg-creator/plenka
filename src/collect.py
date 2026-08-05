@@ -58,6 +58,22 @@ MUSIC_CONTEXT = (
     "rap", "rock", "metal", "label", "record", "lp", "ep", "release",
 )
 
+# Гастрольные новости западных артистов русскому слушателю бесполезны:
+# до России эти туры не доезжают. Такие материалы либо отсеиваются,
+# либо идут с низким приоритетом — как повод пошутить, а не как анонс.
+TOUR_MARKERS_EN = (
+    "tour dates", "announce tour", "announces tour", "on tour", "tour of",
+    "north american tour", "european tour", "uk tour", "world tour",
+    "residency", "festival lineup", "tickets on sale", "live dates",
+)
+TOUR_MARKERS_RU = ("тур по сша", "тур по европе", "гастроли", "билеты в продаж")
+
+# Жанры, которые каналу чужие: попадают только через ложные совпадения имён.
+OFF_TOPIC_MARKERS = (
+    "prog-rock", "progressive rock", "jazz fusion", "classical music",
+    "opera", "symphony", "прог-рок", "симфони", "оперн", "джаз-фьюжн",
+)
+
 # Слова, по которым видно, что новость вообще не о музыке: общекультурные ленты
 # приносят много кино, театра и литературы.
 NON_MUSIC_MARKERS = (
@@ -187,8 +203,27 @@ def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
             if name and _mentions(haystack, name, has_music_context)
         ]
 
+        # Чужие жанры отсеиваем целиком: они попадают сюда только по
+        # случайному совпадению имени вроде Tool или Nas.
+        if any(marker in haystack for marker in OFF_TOPIC_MARKERS):
+            continue
+
         keywords = NEWS_KEYWORDS_RU if entry.get("lang") == "ru" else NEWS_KEYWORDS_EN
         has_keyword = any(word in haystack for word in keywords)
+
+        # Гастроли за рубежом интересны, только если это событие само по себе
+        # (воссоединение, прощальный тур) — иначе это анонс не для нашей аудитории.
+        is_tour = any(m in haystack for m in TOUR_MARKERS_EN + TOUR_MARKERS_RU)
+        # Слова в заголовке часто разделены («announces 2026 UK and Ireland tour»),
+        # поэтому точных фраз мало — проверяем ещё и по сочетанию слов.
+        if not is_tour and ("tour" in haystack or "shows" in haystack):
+            is_tour = any(w in haystack for w in ("announce", "dates", "tickets", "warm-up"))
+        is_big_event = any(
+            w in haystack for w in ("reunion", "reunite", "farewell", "final tour",
+                                    "воссоедин", "прощальн", "распад")
+        )
+        if is_tour and not is_big_event:
+            continue
 
         if mentioned:
             best = max(
