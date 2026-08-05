@@ -4,9 +4,13 @@
 пересылают результат про себя. Поэтому у бота есть три разбора, и главный из них
 отдаёт картинку, которую человек показывает друзьям.
 
-    /вкус   список артистов        → откуда растёт твой вкус + карточка
-    /ноги   артист, трек или жанр  → к какому предку сходится ниточка
-    /текст  строки из песни        → что в этих строках на самом деле происходит
+    /vkus   список артистов        → откуда растёт твой вкус + карточка
+    /nogi   артист, трек или жанр  → к какому предку сходится ниточка
+    /tekst  строки из песни        → что в этих строках на самом деле происходит
+
+Команду можно не писать: бот различает список имён, одно имя и куплет по форме
+сообщения. Кириллические синонимы (/вкус, /ноги, /текст) тоже работают, но
+в меню Telegram их не показать — там разрешена только латиница.
 
 Два ограничения, из которых следует всё устройство модуля:
 
@@ -264,6 +268,18 @@ def _today() -> str:
     return state.now().strftime("%Y-%m-%d")
 
 
+def user_key(user_id: str | int) -> str:
+    """Отпечаток человека вместо его Telegram-id.
+
+    Файл лимитов коммитится в репозиторий, а репозиторий открытый: список
+    id тех, кто писал боту, — это список живых людей, и лежать в открытом
+    виде он не должен. Солью служит токен бота: он есть в каждом запуске,
+    но не в репозитории, поэтому отпечаток не перебирается по номерам.
+    """
+    salt = config.secret("TELEGRAM_BOT_TOKEN", required=False)
+    return state.fingerprint(salt, str(user_id))
+
+
 def load_state() -> dict:
     data = state.read_json(STATE_FILE, {"day": _today(), "total": 0, "users": {}})
     if data.get("day") != _today():
@@ -425,7 +441,9 @@ def _lyrics(body: str) -> tuple[str, Path | None]:
     if result["skip"] or not result["text"]:
         return ("Тут не за что зацепиться — пришли кусок, где что-то происходит.", None)
 
-    _remember(" / ".join(lines[:2]), "lyrics", matched=True)
+    # Сами строки в журнал не кладём: репозиторий открытый, а человек мог
+    # прислать своё неизданное. Для статистики хватает факта разбора.
+    _remember("", "lyrics", matched=True)
     return telegram.sanitize(result["text"]), None
 
 
@@ -473,13 +491,15 @@ def handle_message(message: dict, data: dict) -> bool:
     chat_id = str(chat.get("id", ""))
     user_id = str(message.get("from", {}).get("id", ""))
     admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+    # Дальше человек живёт под отпечатком: в файл лимитов его id не попадает.
+    key = user_key(user_id)
 
     kind, body = parse_command(text)
     if kind == "menu":
         # Пришёл по ссылке с готовым разбором — не показываем меню, а сразу
         # объясняем, что слать: лишний экран между кнопкой и делом только мешает.
         if body in HINTS:
-            set_mode(data, user_id, body)
+            set_mode(data, key, body)
             telegram.send_message(chat_id, HINTS[body])
         else:
             telegram.send_message(chat_id, MENU, buttons=menu_buttons())
@@ -487,7 +507,7 @@ def handle_message(message: dict, data: dict) -> bool:
     if not kind:
         # Разбор, выбранный кнопкой, старше догадки по форме сообщения:
         # человек уже сказал, чего хочет, и переспрашивать его глупо.
-        kind = peek_mode(data, user_id) or guess_kind(text)
+        kind = peek_mode(data, key) or guess_kind(text)
         body = text
     if not kind:
         telegram.send_message(chat_id, MENU, buttons=menu_buttons())
@@ -502,14 +522,14 @@ def handle_message(message: dict, data: dict) -> bool:
         )
         return False
 
-    denied = check_limit(data, user_id, admin=admin)
+    denied = check_limit(data, key, admin=admin)
     if denied:
         telegram.send_message(chat_id, denied)
         return False
 
     # Выбор кнопкой гасим только здесь: если человека развернули на подписке
     # или лимите, он не должен нажимать кнопку заново.
-    clear_mode(data, user_id)
+    clear_mode(data, key)
 
     telegram.send_chat_action(chat_id)
     try:
@@ -532,7 +552,7 @@ def handle_message(message: dict, data: dict) -> bool:
     else:
         telegram.send_message(chat_id, answer, buttons=again_buttons())
 
-    spend(data, user_id)
+    spend(data, key)
     return True
 
 
@@ -551,7 +571,7 @@ def handle_callback(query: dict, data: dict) -> None:
     raw = query.get("data", "")
     kind = raw[len(CALLBACK_PREFIX):]
     chat_id = str(query.get("message", {}).get("chat", {}).get("id", ""))
-    user_id = str(query.get("from", {}).get("id", ""))
+    key = user_key(query.get("from", {}).get("id", ""))
 
     telegram.answer_callback(query.get("id", ""))
     if not chat_id:
@@ -561,7 +581,7 @@ def handle_callback(query: dict, data: dict) -> None:
         telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return
 
-    set_mode(data, user_id, kind)
+    set_mode(data, key, kind)
     telegram.send_message(chat_id, HINTS[kind])
 
 
