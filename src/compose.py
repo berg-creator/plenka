@@ -181,6 +181,11 @@ def _news_payload(item: dict) -> dict:
 
 
 def do_submit(needed: int) -> int:
+    # У бесплатного провайдера батча нет и не нужно — генерируем сразу.
+    if not llm.supports_batch():
+        print(f"Генератор: {llm.describe()} — работаю без батча.")
+        return do_now(needed)
+
     if BATCH_FILE.exists():
         pending = state.read_json(BATCH_FILE, {})
         print(f"Батч {pending.get('batch_id')} ещё не забран. Сначала выполни --fetch.")
@@ -208,6 +213,8 @@ def do_submit(needed: int) -> int:
 
 
 def do_fetch() -> int:
+    if not llm.supports_batch():
+        return 0  # у бесплатного провайдера забирать нечего
     if not BATCH_FILE.exists():
         print("Нет отправленного батча.")
         return 0

@@ -23,8 +23,9 @@ INBOX_FILE = DATA / "inbox.jsonl"
 SEEN_FILE = DATA / "seen.json"
 POSTED_FILE = DATA / "posted.json"
 
-# Модель для генерации текстов. Batch API даёт -50%, кэширование system-промпта — ещё дешевле.
-MODEL = "claude-opus-5"
+# Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
+# (gemini — бесплатный тариф Google, anthropic — платный Claude).
+# Сама модель выбирается внутри соответствующего провайдера в src/providers/.
 
 # Сколько постов держим в очереди. Если меньше MIN — health.yml поднимает тревогу.
 QUEUE_TARGET = 24

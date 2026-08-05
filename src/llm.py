@@ -1,27 +1,22 @@
-"""Обёртка над Claude API.
+"""Генерация текстов. Провайдер выбирается переменной LLM_PROVIDER.
 
-Две особенности, ради которых существует этот модуль:
+    LLM_PROVIDER=gemini      Google Gemini 2.5 Pro — бесплатный тариф (по умолчанию)
+    LLM_PROVIDER=anthropic   Claude Opus — платный, с батч-режимом
 
-1. Тон канала (prompts/voice.md) отправляется как кэшируемый system-промпт.
-   Он одинаков во всех запросах, поэтому повторные вызовы читают его из кэша
-   примерно за 10% цены вместо полной.
-
-2. Посты генерируются через Batch API — это вдвое дешевле обычных запросов.
-   Батч готовится минуты-часы, но посты и не нужны сию секунду: они всё равно
-   лежат в очереди и публикуются по расписанию.
+Рубрики и промпты от провайдера не зависят: смена одной строки в .env
+меняет генератор целиком, ничего больше править не нужно.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
-from typing import Any
-
-import anthropic
 
 from . import config
+from .providers import claude, gemini
 
-# Схема ответа: модель обязана вернуть ровно эти поля, парсить свободный текст не нужно.
+# Ответ модели жёстко ограничен схемой — разбирать свободный текст не приходится.
 POST_SCHEMA = {
     "type": "object",
     "properties": {
@@ -42,6 +37,17 @@ POST_SCHEMA = {
     "additionalProperties": False,
 }
 
+GEMINI_MODEL = "gemini-2.5-pro"
+
+
+def provider() -> str:
+    return os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+
+
+def supports_batch() -> bool:
+    """Батч есть только у Claude. Gemini бесплатен — там он не нужен."""
+    return provider() == "anthropic"
+
 
 @lru_cache(maxsize=1)
 def voice() -> str:
@@ -56,92 +62,45 @@ def rubric_prompt(key: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=config.secret("ANTHROPIC_API_KEY"))
-
-
-def system_blocks() -> list[dict]:
-    """System-промпт с точкой кэширования на конце."""
-    return [
-        {
-            "type": "text",
-            "text": voice(),
-            "cache_control": {"type": "ephemeral"},
-        }
-    ]
-
-
-def build_request(rubric_key: str, payload: dict) -> dict:
-    """Параметры одного запроса — годятся и для батча, и для обычного вызова."""
-    user_text = (
+def build_user_prompt(rubric_key: str, payload: dict) -> str:
+    return (
         f"{rubric_prompt(rubric_key)}\n\n"
         f"## Данные для этого поста\n\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
         f"Напиши пост по правилам рубрики и голосу канала. "
         f"Если материала не хватает или он не тянет на публикацию — верни skip=true."
     )
-    return {
-        "model": config.MODEL,
-        "max_tokens": 8000,
-        "system": system_blocks(),
-        "messages": [{"role": "user", "content": user_text}],
-        "output_config": {"format": {"type": "json_schema", "schema": POST_SCHEMA}},
-    }
 
 
 def generate_now(rubric_key: str, payload: dict) -> dict:
-    """Синхронная генерация — для отладки и срочного пополнения очереди.
-
-    Дороже батча вдвое, поэтому в рабочем цикле не используется.
-    """
-    response = client().messages.create(**build_request(rubric_key, payload))
-    return _extract(response)
+    user = build_user_prompt(rubric_key, payload)
+    if provider() == "anthropic":
+        return claude.generate(voice(), user, POST_SCHEMA)
+    return gemini.generate(GEMINI_MODEL, voice(), user, POST_SCHEMA)
 
 
 def submit_batch(jobs: list[tuple[str, str, dict]]) -> str:
-    """Отправляет пачку заданий. jobs — список (custom_id, rubric_key, payload).
-
-    Возвращает id батча, по которому позже забираются результаты.
-    """
-    requests_payload = [
-        {"custom_id": custom_id, "params": build_request(rubric_key, payload)}
-        for custom_id, rubric_key, payload in jobs
+    """jobs — список (custom_id, ключ рубрики, данные). Только для Claude."""
+    if not supports_batch():
+        raise RuntimeError("Батч доступен только при LLM_PROVIDER=anthropic")
+    prepared = [
+        (custom_id, voice(), build_user_prompt(key, payload), POST_SCHEMA)
+        for custom_id, key, payload in jobs
     ]
-    batch = client().messages.batches.create(requests=requests_payload)
-    return batch.id
+    return claude.submit_batch(prepared)
 
 
 def batch_status(batch_id: str) -> str:
-    return client().messages.batches.retrieve(batch_id).processing_status
+    return claude.batch_status(batch_id)
 
 
 def fetch_batch(batch_id: str) -> dict[str, dict]:
-    """Забирает результаты готового батча: custom_id → разобранный ответ."""
-    results: dict[str, dict] = {}
-    for entry in client().messages.batches.results(batch_id):
-        if entry.result.type != "succeeded":
-            results[entry.custom_id] = {
-                "skip": True,
-                "text": "",
-                "reason": f"ошибка генерации: {entry.result.type}",
-            }
-            continue
-        results[entry.custom_id] = _extract(entry.result.message)
-    return results
+    return claude.fetch_batch(batch_id)
 
 
-def _extract(message: Any) -> dict:
-    """Достаёт JSON из ответа. Схема гарантирует структуру, но подстраховка нужна."""
-    for block in message.content:
-        if getattr(block, "type", None) == "text":
-            try:
-                data = json.loads(block.text)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(data, dict) and "text" in data:
-                return {
-                    "skip": bool(data.get("skip", False)),
-                    "text": (data.get("text") or "").strip(),
-                    "reason": (data.get("reason") or "").strip(),
-                }
-    return {"skip": True, "text": "", "reason": "модель вернула неразборчивый ответ"}
+def describe() -> str:
+    """Человекочитаемое название текущего генератора — для логов и отчётов."""
+    return {
+        "gemini": f"Google {GEMINI_MODEL} (бесплатный тариф)",
+        "anthropic": f"Anthropic {claude.MODEL} (платный)",
+    }.get(provider(), provider())
