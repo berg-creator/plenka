@@ -43,9 +43,14 @@ def handle(action: str, post_id: str) -> str:
         except telegram.TelegramError as exc:
             log.error("Не удалось опубликовать %s: %s", post_id, exc)
             return f"Ошибка: {exc}"
+
+        # Одно нажатие публикует на обеих площадках. ВКонтакте идёт после
+        # Telegram и не влияет на исход: если там не выйдет, пост уже вышел.
+        publish.crosspost_vk(post)
+
         publish.record(post, path, "channel")
         publish.archive(path)
-        return "Опубликовано в канал"
+        return "Опубликовано в канал и ВК"
 
     return "Непонятная команда"
 

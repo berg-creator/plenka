@@ -127,9 +127,11 @@ def send_for_approval(post: dict, path: Path, chat_id: str) -> None:
 
     telegram.send_message(chat_id, f"— — — <b>{title}</b> — — —")
     send(post, chat_id)
+    # Про задержку сказано прямо: иначе кажется, что кнопка не сработала.
     telegram.send_message(
         chat_id,
-        "Что делаем с постом?",
+        "Что делаем с постом?\n"
+        "<i>Кнопка подумает пару минут — решения применяются по расписанию.</i>",
         buttons=telegram.approval_buttons(path.name),
     )
 
