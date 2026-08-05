@@ -39,9 +39,11 @@ jobs:
           # Кнопка «В канал» публикует и во ВКонтакте тоже
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
-          # Разборы ПРОЯВКИ генерируются здесь же
-          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          # Разборы ПРОЯВКИ генерируются здесь же — генератор тот же,
+          # что у постов канала, иначе бот и канал звучат по-разному.
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gigachat' }}
           GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python -m src.moderate

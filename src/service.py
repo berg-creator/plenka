@@ -456,7 +456,13 @@ def handle_message(message: dict, data: dict) -> bool:
         return False
 
     if image is not None:
-        telegram.send_photo_file(chat_id, image, answer)
+        # Подпись к фото у Telegram короче обычного сообщения. Разбор длиннее
+        # лимита не режем — карточка уходит молча, а текст следом отдельно.
+        if len(answer) <= telegram.MAX_CAPTION:
+            telegram.send_photo_file(chat_id, image, answer)
+        else:
+            telegram.send_photo_file(chat_id, image, "")
+            telegram.send_message(chat_id, answer)
         image.unlink(missing_ok=True)  # карточка уже у человека, в репозитории не нужна
     else:
         telegram.send_message(chat_id, answer)
