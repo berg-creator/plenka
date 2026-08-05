@@ -1,11 +1,15 @@
 """Публикация во ВКонтакте.
 
-Главная особенность, из-за которой всё устроено именно так: метод wall.post
-**не работает с токеном сообщества**. Нужен пользовательский токен из
-Standalone-приложения с правами wall и offline. Токены нового VK ID
-(начинаются с vk2.) на стену сообщества тоже не публикуют.
+Про токен — важное. ВКонтакте убрал из интерфейса тип «Standalone-приложение»,
+и классический способ с OAuth больше не доступен. Зато для публикации в
+собственное сообщество достаточно **ключа доступа сообщества**: он выдаётся
+прямо в настройках группы (Управление → Работа с API), приложение создавать
+не нужно.
 
-    python -m src.vk --check           проверить токен и найти id сообщества
+Ключу нужны права «Стена» и «Фотографии». Токены нового VK ID (начинаются
+с vk2.) на стену сообщества не публикуют — нужен именно ключ сообщества.
+
+    python -m src.vk --check           проверить токен и доступ к сообществу
     python -m src.vk --test            отправить тестовый пост
 """
 
@@ -129,17 +133,29 @@ def _upload_photo(url: str) -> str:
 
 
 def check() -> str:
-    """Проверяет токен и доступ к сообществу."""
-    me = _call("users.get")
-    user = me[0] if isinstance(me, list) else me.get("items", [{}])[0]
-    name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+    """Проверяет токен и доступ к сообществу.
+
+    Работает и с ключом сообщества, и с пользовательским: у первого нет
+    владельца-человека, поэтому users.get может не отвечать — это не ошибка.
+    """
+    lines: list[str] = []
+
+    try:
+        me = _call("users.get")
+        user = me[0] if isinstance(me, list) else me.get("items", [{}])[0]
+        name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+        if name:
+            lines.append(f"Тип токена: пользовательский ({name})")
+    except VKError:
+        lines.append("Тип токена: ключ сообщества")
 
     gid = group_id()
     info = _call("groups.getById", group_ids=str(gid))
     groups = info.get("groups") if isinstance(info, dict) else info
     title = groups[0].get("name", "?") if groups else "?"
+    lines.append(f"Сообщество: «{title}» (id {gid})")
 
-    return f"Токен принадлежит: {name}\nСообщество: «{title}» (id {gid})"
+    return "\n".join(lines)
 
 
 def main() -> int:
