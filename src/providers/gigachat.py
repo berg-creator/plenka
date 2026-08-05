@@ -186,9 +186,34 @@ def _parse(data: dict) -> dict:
 
     return {
         "skip": bool(parsed.get("skip", False)),
-        "text": (parsed.get("text") or "").strip(),
-        "reason": (parsed.get("reason") or "").strip(),
+        "text": _as_text(parsed.get("text")),
+        "reason": _as_text(parsed.get("reason")),
     }
+
+
+def _as_text(value: Any) -> str:
+    """Приводит поле ответа к строке.
+
+    Схему GigaChat не принимает, поэтому вместо строки может прийти вложенный
+    объект или список абзацев. Терять из-за этого готовый пост не хочется.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return "\n\n".join(_as_text(item) for item in value if item).strip()
+    if isinstance(value, dict):
+        # Опрос — это структура, а не проза: сохраняем её как JSON,
+        # публикатор разберёт и отправит нативным опросом Telegram.
+        if "question" in value and "options" in value:
+            return json.dumps(value, ensure_ascii=False)
+        # Иногда модель заворачивает текст ещё на уровень глубже.
+        for key in ("text", "post", "content", "value"):
+            if key in value:
+                return _as_text(value[key])
+        return "\n\n".join(_as_text(v) for v in value.values() if v).strip()
+    return str(value).strip()
 
 
 def _extract_json(text: str) -> dict | None:
@@ -196,18 +221,68 @@ def _extract_json(text: str) -> dict | None:
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     candidate = fenced.group(1) if fenced else text
 
-    try:
-        data = json.loads(candidate)
-        return data if isinstance(data, dict) else None
-    except json.JSONDecodeError:
-        pass
+    variants = (
+        candidate,
+        _unescape_line_breaks(candidate),
+        _escape_raw_newlines(_unescape_line_breaks(candidate)),
+    )
+    for attempt in variants:
+        try:
+            data = json.loads(attempt)
+            return data if isinstance(data, dict) else None
+        except json.JSONDecodeError:
+            continue
 
     # Последняя попытка: вырезать самый внешний объект по фигурным скобкам.
     start, end = candidate.find("{"), candidate.rfind("}")
     if 0 <= start < end:
-        try:
-            data = json.loads(candidate[start : end + 1])
-            return data if isinstance(data, dict) else None
-        except json.JSONDecodeError:
-            return None
+        chunk = candidate[start : end + 1]
+        for attempt in (chunk, _unescape_line_breaks(chunk)):
+            try:
+                data = json.loads(attempt)
+                return data if isinstance(data, dict) else None
+            except json.JSONDecodeError:
+                continue
     return None
+
+
+def _escape_raw_newlines(text: str) -> str:
+    """Экранирует переводы строк, оказавшиеся внутри строкового значения JSON.
+
+    Модель часто вставляет в текст поста настоящий перевод строки, хотя по
+    стандарту JSON там должно стоять «\\n». Без этой правки весь ответ считался
+    неразборчивым, и служебный JSON уходил прямо в текст поста.
+    """
+    result: list[str] = []
+    in_string = False
+    escaped = False
+
+    for char in text:
+        if escaped:
+            result.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            result.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            continue
+        if char == "\n" and in_string:
+            result.append("\\n")
+            continue
+        result.append(char)
+
+    return "".join(result)
+
+
+def _unescape_line_breaks(text: str) -> str:
+    """Убирает перенос строки, экранированный обратным слешем.
+
+    GigaChat иногда разбивает длинную строку JSON так, как это делают в коде:
+    обратный слеш и перевод строки. Для JSON это синтаксическая ошибка, и без
+    такой правки готовый пост уходил в мусор целиком.
+    """
+    return re.sub(r"\\\s*\n\s*", "", text)

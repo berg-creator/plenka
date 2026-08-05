@@ -67,7 +67,7 @@ def main() -> int:
         if args.dry_run:
             continue
 
-        result = llm.generate_now("legend", event)
+        result = compose.generate_checked("legend", event)
         if result["skip"] or not result["text"]:
             print(f"  модель отказалась: {result.get('reason', '')}")
             continue

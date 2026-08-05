@@ -18,7 +18,7 @@ import logging
 import random
 from pathlib import Path
 
-from . import config, llm, state
+from . import config, llm, quality, state, telegram
 
 log = logging.getLogger("compose")
 
@@ -35,6 +35,11 @@ def queue_size() -> int:
 
 def save_post(rubric_key: str, text: str, source: dict | None = None) -> Path:
     """Кладёт готовый пост в очередь. Имя файла задаёт порядок публикации."""
+    # Чистим разметку сразу при сохранении, чтобы в очереди лежал тот же текст,
+    # который уйдёт в канал, — иначе просмотр очереди врёт.
+    if rubric_key != "poll":  # опрос хранится как JSON, его трогать нельзя
+        text = telegram.sanitize(text)
+
     config.QUEUE.mkdir(parents=True, exist_ok=True)
     stamp = state.now().strftime("%Y%m%d-%H%M%S")
     suffix = random.randint(1000, 9999)
@@ -55,6 +60,41 @@ def save_post(rubric_key: str, text: str, source: dict | None = None) -> Path:
 
 
 # ─────────────────────────── планирование ───────────────────────────
+
+
+def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
+    """Генерирует пост и проверяет его качество, повторяя при явном браке.
+
+    Модель нестабильна: то вернёт служебный JSON вместо текста, то закончит
+    школьным выводом. Повторная попытка обходится дешевле, чем плохой пост
+    в канале.
+    """
+    last: dict = {"skip": True, "text": "", "reason": "не удалось сгенерировать"}
+
+    for attempt in range(attempts):
+        result = llm.generate_now(rubric_key, payload)
+        if result["skip"] or not result["text"]:
+            return result  # модель осознанно отказалась — это не брак
+
+        issues = quality.problems(result["text"], rubric_key)
+        if not issues:
+            return result
+
+        last = result
+        log.info(
+            "Попытка %d для «%s» забракована: %s",
+            attempt + 1,
+            rubric_key,
+            "; ".join(issues),
+        )
+
+    return {
+        "skip": True,
+        "text": "",
+        "reason": f"брак после {attempts} попыток: " + "; ".join(
+            quality.problems(last["text"], rubric_key)
+        ),
+    }
 
 
 def load_inbox_unused() -> list[dict]:
@@ -265,7 +305,7 @@ def do_now(count: int) -> int:
 
     created, used, subtext_done = 0, [], []
     for custom_id, rubric_key, payload, source in jobs:
-        result = llm.generate_now(rubric_key, payload)
+        result = generate_checked(rubric_key, payload)
         if source.get("fingerprint"):
             used.append(source["fingerprint"])
         if result["skip"] or not result["text"]:

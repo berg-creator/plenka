@@ -114,6 +114,11 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="показать пост, не отправляя")
     parser.add_argument("--check", action="store_true", help="проверить настройки бота")
     parser.add_argument("--force", action="store_true", help="игнорировать интервал между постами")
+    parser.add_argument(
+        "--preview-all",
+        action="store_true",
+        help="прислать себе в личку всю очередь целиком, ничего не публикуя",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -125,6 +130,26 @@ def main() -> int:
         chat = config.secret("TELEGRAM_ADMIN_ID")
         telegram.send_message(chat, "<b>ПЛЁНКА</b> на связи. Проверка прошла успешно.")
         print("Тестовое сообщение отправлено тебе в личку.")
+        return 0
+
+    if args.preview_all:
+        posts = sorted(config.QUEUE.glob("*.json"))
+        if not posts:
+            print("Очередь пуста.")
+            return 0
+        chat_id = config.secret("TELEGRAM_ADMIN_ID")
+        telegram.send_message(
+            chat_id,
+            f"<b>Очередь на просмотр — {len(posts)} постов.</b>\n"
+            f"Это превью: в канал ничего не ушло.",
+        )
+        for index, item in enumerate(posts, start=1):
+            post = state.read_json(item, {})
+            rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
+            title = rubric.title if rubric else post.get("rubric", "")
+            telegram.send_message(chat_id, f"— — — <b>{index}. {title}</b> — — —")
+            send(post, chat_id)
+        print(f"Отправлено на просмотр: {len(posts)} постов. Очередь не тронута.")
         return 0
 
     path = next_post()
