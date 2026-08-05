@@ -1,7 +1,8 @@
 """Генерация текстов. Провайдер выбирается переменной LLM_PROVIDER.
 
-    LLM_PROVIDER=gemini      Google Gemini 2.5 Pro — бесплатный тариф (по умолчанию)
-    LLM_PROVIDER=anthropic   Claude Opus — платный, с батч-режимом
+    LLM_PROVIDER=gigachat    GigaChat от Сбера — работает в России (по умолчанию)
+    LLM_PROVIDER=gemini      Google Gemini 2.5 Pro — бесплатно, но не в России
+    LLM_PROVIDER=anthropic   Claude Opus — платно, тоже недоступен в России
 
 Рубрики и промпты от провайдера не зависят: смена одной строки в .env
 меняет генератор целиком, ничего больше править не нужно.
@@ -14,7 +15,7 @@ import os
 from functools import lru_cache
 
 from . import config
-from .providers import claude, gemini
+from .providers import claude, gemini, gigachat
 
 # Ответ модели жёстко ограничен схемой — разбирать свободный текст не приходится.
 POST_SCHEMA = {
@@ -41,7 +42,7 @@ GEMINI_MODEL = "gemini-2.5-pro"
 
 
 def provider() -> str:
-    return os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    return os.environ.get("LLM_PROVIDER", "gigachat").strip().lower()
 
 
 def supports_batch() -> bool:
@@ -74,9 +75,12 @@ def build_user_prompt(rubric_key: str, payload: dict) -> str:
 
 def generate_now(rubric_key: str, payload: dict) -> dict:
     user = build_user_prompt(rubric_key, payload)
-    if provider() == "anthropic":
+    name = provider()
+    if name == "anthropic":
         return claude.generate(voice(), user, POST_SCHEMA)
-    return gemini.generate(GEMINI_MODEL, voice(), user, POST_SCHEMA)
+    if name == "gemini":
+        return gemini.generate(GEMINI_MODEL, voice(), user, POST_SCHEMA)
+    return gigachat.generate(voice(), user, POST_SCHEMA)
 
 
 def submit_batch(jobs: list[tuple[str, str, dict]]) -> str:
@@ -101,6 +105,7 @@ def fetch_batch(batch_id: str) -> dict[str, dict]:
 def describe() -> str:
     """Человекочитаемое название текущего генератора — для логов и отчётов."""
     return {
+        "gigachat": f"Сбер {gigachat.model_name()}",
         "gemini": f"Google {GEMINI_MODEL} (бесплатный тариф)",
         "anthropic": f"Anthropic {claude.MODEL} (платный)",
     }.get(provider(), provider())

@@ -48,12 +48,12 @@
 
 | Переменная | Где взять |
 |---|---|
-| `GOOGLE_API_KEY` | aistudio.google.com/apikey — **бесплатно, без карты** |
+| `GIGACHAT_CREDENTIALS` | developers.sber.ru → GigaChat API → проект для физлиц → «Ключ авторизации» |
 | `TELEGRAM_BOT_TOKEN` | `@BotFather` → `/newbot` |
 | `TELEGRAM_CHANNEL_ID` | @username канала, например `@plenka_fm` |
 | `TELEGRAM_ADMIN_ID` | `@userinfobot` пришлёт **число** — не @username |
 | `LASTFM_API_KEY` | last.fm/api/account/create — бесплатно |
-| `ANTHROPIC_API_KEY` | нужен, только если переключишь `LLM_PROVIDER=anthropic` |
+| `GOOGLE_API_KEY` / `ANTHROPIC_API_KEY` | только если переключаешь провайдера; **в России оба недоступны** |
 
 Бот должен быть админом канала с правом «Публикация сообщений».
 
@@ -142,17 +142,26 @@ python3 -m venv .venv
 | GitHub Actions | бесплатно (расход ~400 из 2000 минут в месяц) |
 | iTunes, Deezer, YouTube, RSS | бесплатно, без ключей |
 | Last.fm | бесплатно |
-| **Gemini 2.5 Pro** | **бесплатно** — 100 запросов в сутки, нужно 8–10 |
+| **GigaChat** | 1 млн токенов бесплатно, дальше рублями по расходу |
 
-**В текущей конфигурации канал не стоит ничего.**
+Канал тратит ~2800 токенов на пост, то есть около 670 тысяч в месяц при
+восьми постах в день. Бесплатного миллиона хватает примерно на полтора месяца,
+дальше — недорогая доплата в рублях.
 
 ### Смена генератора текстов
 
 Одна строка в `.env`:
 
 ```
-LLM_PROVIDER=gemini      # бесплатно, по умолчанию
-LLM_PROVIDER=anthropic   # платно, ~$4–5/мес, с батч-режимом
+LLM_PROVIDER=gigachat    # Сбер, работает в России — по умолчанию
+LLM_PROVIDER=gemini      # Google, бесплатно, но в России недоступен
+LLM_PROVIDER=anthropic   # Claude, платно, в России недоступен
+```
+
+Проверить генератор и посмотреть пробный пост:
+
+```bash
+.venv/bin/python -m src.check_llm --sample
 ```
 
 Промпты и рубрики от провайдера не зависят — меняется только генератор.
