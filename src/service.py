@@ -48,22 +48,72 @@ CARD_DIR = config.ROOT / "assets" / "cards"
 
 # ─────────────────────────── разбор входящего ───────────────────────────
 
+# В меню бота Telegram пускает только латиницу и цифры, поэтому основные
+# команды — транслитом: по-русски читаются, в меню показываются. Кириллица
+# и английские названия оставлены синонимами: их всё равно набирают.
 COMMANDS = {
-    "вкус": "taste", "taste": "taste",
-    "ноги": "roots", "roots": "roots",
-    "текст": "lyrics", "lyrics": "lyrics",
+    "vkus": "taste", "вкус": "taste", "taste": "taste",
+    "nogi": "roots", "ноги": "roots", "roots": "roots",
+    "tekst": "lyrics", "текст": "lyrics", "lyrics": "lyrics",
 }
 
+# Меню объясняет все три разбора сразу и показывает пример на каждый.
+# Так человеку не нужен лишний круг ожидания: он может ответить прямо на это
+# сообщение и получить разбор, ни на что не нажимая. Кнопки — для тех,
+# кто читать не станет.
 MENU = (
-    "<b>ПРОЯВКА</b> — разборы по запросу.\n\n"
-    "<code>/вкус</code> — пришли своих артистов через запятую, "
-    "покажу, откуда растёт твой вкус. С картинкой.\n\n"
-    "<code>/ноги</code> — артист, трек или жанр. Расскажу, к какому предку "
-    "сходится ниточка.\n\n"
-    "<code>/текст</code> — пришли строки из песни, разберу, что в них "
-    "происходит.\n\n"
-    "Отвечаю не мгновенно: плёнку надо проявить, это пара минут."
+    "<b>ПРОЯВКА</b> — три разбора. Просто пришли, что хочешь разобрать.\n\n"
+    "🎧 <b>Вкус</b> — список артистов через запятую.\n"
+    "<i>Bones, Sematary, Bladee, PHARAOH</i>\n"
+    "Покажу, откуда он растёт, и пришлю картинку.\n\n"
+    "🧬 <b>Откуда ноги</b> — один артист, трек или жанр.\n"
+    "<i>фонк</i>\n"
+    "Расскажу, к какому предку сходится ниточка.\n\n"
+    "📝 <b>Между строк</b> — несколько строк из песни.\n"
+    "Разберу, что в них происходит на самом деле.\n\n"
+    "Не спеши: плёнка проявляется не мгновенно."
 )
+
+# Что бот отвечает на нажатие кнопки: коротко, что прислать, и пример.
+HINTS = {
+    "taste": (
+        "🎧 <b>Разбор вкуса</b>\n\n"
+        "Пришли 3–12 артистов через запятую — тех, кого правда слушаешь.\n\n"
+        "<i>Bones, Sematary, Slipknot, Bladee, PHARAOH</i>\n\n"
+        "В ответ — откуда растёт твой вкус и карточка, которую можно кинуть друзьям."
+    ),
+    "roots": (
+        "🧬 <b>Откуда ноги</b>\n\n"
+        "Пришли одного артиста, название трека или жанр.\n\n"
+        "<i>фонк</i>  ·  <i>Молчат Дома</i>  ·  <i>Three 6 Mafia</i>\n\n"
+        "Расскажу, откуда это выросло и что именно оттуда взяли."
+    ),
+    "lyrics": (
+        "📝 <b>Между строк</b>\n\n"
+        "Пришли несколько строк из песни — своих или чужих.\n\n"
+        "Разберу приём, двойные смыслы и отсылки. Автора не угадываю: "
+        "если хочешь, чтобы учёл — напиши его сам."
+    ),
+}
+
+# Префикс отличает кнопки сервиса от кнопок модерации: у тех callback_data
+# вида «pub:имя-файла», и обработчики не должны пересекаться.
+CALLBACK_PREFIX = "s:"
+
+
+def menu_buttons() -> list[list[dict]]:
+    return [
+        [{"text": "🎧 Разобрать вкус", "callback_data": f"{CALLBACK_PREFIX}taste"}],
+        [
+            {"text": "🧬 Откуда ноги", "callback_data": f"{CALLBACK_PREFIX}roots"},
+            {"text": "📝 Между строк", "callback_data": f"{CALLBACK_PREFIX}lyrics"},
+        ],
+    ]
+
+
+def again_buttons() -> list[list[dict]]:
+    """Кнопки под готовым разбором — чтобы не искать, как повторить."""
+    return [[{"text": "Ещё разбор", "callback_data": f"{CALLBACK_PREFIX}menu"}]]
 
 # Разделители списка: запятая, перенос строки, точка с запятой, буллеты.
 _SPLIT = re.compile(r"[,\n;•·|]+")
@@ -78,7 +128,9 @@ def parse_command(text: str) -> tuple[str, str]:
         return "", text
     name = match.group(1).lower()
     if name in ("start", "help", "старт", "помощь"):
-        return "menu", ""
+        # У /start бывает нагрузка: по ссылке t.me/бот?start=taste Telegram
+        # присылает «/start taste». Так кнопка из канала ведёт сразу в разбор.
+        return "menu", match.group(2).strip()
     return COMMANDS.get(name, ""), match.group(2).strip()
 
 
@@ -424,13 +476,21 @@ def handle_message(message: dict, data: dict) -> bool:
 
     kind, body = parse_command(text)
     if kind == "menu":
-        telegram.send_message(chat_id, MENU)
+        # Пришёл по ссылке с готовым разбором — не показываем меню, а сразу
+        # объясняем, что слать: лишний экран между кнопкой и делом только мешает.
+        if body in HINTS:
+            set_mode(data, user_id, body)
+            telegram.send_message(chat_id, HINTS[body])
+        else:
+            telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return False
     if not kind:
-        kind = guess_kind(text)
+        # Разбор, выбранный кнопкой, старше догадки по форме сообщения:
+        # человек уже сказал, чего хочет, и переспрашивать его глупо.
+        kind = peek_mode(data, user_id) or guess_kind(text)
         body = text
     if not kind:
-        telegram.send_message(chat_id, MENU)
+        telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return False
 
     channel = config.secret("TELEGRAM_CHANNEL_ID", required=False)
@@ -447,6 +507,10 @@ def handle_message(message: dict, data: dict) -> bool:
         telegram.send_message(chat_id, denied)
         return False
 
+    # Выбор кнопкой гасим только здесь: если человека развернули на подписке
+    # или лимите, он не должен нажимать кнопку заново.
+    clear_mode(data, user_id)
+
     telegram.send_chat_action(chat_id)
     try:
         answer, image = analyse(kind, body)
@@ -460,15 +524,60 @@ def handle_message(message: dict, data: dict) -> bool:
         # лимита не режем — карточка уходит молча, а текст следом отдельно.
         if len(answer) <= telegram.MAX_CAPTION:
             telegram.send_photo_file(chat_id, image, answer)
+            telegram.send_message(chat_id, WHAT_NEXT, buttons=again_buttons())
         else:
             telegram.send_photo_file(chat_id, image, "")
-            telegram.send_message(chat_id, answer)
+            telegram.send_message(chat_id, answer, buttons=again_buttons())
         image.unlink(missing_ok=True)  # карточка уже у человека, в репозитории не нужна
     else:
-        telegram.send_message(chat_id, answer)
+        telegram.send_message(chat_id, answer, buttons=again_buttons())
 
     spend(data, user_id)
     return True
+
+
+# Строка под карточкой: кнопки к фото прицепить можно, но тогда подпись
+# и кнопка живут в одном сообщении и пересылаются вместе — а карточку
+# пересылают именно без служебных кнопок.
+WHAT_NEXT = "Забирай карточку. Разберём что-нибудь ещё?"
+
+
+def handle_callback(query: dict, data: dict) -> None:
+    """Нажатие кнопки сервиса. Разборов не делает — только объясняет, что слать.
+
+    Собственно разбор всегда идёт следующим сообщением: так человек видит
+    инструкцию с примером до того, как потратит свой суточный лимит.
+    """
+    raw = query.get("data", "")
+    kind = raw[len(CALLBACK_PREFIX):]
+    chat_id = str(query.get("message", {}).get("chat", {}).get("id", ""))
+    user_id = str(query.get("from", {}).get("id", ""))
+
+    telegram.answer_callback(query.get("id", ""))
+    if not chat_id:
+        return
+
+    if kind not in HINTS:
+        telegram.send_message(chat_id, MENU, buttons=menu_buttons())
+        return
+
+    set_mode(data, user_id, kind)
+    telegram.send_message(chat_id, HINTS[kind])
+
+
+def set_mode(data: dict, user_id: str, kind: str) -> None:
+    user = data.setdefault("users", {}).setdefault(user_id, {"day": "", "count": 0, "total": 0})
+    user["mode"] = kind
+
+
+def peek_mode(data: dict, user_id: str) -> str:
+    return data.get("users", {}).get(user_id, {}).get("mode", "")
+
+
+def clear_mode(data: dict, user_id: str) -> None:
+    """Кнопка отвечает за одно следующее сообщение, дальше человек снова
+    волен слать что угодно."""
+    data.get("users", {}).get(user_id, {}).pop("mode", None)
 
 
 # ─────────────────────────── командная строка ───────────────────────────

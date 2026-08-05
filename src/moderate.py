@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from . import config, publish, service, state, telegram
+from . import comments, config, publish, service, state, telegram
 
 log = logging.getLogger("moderate")
 
@@ -88,6 +88,17 @@ def main() -> int:
         # Личное сообщение — это запрос к сервису разборов.
         message = update.get("message")
         if message:
+            # Пост, пересланный Telegram в чат обсуждений, — повод открыть ветку
+            # комментариев первым. Это не запрос к сервису, дальше не идём.
+            if config.COMMENT_SEED and comments.is_channel_post(
+                message, config.secret("TELEGRAM_CHANNEL_ID", required=False)
+            ):
+                if args.dry_run:
+                    print(f"  пост в чате обсуждений: {message.get('message_id')}")
+                else:
+                    comments.seed(message)
+                continue
+
             if args.dry_run:
                 print(f"  сообщение от {message.get('from', {}).get('id')}: "
                       f"{(message.get('text') or '')[:60]}")
@@ -111,9 +122,23 @@ def main() -> int:
         data = query.get("data", "")
         if ":" not in data:
             continue
+
+        # Кнопки сервиса разбираются до проверки на владельца: их нажимают
+        # читатели, и «это не твой канал» в ответ на «Разобрать вкус» —
+        # ровно то, чего быть не должно.
+        if data.startswith(service.CALLBACK_PREFIX):
+            if args.dry_run:
+                print(f"  кнопка сервиса: {data}")
+                continue
+            try:
+                service.handle_callback(query, limits)
+            except Exception as exc:  # noqa: BLE001 — чужое нажатие не роняет запуск
+                log.error("Кнопка сервиса не сработала: %s", exc)
+            continue
+
         action, post_id = data.split(":", 1)
 
-        # Команды принимаются только от владельца канала.
+        # Кнопки модерации принимаются только от владельца канала.
         sender = str(query.get("from", {}).get("id", ""))
         if sender != str(admin):
             telegram.answer_callback(query["id"], "Это не твой канал")

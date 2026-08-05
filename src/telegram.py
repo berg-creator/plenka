@@ -81,6 +81,7 @@ def send_message(
     *,
     preview: bool = False,
     buttons: list[list[dict]] | None = None,
+    reply_to: int | None = None,
 ) -> dict:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
@@ -90,7 +91,31 @@ def send_message(
     }
     if buttons:
         payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    if reply_to is not None:
+        # Ответ на пост, пересланный в чат обсуждений, — это и есть комментарий
+        # под постом. Без reply_to сообщение повиснет отдельной репликой в чате.
+        payload["reply_parameters"] = json.dumps({"message_id": reply_to})
     return _call("sendMessage", payload)
+
+
+def get_chat(chat_id: str) -> dict:
+    """Карточка чата: описание, привязанный чат обсуждений, реакции."""
+    return _call("getChat", {"chat_id": chat_id})
+
+
+def member_count(chat_id: str) -> int:
+    return int(_call("getChatMemberCount", {"chat_id": chat_id}))
+
+
+def administrators(chat_id: str) -> list[dict]:
+    return _call("getChatAdministrators", {"chat_id": chat_id})
+
+
+def pin_message(chat_id: str, message_id: int, *, notify: bool = False) -> None:
+    _call(
+        "pinChatMessage",
+        {"chat_id": chat_id, "message_id": message_id, "disable_notification": not notify},
+    )
 
 
 def approval_buttons(post_id: str) -> list[list[dict]]:
@@ -209,3 +234,45 @@ def check() -> str:
     """Проверяет токен и возвращает имя бота — быстрый тест настройки."""
     me = _call("getMe", {})
     return f"@{me.get('username', '?')}"
+
+
+# ─────────────────────────── витрина бота ───────────────────────────
+#
+# То, что человек видит до того, как что-то написал: список команд под кнопкой
+# «/», описание на пустом экране и надпись под именем в поиске. Всё ставится
+# через API один раз и живёт само.
+
+
+def set_my_commands(commands: list[tuple[str, str]]) -> None:
+    """Список команд в меню бота. Пары (команда без слеша, описание)."""
+    _call(
+        "setMyCommands",
+        {
+            "commands": json.dumps(
+                [{"command": name, "description": text} for name, text in commands],
+                ensure_ascii=False,
+            )
+        },
+    )
+
+
+def set_my_description(text: str) -> None:
+    """Текст на пустом экране до нажатия «Начать» — единственный шанс
+    объяснить, зачем сюда пришли."""
+    _call("setMyDescription", {"description": text[:512]})
+
+
+def set_my_short_description(text: str) -> None:
+    """Строка под именем бота в поиске и в профиле."""
+    _call("setMyShortDescription", {"short_description": text[:120]})
+
+
+def set_chat_description(chat_id: str, text: str) -> None:
+    """Описание канала. Боту нужно право «Изменение профиля канала»."""
+    _call("setChatDescription", {"chat_id": chat_id, "description": text[:255]})
+
+
+def url_button(text: str, url: str) -> list[list[dict]]:
+    """Кнопка-ссылка под постом. В канале это единственный способ увести
+    человека в бота одним касанием, а не копированием имени из текста."""
+    return [[{"text": text, "url": url}]]
