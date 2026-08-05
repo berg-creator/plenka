@@ -1,11 +1,16 @@
-"""Модерация через бота: обрабатывает нажатия кнопок под превью постов.
+"""Единственный поллер бота: нажатия кнопок модерации и запросы к сервису.
 
-Постоянно работающего сервера у проекта нет, поэтому нажатия не приходят
+Постоянно работающего сервера у проекта нет, поэтому события не приходят
 мгновенно — их забирает по расписанию этот скрипт. Между нажатием кнопки
-и публикацией проходит до пятнадцати минут, и это единственное отличие
+и публикацией проходит до пяти минут, и это единственное отличие
 от «настоящего» бота.
 
-    python -m src.moderate            обработать накопившиеся нажатия
+**Почему всё в одном скрипте.** У бота один общий offset в getUpdates:
+кто первый забрал событие, для того оно и исчезло. Два независимых опросчика
+воровали бы события друг у друга, поэтому модерация и разборы ПРОЯВКИ
+разбираются здесь же — сообщения уходят в src/service.py.
+
+    python -m src.moderate            обработать накопившиеся события
     python -m src.moderate --dry-run  показать, что пришло, ничего не делая
 """
 
@@ -14,7 +19,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from . import config, publish, state, telegram
+from . import config, publish, service, state, telegram
 
 log = logging.getLogger("moderate")
 
@@ -56,7 +61,7 @@ def handle(action: str, post_id: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Обработка нажатий кнопок под постами")
+    parser = argparse.ArgumentParser(description="Обработка событий бота")
     parser.add_argument("--dry-run", action="store_true", help="только показать события")
     args = parser.parse_args()
 
@@ -67,15 +72,38 @@ def main() -> int:
     updates = telegram.get_updates(offset=offset)
 
     if not updates:
-        print("Новых нажатий нет.")
+        print("Новых событий нет.")
         return 0
 
     admin = config.secret("TELEGRAM_ADMIN_ID")
     handled = 0
     last_id = offset
 
+    limits = service.load_state()
+    served = 0
+
     for update in updates:
         last_id = max(last_id, update.get("update_id", 0) + 1)
+
+        # Личное сообщение — это запрос к сервису разборов.
+        message = update.get("message")
+        if message:
+            if args.dry_run:
+                print(f"  сообщение от {message.get('from', {}).get('id')}: "
+                      f"{(message.get('text') or '')[:60]}")
+                continue
+            if served >= config.SERVICE_PER_RUN:
+                # Событие уже забрано из очереди Telegram и просто пропадёт,
+                # поэтому человеку честно говорим, что запрос надо повторить.
+                _tell_busy(message)
+                continue
+            try:
+                if service.handle_message(message, limits):
+                    served += 1
+            except Exception as exc:  # noqa: BLE001 — чужой запрос не роняет запуск
+                log.error("Сервис не справился с сообщением: %s", exc)
+            continue
+
         query = update.get("callback_query")
         if not query:
             continue
@@ -107,9 +135,20 @@ def main() -> int:
 
     if not args.dry_run:
         state.write_json(OFFSET_FILE, {"offset": last_id})
-        print(f"Обработано нажатий: {handled}.")
+        service.save_state(limits)
+        print(f"Обработано нажатий: {handled}. Выдано разборов: {served}.")
 
     return 0
+
+
+def _tell_busy(message: dict) -> None:
+    chat_id = str(message.get("chat", {}).get("id", ""))
+    if not chat_id:
+        return
+    try:
+        telegram.send_message(chat_id, "Проявочная занята. Пришли запрос ещё раз через пару минут.")
+    except telegram.TelegramError:
+        pass
 
 
 if __name__ == "__main__":

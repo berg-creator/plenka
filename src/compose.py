@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import random
+import re
 from pathlib import Path
 
 from . import config, llm, quality, state, telegram
@@ -195,7 +196,13 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
 
 
 def _release_payload(item: dict) -> dict:
-    return {
+    """Данные о релизе для модели.
+
+    Кроме служебных полей сюда идёт треклист: единственное, что позволяет
+    писать про музыку, ничего не выдумывая. Хронометраж, длина треков и фиты —
+    это то, что слышно и на слух, но проверяется по данным.
+    """
+    payload = {
         "artist": item.get("artist", ""),
         "title": item.get("title", ""),
         "track_count": item.get("track_count"),
@@ -204,6 +211,40 @@ def _release_payload(item: dict) -> dict:
         "tags": item.get("tags", []),
         "tier": item.get("tier", ""),
     }
+
+    tracks = item.get("tracks") or []
+    if tracks:
+        payload["tracks"] = [
+            {"title": t.get("title", ""), "length": _mmss(t.get("seconds", 0))} for t in tracks
+        ]
+        payload["shortest_track"] = _mmss(min(t.get("seconds", 0) for t in tracks))
+        payload["longest_track"] = _mmss(max(t.get("seconds", 0) for t in tracks))
+        payload["features"] = _features(tracks)
+    if item.get("duration_sec"):
+        payload["total_length"] = _mmss(item["duration_sec"])
+    if item.get("genre"):
+        payload["genre_by_store"] = item["genre"]
+
+    return payload
+
+
+def _mmss(seconds: int) -> str:
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+# Гости прячутся в названиях треков — «(feat. X)», «with X», «prod. by X».
+# Продюсера отделяем от фита: для рэпа это разные новости.
+_FEAT = re.compile(r"[(\[]?\s*(?:feat\.?|ft\.?|with|при участии)\s+([^)\]]+)[)\]]?", re.IGNORECASE)
+
+
+def _features(tracks: list[dict]) -> list[str]:
+    names: list[str] = []
+    for track in tracks:
+        for match in _FEAT.finditer(track.get("title", "")):
+            name = match.group(1).strip(" .,&")
+            if name and name not in names:
+                names.append(name)
+    return names[:8]
 
 
 def _news_payload(item: dict) -> dict:

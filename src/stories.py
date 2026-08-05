@@ -7,6 +7,10 @@
 ВКонтакте позволяет отмечать в историях только вручную из приложения.
 Зато в обычных постах упоминания работают — см. src/vk.py.
 
+Выходит раз в сутки по расписанию (.github/workflows/stories.yml). Показанные
+посты запоминаются в data/stories.json: голова очереди меняется медленнее,
+чем выходят истории, и без этой отметки одна карточка крутилась бы неделю.
+
     python -m src.stories --preview     нарисовать карточку, не публикуя
     python -m src.stories --publish      нарисовать и опубликовать
 """
@@ -33,10 +37,17 @@ ACCENT = (196, 58, 44)
 
 OUT_DIR = config.ROOT / "assets" / "stories"
 
+# Сначала macOS — на нём карточки рисовались и подбирались кегли.
+# Дальше шрифты раннера GitHub Actions: Liberation Sans совпадает с Arial
+# по метрикам, поэтому вёрстка не разъезжается. Без этих путей Pillow
+# уходит в load_default, и кириллица на автопубликации выглядит бракованно.
 FONT_CANDIDATES = (
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial Black.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 )
 
 
@@ -100,17 +111,21 @@ def first_sentence(text: str, limit: int = 95) -> str:
     return first[:limit].rsplit(" ", 1)[0].rstrip(",;:—-") + "…"
 
 
-def background() -> Image.Image:
-    """Кремовый пластик с фактурой — тот же материал, что у аватарки."""
-    img = Image.new("RGB", (WIDTH, HEIGHT), CREAM)
+def background(width: int = WIDTH, height: int = HEIGHT) -> Image.Image:
+    """Кремовый пластик с фактурой — тот же материал, что у аватарки.
+
+    Размер параметром: этой же фактурой рисуются карточки разбора в боте,
+    а у них другой формат.
+    """
+    img = Image.new("RGB", (width, height), CREAM)
     draw = ImageDraw.Draw(img)
     random.seed(42)
-    for y in range(HEIGHT):
+    for y in range(height):
         delta = random.randint(-6, 6)
-        draw.line([(0, y), (WIDTH, y)],
+        draw.line([(0, y), (width, y)],
                   fill=tuple(max(0, min(255, CREAM[i] + delta)) for i in range(3)))
-    for _ in range(1200):
-        x, y = random.uniform(0, WIDTH), random.uniform(0, HEIGHT)
+    for _ in range(int(1200 * width * height / (WIDTH * HEIGHT))):
+        x, y = random.uniform(0, width), random.uniform(0, height)
         length = random.uniform(30, 160)
         delta = random.randint(-9, 9)
         draw.line([(x, y), (x + length, y)],
@@ -264,12 +279,47 @@ def publish(image_path: Path) -> str:
     return str(items[0].get("id", "")) if items else "опубликовано"
 
 
-def latest_post() -> dict | None:
-    """Берёт свежий пост из очереди — для истории годится тот же материал."""
-    posts = sorted(config.QUEUE.glob("*.json"))
-    if not posts:
-        return None
-    return state.read_json(posts[0], {})
+def used_keys() -> set[str]:
+    """Отпечатки постов, уже показанных в историях."""
+    history = state.read_json(config.STORIES_FILE, {"items": []})
+    return {item.get("key", "") for item in history.get("items", [])}
+
+
+def remember(post: dict, story_id: str) -> None:
+    """Записывает показанный пост, чтобы завтра не повторить его же."""
+    history = state.read_json(config.STORIES_FILE, {"items": []})
+    history.setdefault("items", []).append(
+        {
+            "key": state.fingerprint(post.get("text", "")),
+            "rubric": post.get("rubric", ""),
+            "story_id": story_id,
+            "published_at": state.iso(),
+        }
+    )
+    history["items"] = history["items"][-500:]
+    state.write_json(config.STORIES_FILE, history)
+
+
+def pick_post() -> dict | None:
+    """Выбирает материал для истории: свежий пост, ещё не побывавший в сторис.
+
+    Пост с обложкой предпочтительнее текстового — историю смотрят, а не читают.
+    На автозапуске это единственная защита от того, чтобы каждый день
+    показывать одну и ту же карточку: голова очереди меняется медленнее,
+    чем выходят истории.
+    """
+    seen = used_keys()
+    fallback: dict | None = None
+
+    for path in sorted(config.QUEUE.glob("*.json")):
+        post = state.read_json(path, {})
+        if not post.get("text") or state.fingerprint(post.get("text", "")) in seen:
+            continue
+        if post.get("cover"):
+            return post
+        fallback = fallback or post
+
+    return fallback
 
 
 def main() -> int:
@@ -283,21 +333,13 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     cover_url = ""
+    post: dict | None = None
     if args.text:
         text, title = args.text, ""
     else:
-        # Ищем в очереди пост с обложкой: история с картинкой сильнее текстовой.
-        posts = sorted(config.QUEUE.glob("*.json"))
-        post = None
-        for path in posts:
-            candidate = state.read_json(path, {})
-            if candidate.get("cover"):
-                post = candidate
-                break
-        post = post or (state.read_json(posts[0], {}) if posts else None)
-
+        post = pick_post()
         if not post:
-            print("Очередь пуста — нечего показывать.")
+            print("Нет нового материала — сегодня без истории.")
             return 0
 
         text = post.get("text", "")
@@ -317,12 +359,21 @@ def main() -> int:
     print(f"Карточка готова: {path.relative_to(config.ROOT)} ({card.width}×{card.height})")
 
     if args.publish:
+        # Без ключа ВКонтакте вторая площадка просто выключена — это не поломка.
+        # Тот же принцип, что у кросспостинга в src/publish.py.
+        if not config.secret("VK_TOKEN", required=False):
+            print("VK_TOKEN не задан — истории пропущены.")
+            return 0
+
         try:
             story_id = publish(path)
-            print(f"История опубликована: {story_id}")
         except Exception as exc:
             print(f"Не удалось опубликовать: {exc}")
             return 1
+
+        print(f"История опубликована: {story_id}")
+        if post:
+            remember(post, story_id)
 
     return 0
 

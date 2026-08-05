@@ -1,8 +1,10 @@
-name: Модерация
+name: Бот
 
-# Забирает нажатия кнопок под превью постов и выполняет решения.
-# Постоянного сервера у проекта нет, поэтому нажатия обрабатываются пачками:
-# между нажатием и публикацией проходит до пятнадцати минут.
+# Единственный опросчик бота: забирает нажатия кнопок под превью постов
+# и запросы к сервису разборов. У getUpdates общий offset, поэтому вторым
+# workflow это делать нельзя — события будут теряться.
+# Постоянного сервера у проекта нет, поэтому события обрабатываются пачками:
+# между нажатием и публикацией проходит до пяти минут.
 on:
   schedule:
     # Пять минут — минимальный интервал, который допускает GitHub.
@@ -29,7 +31,7 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Обработать нажатия
+      - name: Обработать события
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
@@ -37,6 +39,11 @@ jobs:
           # Кнопка «В канал» публикует и во ВКонтакте тоже
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
+          # Разборы ПРОЯВКИ генерируются здесь же
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python -m src.moderate
 
       - name: Сохранить состояние

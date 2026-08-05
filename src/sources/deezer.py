@@ -59,6 +59,27 @@ def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
     return releases
 
 
+def album_tracks(album_id: str | int) -> dict:
+    """Треклист альбома: названия, длительности, жанр. То же, что у iTunes,
+    и по той же причине — пост про релиз должен опираться на музыку,
+    а не на один факт «вышло»."""
+    data = get_json(f"{BASE}/album/{album_id}", min_interval=MIN_INTERVAL)
+    if not data or data.get("error"):
+        return {}
+
+    tracks = [
+        {"title": item.get("title", ""), "seconds": item.get("duration") or 0}
+        for item in data.get("tracks", {}).get("data", [])
+        if item.get("title")
+    ]
+    genres = [g.get("name", "") for g in data.get("genres", {}).get("data", [])]
+    return {
+        "tracks": tracks,
+        "genre": next((g for g in genres if g), ""),
+        "duration_sec": data.get("duration") or sum(t["seconds"] for t in tracks),
+    }
+
+
 def _parse_date(raw: str | None) -> datetime | None:
     if not raw:
         return None

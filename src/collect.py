@@ -118,24 +118,46 @@ def collect_releases(artists: list[dict], seen: state.Seen) -> list[dict]:
                 continue
             seen.add(key)
 
-            found.append(
-                {
-                    "kind": "release",
-                    "fingerprint": key,
-                    "score": TIER_SCORE.get(artist.get("tier", "scene"), 50),
-                    "artist": artist["name"],
-                    "tier": artist.get("tier"),
-                    "tags": artist.get("tags", []),
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "cover": item.get("cover", ""),
-                    "track_count": item.get("track_count"),
-                    "released_at": item.get("released_at"),
-                    "source": item.get("source"),
-                    "collected_at": state.iso(),
-                }
-            )
+            record = {
+                "kind": "release",
+                "fingerprint": key,
+                "score": TIER_SCORE.get(artist.get("tier", "scene"), 50),
+                "artist": artist["name"],
+                "tier": artist.get("tier"),
+                "tags": artist.get("tags", []),
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "cover": item.get("cover", ""),
+                "track_count": item.get("track_count"),
+                "released_at": item.get("released_at"),
+                "source": item.get("source"),
+                "external_id": item.get("external_id", ""),
+                "collected_at": state.iso(),
+            }
+            record.update(fetch_tracks(item))
+            found.append(record)
     return found
+
+
+def fetch_tracks(item: dict) -> dict:
+    """Треклист релиза — фактура о самой музыке.
+
+    Запрос делается только на новую находку (несколько штук за запуск), поэтому
+    лимиты источников это не задевает. Пустой ответ не беда: рубрики умеют
+    писать и без треклиста, просто короче.
+    """
+    external_id = item.get("external_id")
+    if not external_id:
+        return {}
+
+    try:
+        if item.get("source") == "itunes":
+            return itunes.album_tracks(external_id)
+        if item.get("source") == "deezer":
+            return deezer.album_tracks(external_id)
+    except Exception as exc:  # треклист — приятное дополнение, а не условие сбора
+        log.warning("Треклист не получен (%s): %s", item.get("title", ""), exc)
+    return {}
 
 
 def collect_videos(artists: list[dict], seen: state.Seen) -> list[dict]:

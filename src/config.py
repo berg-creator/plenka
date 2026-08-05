@@ -22,6 +22,7 @@ CALENDAR_FILE = DATA / "calendar.json"
 INBOX_FILE = DATA / "inbox.jsonl"
 SEEN_FILE = DATA / "seen.json"
 POSTED_FILE = DATA / "posted.json"
+STORIES_FILE = DATA / "stories.json"
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (gemini — бесплатный тариф Google, anthropic — платный Claude).
@@ -37,6 +38,13 @@ PUBLISH_INTERVAL_HOURS = 4
 
 # Сколько дней храним отпечатки в seen.json, чтобы файл не рос бесконечно.
 SEEN_TTL_DAYS = 120
+
+# Лимиты бота-сервиса (src/service.py). Разбор стоит примерно столько же токенов,
+# сколько пост канала, а бесплатный миллион уже наполовину расписан очередью,
+# поэтому потолок нужен с самого начала — накрутить его всегда успеется.
+SERVICE_DAILY_USER = 1  # разборов на человека в сутки
+SERVICE_DAILY_TOTAL = 40  # разборов на всех в сутки
+SERVICE_PER_RUN = 6  # сколько разборов делаем за один запуск поллера
 
 
 @dataclass(frozen=True)

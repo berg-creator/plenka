@@ -63,6 +63,34 @@ def rubric_prompt(key: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+@lru_cache(maxsize=8)
+def service_prompt(kind: str) -> str:
+    """Промпт разбора для бота-сервиса. Лежит отдельно от рубрик канала:
+    там пост для всех, здесь ответ конкретному человеку."""
+    path = config.PROMPTS / "service" / f"{kind}.md"
+    if not path.exists():
+        raise FileNotFoundError(f"Нет промпта разбора: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def generate_service(kind: str, payload: dict) -> dict:
+    """Разбор по запросу человека. Схема ответа та же, что у постов:
+    провайдеру всё равно, а нам не нужен второй разборщик ответа."""
+    user = (
+        f"{service_prompt(kind)}\n\n"
+        f"## Данные запроса\n\n"
+        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"Напиши разбор по правилам выше и голосу канала. "
+        f"Если данных не хватает — верни skip=true и причину одной строкой."
+    )
+    name = provider()
+    if name == "anthropic":
+        return claude.generate(voice(), user, POST_SCHEMA)
+    if name == "gemini":
+        return gemini.generate(GEMINI_MODEL, voice(), user, POST_SCHEMA)
+    return gigachat.generate(voice(), user, POST_SCHEMA)
+
+
 def build_user_prompt(rubric_key: str, payload: dict) -> str:
     return (
         f"{rubric_prompt(rubric_key)}\n\n"

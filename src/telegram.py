@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -58,9 +59,11 @@ class TelegramError(RuntimeError):
     pass
 
 
-def _call(method: str, payload: dict[str, Any]) -> dict:
+def _call(method: str, payload: dict[str, Any], files: dict | None = None) -> dict:
     token = config.secret("TELEGRAM_BOT_TOKEN")
-    response = requests.post(API.format(token=token, method=method), data=payload, timeout=30)
+    response = requests.post(
+        API.format(token=token, method=method), data=payload, files=files, timeout=90
+    )
 
     try:
         data = response.json()
@@ -133,6 +136,47 @@ def edit_markup(chat_id: str, message_id: int, buttons: list[list[dict]] | None)
                 "reply_markup": json.dumps({"inline_keyboard": buttons or []}),
             },
         )
+    except TelegramError:
+        pass
+
+
+def send_photo_file(chat_id: str, path: Path, caption: str) -> dict:
+    """Отправляет картинку с диска. Нужна сервису: карточку разбора мы рисуем
+    сами, публичной ссылки на неё нет — файл уходит прямо в загрузку."""
+    with path.open("rb") as handle:
+        return _call(
+            "sendPhoto",
+            {
+                "chat_id": chat_id,
+                "caption": sanitize(caption)[:MAX_CAPTION],
+                "parse_mode": "HTML",
+            },
+            files={"photo": (path.name, handle, "image/jpeg")},
+        )
+
+
+# Подписчиком считается любой, кто не вышел и не выгнан.
+MEMBER_STATUSES = {"creator", "administrator", "member", "restricted"}
+
+
+def is_member(chat_id: str, user_id: str | int) -> bool:
+    """Проверяет подписку на канал. Бот админ канала, поэтому право есть.
+
+    При любой ошибке отвечаем «подписан»: сломанная проверка не должна
+    выглядеть для человека как отказ в обслуживании.
+    """
+    try:
+        result = _call("getChatMember", {"chat_id": chat_id, "user_id": user_id})
+    except TelegramError:
+        return True
+    return result.get("status", "") in MEMBER_STATUSES
+
+
+def send_chat_action(chat_id: str, action: str = "typing") -> None:
+    """Показывает «печатает…». Ответ готовится минуты — без этого человек
+    решит, что бот умер."""
+    try:
+        _call("sendChatAction", {"chat_id": chat_id, "action": action})
     except TelegramError:
         pass
 
