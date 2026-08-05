@@ -1,0 +1,12 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+*.egg-info/
+
+# Локальные черновики и выгрузки, которые не должны попадать в репозиторий
+scratch/
+*.local.json

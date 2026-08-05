@@ -1,0 +1,43 @@
+name: Сбор новинок
+
+# Агент слежки: обходит iTunes, Deezer, YouTube и RSS изданий,
+# складывает находки в data/inbox.jsonl.
+on:
+  schedule:
+    - cron: "17 */6 * * *"   # каждые 6 часов; минута 17, чтобы не попадать в пик нагрузки GitHub
+  workflow_dispatch:          # и кнопка ручного запуска в интерфейсе
+
+# Два одновременных сбора подрались бы при коммите состояния.
+concurrency:
+  group: state-write
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write         # нужно, чтобы бот мог коммитить обновлённое состояние
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Собрать новинки
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+        run: python -m src.collect
+
+      - name: Сохранить состояние
+        run: |
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "сбор: новые находки"
+          # Между checkout и push мог пройти другой воркфлоу — подтягиваем его коммиты.
+          git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push

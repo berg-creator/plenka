@@ -1,0 +1,26 @@
+{
+  "note": "Все адреса проверены вживую командой `python -m src.sources.feeds --check`. Мёртвые ленты не удаляются, а помечаются enabled:false — чтобы помнить, что вариант уже пробовали.",
+  "feeds": [
+    { "name": "Lenta Музыка", "url": "https://lenta.ru/rss/news/culture/music", "lang": "ru", "enabled": true },
+    { "name": "Интермедиа", "url": "https://www.intermedia.ru/rss/", "lang": "ru", "enabled": true },
+    { "name": "Sadwave", "url": "https://sadwave.com/feed/", "lang": "ru", "enabled": true },
+    { "name": "Афиша Daily", "url": "https://daily.afisha.ru/rss/", "lang": "ru", "enabled": true },
+    { "name": "Газета Культура", "url": "https://www.gazeta.ru/export/rss/culture.xml", "lang": "ru", "enabled": true },
+    { "name": "Коммерсант Культура", "url": "https://www.kommersant.ru/RSS/section-culture.xml", "lang": "ru", "enabled": true },
+    { "name": "Pitchfork", "url": "https://pitchfork.com/feed/feed-news/rss", "lang": "en", "enabled": true },
+    { "name": "Stereogum", "url": "https://www.stereogum.com/feed/", "lang": "en", "enabled": true },
+    { "name": "Consequence", "url": "https://consequence.net/feed/", "lang": "en", "enabled": true },
+    { "name": "Loudwire", "url": "https://loudwire.com/feed/", "lang": "en", "enabled": true },
+    { "name": "Metal Injection", "url": "https://metalinjection.net/feed", "lang": "en", "enabled": true },
+    { "name": "BrooklynVegan", "url": "https://www.brooklynvegan.com/feed/", "lang": "en", "enabled": true },
+    { "name": "HipHopDX", "url": "https://hiphopdx.com/rss/news.xml", "lang": "en", "enabled": true },
+    { "name": "NME", "url": "https://www.nme.com/news/music/feed", "lang": "en", "enabled": true },
+
+    { "name": "The Flow", "url": "https://the-flow.ru/feed", "lang": "ru", "enabled": false,
+      "note": "Отдаёт 404 на любой User-Agent — публичной RSS-ленты у издания больше нет" },
+    { "name": "The FADER", "url": "https://www.thefader.com/rss", "lang": "en", "enabled": false,
+      "note": "Лента недоступна, адрес изменился" },
+    { "name": "Звуки.ру", "url": "https://zvuki.ru/rss/", "lang": "ru", "enabled": false,
+      "note": "403 — закрыт для автоматических клиентов" }
+  ]
+}

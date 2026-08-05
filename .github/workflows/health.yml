@@ -1,0 +1,28 @@
+name: Сторож
+
+# Следит, чтобы канал не встал молча: пустая очередь, зависшая публикация,
+# прекратившийся поток новинок. О проблемах пишет в личку.
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Проверить состояние
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        # --quiet: писать только если что-то сломалось, а не каждый день
+        run: python -m src.health --quiet

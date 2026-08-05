@@ -1,0 +1,1466 @@
+{
+  "artists": [
+    {
+      "deezer_id": 2489141,
+      "itunes_id": 529228640,
+      "name": "SpaceGhostPurrp",
+      "tags": [
+        "memphis",
+        "cloud-rap",
+        "raider-klan"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 7767352,
+      "itunes_id": 614548513,
+      "name": "Black Kray",
+      "tags": [
+        "memphis",
+        "cloud-rap",
+        "goth-money"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 8992840,
+      "itunes_id": 1045751732,
+      "name": "Goth Money",
+      "tags": [
+        "memphis",
+        "cloud-rap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 7138333,
+      "itunes_id": 1397185437,
+      "name": "Chris Travis",
+      "tags": [
+        "memphis",
+        "raider-klan"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 10957770,
+      "itunes_id": 789922000,
+      "name": "Xavier Wulf",
+      "tags": [
+        "memphis",
+        "raider-klan"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 72966492,
+      "itunes_id": 1300793014,
+      "name": "Bones",
+      "tags": [
+        "cloud-rap",
+        "teamsesh"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 4547858,
+      "itunes_id": 493199315,
+      "name": "Eddy Baker",
+      "tags": [
+        "memphis",
+        "teamsesh"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 302820431,
+      "itunes_id": 1469648917,
+      "name": "Sematary",
+      "tags": [
+        "haunted-mound",
+        "phonk"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 463415,
+      "itunes_id": 368777364,
+      "name": "Ghost Mountain",
+      "tags": [
+        "haunted-mound"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 10159994,
+      "itunes_id": 1081606072,
+      "name": "$uicideboy$",
+      "tags": [
+        "memphis",
+        "g59"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 105648142,
+      "itunes_id": 1373497397,
+      "name": "Ramirez",
+      "tags": [
+        "memphis",
+        "g59"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 106096,
+      "itunes_id": 1109554148,
+      "name": "Pouya",
+      "tags": [
+        "underground-rap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 8940984,
+      "itunes_id": 1104256048,
+      "name": "Fat Nick",
+      "tags": [
+        "underground-rap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 540059,
+      "itunes_id": 19321657,
+      "name": "Germ",
+      "tags": [
+        "g59"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 429296,
+      "itunes_id": 1084612511,
+      "name": "Shakewell",
+      "tags": [
+        "underground-rap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 363378572,
+      "itunes_id": 516663045,
+      "name": "Chief Keef",
+      "tags": [
+        "drill",
+        "chicago"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 299587271,
+      "itunes_id": 982372505,
+      "name": "Playboi Carti",
+      "tags": [
+        "rage",
+        "opium"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 5097674,
+      "itunes_id": 472502104,
+      "name": "Yung Lean",
+      "tags": [
+        "cloud-rap",
+        "sad-boys"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 5804578,
+      "itunes_id": 861359576,
+      "name": "Bladee",
+      "tags": [
+        "drain-gang"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 6073616,
+      "itunes_id": 1080416666,
+      "name": "Ecco2k",
+      "tags": [
+        "drain-gang"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 6073614,
+      "itunes_id": 941886638,
+      "name": "Thaiboy Digital",
+      "tags": [
+        "drain-gang"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 11420468,
+      "itunes_id": 1077454941,
+      "name": "Lil Peep",
+      "tags": [
+        "emo-rap",
+        "gbc"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 225049235,
+      "itunes_id": 425813421,
+      "name": "Lil Tracy",
+      "tags": [
+        "emo-rap",
+        "gbc"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 7964430,
+      "itunes_id": 948447923,
+      "name": "Wicca Phase Springs Eternal",
+      "tags": [
+        "emo-rap",
+        "gbc"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 116098252,
+      "itunes_id": 1274460140,
+      "name": "Cold Hart",
+      "tags": [
+        "emo-rap",
+        "gbc"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 4658504,
+      "itunes_id": 637230944,
+      "name": "Horse Head",
+      "tags": [
+        "emo-rap",
+        "gbc"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 7101343,
+      "itunes_id": 940710524,
+      "name": "Lil Uzi Vert",
+      "tags": [
+        "rage",
+        "trap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 9776678,
+      "itunes_id": 1080733657,
+      "name": "Lil Yachty",
+      "tags": [
+        "trap",
+        "experimental"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 158706,
+      "itunes_id": 273058501,
+      "name": "Kid Cudi",
+      "tags": [
+        "alt-rap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 632926,
+      "itunes_id": 419944559,
+      "name": "Mac Miller",
+      "tags": [
+        "alt-rap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 1518490,
+      "itunes_id": 481488005,
+      "name": "A$AP Rocky",
+      "tags": [
+        "cloud-rap",
+        "asap-mob"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 386629611,
+      "itunes_id": 5869117,
+      "name": "Lil Wayne",
+      "tags": [
+        "classic-rap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 55127652,
+      "itunes_id": 1445234142,
+      "name": "chimp1",
+      "tags": [
+        "underground-rap"
+      ],
+      "tier": "core"
+    },
+    {
+      "deezer_id": 5131091,
+      "itunes_id": 631440154,
+      "name": "Denzel Curry",
+      "tags": [
+        "raider-klan",
+        "rap"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 4919855,
+      "itunes_id": 560628163,
+      "name": "Yung Simmie",
+      "tags": [
+        "raider-klan",
+        "memphis"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 9225830,
+      "itunes_id": 726661363,
+      "name": "Amber London",
+      "tags": [
+        "raider-klan",
+        "memphis"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 7150049,
+      "itunes_id": 945826126,
+      "name": "Ghostemane",
+      "tags": [
+        "trap-metal",
+        "phonk"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 10541089,
+      "itunes_id": 1123771392,
+      "name": "Scarlxrd",
+      "tags": [
+        "trap-metal"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 14386891,
+      "itunes_id": 1361386830,
+      "name": "City Morgue",
+      "tags": [
+        "trap-metal"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 13495583,
+      "itunes_id": 1278683351,
+      "name": "ZillaKami",
+      "tags": [
+        "trap-metal"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 9822974,
+      "itunes_id": 1082533559,
+      "name": "XXXTENTACION",
+      "tags": [
+        "emo-rap"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 14456487,
+      "itunes_id": 1368733420,
+      "name": "Juice WRLD",
+      "tags": [
+        "emo-rap"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 11934257,
+      "itunes_id": 1203172438,
+      "name": "Trippie Redd",
+      "tags": [
+        "emo-rap",
+        "rage"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 10138676,
+      "itunes_id": 1099433152,
+      "name": "nothing,nowhere.",
+      "tags": [
+        "emo-rap"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 117601102,
+      "itunes_id": 1411605197,
+      "name": "Lil Darkie",
+      "tags": [
+        "underground-rap"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 10159992,
+      "itunes_id": 1101525244,
+      "name": "Freddie Dredd",
+      "tags": [
+        "phonk",
+        "memphis"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 125722472,
+      "itunes_id": 1557035452,
+      "name": "Kordhell",
+      "tags": [
+        "phonk",
+        "drift-phonk"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 88333752,
+      "itunes_id": 1514110458,
+      "name": "DVRST",
+      "tags": [
+        "phonk",
+        "drift-phonk"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 100588482,
+      "itunes_id": 1473236877,
+      "name": "Sxmpra",
+      "tags": [
+        "phonk"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 150272142,
+      "itunes_id": 1593188093,
+      "name": "MoonDeity",
+      "tags": [
+        "phonk"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 59471332,
+      "itunes_id": 1467274153,
+      "name": "Kaito Shoma",
+      "tags": [
+        "phonk"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 287530971,
+      "itunes_id": 1489874860,
+      "name": "Ghostface Playa",
+      "tags": [
+        "phonk"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 4073450,
+      "itunes_id": 445693504,
+      "name": "Earl Sweatshirt",
+      "tags": [
+        "alt-rap",
+        "odd-future"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 1194083,
+      "itunes_id": 420368335,
+      "name": "Tyler, The Creator",
+      "tags": [
+        "alt-rap",
+        "odd-future"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 1017307,
+      "itunes_id": 217291005,
+      "name": "Danny Brown",
+      "tags": [
+        "alt-rap"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 10785056,
+      "itunes_id": 1130088441,
+      "name": "JPEGMAFIA",
+      "tags": [
+        "experimental-rap"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 230,
+      "itunes_id": 2715720,
+      "name": "Kanye West",
+      "tags": [
+        "classic-rap",
+        "producer"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 4495513,
+      "itunes_id": 549236696,
+      "name": "Travis Scott",
+      "tags": [
+        "trap"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 11025166,
+      "itunes_id": 1153723033,
+      "name": "Sleep Token",
+      "tags": [
+        "alt-metal"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 12874,
+      "itunes_id": 121043936,
+      "name": "Bring Me The Horizon",
+      "tags": [
+        "metalcore",
+        "alt-metal"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 535,
+      "itunes_id": 1092903,
+      "name": "Deftones",
+      "tags": [
+        "alt-metal",
+        "shoegaze"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 240940521,
+      "itunes_id": 466532,
+      "name": "Korn",
+      "tags": [
+        "nu-metal"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 9222,
+      "itunes_id": 213344206,
+      "name": "Crystal Castles",
+      "tags": [
+        "witch-house",
+        "electronic"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 297593001,
+      "itunes_id": 1772912183,
+      "name": "Salem",
+      "tags": [
+        "witch-house"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 647650,
+      "itunes_id": 349736311,
+      "name": "Twenty One Pilots",
+      "tags": [
+        "alt-pop"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 73228892,
+      "itunes_id": 1478740208,
+      "name": "Molchat Doma",
+      "tags": [
+        "post-punk",
+        "ru"
+      ],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 291,
+      "itunes_id": 1889116,
+      "name": "Three 6 Mafia",
+      "tags": [
+        "memphis",
+        "founder"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 121310052,
+      "itunes_id": 5442501,
+      "name": "DJ Paul",
+      "tags": [
+        "memphis"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 12294,
+      "itunes_id": 6392055,
+      "name": "Juicy J",
+      "tags": [
+        "memphis"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 1218444,
+      "itunes_id": 121988278,
+      "name": "Lord Infamous",
+      "tags": [
+        "memphis"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 12161,
+      "itunes_id": 628004,
+      "name": "Project Pat",
+      "tags": [
+        "memphis"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 4713807,
+      "itunes_id": 159460191,
+      "name": "Tommy Wright III",
+      "tags": [
+        "memphis",
+        "founder"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 97514,
+      "itunes_id": 80923709,
+      "name": "DJ Screw",
+      "tags": [
+        "chopped-and-screwed",
+        "houston"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 387168,
+      "itunes_id": 1491249,
+      "name": "UGK",
+      "tags": [
+        "houston"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 2857,
+      "itunes_id": 3864756,
+      "name": "MF DOOM",
+      "tags": [
+        "classic-rap",
+        "underground"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 4283,
+      "itunes_id": 19657316,
+      "name": "Madlib",
+      "tags": [
+        "producer",
+        "underground"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 4064,
+      "itunes_id": 16589310,
+      "name": "J Dilla",
+      "tags": [
+        "producer"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 273,
+      "itunes_id": 200986,
+      "name": "Wu-Tang Clan",
+      "tags": [
+        "classic-rap"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 258830271,
+      "itunes_id": 35307,
+      "name": "Nas",
+      "tags": [
+        "classic-rap"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 1309,
+      "itunes_id": 1352449404,
+      "name": "JAY-Z",
+      "tags": [
+        "classic-rap"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 9,
+      "itunes_id": 289550,
+      "name": "OutKast",
+      "tags": [
+        "classic-rap"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 415,
+      "itunes_id": 112018,
+      "name": "Nirvana",
+      "tags": [
+        "grunge"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 691,
+      "itunes_id": 462221,
+      "name": "Alice In Chains",
+      "tags": [
+        "grunge"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 1865,
+      "itunes_id": 133036,
+      "name": "Soundgarden",
+      "tags": [
+        "grunge"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 458,
+      "itunes_id": 462715,
+      "name": "System Of A Down",
+      "tags": [
+        "nu-metal"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 72662772,
+      "itunes_id": 6907568,
+      "name": "Slipknot",
+      "tags": [
+        "nu-metal"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 92,
+      "itunes_id": 148662,
+      "name": "Linkin Park",
+      "tags": [
+        "nu-metal"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 93,
+      "itunes_id": 105544,
+      "name": "Limp Bizkit",
+      "tags": [
+        "nu-metal"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 113,
+      "itunes_id": 899409,
+      "name": "Rage Against The Machine",
+      "tags": [
+        "rap-metal"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 482,
+      "itunes_id": 251375,
+      "name": "Marilyn Manson",
+      "tags": [
+        "industrial"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 70866142,
+      "itunes_id": 140870416,
+      "name": "Tool",
+      "tags": [
+        "prog-metal"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 182,
+      "itunes_id": 889780,
+      "name": "Red Hot Chili Peppers",
+      "tags": [
+        "funk-rock"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 371518431,
+      "itunes_id": 116851,
+      "name": "blink-182",
+      "tags": [
+        "pop-punk"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 599,
+      "itunes_id": 14748659,
+      "name": "My Chemical Romance",
+      "tags": [
+        "emo"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 14309985,
+      "itunes_id": 649817,
+      "name": "Placebo",
+      "tags": [
+        "alt-rock"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 399,
+      "itunes_id": 657515,
+      "name": "Radiohead",
+      "tags": [
+        "alt-rock"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 860,
+      "itunes_id": 487143,
+      "name": "Pink Floyd",
+      "tags": [
+        "prog-rock"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 85,
+      "itunes_id": 1093102,
+      "name": "The Prodigy",
+      "tags": [
+        "big-beat"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 1069,
+      "itunes_id": 853090,
+      "name": "Portishead",
+      "tags": [
+        "trip-hop"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 612,
+      "itunes_id": 526404,
+      "name": "Massive Attack",
+      "tags": [
+        "trip-hop"
+      ],
+      "tier": "legend"
+    },
+    {
+      "deezer_id": 57264342,
+      "itunes_id": 1449022766,
+      "name": "УННВ",
+      "tags": [
+        "ru-underground"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 16779,
+      "itunes_id": 685986151,
+      "name": "Кровосток",
+      "tags": [
+        "ru-underground"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 10292790,
+      "itunes_id": 1129931073,
+      "name": "Boulevard Depo",
+      "tags": [
+        "ru-underground",
+        "dead-dynasty"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 5865529,
+      "itunes_id": 484265970,
+      "name": "Кунтейнир",
+      "search_name": "Kunteynir",
+      "tags": [
+        "ru-underground"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 66982102,
+      "itunes_id": 1077538316,
+      "name": "PHARAOH",
+      "tags": [
+        "ru-cloud-rap",
+        "dead-dynasty"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 51199632,
+      "itunes_id": 1450150470,
+      "name": "Джизус",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 59648332,
+      "itunes_id": 1453218855,
+      "name": "LOVV66",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 15037981,
+      "itunes_id": 1382321701,
+      "name": "OG Buda",
+      "tags": [
+        "ru-rap",
+        "melon"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 50462772,
+      "itunes_id": 1433836652,
+      "name": "SODA LUV",
+      "tags": [
+        "ru-rap",
+        "melon"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 1944341,
+      "itunes_id": 1458525039,
+      "name": "MAYOT",
+      "tags": [
+        "ru-rap",
+        "melon"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 14097523,
+      "itunes_id": 1309211809,
+      "name": "Платина",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 10520751,
+      "itunes_id": 1123087234,
+      "name": "i61",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 74526042,
+      "itunes_id": 1513508897,
+      "name": "Toxi$",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 53173512,
+      "itunes_id": 1440152629,
+      "name": "seemee",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 14277587,
+      "itunes_id": 1356097231,
+      "name": "Big Baby Tape",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 8687202,
+      "itunes_id": 503131736,
+      "name": "kizaru",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4975770,
+      "itunes_id": 278959467,
+      "name": "Yanix",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 96636102,
+      "itunes_id": 1095478183,
+      "name": "ATL",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 8874422,
+      "itunes_id": 943459711,
+      "name": "ЛСП",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 5036430,
+      "itunes_id": 680146234,
+      "name": "Loqiemean",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 6363110,
+      "itunes_id": 909146745,
+      "name": "Хаски",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 5603958,
+      "itunes_id": 837847154,
+      "name": "Скриптонит",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 291076,
+      "itunes_id": 301601116,
+      "name": "Oxxxymiron",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 11052818,
+      "itunes_id": 1156448492,
+      "name": "Слава КПСС",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 64238642,
+      "itunes_id": 1460789440,
+      "name": "Соня Мармеладова",
+      "tags": [
+        "ru-underground"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 13382351,
+      "itunes_id": 1297519790,
+      "name": "Ssshhhiiittt!",
+      "tags": [
+        "ru-post-punk"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 10882510,
+      "itunes_id": 1145507122,
+      "name": "Буерак",
+      "tags": [
+        "ru-post-punk"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 10348118,
+      "itunes_id": 1112985301,
+      "name": "Пасош",
+      "tags": [
+        "ru-indie"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 12373790,
+      "itunes_id": 1230051303,
+      "name": "Дайте танк (!)",
+      "tags": [
+        "ru-indie"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4505880,
+      "itunes_id": 621768190,
+      "name": "Кино",
+      "tags": [
+        "ru-classic"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4637757,
+      "itunes_id": 474555710,
+      "name": "Гражданская Оборона",
+      "tags": [
+        "ru-classic",
+        "punk"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 6459787,
+      "itunes_id": 531116017,
+      "name": "Сектор Газа",
+      "tags": [
+        "ru-classic",
+        "punk"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4237492,
+      "itunes_id": 129994805,
+      "name": "Король и Шут",
+      "tags": [
+        "ru-classic",
+        "punk"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4179081,
+      "itunes_id": 466873036,
+      "name": "Аквариум",
+      "tags": [
+        "ru-classic"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 6215386,
+      "itunes_id": 592405403,
+      "name": "Аукцыон",
+      "tags": [
+        "ru-classic"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4179069,
+      "itunes_id": 582803010,
+      "name": "Наутилус Помпилиус",
+      "tags": [
+        "ru-classic"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 14966,
+      "itunes_id": 400615958,
+      "name": "Агата Кристи",
+      "tags": [
+        "ru-classic"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 296604,
+      "itunes_id": 268782751,
+      "name": "Мумий Тролль",
+      "tags": [
+        "ru-classic"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4286880,
+      "itunes_id": 607413604,
+      "name": "25/17",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 78801792,
+      "itunes_id": 340420197,
+      "name": "Каста",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 5330639,
+      "itunes_id": 738269410,
+      "name": "Каспийский Груз",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4170095,
+      "itunes_id": 366970924,
+      "name": "Смоки Мо",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 2662361,
+      "itunes_id": 1094514442,
+      "name": "Guf",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 4170146,
+      "itunes_id": 1372953342,
+      "name": "Баста",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru"
+    },
+    {
+      "deezer_id": 98335212,
+      "itunes_id": 1371400021,
+      "name": "Моргенштерн",
+      "tags": [
+        "ru-pop-rap",
+        "drama"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "itunes_id": 1465235237,
+      "name": "Инстасамка",
+      "tags": [
+        "ru-pop-rap",
+        "drama"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 14619893,
+      "itunes_id": 1290520265,
+      "name": "FACE",
+      "tags": [
+        "ru-rap",
+        "drama"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 7968842,
+      "itunes_id": 881027285,
+      "name": "Элджей",
+      "tags": [
+        "ru-pop-rap"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 271715,
+      "itunes_id": 284266257,
+      "name": "Тимати",
+      "tags": [
+        "ru-pop-rap",
+        "drama"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 73922432,
+      "itunes_id": 1479626901,
+      "name": "Три дня дождя",
+      "tags": [
+        "ru-pop-rock"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 12080830,
+      "itunes_id": 1212756868,
+      "name": "Пошлая Молли",
+      "tags": [
+        "ru-pop-punk"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 57812002,
+      "itunes_id": 1449969935,
+      "name": "Дора",
+      "tags": [
+        "ru-pop"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 1582524,
+      "itunes_id": 1533716530,
+      "name": "Aarne",
+      "tags": [
+        "ru-producer"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 146765,
+      "itunes_id": 1435835151,
+      "name": "Cakeboy",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 129513512,
+      "itunes_id": 1563426461,
+      "name": "Icegergert",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 14038535,
+      "itunes_id": 1321362218,
+      "name": "044 ROSE",
+      "tags": [
+        "ru-rap"
+      ],
+      "tier": "ru_pop"
+    }
+  ],
+  "ids_updated_at": "2026-08-05T00:09:31+00:00",
+  "note": "Поля itunes_id / deezer_id / youtube_channel_id заполняет скрипт `python -m src.resolve_ids`. Вручную их вписывать не надо. tier: core — ядро вкуса, scene — смежная сцена, legend — классика и наследие, ru — русский андеграунд, ru_pop — русский мейнстрим (нужен для инфоповодов и юмора, не для рубрики РЕЛИЗ).",
+  "version": 1
+}
