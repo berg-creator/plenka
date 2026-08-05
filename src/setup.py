@@ -19,7 +19,7 @@
     python -m src.setup --rules --publish    отправить их в чат и закрепить
     python -m src.setup --bot                команды и описания бота
     python -m src.setup --about              описание канала
-    python -m src.setup --vk                 пост во ВКонтакте про разборы
+    python -m src.setup --announce           пост про бота в канал и ВК
 
 Всё, что публикует, по умолчанию только показывает: `--publish` добавляется
 осознанно. Особенно это важно для ВКонтакте — ключом сообщества пост можно
@@ -98,6 +98,16 @@ CHANNEL_DESCRIPTION = (
     "Разбираем, кто у кого что взял.\n\n"
     "Бот {bot} разберёт твой вкус по списку артистов и пришлёт карточку."
 )
+
+# Пост про запуск бота. В канале — с кнопкой, поэтому ссылку в текст
+# не вставляем: две дороги в одно место в коротком посте выглядят суетой.
+ANNOUNCE_TG = """<b>У канала теперь есть бот, который читает твой плейлист и говорит, откуда он взялся.</b>
+
+Кидаешь список артистов — получаешь разбор: что у кого взято, кто чей потомок и в каком году это уже было. Плюс карточка, которую не стыдно кинуть в сторис.
+
+Ещё две вещи. Пришлёшь одно имя или жанр — расскажет, откуда оно выросло. Пришлёшь строки из песни — разберёт, что там на самом деле происходит.
+
+Выдумывать не станет принципиально: если связь не подтверждена, так и скажет. Врать про музыку — последнее дело 💯"""
 
 VK_ANNOUNCE = """У канала появился бот, который разбирает вкус.
 
@@ -332,26 +342,54 @@ def publish_rules(publish: bool) -> int:
     return 0
 
 
-def announce_vk(publish: bool) -> int:
-    """Пост во ВКонтакте про разборы.
+def announce(publish: bool) -> int:
+    """Пост про запуск бота: в канал и во ВКонтакте, с закреплением.
 
-    Отдельной командой и с предпросмотром по умолчанию: ключом сообщества
-    ВКонтакте публиковать можно, а удалять — нельзя, так что «отправил и
-    передумал» тут не работает.
+    С предпросмотром по умолчанию: ключом сообщества ВКонтакте публиковать
+    можно, а удалять — нельзя, так что «отправил и передумал» тут не работает.
     """
     from . import vk
 
-    text = VK_ANNOUNCE.format(link=bot_link("taste"))
+    buttons = telegram.url_button("🎧 Разобрать свой вкус", bot_link("taste"))
+    vk_text = VK_ANNOUNCE.format(link=bot_link("taste"))
+
     if not publish:
-        print("\n— — — ПОСТ ВО ВКОНТАКТЕ — — —\n")
-        print(text)
-        print("\nОпубликовать: python -m src.setup --vk --publish")
-        print("Учти: ключом сообщества пост потом не удалить, только руками из ВК.")
+        print("\n— — — В КАНАЛ — — —\n")
+        print(telegram.sanitize(ANNOUNCE_TG))
+        print(f"\n  [ {buttons[0][0]['text']} ] → {buttons[0][0]['url']}")
+        print("\n— — — ВО ВКОНТАКТЕ — — —\n")
+        print(vk_text)
+        print("\nОпубликовать и закрепить: python -m src.setup --announce --publish")
+        print("Учти: во ВКонтакте пост ключом сообщества потом не удалить.")
         return 0
 
-    post_id = vk.post(text)
-    group = config.secret("VK_GROUP_ID", required=False)
-    print(f"Опубликовано: vk.com/{group}?w=wall-{vk.group_id()}_{post_id}")
+    channel = config.secret("TELEGRAM_CHANNEL_ID")
+    message = telegram.send_message(channel, ANNOUNCE_TG, preview=False, buttons=buttons)
+    print(f"Канал: опубликовано, сообщение {message.get('message_id')}.")
+    try:
+        telegram.pin_message(channel, message["message_id"], notify=True)
+        print("Канал: закреплено.")
+    except telegram.TelegramError as exc:
+        print(f"Канал: закрепить не вышло ({exc}) — нужно право «Закрепление сообщений».")
+
+    # ВКонтакте идёт вторым и на исход не влияет: пост в канале к этому
+    # моменту уже вышел, и ошибка на второй площадке его не отменяет.
+    try:
+        post_id = vk.post(vk_text)
+        group = config.secret("VK_GROUP_ID", required=False)
+        print(f"ВК: опубликовано, vk.com/{group}?w=wall-{vk.group_id()}_{post_id}")
+    except Exception as exc:  # noqa: BLE001 — вторая площадка не роняет первую
+        print(f"ВК: не вышло ({exc}).")
+        return 0
+
+    # Закрепление ключом сообщества запрещено — как и удаление. Это ограничение
+    # ВКонтакте, а не недостаток прав: из приложения то же самое делается в тап.
+    try:
+        vk.pin(post_id)
+        print("ВК: закреплено.")
+    except Exception as exc:  # noqa: BLE001
+        log.debug("wall.pin недоступен: %s", exc)
+        print("ВК: закрепи руками — групповым ключом это запрещено, как и удаление.")
     return 0
 
 
@@ -362,7 +400,9 @@ def main() -> int:
     parser.add_argument("--rules", action="store_true", help="правила чата обсуждений")
     parser.add_argument("--bot", action="store_true", help="команды и описания бота")
     parser.add_argument("--about", action="store_true", help="описание канала")
-    parser.add_argument("--vk", action="store_true", help="пост во ВКонтакте про разборы")
+    parser.add_argument(
+        "--announce", action="store_true", help="пост про бота в канал и ВК, с закреплением"
+    )
     parser.add_argument(
         "--publish",
         action="store_true",
@@ -383,8 +423,8 @@ def main() -> int:
         return setup_bot(args.publish)
     if args.about:
         return setup_channel_description(args.publish)
-    if args.vk:
-        return announce_vk(args.publish)
+    if args.announce:
+        return announce(args.publish)
 
     parser.print_help()
     return 0

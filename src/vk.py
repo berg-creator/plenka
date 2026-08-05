@@ -155,6 +155,11 @@ def _upload_photo(url: str) -> str:
         return ""
 
 
+def pin(post_id: int) -> None:
+    """Закрепляет пост в сообществе — он показывается первым на стене."""
+    _call("wall.pin", owner_id=-group_id(), post_id=post_id)
+
+
 def check() -> str:
     """Проверяет токен и доступ к сообществу.
 
