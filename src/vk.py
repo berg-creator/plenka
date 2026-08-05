@@ -142,11 +142,14 @@ def check() -> str:
 
     try:
         me = _call("users.get")
-        user = me[0] if isinstance(me, list) else me.get("items", [{}])[0]
+        items = me if isinstance(me, list) else me.get("items", [])
+        user = items[0] if items else {}
         name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
-        if name:
-            lines.append(f"Тип токена: пользовательский ({name})")
-    except VKError:
+        # Ключ сообщества отвечает на users.get пустым списком — это не ошибка.
+        lines.append(
+            f"Тип токена: пользовательский ({name})" if name else "Тип токена: ключ сообщества"
+        )
+    except (VKError, IndexError, KeyError, AttributeError):
         lines.append("Тип токена: ключ сообщества")
 
     gid = group_id()

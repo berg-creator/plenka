@@ -42,6 +42,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          # ВКонтакте: кросспостинг включается сам при наличии токена
+          VK_TOKEN: ${{ secrets.VK_TOKEN }}
+          VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
           # Переменная PUBLISH_TARGET задаётся в Settings → Variables.
           # Пока стоит admin — посты уходят в личку. Меняешь на channel, когда готов.
           TARGET: ${{ inputs.target || vars.PUBLISH_TARGET || 'admin' }}
