@@ -91,6 +91,31 @@ def send(post: dict, chat_id: str) -> None:
     telegram.send_message(chat_id, text)
 
 
+def crosspost_vk(post: dict) -> None:
+    """Дублирует пост во ВКонтакте, если сообщество подключено.
+
+    Молчаливо пропускается, когда токен не задан: ВКонтакте — вторая площадка,
+    и её отсутствие не должно мешать основному каналу. Ошибка публикации там
+    тоже не роняет запуск — пост в Telegram уже вышел.
+    """
+    import os
+
+    if not os.environ.get("VK_TOKEN", "").strip():
+        return
+
+    from . import vk
+
+    # Опросы во ВКонтакте создаются иначе, чем в Telegram, — пока пропускаем.
+    if post.get("rubric") == "poll":
+        return
+
+    try:
+        post_id = vk.post(post.get("text", ""), photo_url=post.get("cover", ""))
+        log.info("Продублировано во ВКонтакте, запись %s", post_id)
+    except Exception as exc:
+        log.warning("ВКонтакте не принял пост: %s", exc)
+
+
 def send_for_approval(post: dict, path: Path, chat_id: str) -> None:
     """Показывает пост и подкладывает под него кнопки решения.
 
@@ -192,6 +217,7 @@ def main() -> int:
 
     if args.target == "channel":
         send(post, chat_id)
+        crosspost_vk(post)
         record(post, path, "channel")
         archive(path)
         print(f"Опубликовано в канал: {path.name}. Осталось в очереди: {len(list(config.QUEUE.glob('*.json')))}")
