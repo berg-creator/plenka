@@ -3,22 +3,29 @@ name: Бот
 # Единственный опросчик бота: забирает нажатия кнопок под превью постов
 # и запросы к сервису разборов. У getUpdates общий offset, поэтому вторым
 # workflow это делать нельзя — события будут теряться.
-# Постоянного сервера у проекта нет, поэтому события обрабатываются пачками:
-# между нажатием и публикацией проходит до пяти минут.
+#
+# Режим — дежурство: запуск живёт 55 минут и держит соединение с Telegram
+# открытым, поэтому бот отвечает за секунды, а не когда доедет крон. Раньше
+# тут стоял `*/5`, но GitHub это расписание не соблюдал: на практике между
+# запусками проходил час и больше. Дежурство работает потому, что репозиторий
+# открытый — минуты Actions для публичных репозиториев не считаются.
 on:
   schedule:
-    # Пять минут — минимальный интервал, который допускает GitHub.
-    # Чаще проверять нельзя, поэтому часики на кнопке живут до пяти минут.
-    - cron: "*/5 * * * *"
+    # Каждый час — новая смена. Предыдущая к этому моменту уже закончилась
+    # сама, поэтому двух опросчиков одновременно не бывает.
+    - cron: "0 * * * *"
   workflow_dispatch:
 
+# Своя группа, не общая state-write: дежурство занимает почти весь час,
+# и публикация постов не должна стоять в очереди за ним.
 concurrency:
-  group: state-write
+  group: bot-serve
   cancel-in-progress: false
 
 jobs:
-  moderate:
+  serve:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: write
     steps:
@@ -31,7 +38,12 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Обработать события
+      - name: Представиться для коммитов
+        run: |
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+
+      - name: Дежурить
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
@@ -41,18 +53,20 @@ jobs:
           VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
           # Разборы ПРОЯВКИ генерируются здесь же — генератор тот же,
           # что у постов канала, иначе бот и канал звучат по-разному.
-          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gigachat' }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
           GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python -m src.moderate
+        # Пятьдесят пять, а не шестьдесят: смена должна закончиться сама
+        # и успеть сохранить состояние до того, как придёт следующая.
+        run: python -m src.moderate --serve 55
 
       - name: Сохранить состояние
+        if: always()
         run: |
-          git config user.name "plenka-bot"
-          git config user.email "bot@users.noreply.github.com"
           git add data/ content/
-          git diff --cached --quiet || git commit -m "модерация: решения по постам применены"
+          git diff --cached --quiet || git commit -m "дежурство: состояние бота"
           git pull --rebase --autostash origin ${{ github.ref_name }}
           git push
