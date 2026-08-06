@@ -32,6 +32,39 @@ jobs:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
         run: python -m src.collect
 
+      # Слежение — вещь неспешная: человек подписался и забыл, а весть о релизе
+      # уместна тогда, когда релиз нашёлся. Поэтому рассылка идёт сразу после
+      # сбора, а не крутится в дежурстве.
+      - name: Забрать списки слежения
+        env:
+          STATE_REPO: ${{ secrets.STATE_REPO }}
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: |
+          if [ -z "$STATE_REPO" ] || [ -z "$STATE_TOKEN" ]; then
+            echo "Приватное хранилище не настроено — рассылать некому."
+            exit 0
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${STATE_TOKEN}@github.com/${STATE_REPO}.git" private-state
+          cd private-state
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          echo "STATE_DIR=${GITHUB_WORKSPACE}/private-state" >> "$GITHUB_ENV"
+
+      - name: Разослать вести о релизах
+        if: env.STATE_DIR != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python -m src.service --notify
+
+      - name: Сохранить списки слежения
+        if: env.STATE_DIR != ''
+        run: |
+          cd private-state
+          git add -A
+          git diff --cached --quiet || git commit -m "слежение: отправленное отмечено"
+          git push
+
       - name: Сохранить состояние
         run: |
           git config user.name "plenka-bot"

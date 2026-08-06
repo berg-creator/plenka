@@ -52,6 +52,25 @@ jobs:
           git config user.name "plenka-bot"
           git config user.email "bot@users.noreply.github.com"
 
+      # Всё, что относится к конкретным людям — списки слежения, — лежит
+      # в отдельном приватном репозитории. Этот открыт, и такому в нём не место.
+      # Пока секреты не заведены, слежение просто выключено: остальное работает.
+      - name: Забрать приватное хранилище
+        env:
+          STATE_REPO: ${{ secrets.STATE_REPO }}
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: |
+          if [ -z "$STATE_REPO" ] || [ -z "$STATE_TOKEN" ]; then
+            echo "Приватное хранилище не настроено — слежение выключено."
+            exit 0
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${STATE_TOKEN}@github.com/${STATE_REPO}.git" private-state
+          cd private-state
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          echo "STATE_DIR=${GITHUB_WORKSPACE}/private-state" >> "$GITHUB_ENV"
+
       - name: Дежурить
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -81,4 +100,14 @@ jobs:
           git add data/ content/
           git diff --cached --quiet || git commit -m "дежурство: состояние бота"
           git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push
+
+      - name: Сохранить списки слежения
+        if: always()
+        run: |
+          if [ ! -d private-state ]; then exit 0; fi
+          cd private-state
+          git add -A
+          git diff --cached --quiet || git commit -m "слежение: списки обновлены"
+          git pull --rebase --autostash origin HEAD || true
           git push

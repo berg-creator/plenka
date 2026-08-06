@@ -37,7 +37,7 @@ import re
 from pathlib import Path
 
 from . import card, config, llm, quality, state, stories, telegram
-from .sources import lastfm
+from .sources import deezer, itunes, lastfm
 
 log = logging.getLogger("service")
 
@@ -60,6 +60,10 @@ COMMANDS = {
     "vkus": "taste", "вкус": "taste", "taste": "taste",
     "nogi": "roots", "ноги": "roots", "roots": "roots",
     "tekst": "lyrics", "текст": "lyrics", "lyrics": "lyrics",
+    "sovet": "recommend", "совет": "recommend",
+    "novoe": "new", "новое": "new",
+    "slezhu": "watchlist", "слежу": "watchlist",
+    "stop": "watchstop", "стоп": "watchstop",
 }
 
 # Меню объясняет все три разбора сразу и показывает пример на каждый.
@@ -108,9 +112,32 @@ def menu_buttons() -> list[list[dict]]:
     ]
 
 
-def again_buttons() -> list[list[dict]]:
-    """Кнопки под готовым разбором — чтобы не искать, как повторить."""
-    return [[{"text": "Ещё разбор", "callback_data": f"{CALLBACK_PREFIX}menu"}]]
+# Telegram отводит под callback_data 64 байта, а кириллица занимает по два
+# на букву. Имя артиста туда обычно влезает, но обрезать всё равно приходится.
+CALLBACK_BYTES = 64
+
+
+def _cb(action: str, arg: str = "") -> str:
+    data = f"{CALLBACK_PREFIX}{action}:{arg}".encode()
+    return data[:CALLBACK_BYTES].decode(errors="ignore")
+
+
+def again_buttons(subject: str = "") -> list[list[dict]]:
+    """Кнопки под готовым разбором.
+
+    Продолжение разговора должно быть в одно касание: человек только что узнал,
+    откуда растёт артист, и следующий его вопрос предсказуем — что послушать
+    и что нового. Заставлять набирать это руками незачем.
+    """
+    if not subject:
+        return [[{"text": "Ещё разбор", "callback_data": _cb("menu")}]]
+    return [
+        [{"text": "🎧 Что послушать дальше", "callback_data": _cb("rec", subject)}],
+        [
+            {"text": "🆕 Что нового", "callback_data": _cb("new", subject)},
+            {"text": "🔔 Следить", "callback_data": _cb("watch", subject)},
+        ],
+    ]
 
 # Разделители списка: запятая, перенос строки, точка с запятой, буллеты.
 _SPLIT = re.compile(r"[,\n;•·|]+")
@@ -388,6 +415,10 @@ def analyse(kind: str, body: str) -> tuple[str, Path | None]:
     """
     if kind == "lyrics":
         return _lyrics(body)
+    if kind == "recommend":
+        return _recommend(body)
+    if kind == "new":
+        return _whats_new(body)
     return _taste(body)
 
 
@@ -455,6 +486,223 @@ def _taste(body: str) -> tuple[str, Path | None]:
     path = card.save(verdict, items, name=f"card-{state.now().strftime('%H%M%S')}")
     _remember(query, kind, matched=True, verdict=verdict)
     return text, path
+
+
+def _recommend(body: str) -> tuple[str, Path | None]:
+    """Что послушать дальше. Кандидаты — только из реальных данных Last.fm.
+
+    Своих имён модель не придумывает: список приходит из статистики
+    прослушиваний, где людей, слушающих одно, связали с другим. Модель лишь
+    объясняет, почему именно эти.
+    """
+    items = split_items(body)[:MAX_ARTISTS]
+    if not items:
+        return ("Напиши, от кого плясать, — верну, что послушать дальше.", None)
+
+    seen = {i.casefold() for i in items}
+    picks: list[dict] = []
+    tags: list[str] = []
+
+    for name in items[:LOOKUP_LIMIT]:
+        try:
+            tags.extend(lastfm.artist_tags(name, limit=4))
+            for candidate in lastfm.similar_artists(name, limit=10):
+                # Того, кого человек и так назвал, советовать обратно нельзя.
+                if candidate["name"].casefold() in seen:
+                    continue
+                seen.add(candidate["name"].casefold())
+                picks.append(candidate)
+        except Exception as exc:  # noqa: BLE001 — источник необязательный
+            log.info("Last.fm не дал похожих на «%s»: %s", name, exc)
+
+    if not picks:
+        _remember(", ".join(items), "recommend", matched=False)
+        return (_nothing_found(), None)
+
+    # Самые близкие подтверждают вкус, дальние его расширяют — нужны оба края,
+    # иначе совет вырождается в «послушай то же самое ещё раз».
+    picks.sort(key=lambda p: p["match"], reverse=True)
+    chosen = picks[:4] + picks[len(picks) // 2 : len(picks) // 2 + 2]
+
+    query = ", ".join(items)
+    scene = known_artists(query)
+    result = _generate(
+        "recommend",
+        {
+            "from": items,
+            "picks": chosen,
+            "known": match_links(query, scene, limit=1),
+            "tags": sorted(set(tags))[:6],
+        },
+    )
+    if result["skip"] or not result["text"]:
+        _remember(query, "recommend", matched=False)
+        return (NO_BASE, None)
+
+    _remember(query, "recommend", matched=True)
+    return telegram.sanitize(result["text"]), None
+
+
+def _whats_new(name: str) -> tuple[str, Path | None]:
+    """Свежие релизы артиста. Модель не участвует вовсе.
+
+    Это чистые факты из магазинов: даты, названия, ссылки. Пропускать их через
+    генератор было бы и дороже, и хуже — пересказ портит то, что и так точно.
+    """
+    name = name.strip()[:MAX_QUERY]
+    if not name:
+        return ("Напиши артиста — покажу, что у него выходило.", None)
+
+    releases: list[dict] = []
+    try:
+        artist_id = itunes.find_artist_id(name)
+        if artist_id:
+            releases = itunes.recent_releases(artist_id, limit=5)
+    except Exception as exc:  # noqa: BLE001 — магазин мог не ответить
+        log.info("iTunes молчит про «%s»: %s", name, exc)
+
+    if not releases:
+        try:
+            artist_id = deezer.find_artist_id(name)
+            if artist_id:
+                releases = deezer.recent_releases(artist_id, limit=5)
+        except Exception as exc:  # noqa: BLE001
+            log.info("Deezer молчит про «%s»: %s", name, exc)
+
+    if not releases:
+        return (
+            f"Про <b>{name}</b> магазины ничего свежего не отдают.\n\n"
+            "Либо имя написано иначе, либо релизов давно не было.",
+            None,
+        )
+
+    # Магазины отдают релизы в своём порядке, а человек ждёт свежее сверху.
+    releases.sort(key=lambda r: (r.get("released_at") or ""), reverse=True)
+
+    lines = [f"<b>{name}</b> — что выходило:\n"]
+    for item in releases:
+        title = item.get("title", "без названия")
+        date = (item.get("released_at") or "")[:10]
+        url = item.get("url", "")
+        head = f'<a href="{url}">{title}</a>' if url else title
+        tracks = item.get("track_count")
+        detail = f" · {tracks} {_plural(tracks, 'трек', 'трека', 'треков')}" if tracks else ""
+        lines.append(f"{date} — {head}{detail}")
+
+    return ("\n".join(lines), None)
+
+
+def _plural(count: int, one: str, few: str, many: str) -> str:
+    """Русское склонение после числа: 1 трек, 2 трека, 5 треков."""
+    tail_two, tail_one = count % 100, count % 10
+    if 11 <= tail_two <= 14:
+        return many
+    if tail_one == 1:
+        return one
+    if 2 <= tail_one <= 4:
+        return few
+    return many
+
+
+# ─────────────────────────── слежение за артистом ───────────────────────────
+
+WATCH_FILE = config.WATCH_FILE
+WATCH_LIMIT = 20
+
+
+def watch_add(chat_id: str, artist: str) -> str:
+    """Подписывает на артиста. Возвращает ответ для человека.
+
+    Адрес переписки хранится как есть — но в приватном хранилище, отдельном
+    от кода. Прятать его шифром в открытом файле было бы самообманом: чтобы
+    прислать весть о релизе, адрес всё равно нужно восстановить, а значит,
+    ключ лежит рядом с замком.
+    """
+    data = state.read_json(WATCH_FILE, {"watchers": {}})
+    names = data["watchers"].setdefault(str(chat_id), [])
+
+    if any(n.casefold() == artist.casefold() for n in names):
+        return f"За <b>{artist}</b> уже слежу. Выйдет что-нибудь — напишу."
+    if len(names) >= WATCH_LIMIT:
+        return (
+            f"Больше {WATCH_LIMIT} артистов не потяну — это уже не слежение, "
+            "а лента новостей.\n\nПришли /stop, чтобы очистить список."
+        )
+
+    names.append(artist)
+    state.write_json(WATCH_FILE, data)
+    return (
+        f"Слежу за <b>{artist}</b>. Выйдет релиз — напишу первым.\n\n"
+        f"Сейчас в списке: {len(names)}."
+    )
+
+
+def watch_clear(chat_id: str) -> str:
+    data = state.read_json(WATCH_FILE, {"watchers": {}})
+    if data["watchers"].pop(str(chat_id), None) is None:
+        return "Список и так пуст."
+    state.write_json(WATCH_FILE, data)
+    return "Больше ни за кем не слежу."
+
+
+def watch_list(chat_id: str) -> str:
+    names = state.read_json(WATCH_FILE, {"watchers": {}})["watchers"].get(str(chat_id), [])
+    if not names:
+        return "Список пуст. Разбери артиста и нажми «Следить» под ответом."
+    return "Слежу за:\n" + "\n".join(f"· {n}" for n in names)
+
+
+def notify_releases() -> int:
+    """Рассылает вести о новых релизах тем, кто на них подписан.
+
+    Сборщик новинок уже наполняет inbox каждые шесть часов — здесь мы только
+    сверяем свежие находки со списками слежения. Отправленное помечаем, чтобы
+    одна и та же новость не пришла человеку дважды.
+    """
+    data = state.read_json(WATCH_FILE, {"watchers": {}, "sent": []})
+    watchers = data.get("watchers", {})
+    if not watchers:
+        return 0
+
+    sent = set(data.get("sent", []))
+    releases = [
+        item
+        for item in state.read_jsonl(config.INBOX_FILE)
+        if item.get("kind") in ("release", "video") and item.get("artist")
+    ]
+    if not releases:
+        return 0
+
+    delivered = 0
+    for chat_id, names in watchers.items():
+        wanted = {n.casefold() for n in names}
+
+        for item in releases:
+            mark = f"{chat_id}:{item.get('fingerprint', '')}"
+            if mark in sent or item["artist"].casefold() not in wanted:
+                continue
+
+            title = item.get("title", "")
+            url = item.get("url", "")
+            head = f'<a href="{url}">{title}</a>' if url else title
+            try:
+                telegram.send_message(
+                    chat_id,
+                    f"🔔 У <b>{item['artist']}</b> вышло новое: {head}",
+                    preview=bool(url),
+                )
+            except telegram.TelegramError as exc:
+                log.info("Не доставлено про %s: %s", item["artist"], exc)
+                continue
+
+            sent.add(mark)
+            delivered += 1
+
+    if delivered:
+        # Список отправленного подрезаем: он нужен только чтобы не повториться.
+        data["sent"] = sorted(sent)[-2000:]
+        state.write_json(WATCH_FILE, data)
+    return delivered
 
 
 def _nothing_found() -> str:
@@ -560,6 +808,14 @@ def handle_message(message: dict, data: dict) -> bool:
         else:
             telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return False
+
+    # Списками слежения человек распоряжается сам, и это не стоит ни токенов,
+    # ни лимита — поэтому разбирается до всех проверок, кроме подписки.
+    if kind in ("watchlist", "watchstop"):
+        telegram.send_message(
+            chat_id, watch_list(chat_id) if kind == "watchlist" else watch_clear(chat_id)
+        )
+        return False
     if not kind:
         # Разбор, выбранный кнопкой, старше догадки по форме сообщения:
         # человек уже сказал, чего хочет, и переспрашивать его глупо.
@@ -578,10 +834,13 @@ def handle_message(message: dict, data: dict) -> bool:
         )
         return False
 
-    denied = check_limit(data, key, admin=admin)
-    if denied:
-        telegram.send_message(chat_id, denied)
-        return False
+    # Лимит тратят только те ответы, что идут через модель. «Что нового» —
+    # выборка из магазина, брать за неё суточную квоту было бы враньём.
+    if COSTS_TOKENS.get(kind, True):
+        denied = check_limit(data, key, admin=admin)
+        if denied:
+            telegram.send_message(chat_id, denied)
+            return False
 
     # Выбор кнопкой гасим только здесь: если человека развернули на подписке
     # или лимите, он не должен нажимать кнопку заново.
@@ -595,19 +854,52 @@ def handle_message(message: dict, data: dict) -> bool:
         telegram.send_message(chat_id, "Плёнку зажевало. Попробуй ещё раз.")
         return False
 
+    return _deliver(chat_id, answer, image, subject=_subject(kind, body)) and _spend_if_costly(
+        data, key, kind
+    )
+
+
+# Что из ответов проходит через модель. Остальное — выборка из магазина
+# или работа со списком слежения: они бесплатны и лимит не трогают.
+COSTS_TOKENS = {"new": False, "watchlist": False, "watchstop": False, "watch": False}
+
+
+def _subject(kind: str, body: str) -> str:
+    """Про кого был разбор — уходит в кнопки продолжения.
+
+    Только для одного имени: под разбором списка кнопка «следить» бессмысленна,
+    непонятно, за кем именно.
+    """
+    if kind in ("lyrics", "new", "recommend"):
+        return ""
+    items = split_items(body)
+    if len(items) != 1:
+        return ""
+    # Двадцать знаков, а не сорок: кириллица весит по два байта, и длинное имя
+    # обрезалось бы прямо в callback_data — а потом не совпало бы с лентой релизов.
+    return items[0][:20]
+
+
+def _deliver(chat_id: str, answer: str, image: Path | None, *, subject: str = "") -> bool:
+    buttons = again_buttons(subject)
     if image is not None:
         # Подпись к фото у Telegram короче обычного сообщения. Разбор длиннее
         # лимита не режем — карточка уходит молча, а текст следом отдельно.
         if len(answer) <= telegram.MAX_CAPTION:
             telegram.send_photo_file(chat_id, image, answer)
-            telegram.send_message(chat_id, WHAT_NEXT, buttons=again_buttons())
+            telegram.send_message(chat_id, WHAT_NEXT, buttons=buttons)
         else:
             telegram.send_photo_file(chat_id, image, "")
-            telegram.send_message(chat_id, answer, buttons=again_buttons())
+            telegram.send_message(chat_id, answer, buttons=buttons)
         image.unlink(missing_ok=True)  # карточка уже у человека, в репозитории не нужна
     else:
-        telegram.send_message(chat_id, answer, buttons=again_buttons())
+        telegram.send_message(chat_id, answer, buttons=buttons)
+    return True
 
+
+def _spend_if_costly(data: dict, key: str, kind: str) -> bool:
+    if not COSTS_TOKENS.get(kind, True):
+        return False
     spend(data, key)
     return True
 
@@ -619,26 +911,56 @@ WHAT_NEXT = "Забирай карточку. Разберём что-нибуд
 
 
 def handle_callback(query: dict, data: dict) -> None:
-    """Нажатие кнопки сервиса. Разборов не делает — только объясняет, что слать.
+    """Нажатие кнопки сервиса.
 
-    Собственно разбор всегда идёт следующим сообщением: так человек видит
-    инструкцию с примером до того, как потратит свой суточный лимит.
+    Кнопки бывают двух родов. Одни только объясняют, что прислать, — тогда
+    разбор идёт следующим сообщением, и человек видит пример до того, как
+    потратит суточный лимит. Другие продолжают уже состоявшийся разговор:
+    под ответом про артиста стоят «что послушать», «что нового» и «следить»,
+    и они делают дело сразу — имя уже известно, переспрашивать нечего.
     """
-    raw = query.get("data", "")
-    kind = raw[len(CALLBACK_PREFIX):]
+    raw = query.get("data", "")[len(CALLBACK_PREFIX):]
+    action, _, subject = raw.partition(":")
     chat_id = str(query.get("message", {}).get("chat", {}).get("id", ""))
-    key = user_key(query.get("from", {}).get("id", ""))
+    user_id = str(query.get("from", {}).get("id", ""))
+    key = user_key(user_id)
 
     telegram.answer_callback(query.get("id", ""))
     if not chat_id:
         return
 
-    if kind not in HINTS:
-        telegram.send_message(chat_id, MENU, buttons=menu_buttons())
+    if action in HINTS:
+        set_mode(data, key, action)
+        telegram.send_message(chat_id, HINTS[action])
         return
 
-    set_mode(data, key, kind)
-    telegram.send_message(chat_id, HINTS[kind])
+    if action == "watch" and subject:
+        telegram.send_message(chat_id, watch_add(chat_id, subject))
+        return
+
+    if action in ("rec", "new") and subject:
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        kind = "recommend" if action == "rec" else "new"
+
+        if COSTS_TOKENS.get(kind, True):
+            denied = check_limit(data, key, admin=admin)
+            if denied:
+                telegram.send_message(chat_id, denied)
+                return
+
+        telegram.send_chat_action(chat_id)
+        try:
+            answer, image = analyse(kind, subject)
+        except Exception as exc:  # noqa: BLE001 — чужое нажатие не роняет запуск
+            log.error("Кнопка «%s» сорвалась: %s", action, exc)
+            telegram.send_message(chat_id, "Плёнку зажевало. Попробуй ещё раз.")
+            return
+
+        _deliver(chat_id, answer, image)
+        _spend_if_costly(data, key, kind)
+        return
+
+    telegram.send_message(chat_id, MENU, buttons=menu_buttons())
 
 
 def set_mode(data: dict, user_id: str, kind: str) -> None:
@@ -665,10 +987,20 @@ def main() -> int:
     parser.add_argument("--kind", default="", help="taste | roots | lyrics")
     parser.add_argument("--match", help="показать, что нашлось в базе, без затрат на модель")
     parser.add_argument("--stats", action="store_true", help="расход лимитов")
+    parser.add_argument(
+        "--notify",
+        action="store_true",
+        help="разослать вести о новых релизах тем, кто следит",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
+
+    if args.notify:
+        sent = notify_releases()
+        print(f"Разослано вестей о релизах: {sent}.")
+        return 0
 
     if args.stats:
         data = load_state()

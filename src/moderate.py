@@ -223,23 +223,32 @@ def push_state() -> None:
     if not os.environ.get("GITHUB_ACTIONS"):
         return
 
+    _push_repo(config.ROOT, "data/", "дежурство: разборы и состояние бота")
+
+    # Списки слежения живут в отдельном приватном репозитории — он с этим
+    # никак не связан и отправляется своим коммитом.
+    if config.PRIVATE.exists() and (config.PRIVATE / ".git").exists():
+        _push_repo(config.PRIVATE, ".", "слежение: списки обновлены")
+
+
+def _push_repo(cwd, paths: str, message: str) -> None:
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=config.ROOT,
+        cwd=cwd,
         capture_output=True,
         text=True,
     ).stdout.strip() or "main"
 
     commands = (
-        ["git", "add", "data/"],
-        ["git", "commit", "-m", "дежурство: разборы и состояние бота"],
+        ["git", "add", paths],
+        ["git", "commit", "-m", message],
         # Пока идёт смена, в ветку пишут и другие задачи — публикация, сбор.
         # Поэтому перед отправкой всегда подтягиваем чужое.
         ["git", "pull", "--rebase", "--autostash", "origin", branch],
         ["git", "push", "origin", f"HEAD:{branch}"],
     )
     for command in commands:
-        result = subprocess.run(command, cwd=config.ROOT, capture_output=True, text=True)
+        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
         if result.returncode != 0:
             # Коммитить нечего — обычное дело, тишина в логе тут уместнее ошибки.
             if command[1] != "commit":

@@ -23,6 +23,15 @@ INBOX_FILE = DATA / "inbox.jsonl"
 SEEN_FILE = DATA / "seen.json"
 POSTED_FILE = DATA / "posted.json"
 STORIES_FILE = DATA / "stories.json"
+CLIPS_FILE = DATA / "clips.json"
+
+# Всё, что относится к конкретным людям, лежит отдельно от кода.
+# Репозиторий проекта открытый, и списки тех, кто писал боту и за кем следит,
+# в нём быть не должны — ни в каком виде. Путь задаётся переменной STATE_DIR:
+# в GitHub Actions туда клонируется приватный репозиторий, локально —
+# просто папка рядом, которую не берёт git (см. .gitignore).
+PRIVATE = Path(os.environ.get("STATE_DIR", "")) if os.environ.get("STATE_DIR") else DATA / "private"
+WATCH_FILE = PRIVATE / "watches.json"
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (anthropic — платный Claude, по умолчанию; gigachat — Сбер; gemini — Google).
