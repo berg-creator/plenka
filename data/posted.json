@@ -11,6 +11,12 @@
       "file": "20260805-092158-2802-verdict.json",
       "published_at": "2026-08-05T16:55:42+00:00",
       "rubric": "verdict"
+    },
+    {
+      "chat": "channel",
+      "file": "20260805-092205-4483-lineage.json",
+      "published_at": "2026-08-06T09:38:59+00:00",
+      "rubric": "lineage"
     }
   ]
 }
