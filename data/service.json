@@ -1,12 +1,11 @@
 {
   "day": "2026-08-06",
-  "total": 0,
+  "total": 2,
   "users": {
     "1d0ec4cc6dd7e460": {
-      "count": 7,
-      "day": "2026-08-05",
-      "mode": "taste",
-      "total": 7
+      "count": 2,
+      "day": "2026-08-06",
+      "total": 9
     }
   }
 }
