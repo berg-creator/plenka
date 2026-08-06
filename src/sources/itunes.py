@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from .http import get_json
@@ -33,6 +34,23 @@ def find_artist_id(name: str) -> int | None:
             return item.get("artistId")
     # Точного совпадения нет — берём первый результат, но он требует проверки глазами.
     return data["results"][0].get("artistId")
+
+
+def resolve_name(name: str) -> str:
+    """Правильное написание имени артиста по приблизительному.
+
+    Нужно потому, что поиск Last.fm ищет по подстроке: на «Chef Keef» он
+    возвращает другие опечатки того же имени, но не самого Chief Keef.
+    У iTunes сравнение нечёткое, и такие ошибки он переживает — заодно
+    переводит «молчат дома» в «Molchat Doma».
+    """
+    data = get_json(
+        SEARCH_URL,
+        params={"term": name, "entity": "musicArtist", "limit": 1},
+        min_interval=MIN_INTERVAL,
+    )
+    results = (data or {}).get("results") or []
+    return results[0].get("artistName", "") if results else ""
 
 
 def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
@@ -72,22 +90,60 @@ def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
     return releases
 
 
+# Ссылка на релиз несёт его идентификатор: .../album/asthebluntburnsslow/6794327130
+_ALBUM_URL = re.compile(r"music\.apple\.com/[^/]+/album/[^/]+/(\d+)")
+
+
+def album_id_from_url(url: str) -> str:
+    """Идентификатор альбома из ссылки магазина.
+
+    Надёжнее поиска по названию: тот требует точного совпадения и на релизах
+    со скобками, фитами и изданиями в названии не находит ничего.
+    """
+    match = _ALBUM_URL.search(url or "")
+    return match.group(1) if match else ""
+
+
 def find_album(artist: str, title: str) -> int | None:
     """Ищет альбом по имени артиста и названию. Нужен, когда id релиза
-    не сохранился, — например, при дозагрузке треклистов к старым находкам."""
+    не сохранился, — например, при дозагрузке треклистов к старым находкам.
+
+    Совпадение требуется точное — и по названию, и по артисту. Похожий результат
+    здесь хуже, чем никакого: поиск охотно отдаёт чужой альбом с тем же названием,
+    и в пост уходит треклист, которого у релиза нет.
+    """
     data = get_json(
         SEARCH_URL,
-        params={"term": f"{artist} {title}", "entity": "album", "limit": 5},
+        params={"term": f"{artist} {title}", "entity": "album", "limit": 10},
         min_interval=MIN_INTERVAL,
     )
     if not data or not data.get("results"):
         return None
 
-    target = title.casefold().strip()
     for item in data["results"]:
-        if item.get("collectionName", "").casefold().strip() == target:
+        same_album = _norm(item.get("collectionName", "")) == _norm(title)
+        same_artist = _norm(item.get("artistName", "")) == _norm(artist)
+        if same_album and same_artist:
             return item.get("collectionId")
-    return data["results"][0].get("collectionId")
+    return None
+
+
+# Магазины дописывают к названию тип релиза и издание: «- Single», «(Deluxe)».
+# Для сверки это шум.
+_EDITION = re.compile(
+    r"\s*[-–—(\[]?\s*(single|ep|deluxe|explicit|remastered\s*\d*|bonus track version|"
+    r"deluxe edition|expanded edition)\s*[)\]]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _norm(value: str) -> str:
+    previous = None
+    text = value.strip()
+    while previous != text:  # изданий может быть несколько: «(Deluxe) - Single»
+        previous = text
+        text = _EDITION.sub("", text).strip(" -–—")
+    return re.sub(r"[^\w\s]", "", text.casefold()).strip()
 
 
 def album_tracks(collection_id: str | int) -> dict:
@@ -119,6 +175,10 @@ def album_tracks(collection_id: str | int) -> dict:
             {
                 "title": item.get("trackName", ""),
                 "seconds": round(millis / 1000) if millis else 0,
+                # Тридцатисекундный отрывок, который магазин отдаёт всем для
+                # прослушивания. Он и уходит в пост: канал про музыку должен
+                # давать её услышать, а не только про неё рассказывать.
+                "preview": item.get("previewUrl", ""),
             }
         )
         genre = genre or item.get("primaryGenreName", "")

@@ -55,6 +55,36 @@ def artist_tags(name: str, limit: int = 8) -> list[str]:
     return [t.get("name", "") for t in tags[:limit] if t.get("name")]
 
 
+def search_artist(name: str, limit: int = 6) -> list[dict]:
+    """Кандидаты по приблизительному написанию: имя и число слушателей.
+
+    Параметр autocorrect у Last.fm чинит только мелочи вроде регистра и
+    диакритики: «Chef Keef» вместо «Chief Keef» он не узнаёт и возвращает
+    пустоту. А боту пишут именно так — на слух и с ошибками.
+
+    Первое совпадение брать нельзя: поиск охотно отдаёт однофамильцев
+    и пустышки, у которых имя ближе по буквам. Поэтому возвращаем несколько
+    кандидатов со счётчиком слушателей — выбирать будет вызывающий.
+    """
+    data = _call("artist.search", artist=name, limit=str(limit))
+    if not data:
+        return []
+
+    matches = data.get("results", {}).get("artistmatches", {}).get("artist", [])
+    if isinstance(matches, dict):  # при одном результате приходит объект
+        matches = [matches]
+
+    results = []
+    for item in matches:
+        try:
+            listeners = int(item.get("listeners", 0))
+        except (TypeError, ValueError):
+            listeners = 0
+        if item.get("name"):
+            results.append({"name": item["name"], "listeners": listeners})
+    return results
+
+
 def artist_bio(name: str) -> str:
     """Короткая справка об артисте — контекст для генерации поста."""
     data = _call("artist.getinfo", artist=name, autocorrect="1", lang="en")

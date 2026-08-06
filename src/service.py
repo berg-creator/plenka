@@ -309,25 +309,76 @@ def lastfm_facts(items: list[str]) -> list[dict]:
     facts: list[dict] = []
     for name in items[:LOOKUP_LIMIT]:
         try:
-            tags = lastfm.artist_tags(name, limit=6)
-            similar = lastfm.similar_artists(name, limit=6)
-            bio = lastfm.artist_bio(name)
+            resolved = _resolve(name)
+            if not resolved:
+                continue  # такого не знает даже Last.fm — выдумывать не станем
+            tags = lastfm.artist_tags(resolved, limit=6)
+            similar = lastfm.similar_artists(resolved, limit=6)
+            bio = lastfm.artist_bio(resolved)
         except Exception as exc:  # noqa: BLE001 — источник необязательный
             log.info("Last.fm молчит про «%s»: %s", name, exc)
             continue
 
         if not (tags or similar):
-            continue  # артиста не знает даже Last.fm — выдумывать не станем
+            continue
 
         facts.append(
             {
-                "artist": name,
+                "artist": resolved,
+                # Как человек написал имя — если иначе, модель мягко поправит.
+                "asked_as": name if resolved.casefold() != name.casefold() else "",
                 "tags": tags,
                 "similar": [s["name"] for s in similar],
                 "bio": stories.strip_html(bio)[:BIO_LIMIT],
             }
         )
     return facts
+
+
+# Ниже этого числа слушателей совпадение считаем случайным. Поиск Last.fm
+# охотно отдаёт пустышки с похожим написанием: на «black kart» — безвестного
+# «Black Cart» вместо Black Kray, на набор букв — такой же набор букв.
+MIN_LISTENERS = 5000
+
+
+def _resolve(name: str) -> str:
+    """Приводит имя к тому, как оно записано на самом деле.
+
+    Боту пишут на слух: «Chef Keef» вместо Chief Keef, «black kart» вместо
+    Black Kray. Раньше такой запрос упирался в «не знаю такого» — а человек
+    видел в этом сломанный бот, а не свою опечатку.
+
+    Из кандидатов берём самого слушаемого, а не самого похожего по буквам:
+    когда человек ошибается в имени, он почти всегда имеет в виду известного
+    артиста, а не его безвестного тёзку.
+    """
+    if lastfm.artist_tags(name, limit=1):
+        return name  # написано верно, искать нечего
+
+    # Сначала магазин: у него нечёткое сравнение, и опечатку он переживает.
+    # Поиск Last.fm тут бесполезен — он ищет по подстроке и на «Chef Keef»
+    # отдаёт другие опечатки того же имени вместо самого артиста.
+    try:
+        guess = itunes.resolve_name(name)
+    except Exception as exc:  # noqa: BLE001 — магазин мог не ответить
+        log.info("iTunes не опознал «%s»: %s", name, exc)
+        guess = ""
+
+    if guess and lastfm.artist_tags(guess, limit=1):
+        if guess.casefold() != name.casefold():
+            log.info("Имя «%s» опознано как «%s»", name, guess)
+        return guess
+
+    # Магазин не помог — пробуем поиск Last.fm и берём самого слушаемого:
+    # ошибаясь в имени, человек почти всегда имеет в виду известного артиста,
+    # а не его безвестного тёзку.
+    candidates = [c for c in lastfm.search_artist(name) if c["listeners"] >= MIN_LISTENERS]
+    if not candidates:
+        return ""
+
+    best = max(candidates, key=lambda c: c["listeners"])
+    log.info("Имя «%s» опознано как «%s» (%d слушателей)", name, best["name"], best["listeners"])
+    return best["name"]
 
 
 # ─────────────────────────── лимиты ───────────────────────────
@@ -483,9 +534,33 @@ def _taste(body: str) -> tuple[str, Path | None]:
 
     text = telegram.sanitize(result["text"])
     verdict = _verdict(text)
-    path = card.save(verdict, items, name=f"card-{state.now().strftime('%H%M%S')}")
+    # Портрет ищем только когда спрашивали про одного: под списком из пяти имён
+    # фотография одного из них — обман, лучше обычная карточка.
+    photo = _artist_photo(web[0]["artist"] if len(items) == 1 and web else "")
+    path = card.save(
+        verdict, items, name=f"card-{state.now().strftime('%H%M%S')}", photo_url=photo
+    )
     _remember(query, kind, matched=True, verdict=verdict)
     return text, path
+
+
+def _artist_photo(name: str) -> str:
+    """Портрет артиста — только настоящий и только его.
+
+    Портреты есть примерно у половины андеграунда: остальным Deezer отдаёт
+    серый силуэт. В таком случае возвращаемся к фирменной карточке, и это
+    осознанный выбор. Пробовали и обложки, и поиск по Википедии — первое
+    подсовывает гостевые куплеты с чужим оформлением, второе на имени вроде
+    «Bones» находит постороннюю группу. Чужое лицо под разбором — та же
+    выдумка, что и выдуманный факт, только заметнее.
+    """
+    if not name:
+        return ""
+    try:
+        return deezer.artist_picture(name)
+    except Exception as exc:  # noqa: BLE001 — без портрета карточка всё равно выйдет
+        log.info("Портрет «%s» не нашёлся: %s", name, exc)
+        return ""
 
 
 def _recommend(body: str) -> tuple[str, Path | None]:
@@ -685,12 +760,23 @@ def notify_releases() -> int:
             title = item.get("title", "")
             url = item.get("url", "")
             head = f'<a href="{url}">{title}</a>' if url else title
+            caption = f"🔔 У <b>{item['artist']}</b> вышло новое: {head}"
+
+            # Отрывок важнее текста: про релиз можно рассказать, а можно дать
+            # услышать. Тридцать секунд магазин отдаёт всем для прослушивания.
+            snippet = _preview(url)
             try:
-                telegram.send_message(
-                    chat_id,
-                    f"🔔 У <b>{item['artist']}</b> вышло новое: {head}",
-                    preview=bool(url),
-                )
+                if snippet:
+                    telegram.send_audio(
+                        chat_id,
+                        snippet["preview"],
+                        caption,
+                        title=snippet["title"],
+                        performer=item["artist"],
+                        cover_url=item.get("cover", ""),
+                    )
+                else:
+                    telegram.send_message(chat_id, caption, preview=bool(url))
             except telegram.TelegramError as exc:
                 log.info("Не доставлено про %s: %s", item["artist"], exc)
                 continue
@@ -703,6 +789,26 @@ def notify_releases() -> int:
         data["sent"] = sorted(sent)[-2000:]
         state.write_json(WATCH_FILE, data)
     return delivered
+
+
+def _preview(album_url: str) -> dict | None:
+    """Первый трек релиза с отрывком для прослушивания.
+
+    Молчит при любой заминке: весть о релизе важнее музыки к ней, и терять
+    её из-за недоступного магазина незачем.
+    """
+    if not album_url or "music.apple.com" not in album_url:
+        return None
+    try:
+        album_id = itunes.album_id_from_url(album_url)
+        if not album_id:
+            return None
+        for track in itunes.album_tracks(album_id).get("tracks", []):
+            if track.get("preview"):
+                return track
+    except Exception as exc:  # noqa: BLE001 — источник необязательный
+        log.info("Отрывок не достался: %s", exc)
+    return None
 
 
 def _nothing_found() -> str:

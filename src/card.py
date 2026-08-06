@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import argparse
 import textwrap
+from io import BytesIO
 from pathlib import Path
 
+import requests
 from PIL import Image, ImageDraw
 
 from . import config, stories
@@ -94,10 +96,84 @@ def render(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА") -
     return img
 
 
-def save(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА", name: str = "card") -> Path:
+def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВКА") -> Image.Image | None:
+    """Карточка на портрете артиста.
+
+    Человек спрашивает про артиста и ждёт увидеть артиста — служебная плашка
+    с текстом на его месте выглядит как слайд из презентации. Фотография
+    занимает весь кадр, текста на ней минимум: карточку смотрят, а не читают.
+    """
+    try:
+        response = requests.get(photo_url, timeout=30)
+        if response.status_code != 200:
+            return None
+        photo = Image.open(BytesIO(response.content)).convert("RGB")
+    except Exception:  # noqa: BLE001 — без картинки просто вернёмся к обычной карточке
+        return None
+
+    # Кадрируем по центру: портреты приходят квадратными, а карточка вытянутая.
+    ratio = max(WIDTH / photo.width, HEIGHT / photo.height)
+    scaled = photo.resize((int(photo.width * ratio), int(photo.height * ratio)), Image.LANCZOS)
+    left = (scaled.width - WIDTH) // 2
+    top = int((scaled.height - HEIGHT) * 0.3)  # лицо обычно выше центра
+    img = scaled.crop((left, top, left + WIDTH, top + HEIGHT))
+
+    # Затемняем низ, иначе белый текст не прочитается. Обложки бывают пёстрыми
+    # до ряби, поэтому к низу уходим почти в чёрное — читаемость важнее картинки.
+    shade = Image.new("L", (WIDTH, HEIGHT), 0)
+    draw_shade = ImageDraw.Draw(shade)
+    for y in range(HEIGHT):
+        share = max(0.0, (y / HEIGHT - 0.18) / 0.82)
+        draw_shade.line([(0, y), (WIDTH, y)], fill=int(242 * share**1.25))
+    img = Image.composite(Image.new("RGB", (WIDTH, HEIGHT), (12, 10, 9)), img, shade)
+
+    draw = ImageDraw.Draw(img)
+    margin = int(WIDTH * 0.09)
+
+    plate = stories.font(38)
+    box = draw.textbbox((0, 0), label, font=plate)
+    pad = 18
+    y = int(HEIGHT * 0.07)
+    draw.rectangle(
+        [margin, y, margin + box[2] + pad * 2, y + box[3] + pad * 1.5], fill=stories.ACCENT
+    )
+    draw.text((margin + pad, y + pad * 0.6), label, font=plate, fill=(255, 255, 255))
+
+    # Приговор — внизу, по нижней границе кадра.
+    f, lines, size = _fit(draw, verdict, HEIGHT * 0.34, ((70, 20), (60, 24), (52, 28), (44, 33)))
+    y = HEIGHT - int(HEIGHT * 0.14) - len(lines) * size * 1.3
+    for line in lines:
+        draw.text((margin + 2, y + 2), line, font=f, fill=(0, 0, 0))
+        draw.text((margin, y), line, font=f, fill=(246, 244, 239))
+        y += size * 1.3
+
+    footer = stories.font(34)
+    fy = HEIGHT - int(HEIGHT * 0.068)
+    draw.rectangle([margin, fy - 14, margin + 84, fy - 7], fill=stories.ACCENT)
+    draw.text((margin, fy), "ПЛЁНКА", font=footer, fill=(246, 244, 239))
+    handle = "@plenka_fm"
+    hbox = draw.textbbox((0, 0), handle, font=footer)
+    draw.text((WIDTH - margin - hbox[2], fy), handle, font=footer, fill=(198, 192, 182))
+
+    return img
+
+
+def save(
+    verdict: str,
+    artists: list[str],
+    *,
+    label: str = "ПРОЯВКА",
+    name: str = "card",
+    photo_url: str = "",
+) -> Path:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{name}.jpg"
-    render(verdict, artists, label=label).convert("RGB").save(path, "JPEG", quality=90)
+
+    image = render_on_photo(verdict, photo_url, label=label) if photo_url else None
+    if image is None:
+        image = render(verdict, artists, label=label)
+
+    image.convert("RGB").save(path, "JPEG", quality=90)
     return path
 
 
