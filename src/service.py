@@ -37,6 +37,7 @@ import re
 from pathlib import Path
 
 from . import card, config, llm, quality, state, stories, telegram
+from .sources import lastfm
 
 log = logging.getLogger("service")
 
@@ -65,35 +66,30 @@ COMMANDS = {
 # Так человеку не нужен лишний круг ожидания: он может ответить прямо на это
 # сообщение и получить разбор, ни на что не нажимая. Кнопки — для тех,
 # кто читать не станет.
+# Одно правило вместо трёх режимов: напиши что угодно. Раньше здесь висело
+# меню из трёх разборов с порогом в три артиста — человек читал условия
+# и уходил, так и не спросив ничего.
 MENU = (
-    "<b>ПРОЯВКА</b> — три разбора. Просто пришли, что хочешь разобрать.\n\n"
-    "🎧 <b>Вкус</b> — список артистов через запятую.\n"
-    "<i>Bones, Sematary, Bladee, PHARAOH</i>\n"
-    "Покажу, откуда он растёт, и пришлю картинку.\n\n"
-    "🧬 <b>Откуда ноги</b> — один артист, трек или жанр.\n"
-    "<i>фонк</i>\n"
-    "Расскажу, к какому предку сходится ниточка.\n\n"
-    "📝 <b>Между строк</b> — несколько строк из песни.\n"
-    "Разберу, что в них происходит на самом деле.\n\n"
-    "Не спеши: плёнка проявляется не мгновенно."
+    "<b>ПРОЯВКА</b> — разбираю, откуда что взялось.\n\n"
+    "Напиши что угодно:\n"
+    "· артиста — <i>Bones</i>\n"
+    "· жанр — <i>фонк</i>\n"
+    "· песню — <i>Molchat Doma — Судно</i>\n"
+    "· или сразу список, кого слушаешь\n\n"
+    "В ответ придёт разбор и карточка, которую не стыдно кинуть друзьям.\n\n"
+    "Ещё умею разбирать тексты: пришли несколько строк из песни."
 )
 
 # Что бот отвечает на нажатие кнопки: коротко, что прислать, и пример.
 HINTS = {
     "taste": (
-        "🎧 <b>Разбор вкуса</b>\n\n"
-        "Пришли 3–12 артистов через запятую — тех, кого правда слушаешь.\n\n"
-        "<i>Bones, Sematary, Slipknot, Bladee, PHARAOH</i>\n\n"
-        "В ответ — откуда растёт твой вкус и карточка, которую можно кинуть друзьям."
-    ),
-    "roots": (
-        "🧬 <b>Откуда ноги</b>\n\n"
-        "Пришли одного артиста, название трека или жанр.\n\n"
-        "<i>фонк</i>  ·  <i>Молчат Дома</i>  ·  <i>Three 6 Mafia</i>\n\n"
-        "Расскажу, откуда это выросло и что именно оттуда взяли."
+        "🎧 <b>Что разобрать?</b>\n\n"
+        "Напиши артиста, жанр или песню — по одному имени тоже работает.\n\n"
+        "<i>Bones</i>  ·  <i>фонк</i>  ·  <i>Молчат Дома</i>\n\n"
+        "Или сразу список, кого слушаешь, — тогда покажу, что у них общего."
     ),
     "lyrics": (
-        "📝 <b>Между строк</b>\n\n"
+        "📝 <b>Разбор текста</b>\n\n"
         "Пришли несколько строк из песни — своих или чужих.\n\n"
         "Разберу приём, двойные смыслы и отсылки. Автора не угадываю: "
         "если хочешь, чтобы учёл — напиши его сам."
@@ -107,11 +103,8 @@ CALLBACK_PREFIX = "s:"
 
 def menu_buttons() -> list[list[dict]]:
     return [
-        [{"text": "🎧 Разобрать вкус", "callback_data": f"{CALLBACK_PREFIX}taste"}],
-        [
-            {"text": "🧬 Откуда ноги", "callback_data": f"{CALLBACK_PREFIX}roots"},
-            {"text": "📝 Между строк", "callback_data": f"{CALLBACK_PREFIX}lyrics"},
-        ],
+        [{"text": "🎧 Что разобрать?", "callback_data": f"{CALLBACK_PREFIX}taste"}],
+        [{"text": "📝 Разобрать текст песни", "callback_data": f"{CALLBACK_PREFIX}lyrics"}],
     ]
 
 
@@ -163,14 +156,20 @@ def guess_kind(text: str) -> str:
     items = split_items(text)
     lines = [line for line in text.splitlines() if line.strip()]
 
-    if len(items) >= 3 and looks_like_names(items):
-        return "taste"
+    # Строки песни: несколько длинных строк подряд. Проверяем первыми — куплет
+    # ни при каком раскладе не должен уехать в разбор имён.
     if len(lines) >= 2 and sum(len(line) for line in lines) / len(lines) > 18:
         return "lyrics"
-    # Имя артиста, название трека или жанр — это несколько слов. Фраза длиннее
-    # похожа на разговор с ботом, а разговоров он не ведёт.
+
+    # Имена, жанры и названия песен — любое количество коротких кусков.
+    # Одного достаточно: заставлять человека собирать список нельзя.
+    if items and looks_like_names(items):
+        return "taste"
+
+    # Одна строка в несколько слов — тоже запрос: «Молчат Дома», «Bones — Dirt».
     if len(lines) == 1 and 2 <= len(text.strip()) <= 80 and len(text.split()) <= 6:
-        return "roots"
+        return "taste"
+
     return ""
 
 
@@ -261,6 +260,49 @@ def scene_payload(artists: list[dict]) -> list[dict]:
     return [{"name": a["name"], "tags": a.get("tags", [])} for a in artists]
 
 
+# Сколько имён из запроса проверяем во внешнем источнике. Каждое — три запроса
+# к Last.fm, а человек ждёт ответа: за пределами первых имён польза уже не
+# окупает задержку.
+LOOKUP_LIMIT = 3
+BIO_LIMIT = 400
+
+
+def lastfm_facts(items: list[str]) -> list[dict]:
+    """Настоящие сведения об артистах из Last.fm — теги, похожие, справка.
+
+    Ради этого источника снято ограничение по артистам и жанрам. Курируемая
+    база покрывает только тёмный звук, и раньше на всём остальном бот отвечал
+    «такого нет». Теперь на всё, чего нет в базе, факты берутся здесь — они
+    настоящие, а не придуманные моделью, и это принципиально: правило «ничего
+    не выдумывать» осталось прежним, просто источников стало два.
+
+    Молчит при любой ошибке: без ключа или без сети разбор всё ещё возможен
+    по курируемой базе, и ронять его из-за необязательного источника незачем.
+    """
+    facts: list[dict] = []
+    for name in items[:LOOKUP_LIMIT]:
+        try:
+            tags = lastfm.artist_tags(name, limit=6)
+            similar = lastfm.similar_artists(name, limit=6)
+            bio = lastfm.artist_bio(name)
+        except Exception as exc:  # noqa: BLE001 — источник необязательный
+            log.info("Last.fm молчит про «%s»: %s", name, exc)
+            continue
+
+        if not (tags or similar):
+            continue  # артиста не знает даже Last.fm — выдумывать не станем
+
+        facts.append(
+            {
+                "artist": name,
+                "tags": tags,
+                "similar": [s["name"] for s in similar],
+                "bio": stories.strip_html(bio)[:BIO_LIMIT],
+            }
+        )
+    return facts
+
+
 # ─────────────────────────── лимиты ───────────────────────────
 
 
@@ -338,12 +380,15 @@ NO_BASE = (
 
 
 def analyse(kind: str, body: str) -> tuple[str, Path | None]:
-    """Готовит разбор. Возвращает (текст ответа, карточка или None)."""
-    if kind == "taste":
-        return _taste(body)
+    """Готовит разбор. Возвращает (текст ответа, карточка или None).
+
+    Вход всего один: строки песни разбираются отдельно, всё остальное —
+    артист, жанр, песня или список — идёт в общий разбор. Человеку не нужно
+    выбирать режим, а нам не нужно объяснять разницу между ними.
+    """
     if kind == "lyrics":
         return _lyrics(body)
-    return _roots(body)
+    return _taste(body)
 
 
 def _generate(kind: str, payload: dict) -> dict:
@@ -362,61 +407,72 @@ def _generate(kind: str, payload: dict) -> dict:
 
 
 def _taste(body: str) -> tuple[str, Path | None]:
+    """Разбор присланного: одно имя, жанр, песня или целый список.
+
+    Порога в три артиста больше нет. Он выглядел безобидно, но заставлял
+    человека вспоминать и собирать список, прежде чем что-то получить, —
+    а до этого места доходят единицы. Один вопрос должен работать сразу.
+    """
     items = split_items(body)[:MAX_ARTISTS]
-    if len(items) < 3:
-        return ("Пришли хотя бы трёх артистов через запятую — по одному вкус не читается.", None)
+    if not items:
+        return ("Напиши артиста, жанр или песню — разберу.", None)
 
     query = ", ".join(items)
     scene = known_artists(query)
     links = match_links(query, scene)
 
-    if not links:
-        _remember(query, "taste", matched=False)
-        return (
-            "Ни одного знакомого имени — база канала про тёмный звук: "
-            "мемфис, фонк, эмо-рэп, дрейн, ню-метал.\n\n"
-            "Пришли что-нибудь из этой стороны, разберу.",
-            None,
-        )
+    # Курируемая база отвечает за тёмный звук и остаётся главной: связи в ней
+    # проверены руками. Всё, чего в ней нет, добираем из Last.fm — иначе бот
+    # знал бы полторы сцены и на остальное отвечал отказом.
+    web = lastfm_facts(items) if len(links) < 2 else []
 
-    result = _generate(
-        "taste",
+    if not links and not web:
+        _remember(query, "taste", matched=False)
+        return (_nothing_found(), None)
+
+    # Список и одно имя разбираются по-разному: у списка ищем общий корень,
+    # у одного имени — откуда оно само выросло.
+    kind = "taste" if len(items) >= 3 else "roots"
+    payload = (
         {
             "artists": items,
             "known": links,
+            "web": web,
             "scene": scene_payload(scene),
             "unknown": [i for i in items if not any(_mentions(i, a["name"]) for a in scene)],
-        },
+        }
+        if kind == "taste"
+        else {"query": query, "known": links, "web": web, "scene": scene_payload(scene)}
     )
+
+    result = _generate(kind, payload)
     if result["skip"] or not result["text"]:
-        _remember(query, "taste", matched=False)
+        _remember(query, kind, matched=False)
         return (NO_BASE, None)
 
     text = telegram.sanitize(result["text"])
     verdict = _verdict(text)
-    path = card.save(verdict, items, name=f"taste-{state.now().strftime('%H%M%S')}")
-    _remember(query, "taste", matched=True, verdict=verdict)
+    path = card.save(verdict, items, name=f"card-{state.now().strftime('%H%M%S')}")
+    _remember(query, kind, matched=True, verdict=verdict)
     return text, path
 
 
-def _roots(body: str) -> tuple[str, Path | None]:
-    query = body.strip()[:MAX_QUERY]
-    if len(query) < 2:
-        return ("Напиши, про кого или про что — артиста, трек или жанр.", None)
+def _nothing_found() -> str:
+    """Отказ должен помогать, а не закрывать дверь.
 
-    scene = known_artists(query)
-    links = match_links(query, scene, limit=2)
-    if not links:
-        _remember(query, "roots", matched=False)
-        return (NO_BASE, None)
-
-    result = _generate("roots", {"query": query, "known": links, "scene": scene_payload(scene)})
-    if result["skip"] or not result["text"]:
-        _remember(query, "roots", matched=False)
-        return (NO_BASE, None)
-
-    _remember(query, "roots", matched=True)
-    return telegram.sanitize(result["text"]), None
+    Сухое «нет в базе» человек читает как «бот сломан». Поэтому показываем,
+    про что канал вообще, и даём пару имён, с которыми точно сработает.
+    """
+    artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
+    core = [a["name"] for a in artists if a.get("tier") == "core"][:4]
+    examples = ", ".join(core) if core else "Three 6 Mafia, Bones"
+    return (
+        "Такого в базе канала нет — она про тёмный звук: мемфис, фонк, "
+        "эмо-рэп, дрейн, ню-метал, русский андеграунд.\n\n"
+        f"Попробуй так: <i>{examples}</i>\n"
+        "Или просто жанр: <i>фонк</i>, <i>витч-хаус</i>, <i>ню-метал</i>.\n\n"
+        "Запрос я записал — если связь подтвердится, разберём в канале."
+    )
 
 
 def _lyrics(body: str) -> tuple[str, Path | None]:
