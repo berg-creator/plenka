@@ -1,0 +1,57 @@
+name: Слепая прослушка
+
+# Викторина по тридцатисекундному отрывку — единственная рубрика, где от
+# читателя требуется действие, а не чтение. Раз в сутки: чаще она перестаёт
+# быть событием, реже — про неё забывают.
+#
+# Токенов рубрика не тратит: отрывки и факты берутся из магазина, генератор
+# текстов тут не участвует вовсе.
+on:
+  schedule:
+    # 12:00 UTC — 15:00 по Москве, между дневной и вечерней публикациями.
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Куда отправить"
+        type: choice
+        options: [admin, channel]
+        default: admin
+
+concurrency:
+  group: state-write
+  cancel-in-progress: false
+
+jobs:
+  quiz:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Отправить викторину
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          # Пока PUBLISH_TARGET стоит admin, викторина приходит владельцу
+          # в личку — как и остальные посты. Канал ничего не замечает.
+          TARGET: ${{ inputs.target || vars.PUBLISH_TARGET || 'admin' }}
+        run: python -m src.quiz --target "$TARGET"
+
+      - name: Сохранить состояние
+        run: |
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "прослушка: загадка отмечена"
+          git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push

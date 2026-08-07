@@ -180,6 +180,28 @@ def send_photo_file(chat_id: str, path: Path, caption: str) -> dict:
         )
 
 
+def send_video_file(chat_id: str, path: Path, caption: str, *, seconds: int = 0) -> dict:
+    """Отправляет готовый ролик с диска.
+
+    Через это же место идёт доставка клипов: ВКонтакте заливать видео
+    групповым ключом не даёт (video.save требует пользовательский токен),
+    поэтому ролик уходит в Telegram, а во ВКонтакте перекладывается руками.
+
+    `supports_streaming` важен для вертикальных роликов: без него Telegram
+    показывает файл вложением, а не проигрывателем.
+    """
+    with path.open("rb") as handle:
+        payload = {
+            "chat_id": chat_id,
+            "caption": sanitize(caption)[:MAX_CAPTION],
+            "parse_mode": "HTML",
+            "supports_streaming": True,
+        }
+        if seconds:
+            payload["duration"] = seconds
+        return _call("sendVideo", payload, files={"video": (path.name, handle, "video/mp4")})
+
+
 # Подписчиком считается любой, кто не вышел и не выгнан.
 MEMBER_STATUSES = {"creator", "administrator", "member", "restricted"}
 
@@ -218,6 +240,68 @@ def send_photo(chat_id: str, photo_url: str, caption: str) -> dict:
     )
 
 
+def _thumbnail(cover_url: str) -> bytes | None:
+    """Готовит обложку под требования Telegram к превью аудио: JPEG,
+    не больше 320 пикселей по стороне и 200 КБ весом. Обложка из магазина
+    приходит 600×600 и в эти рамки не влезает, поэтому её ужимаем.
+
+    Не получилось — вернём None: отрывок уйдёт с типовой иконкой ноты,
+    это хуже на вид, но не повод не отправлять музыку.
+    """
+    try:
+        import io
+
+        from PIL import Image
+
+        response = requests.get(cover_url, timeout=30)
+        if response.status_code != 200:
+            return None
+
+        image = Image.open(io.BytesIO(response.content)).convert("RGB")
+        image.thumbnail((320, 320))
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=85)
+        data = buffer.getvalue()
+        return data if len(data) <= 200_000 else None
+    except Exception:
+        return None
+
+
+def send_audio(
+    chat_id: str,
+    audio_url: str,
+    caption: str,
+    *,
+    title: str = "",
+    performer: str = "",
+    cover_url: str = "",
+) -> dict:
+    """Отправляет отрывок трека с текстом поста в подписи.
+
+    Telegram принимает сам файл по ссылке, а вот превью — только загрузкой,
+    ссылку на картинку в `thumbnail` он не берёт. Поэтому обложка идёт
+    вторым файлом в том же запросе.
+    """
+    payload = {
+        "chat_id": chat_id,
+        "audio": audio_url,
+        "caption": sanitize(caption)[:MAX_CAPTION],
+        "parse_mode": "HTML",
+    }
+    if title:
+        payload["title"] = title[:64]
+    if performer:
+        payload["performer"] = performer[:64]
+
+    files = None
+    thumb = _thumbnail(cover_url) if cover_url else None
+    if thumb:
+        payload["thumbnail"] = "attach://thumb"
+        files = {"thumb": ("thumb.jpg", thumb, "image/jpeg")}
+
+    return _call("sendAudio", payload, files)
+
+
 def send_poll(chat_id: str, question: str, options: list[str], *, anonymous: bool = True) -> dict:
     return _call(
         "sendPoll",
@@ -228,6 +312,39 @@ def send_poll(chat_id: str, question: str, options: list[str], *, anonymous: boo
             "is_anonymous": anonymous,
         },
     )
+
+
+# Пояснение к викторине Telegram обрезает жёстко — двести знаков и ни одним
+# больше, иначе запрос отклоняется целиком.
+MAX_EXPLANATION = 200
+
+
+def send_quiz(
+    chat_id: str,
+    question: str,
+    options: list[str],
+    correct: int,
+    *,
+    explanation: str = "",
+) -> dict:
+    """Нативная викторина: Telegram сам покажет верный ответ и пояснение.
+
+    Отличается от обычного опроса тем, что у неё есть правильный вариант —
+    человек сразу узнаёт, угадал или нет, и это работает без нашего участия.
+    В канале викторина обязана быть анонимной.
+    """
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "type": "quiz",
+        "question": question[:300],
+        "options": json.dumps([o[:100] for o in options[:10]], ensure_ascii=False),
+        "correct_option_id": correct,
+        "is_anonymous": True,
+    }
+    if explanation:
+        payload["explanation"] = sanitize(explanation)[:MAX_EXPLANATION]
+        payload["explanation_parse_mode"] = "HTML"
+    return _call("sendPoll", payload)
 
 
 def check() -> str:
