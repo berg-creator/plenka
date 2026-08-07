@@ -23,6 +23,12 @@
       "file": "20260805-092207-9338-meme.json",
       "published_at": "2026-08-07T06:02:26+00:00",
       "rubric": "meme"
+    },
+    {
+      "chat": "channel",
+      "file": "20260805-092210-9866-poll.json",
+      "published_at": "2026-08-07T16:15:33+00:00",
+      "rubric": "poll"
     }
   ]
 }
