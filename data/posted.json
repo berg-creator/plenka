@@ -29,6 +29,12 @@
       "file": "20260805-092210-9866-poll.json",
       "published_at": "2026-08-07T16:15:33+00:00",
       "rubric": "poll"
+    },
+    {
+      "chat": "channel",
+      "file": "20260805-092601-3730-release.json",
+      "published_at": "2026-08-08T07:34:56+00:00",
+      "rubric": "release"
     }
   ]
 }
