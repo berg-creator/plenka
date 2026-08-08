@@ -11,6 +11,12 @@
       "published_at": "2026-08-07T08:34:50+00:00",
       "rubric": "release",
       "story_id": "456239017"
+    },
+    {
+      "key": "24a9277a18beb52e",
+      "published_at": "2026-08-08T08:07:14+00:00",
+      "rubric": "verdict",
+      "story_id": "456239018"
     }
   ]
 }
