@@ -41,6 +41,12 @@
       "file": "20260805-092604-5357-release.json",
       "published_at": "2026-08-08T20:16:53+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20260805-092608-1251-news.json",
+      "published_at": "2026-08-09T07:12:35+00:00",
+      "rubric": "news"
     }
   ]
 }
