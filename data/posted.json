@@ -59,6 +59,12 @@
       "file": "20260805-092624-1549-verdict.json",
       "published_at": "2026-08-10T08:24:24+00:00",
       "rubric": "verdict"
+    },
+    {
+      "chat": "channel",
+      "file": "20260805-092628-2576-verdict.json",
+      "published_at": "2026-08-10T16:13:05+00:00",
+      "rubric": "verdict"
     }
   ]
 }
