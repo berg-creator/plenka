@@ -119,6 +119,12 @@
       "file": "20260805-101411-7031-verdict.json",
       "published_at": "2026-08-15T07:04:25+00:00",
       "rubric": "verdict"
+    },
+    {
+      "chat": "channel",
+      "file": "20260805-101626-9410-lineage.json",
+      "published_at": "2026-08-15T15:41:44+00:00",
+      "rubric": "lineage"
     }
   ]
 }
