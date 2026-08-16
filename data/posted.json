@@ -125,6 +125,12 @@
       "file": "20260805-101626-9410-lineage.json",
       "published_at": "2026-08-15T15:41:44+00:00",
       "rubric": "lineage"
+    },
+    {
+      "chat": "channel",
+      "file": "20260806-061454-2335-release.json",
+      "published_at": "2026-08-16T06:55:04+00:00",
+      "rubric": "release"
     }
   ]
 }
