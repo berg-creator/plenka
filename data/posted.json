@@ -137,6 +137,12 @@
       "file": "20260806-061458-4128-news.json",
       "published_at": "2026-08-16T16:09:10+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260806-061502-8710-verdict.json",
+      "published_at": "2026-08-17T16:09:37+00:00",
+      "rubric": "verdict"
     }
   ]
 }
