@@ -155,6 +155,12 @@
       "file": "20260806-061723-2283-meme.json",
       "published_at": "2026-08-18T16:01:15+00:00",
       "rubric": "meme"
+    },
+    {
+      "chat": "channel",
+      "file": "20260807-052232-2888-release.json",
+      "published_at": "2026-08-19T07:26:28+00:00",
+      "rubric": "release"
     }
   ]
 }
