@@ -95,6 +95,12 @@
       "published_at": "2026-08-22T07:55:22+00:00",
       "rubric": "release",
       "story_id": "456239030"
+    },
+    {
+      "key": "ee5390eb216d467e",
+      "published_at": "2026-08-23T07:57:00+00:00",
+      "rubric": "verdict",
+      "story_id": "456239031"
     }
   ]
 }
