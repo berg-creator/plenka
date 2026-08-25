@@ -227,6 +227,12 @@
       "file": "20260813-052157-3804-release.json",
       "published_at": "2026-08-25T08:04:09+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20260813-052200-6210-news.json",
+      "published_at": "2026-08-25T15:54:15+00:00",
+      "rubric": "news"
     }
   ]
 }
