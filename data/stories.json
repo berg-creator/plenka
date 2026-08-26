@@ -113,6 +113,12 @@
       "published_at": "2026-08-25T08:08:05+00:00",
       "rubric": "release",
       "story_id": "опубликовано"
+    },
+    {
+      "key": "cad3216e4c62af78",
+      "published_at": "2026-08-26T08:08:51+00:00",
+      "rubric": "release",
+      "story_id": "456239033"
     }
   ]
 }
