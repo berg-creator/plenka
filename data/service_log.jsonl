@@ -5,3 +5,5 @@
 {"at": "2026-08-06T12:17:17+00:00", "kind": "taste", "query": "Chef Keef", "matched": false}
 {"at": "2026-08-06T12:18:07+00:00", "kind": "roots", "query": "ASAP rocky", "matched": true, "verdict": "ASAP Rocky: вышел из подземного нью-йоркского хип-хопа нулевых"}
 {"at": "2026-08-09T18:31:26+00:00", "kind": "roots", "query": "Chief Keef", "matched": true, "verdict": "Чиф Киф стал лицом жанра дрилл, когда ему было восемнадцать"}
+{"at": "2026-08-27T10:06:44+00:00", "kind": "roots", "query": "Chief Keef", "matched": true, "verdict": "Chief Keef: пацан с юга Чикаго, который сделал бум-бум и проснулся знаменитым"}
+{"at": "2026-08-27T10:08:03+00:00", "kind": "recommend", "query": "Chief Keef", "matched": true}
