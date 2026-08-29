@@ -347,7 +347,7 @@ class Shot:
     seconds: float
     subject: str
     context: str
-    # Чем закрыть фон вместо обычного поиска. Сейчас единственное значение —
+    # Чем закрыть фон вместо обычного поиска. Единственное значение —
     # "terminal" у финального кадра.
     backdrop: str = ""
 
@@ -470,16 +470,6 @@ def segment(shot: Shot, out: Path, work: Path) -> str:
     if shot.backdrop == "terminal":
         kind = "терминал"
         source = footage.terminal(work / f"{out.stem}-bg.mp4", shot.seconds, ffmpeg())
-    elif shot.backdrop and Path(shot.backdrop).exists():
-        # Своя картинка: ведущая канала, кадр под конкретную связь, что угодно
-        # положенное руками. Обрабатывается наравне с остальным, иначе
-        # выпадает из ряда.
-        kind = "своя"
-        source = Path(shot.backdrop)
-        # Петля с ведущей уже движется сама, наезд ей не нужен и только
-        # спорит с движением в кадре. Фотографию, наоборот, без наезда
-        # в ленте читают как зависшее видео.
-        still = source if source.suffix.lower() != ".mp4" else None
     elif (still := footage.artist_image(shot.subject) if shot.subject else None) is not None:
         kind = "артист"
         source = still
@@ -489,13 +479,6 @@ def segment(shot: Shot, out: Path, work: Path) -> str:
         if source is None:
             kind = "фон"
             source = footage.procedural(work / f"{out.stem}-bg.mp4", shot.seconds, ffmpeg())
-
-    # Кадр с ведущей снят тёмным намеренно: чёрное худи, фиолетовый полумрак.
-    # Поверх него ложится затемнение под текстом, и лицо уходит в чёрный —
-    # поэтому свои кадры перед обработкой поднимаются. Знак подбирался
-    # глазами на готовом ролике, а не по теории: меньше — лица не видно,
-    # больше — фотография выцветает.
-    lift = "eq=brightness=0.16:saturation=1.15," if kind == "своя" else ""
 
     if still is not None:
         feed = ["-loop", "1", "-framerate", str(FPS), "-i", str(source)]
@@ -519,7 +502,7 @@ def segment(shot: Shot, out: Path, work: Path) -> str:
         "-filter_complex",
         (
             f"[0:v]scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
-            f"crop={WIDTH}:{HEIGHT},setsar=1,fps={FPS},{motion}{lift}{GRADE}[bg];"
+            f"crop={WIDTH}:{HEIGHT},setsar=1,fps={FPS},{motion}{GRADE}[bg];"
             f"[bg][1:v]overlay=0:0,fade=t=in:st=0:d=0.12,format=yuv420p[v]"
         ),
         "-map", "[v]", "-an",
@@ -801,7 +784,7 @@ def deliver(path: Path, link: dict) -> dict:
 
 
 def _selftest() -> None:
-    """Кадров в раскадровке ровно столько же, сколько фраз у ведущей.
+    """Кадров в раскадровке ровно столько же, сколько фраз у голоса.
 
     Единственное место, где два файла обязаны сойтись числом: кадр без фразы
     висит молча, фраза без кадра пропадает совсем. Проверяется на всей базе —
