@@ -1,0 +1,135 @@
+{
+  "note": "Материал для клипов формата А ВЫ ЗНАЛИ (src/clips.py --facts). Каждый факт должен подтверждаться ссылкой из sources — в ролике его читают вслух, и первое же выдуманное утверждение стоит дороже десяти пропущенных. Поле artist пишется ровно так, как имя стоит в data/artists.json: по нему ищется фотография, и «Три 6 Мафия» вместо «Three 6 Mafia» оставит кадр без лица. Три-четыре факта на запись: меньше — ролик не набирает тридцати секунд, больше — не досматривают.",
+  "items": [
+    {
+      "artist": "XXXTENTACION",
+      "facts": [
+        "«Look at Me» он выложил на SoundCloud в конце 2015 года",
+        "Трек пробивался в чарты почти два года и попал в годовой Billboard только в 2017-м",
+        "К этому времени он сидел под арестом и вышел под домашний с правом ездить только в студию",
+        "Его убили в 2018-м, ему было двадцать"
+      ],
+      "sources": [
+        "https://www.billboard.com/music/rb-hip-hop/xxxtentacion-career-timeline-8461690/",
+        "https://en.wikipedia.org/wiki/Look_at_Me!"
+      ]
+    },
+    {
+      "artist": "Playboi Carti",
+      "facts": [
+        "Начинал он под именем Sir Cartier и сменил его до первого микстейпа",
+        "Дебютный альбом Die Lit взял третье место Billboard и золотой статус",
+        "Whole Lotta Red вышел в декабре 2020-го сразу на первом месте, исполнительным продюсером был Kanye West",
+        "Этот альбом утекал в сеть кусками задолго до релиза"
+      ],
+      "sources": [
+        "https://www.udiscovermusic.com/news/playboi-carti-new-album-whole-lotta-red/",
+        "https://www.npr.org/2020/12/25/949788349/playboi-carti-finally-drops-second-album-whole-lotta-red"
+      ]
+    },
+    {
+      "artist": "Lil Peep",
+      "facts": [
+        "Родился он в Пенсильвании, а вырос в Лонг-Бич под Нью-Йорком",
+        "Школу бросил и доучивался онлайн",
+        "В семнадцать набил первую татуировку на лице — разбитое сердце под левым глазом",
+        "Единственный студийный альбом при жизни вышел ровно за три месяца до его смерти"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Come_Over_When_You're_Sober,_Pt._1",
+        "https://www.imdb.com/name/nm9425078/bio/"
+      ]
+    },
+    {
+      "artist": "Three 6 Mafia",
+      "facts": [
+        "В 2006 году они стали первой рэп-группой с «Оскаром»",
+        "Награду дали за песню из фильма «Hustle & Flow» про мемфисского сутенёра",
+        "Речь они не готовили — не верили, что победят",
+        "До них «Оскар» за песню брал Eminem, но на церемонию не пришёл"
+      ],
+      "sources": [
+        "https://www.xxlmag.com/today-in-hip-hop-three-6-mafia-win-oscar-for-its-hard-out-here-for-a-pimp-at-2006-academy-awards/",
+        "https://variety.com/2021/film/news/three-6-mafia-oscar-hard-out-here-pimp-juicy-1234958484/"
+      ]
+    },
+    {
+      "artist": "Linkin Park",
+      "facts": [
+        "Hybrid Theory разошёлся тиражом двадцать семь миллионов",
+        "Это самый продаваемый дебютный альбом двадцать первого века",
+        "Chester Bennington к моменту прослушивания уже бросил музыку и работал в недвижимости",
+        "Тексты альбома — про его подростковые годы, развод родителей и наркотики"
+      ],
+      "sources": [
+        "https://www.loudersound.com/features/the-real-story-behind-linkin-parks-hybrid-theory",
+        "https://weraveyou.com/2025/12/linkin-park-hybrid-theory-best-selling-debut-album-21st-century/"
+      ]
+    },
+    {
+      "artist": "MF DOOM",
+      "facts": [
+        "Начинал он в 1988-м под именем Zev Love X в группе KMD",
+        "Группа распалась, когда его брат DJ Subroc погиб в автоаварии",
+        "После этого он ушёл из музыки на четыре года",
+        "Вернулся в железной маске Доктора Дума и почти никогда не показывался без неё"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/MF_Doom",
+        "https://www.pbs.org/newshour/arts/mf-doom-masked-rapper-known-for-complex-lyrics-dies-at-49"
+      ]
+    },
+    {
+      "artist": "Juice WRLD",
+      "facts": [
+        "В 2018-м он фристайлил на радио у Tim Westwood больше часа подряд",
+        "Читал поверх чужих битов — Tyler, The Creator и Mobb Deep",
+        "Его «Lucid Dreams» построен на сэмпле песни Sting",
+        "Восемьдесят пять процентов прав на трек ушли Стингу и соавтору"
+      ],
+      "sources": [
+        "https://hypebeast.com/2018/7/juice-wrld-tim-westwood-freestyle-rap",
+        "https://ultimateclassicrock.com/sting-juice-wrld/"
+      ]
+    },
+    {
+      "artist": "Кино",
+      "facts": [
+        "Виктор Цой топил котельную «Камчатка» с осени 1986-го до 1988 года",
+        "Работа была нужна, чтобы не попасть под статью о тунеядстве",
+        "В той же кочегарке работали Башлачёв и Задерий",
+        "Сейчас «Камчатка» — клуб-музей"
+      ],
+      "sources": [
+        "https://ru.wikipedia.org/wiki/Камчатка_(котельная)",
+        "https://gol.ru/materials/19179-tsoy-kamchatka"
+      ]
+    },
+    {
+      "artist": "Король и Шут",
+      "facts": [
+        "Горшенёв и Князев познакомились в ленинградском реставрационном училище",
+        "Практику оба проходили в Эрмитаже и там же остались работать",
+        "Эрмитаж выделил им мастерскую на Миллионной улице",
+        "Эта мастерская и стала первой репетиционной точкой группы"
+      ],
+      "sources": [
+        "https://ru.wikipedia.org/wiki/Король_и_Шут",
+        "https://reproduktor.net/gruppa-korol-i-shut/mixail-gorshenyov/"
+      ]
+    },
+    {
+      "artist": "Oxxxymiron",
+      "facts": [
+        "В пятнадцать лет он уехал в Англию",
+        "Окончил Оксфорд по средневековой английской литературе, со второй попытки",
+        "Учёбу пришлось прерывать: в 2006-м ему поставили биполярное расстройство",
+        "После диплома работал кассиром, переводчиком, клерком и строителем"
+      ],
+      "sources": [
+        "https://24smi.org/celebrity/4549-oksimiron.html",
+        "https://www.syl.ru/article/284722/new_biografiya-oksimirona-tvorchestvo-lichnaya-jizn-interesnyie-faktyi"
+      ]
+    }
+  ]
+}
