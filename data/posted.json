@@ -299,6 +299,12 @@
       "file": "20260819-080637-7506-release.json",
       "published_at": "2026-09-01T13:47:20+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20260820-042027-2980-release.json",
+      "published_at": "2026-09-02T11:29:04+00:00",
+      "rubric": "release"
     }
   ]
 }
