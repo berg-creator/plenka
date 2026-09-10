@@ -63,7 +63,7 @@ def archive(path: Path) -> None:
 
 
 def send(post: dict, chat_id: str) -> None:
-    """Отправляет пост нужным методом: опрос, фото с подписью или текст."""
+    """Отправляет пост нужным методом: опрос, отрывок трека, фото или текст."""
     text = post.get("text", "").strip()
     rubric = post.get("rubric", "")
 
@@ -80,6 +80,25 @@ def send(post: dict, chat_id: str) -> None:
         log.warning("Опрос не разобран — отправляю как обычный текст")
 
     cover = post.get("cover", "")
+
+    # Музыка важнее картинки: канал про звук, и услышать его надо не уходя
+    # из ленты. Обложка при этом не пропадает — идёт превью к отрывку.
+    preview = post.get("preview", "")
+    if preview and len(text) <= telegram.MAX_CAPTION:
+        try:
+            telegram.send_audio(
+                chat_id,
+                preview,
+                text,
+                title=post.get("track", ""),
+                performer=post.get("artist", ""),
+                cover_url=cover,
+            )
+            return
+        except telegram.TelegramError as exc:
+            # Ссылка на отрывок живёт не вечно — тогда откатываемся на обложку.
+            log.warning("Отрывок не ушёл (%s), пробую обложкой", exc)
+
     if cover and len(text) <= telegram.MAX_CAPTION:
         try:
             telegram.send_photo(chat_id, cover, text)
@@ -205,7 +224,10 @@ def main() -> int:
     if args.dry_run:
         print(f"\nФайл: {path.name}")
         print(f"Рубрика: {post.get('rubric')}")
-        print(f"Обложка: {post.get('cover') or 'нет'}\n")
+        print(f"Обложка: {post.get('cover') or 'нет'}")
+        # Отрывок меняет способ отправки, а не только вид поста, — в сухом
+        # прогоне это видно должно быть сразу.
+        print(f"Отрывок: {post.get('preview') or 'нет'}\n")
         print(post.get("text", ""))
         return 0
 

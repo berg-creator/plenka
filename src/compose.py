@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 from . import config, llm, quality, state, telegram
+from .sources import deezer, itunes
 
 log = logging.getLogger("compose")
 
@@ -57,6 +58,7 @@ def save_post(
     suffix = random.randint(1000, 9999)
     path = folder / f"{stamp}-{suffix}-{rubric_key}.json"
 
+    lead = _lead_track(source or {})
     state.write_json(
         path,
         {
@@ -66,9 +68,22 @@ def save_post(
             "source_url": (source or {}).get("url", ""),
             "cover": (source or {}).get("cover", ""),
             "artist": (source or {}).get("artist", ""),
+            "preview": lead.get("preview", ""),
+            "track": lead.get("title", ""),
         },
     )
     return path
+
+
+def _lead_track(source: dict) -> dict:
+    """Трек, который уйдёт в пост отрывком. Берём первый с отрывком:
+    у сингла он единственный, у альбома открывающий — тот, которым релиз
+    сам себя представляет. Выбирать «лучший» нам не по чему.
+    """
+    for track in source.get("tracks") or []:
+        if track.get("preview"):
+            return track
+    return {}
 
 
 # ─────────────────────────── планирование ───────────────────────────
@@ -379,6 +394,51 @@ def do_now(count: int) -> int:
     return 0
 
 
+def _lead_from_url(url: str) -> dict:
+    """Открывающий трек релиза по ссылке на него в магазине. Идентификатор
+    у поста уже сохранён в ссылке, поэтому разыскивать релиз заново не нужно."""
+    album = itunes.album_id_from_url(url)
+    if album:
+        return _lead_track(itunes.album_tracks(album))
+    album = deezer.album_id_from_url(url)
+    if album:
+        return _lead_track(deezer.album_tracks(album))
+    return {}
+
+
+def do_backfill_music() -> int:
+    """Дописывает отрывок к постам, которые уже лежат в очереди.
+
+    Посты, написанные до появления музыки в канале, ушли бы немыми — а они
+    про релизы, где звук и есть содержание. Текст не трогаем: меняется только
+    то, чем пост отправится.
+    """
+    touched, skipped = 0, 0
+    for path in sorted(config.QUEUE.glob("*.json")):
+        post = state.read_json(path, {})
+        if post.get("preview") or not post.get("source_url"):
+            continue
+
+        try:
+            lead = _lead_from_url(post["source_url"])
+        except Exception as exc:  # магазин мог не ответить — это не повод падать
+            log.warning("%s: %s", path.name, exc)
+            continue
+
+        if not lead:
+            skipped += 1
+            continue
+
+        post["preview"] = lead["preview"]
+        post["track"] = lead.get("title", "")
+        state.write_json(path, post)
+        touched += 1
+        print(f"  ✓ {post.get('rubric', ''):<8} {post.get('artist', '')} — {lead.get('title', '')}")
+
+    print(f"\nПостов с музыкой: {touched}. Без неё осталось: {skipped}.")
+    return 0
+
+
 def do_dry_run(needed: int) -> int:
     jobs = plan(needed)
     print(f"\nВ очереди сейчас: {queue_size()}. Нужно добрать: {needed}.\n")
@@ -398,6 +458,11 @@ def main() -> int:
     parser.add_argument("--submit", action="store_true", help="отправить батч (дёшево)")
     parser.add_argument("--fetch", action="store_true", help="забрать готовый батч")
     parser.add_argument("--now", type=int, metavar="N", help="сгенерировать N постов сразу")
+    parser.add_argument(
+        "--backfill-music",
+        action="store_true",
+        help="дописать отрывки к постам, которые уже в очереди",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -405,6 +470,8 @@ def main() -> int:
 
     needed = max(0, config.QUEUE_TARGET - queue_size())
 
+    if args.backfill_music:
+        return do_backfill_music()
     if args.dry_run:
         return do_dry_run(needed or config.QUEUE_TARGET)
     if args.now:
