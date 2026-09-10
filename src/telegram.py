@@ -22,6 +22,9 @@ ALLOWED_TAGS = {
 _BR = re.compile(r"<\s*br\s*/?\s*>", re.IGNORECASE)
 _P_CLOSE = re.compile(r"<\s*/\s*p\s*>", re.IGNORECASE)
 _TAG = re.compile(r"<\s*/?\s*([a-zA-Z][a-zA-Z0-9-]*)[^>]*>")
+# Всё, что похоже на тег, разбирает _TAG выше; уцелевший «<» — это просто знак
+# «меньше», и Telegram считает его началом тега, отвечая ошибкой разбора.
+_BARE_LT = re.compile(r"<(?!\s*/?\s*[a-zA-Z][a-zA-Z0-9-]*[^>]*>)")
 
 
 def sanitize(text: str) -> str:
@@ -42,6 +45,14 @@ def sanitize(text: str) -> str:
     # Telegram выводит эти символы как есть, и пост выглядит сломанным.
     text = re.sub(r"(?m)^\s*&gt;\s?", "", text)
     text = re.sub(r"(?m)^\s*>\s?", "", text)
+
+    # «Цена < 100» роняет отправку целиком и молча: Telegram отвечает
+    # «Unsupported start tag». Экранируем — но только после разбора цитат,
+    # иначе собственная чистка «&gt;» разъедется с экранированием.
+    # Голый «&» так не ломает: проверено вживую, API принимает его в любом виде
+    # (Simon & Garfunkel, R&B;, «хвост &»), поэтому в тексте он и остаётся —
+    # в очереди должен лежать пост, а не «&amp;».
+    text = _BARE_LT.sub("&lt;", text)
 
     # Ссылка, приклеенная к последнему слову, читается как опечатка.
     text = re.sub(r"(?<=[^\s>\n])(<a\s+href=)", r"\n\n\1", text)
@@ -438,3 +449,31 @@ def url_button(text: str, url: str) -> list[list[dict]]:
     """Кнопка-ссылка под постом. В канале это единственный способ увести
     человека в бота одним касанием, а не копированием имени из текста."""
     return [[{"text": text, "url": url}]]
+
+
+def _selftest() -> None:
+    """Проверка sanitize: молчаливая потеря поста дороже любого теста.
+
+    Запуск: python -m src.telegram
+    """
+    # Голый «<» — единственное, что действительно роняет отправку.
+    assert sanitize("цена < 100") == "цена &lt; 100"
+    assert sanitize("рейтинг <3 из 10") == "рейтинг &lt;3 из 10"
+    # Разрешённая разметка проходит целиком.
+    assert sanitize('<b>жир</b> и <a href="https://x.ru">ссылка</a>').startswith("<b>жир</b>")
+    # Уже экранированное вторым проходом не портится.
+    assert sanitize("&lt;тег&gt; внутри") == "&lt;тег&gt; внутри"
+    assert sanitize("Hall &amp; Oates") == "Hall &amp; Oates"
+    # Голый амперсанд Telegram принимает — не трогаем, иначе «&amp;» полезет
+    # в очередь, в консоль и в карточки историй.
+    assert sanitize("Simon & Garfunkel") == "Simon & Garfunkel"
+    # Markdown-цитата в начале строки по-прежнему срезается, в обоих видах.
+    assert sanitize("&gt; цитата") == "цитата"
+    assert sanitize("> цитата") == "цитата"
+    # Неподдерживаемые теги вырезаются, полезные — нет.
+    assert sanitize("<div>текст<br>ещё</div>") == "текст\nещё"
+    print("sanitize: все проверки прошли")
+
+
+if __name__ == "__main__":
+    _selftest()
