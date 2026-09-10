@@ -198,7 +198,7 @@ def collect_videos(artists: list[dict], seen: state.Seen) -> list[dict]:
 def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
     """Новости из RSS. Приоритет тем, где упомянут знакомый артист."""
     try:
-        entries = feeds.fetch_recent()
+        entries = feeds.fetch_recent(config.NEWS_MAX_AGE_HOURS)
     except Exception as exc:
         log.warning("RSS недоступны (%s)", exc)
         return []
