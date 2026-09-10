@@ -156,8 +156,12 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
         counter += 1
         jobs.append((f"job-{counter:03d}-{rubric_key}", rubric_key, payload, source))
 
-    # Доли рубрик в пачке — из весов в config.RUBRICS.
-    weights = {r.key: r.weight for r in config.RUBRICS if r.key != "legend"}
+    # Доли рубрик в пачке — из весов в config.RUBRICS. Нулевой вес означает
+    # «в очередь не пишем вовсе»: такие рубрики привязаны ко дню и делаются
+    # отдельными запусками (ЛЕГЕНДА — календарь, ИНФОПОВОД — src/urgent.py).
+    # Раньше их отсекали по имени, а пол max(1, …) всё равно возвращал единицу,
+    # и в очередь просачивалась новость, которая к своей публикации протухала.
+    weights = {r.key: r.weight for r in config.RUBRICS if r.weight > 0}
     total_weight = sum(weights.values())
     quota = {key: max(1, round(needed * w / total_weight)) for key, w in weights.items()}
 
