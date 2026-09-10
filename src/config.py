@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 PROMPTS = ROOT / "prompts"
 QUEUE = ROOT / "content" / "queue"
+# Срочные новости живут отдельно от очереди: их пишут и показывают в тот же
+# день, и в общую ленту по расписанию они попадать не должны — пока пост
+# дождётся своей очереди, новость успеет протухнуть.
+URGENT = ROOT / "content" / "urgent"
 ARCHIVE = ROOT / "content" / "archive"
 TEMPLATES = ROOT / "assets" / "templates"
 
@@ -18,11 +22,15 @@ ARTISTS_FILE = DATA / "artists.json"
 CANDIDATES_FILE = DATA / "artists_candidates.json"
 LINEAGE_FILE = DATA / "lineage.json"
 SUBTEXT_FILE = DATA / "subtext.json"
+FACTS_FILE = DATA / "facts.json"
 CALENDAR_FILE = DATA / "calendar.json"
 INBOX_FILE = DATA / "inbox.jsonl"
 SEEN_FILE = DATA / "seen.json"
 POSTED_FILE = DATA / "posted.json"
 STORIES_FILE = DATA / "stories.json"
+# Выгрузка плейлиста ВКонтакте: «артист|трек» → вложение audio-…_…
+# Собирается разово руками, потому что audio.search сообществам закрыт.
+VK_AUDIO_FILE = DATA / "vk_audio.json"
 CLIPS_FILE = DATA / "clips.json"
 
 # Всё, что относится к конкретным людям, лежит отдельно от кода.
@@ -43,9 +51,16 @@ WATCH_FILE = PRIVATE / "watches.json"
 QUEUE_TARGET = 24
 QUEUE_MIN = 6
 
+# Срочные новости: сколько пишем за один заход и через сколько часов
+# непринятый пост считается протухшим и удаляется сам.
+URGENT_PER_RUN = 3
+URGENT_TTL_HOURS = 48
+# Новость старше этого срока срочной уже не считается.
+URGENT_MAX_AGE_HOURS = 36
+
 # Минимальный интервал между публикациями. Публикатор смотрит не на часы,
 # а на «сколько прошло с прошлого поста» — так пропуск cron не ломает ленту.
-PUBLISH_INTERVAL_HOURS = 4
+PUBLISH_INTERVAL_HOURS = 3
 
 # Сколько дней храним отпечатки в seen.json, чтобы файл не рос бесконечно.
 SEEN_TTL_DAYS = 120
@@ -70,6 +85,10 @@ class Rubric:
     key: str
     title: str
     # Доля рубрики в очереди. Сумма весов нормируется, точных чисел не требуется.
+    # Перекос в сторону МЕМА сделан намеренно: канал растёт пересылками, а
+    # пересылают шутку, а не разбор. Разборы остаются, но перестают быть половиной ленты.
+    # Ноль — рубрика в очередь наперёд не пишется: её посты делает отдельный
+    # запуск ко дню публикации (ЛЕГЕНДА — календарь, ИНФОПОВОД — src/urgent.py).
     weight: int
     # Из какого сырья строится: release | news | lineage | calendar | verdict | meme | poll | digest
     feeds_on: str
@@ -80,7 +99,7 @@ RUBRICS: tuple[Rubric, ...] = (
     Rubric(
         key="lineage",
         title="ОТКУДА НОГИ",
-        weight=20,
+        weight=22,
         feeds_on="lineage",
         description=(
             "Ниточка от современного трека к его предку: фонк → Three 6 Mafia, "
@@ -90,7 +109,7 @@ RUBRICS: tuple[Rubric, ...] = (
     Rubric(
         key="verdict",
         title="ВЕРДИКТ",
-        weight=18,
+        weight=16,
         feeds_on="verdict",
         description=(
             "Реакция на свежий трек или тренд: либо разнос, либо честный респект. "
@@ -100,27 +119,31 @@ RUBRICS: tuple[Rubric, ...] = (
     Rubric(
         key="news",
         title="ИНФОПОВОД",
-        weight=18,
+        weight=0,
         feeds_on="news",
         description=(
             "Что происходит на сцене: бифы, скандалы, уходы с лейблов, воссоединения, "
-            "суды, цифры стримов. Мировая и русская сцена наравне."
+            "суды, цифры стримов. Мировая и русская сцена наравне. В очередь не идёт: "
+            "новость к своей очереди протухает, поэтому её пишет src/urgent.py "
+            "в день события и сразу показывает владельцу."
         ),
     ),
     Rubric(
         key="meme",
         title="МЕМ",
-        weight=18,
+        weight=30,
         feeds_on="meme",
         description=(
-            "Юмор про музыку и индустрию: ру-рэп, продюсеры, лейблы, слушатели, "
-            "жанровые стереотипы. Картинка на шаблоне или чистый текст."
+            "Юмор про музыку и слушателя: ру-рэп, продюсеры, лейблы, стриминг, "
+            "плейлисты, тикток, жанровые стереотипы. Самая пересылаемая рубрика — "
+            "поэтому и самая весомая: разборы держат лицо канала, а растит его тот, "
+            "кого пересылают друзьям."
         ),
     ),
     Rubric(
         key="subtext",
         title="МЕЖДУ СТРОК",
-        weight=14,
+        weight=12,
         feeds_on="subtext",
         description=(
             "Разбор текста: отсылки, двойные смыслы, контекст. Работает на курируемой "
@@ -131,16 +154,19 @@ RUBRICS: tuple[Rubric, ...] = (
     Rubric(
         key="release",
         title="РЕЛИЗ",
-        weight=12,
+        weight=14,
         feeds_on="release",
         description="Вышло что-то у трекаемого артиста — короткий пост со ссылками.",
     ),
     Rubric(
         key="legend",
         title="ЛЕГЕНДА",
-        weight=6,
+        weight=0,
         feeds_on="calendar",
-        description="Годовщина: смерть, рождение, выход культового альбома.",
+        description=(
+            "Годовщина: смерть, рождение, выход культового альбома. "
+            "Пишется в день даты — см. src/calendar_check.py."
+        ),
     ),
     Rubric(
         key="poll",

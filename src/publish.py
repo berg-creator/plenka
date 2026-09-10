@@ -116,14 +116,16 @@ def crosspost_vk(post: dict) -> None:
         log.warning("ВКонтакте не принял пост: %s", exc)
 
 
-def send_for_approval(post: dict, path: Path, chat_id: str) -> None:
+def send_for_approval(post: dict, path: Path, chat_id: str, label: str = "") -> None:
     """Показывает пост и подкладывает под него кнопки решения.
 
     Кнопки идут отдельным сообщением: пост может оказаться фотографией или
     опросом, а к ним клавиатуру приложить не всегда возможно.
     """
     rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
-    title = rubric.title if rubric else post.get("rubric", "")
+    # label заменяет название рубрики в шапке — так срочная новость видна
+    # в личке среди обычной очереди сразу, до чтения текста.
+    title = label or (rubric.title if rubric else post.get("rubric", ""))
 
     telegram.send_message(chat_id, f"— — — <b>{title}</b> — — —")
     send(post, chat_id)

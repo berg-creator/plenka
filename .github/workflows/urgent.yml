@@ -1,0 +1,72 @@
+name: Срочные новости
+
+# Свежий обход лент и посты по инфоповодам — сразу в канал, минуя очередь.
+# Новость, дождавшаяся своей очереди, новостью быть перестаёт, поэтому здесь
+# нет ни модерации, ни задержки: владельцу уходит уведомление уже постфактум.
+on:
+  schedule:
+    # Три захода: утро (ночные новости), день и вечер. Событие, случившееся
+    # в обед, не должно ждать до завтрашнего утра — ради этого рубрика
+    # и вынута из очереди.
+    - cron: "20 6,11,17 * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "Сколько новостей взять за раз"
+        type: string
+        default: "3"
+
+concurrency:
+  group: state-write
+  cancel-in-progress: false
+
+jobs:
+  urgent:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Обычный сбор ходит раз в 6 часов, и к утру его находки уже полусуточные.
+      # Отдельный обход перед генерацией стоит недорого — модель тут не участвует.
+      - name: Обойти ленты
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+        run: python -m src.collect
+
+      - name: Написать срочные посты и опубликовать
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          # Тот же рубильник, что и у публикации по расписанию: channel —
+          # сразу в канал, admin — себе в личку с кнопками.
+          PUBLISH_TARGET: ${{ vars.PUBLISH_TARGET || 'channel' }}
+          VK_TOKEN: ${{ secrets.VK_TOKEN }}
+          VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
+          GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          COUNT: ${{ inputs.count || '3' }}
+        run: python -m src.urgent -n "$COUNT"
+
+      - name: Сохранить состояние
+        run: |
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/ content/
+          git diff --cached --quiet || git commit -m "срочное: новость в день события"
+          # Между checkout и push мог пройти другой воркфлоу — подтягиваем его коммиты.
+          git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push

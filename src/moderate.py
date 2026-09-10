@@ -43,7 +43,11 @@ PUSH_EVERY = 600
 
 def handle(action: str, post_id: str) -> str:
     """Выполняет действие над постом. Возвращает текст ответа для всплывашки."""
+    # Пост лежит либо в очереди, либо в срочных новостях (src/urgent.py):
+    # кнопки под ними одинаковые, а папки разные.
     path = config.QUEUE / post_id
+    if not path.exists():
+        path = config.URGENT / post_id
 
     if action == "skip":
         return "Оставил в очереди"

@@ -34,17 +34,28 @@ def queue_size() -> int:
     return len(list(config.QUEUE.glob("*.json")))
 
 
-def save_post(rubric_key: str, text: str, source: dict | None = None) -> Path:
-    """Кладёт готовый пост в очередь. Имя файла задаёт порядок публикации."""
+def save_post(
+    rubric_key: str,
+    text: str,
+    source: dict | None = None,
+    folder: Path | None = None,
+) -> Path:
+    """Кладёт готовый пост в очередь. Имя файла задаёт порядок публикации.
+
+    folder уводит пост мимо очереди — так пишутся срочные новости
+    (config.URGENT): они выходят в день события, а не когда до них дойдёт
+    очередь, и публикатору по расписанию их видеть незачем.
+    """
     # Чистим разметку сразу при сохранении, чтобы в очереди лежал тот же текст,
     # который уйдёт в канал, — иначе просмотр очереди врёт.
     if rubric_key != "poll":  # опрос хранится как JSON, его трогать нельзя
         text = telegram.sanitize(text)
 
-    config.QUEUE.mkdir(parents=True, exist_ok=True)
+    folder = folder or config.QUEUE
+    folder.mkdir(parents=True, exist_ok=True)
     stamp = state.now().strftime("%Y%m%d-%H%M%S")
     suffix = random.randint(1000, 9999)
-    path = config.QUEUE / f"{stamp}-{suffix}-{rubric_key}.json"
+    path = folder / f"{stamp}-{suffix}-{rubric_key}.json"
 
     state.write_json(
         path,
