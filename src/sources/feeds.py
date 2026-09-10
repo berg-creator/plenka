@@ -48,11 +48,30 @@ def fetch_recent(max_age_hours: int = 30) -> list[dict]:
                     "title": (entry.get("title") or "").strip(),
                     "url": entry.get("link", ""),
                     "summary": _clean(entry.get("summary", ""))[:600],
+                    "cover": _entry_image(entry),
                     "published_at": published.isoformat(),
                     "external_id": entry.get("id") or entry.get("link", ""),
                 }
             )
     return items
+
+
+def _entry_image(entry) -> str:
+    """Картинка записи, если лента её отдала.
+
+    Новость без картинки уходит в канал голым текстом и в ленте теряется
+    среди постов с обложками. Своей картинки у неё быть не может — рисовать
+    иллюстрацию к чужой новости значит выдумывать, — поэтому берём ту,
+    что издание приложило само, и ничего не подставляем, когда её нет.
+    """
+    for media in (entry.get("media_content") or []) + (entry.get("media_thumbnail") or []):
+        url = str(media.get("url", "")).strip()
+        if url.startswith("http"):
+            return url
+    for link in entry.get("links") or []:
+        if str(link.get("type", "")).startswith("image/"):
+            return str(link.get("href", "")).strip()
+    return ""
 
 
 def _entry_date(entry) -> datetime | None:

@@ -81,6 +81,16 @@ def problems(text: str, rubric: str) -> list[str]:
     if re.search(r"<\s*(br|p|ul|ol|li|h[1-6])\b", stripped, re.IGNORECASE):
         issues.append("неподдерживаемые HTML-теги")
 
+    # Опись в моноширинном блоке шире экрана телефона переносится на две-три
+    # строки, разделители уезжают в начало строк, и вместо бирки выходит каша.
+    for spec in re.findall(r"<code>(.*?)</code>", stripped, re.DOTALL | re.IGNORECASE):
+        if len(spec.strip()) > 45:
+            issues.append(f"опись длиннее 45 знаков ({len(spec.strip())})")
+
+    # Строка, начатая со служебного значка, читается как сбой разметки.
+    if re.search(r"(?m)^\s*[/*>+-]\s*\S", stripped):
+        issues.append("строка начинается со служебного значка")
+
     # Мем длиной в абзац — это уже не мем.
     if rubric == "meme" and len(stripped) > 400:
         issues.append("мем слишком длинный")

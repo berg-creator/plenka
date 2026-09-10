@@ -270,6 +270,7 @@ def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
                 "title": entry.get("title", ""),
                 "summary": entry.get("summary", ""),
                 "url": entry.get("url", ""),
+                "cover": entry.get("cover", ""),
                 "released_at": entry.get("published_at"),
                 "source": "rss",
                 "collected_at": state.iso(),
