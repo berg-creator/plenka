@@ -18,6 +18,7 @@ import logging
 import random
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import config, llm, quality, state, telegram
 from .sources import deezer, itunes
@@ -26,6 +27,20 @@ log = logging.getLogger("compose")
 
 BATCH_FILE = config.DATA / "pending_batch.json"
 USED_FILE = config.DATA / "used_inbox.json"
+
+# Кнопка обязана называть площадку: «Слушать» не говорит, что откроется —
+# Apple Music, Deezer или YouTube, а это три разных приложения, и человек
+# вправе знать это до нажатия. Просить об этом модель мало: она называет
+# площадку через раз, поэтому подпись ставится по домену ссылки.
+BUTTON_LABELS = {
+    "music.apple.com": "Слушать в Apple Music",
+    "deezer.com": "Слушать в Deezer",
+    "youtube.com": "Смотреть на YouTube",
+    "youtu.be": "Смотреть на YouTube",
+}
+
+# Только строка-кнопка целиком: ссылки внутри текста поста не трогаем.
+_BUTTON_LINE = re.compile(r'(?m)^(▸\s*<a\s+href="([^"]+)"[^>]*>)([^<]*)(</a>)\s*$')
 
 
 # ─────────────────────────── очередь ───────────────────────────
@@ -50,7 +65,7 @@ def save_post(
     # Чистим разметку сразу при сохранении, чтобы в очереди лежал тот же текст,
     # который уйдёт в канал, — иначе просмотр очереди врёт.
     if rubric_key != "poll":  # опрос хранится как JSON, его трогать нельзя
-        text = telegram.sanitize(text)
+        text = name_button(telegram.sanitize(text))
 
     folder = folder or config.QUEUE
     folder.mkdir(parents=True, exist_ok=True)
@@ -73,6 +88,26 @@ def save_post(
         },
     )
     return path
+
+
+def name_button(text: str) -> str:
+    """Подставляет в кнопку название площадки по домену ссылки.
+
+    Незнакомый домен остаётся как есть: у новостей в кнопке стоит имя издания,
+    и вывести его из адреса нельзя — «lenta.ru» это ещё не «Лента.ру».
+    Выдумывать название по домену — то же враньё, только машинное.
+    """
+
+    def rename(match: re.Match[str]) -> str:
+        host = urlparse(match.group(2)).netloc.casefold().removeprefix("www.")
+        label = next(
+            (name for domain, name in BUTTON_LABELS.items()
+             if host == domain or host.endswith("." + domain)),
+            "",
+        )
+        return f"{match.group(1)}{label}{match.group(4)}" if label else match.group(0)
+
+    return _BUTTON_LINE.sub(rename, text)
 
 
 def _lead_track(source: dict) -> dict:
@@ -439,6 +474,35 @@ def do_backfill_music() -> int:
     return 0
 
 
+def _selftest() -> int:
+    """Проверка подписи кнопки: молча уехавшая подпись врёт читателю,
+    а заодно рушит последнюю строку поста. Запуск: python -m src.compose --selftest
+    """
+    def button(url: str, label: str = "Слушать") -> str:
+        return f'текст\n\n▸ <a href="{url}">{label}</a>'
+
+    assert name_button(button("https://music.apple.com/us/album/x/1")).endswith(
+        ">Слушать в Apple Music</a>"
+    )
+    assert name_button(button("https://www.deezer.com/album/1")).endswith(">Слушать в Deezer</a>")
+    assert name_button(button("https://youtu.be/abc")).endswith(">Смотреть на YouTube</a>")
+    assert name_button(button("https://m.youtube.com/watch?v=1")).endswith(
+        ">Смотреть на YouTube</a>"
+    )
+    # Издание в новости трогать нельзя: имя там стоит своё, не выводимое из домена.
+    assert name_button(button("https://the-flow.ru/news/1", "Источник — The Flow")).endswith(
+        ">Источник — The Flow</a>"
+    )
+    # Домен-подделка в пути не должна выдать себя за площадку.
+    assert name_button(button("https://evil.ru/?x=deezer.com")).endswith(">Слушать</a>")
+    # Ссылка внутри текста — не кнопка, её название остаётся авторским.
+    inline = 'в <a href="https://music.apple.com/us/album/x/1">этом альбоме</a> всё ясно'
+    assert name_button(inline) == inline
+
+    print("кнопка: все проверки прошли")
+    return 0
+
+
 def do_dry_run(needed: int) -> int:
     jobs = plan(needed)
     print(f"\nВ очереди сейчас: {queue_size()}. Нужно добрать: {needed}.\n")
@@ -463,6 +527,7 @@ def main() -> int:
         action="store_true",
         help="дописать отрывки к постам, которые уже в очереди",
     )
+    parser.add_argument("--selftest", action="store_true", help="проверить подпись кнопки")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -470,6 +535,8 @@ def main() -> int:
 
     needed = max(0, config.QUEUE_TARGET - queue_size())
 
+    if args.selftest:
+        return _selftest()
     if args.backfill_music:
         return do_backfill_music()
     if args.dry_run:
