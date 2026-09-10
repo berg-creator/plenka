@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 from pathlib import Path
 from typing import Any
 
@@ -240,6 +241,38 @@ def send_photo(chat_id: str, photo_url: str, caption: str) -> dict:
     )
 
 
+def _seconds(clip: bytes) -> int:
+    """Длительность m4a из заголовка mvhd — Telegram сам её не считает,
+    и без неё в ленте висит плеер на 0:00.
+
+    Магазин кладёт moov в начало файла (иначе превью не начало бы играть
+    до полной загрузки), так что заголовок ищется простым поиском.
+    """
+    mark = clip.find(b"mvhd")
+    if mark < 0:
+        return 0
+    head = clip[mark + 4 :]
+    try:
+        if head[0] == 0:
+            scale, length = struct.unpack(">II", head[12:20])
+        else:
+            scale, length = struct.unpack(">IQ", head[20:32])
+        return round(length / scale) if scale else 0
+    except Exception:
+        return 0
+
+
+def _download(url: str) -> bytes | None:
+    """Тянет отрывок в память. Превью магазина — около мегабайта, держать его
+    в памяти дешевле, чем возиться с временными файлами.
+    """
+    try:
+        response = requests.get(url, timeout=60)
+        return response.content if response.status_code == 200 else None
+    except Exception:
+        return None
+
+
 def _thumbnail(cover_url: str) -> bytes | None:
     """Готовит обложку под требования Telegram к превью аудио: JPEG,
     не больше 320 пикселей по стороне и 200 КБ весом. Обложка из магазина
@@ -278,13 +311,16 @@ def send_audio(
 ) -> dict:
     """Отправляет отрывок трека с текстом поста в подписи.
 
-    Telegram принимает сам файл по ссылке, а вот превью — только загрузкой,
-    ссылку на картинку в `thumbnail` он не берёт. Поэтому обложка идёт
+    Отрывок качаем сами, а не даём Telegram ссылку: магазин помечает превью
+    типом `audio/x-m4p`, Telegram его не узнаёт и кладёт в ленту файл, который
+    слушателю надо сперва скачать. Тот же байт, загруженный как `.m4a`,
+    становится обычным плеером — нажал и играет.
+
+    Превью-картинку Telegram по ссылке не берёт вовсе, поэтому обложка идёт
     вторым файлом в том же запросе.
     """
     payload = {
         "chat_id": chat_id,
-        "audio": audio_url,
         "caption": sanitize(caption)[:MAX_CAPTION],
         "parse_mode": "HTML",
     }
@@ -293,13 +329,22 @@ def send_audio(
     if performer:
         payload["performer"] = performer[:64]
 
-    files = None
+    files = {}
+    clip = _download(audio_url) if audio_url.startswith("http") else None
+    if clip:
+        payload["audio"] = "attach://audio"
+        files["audio"] = ("preview.m4a", clip, "audio/mp4")
+        payload["duration"] = _seconds(clip)
+    else:
+        # Не скачалось — пусть Telegram сходит сам: файлом, но хоть с музыкой.
+        payload["audio"] = audio_url
+
     thumb = _thumbnail(cover_url) if cover_url else None
     if thumb:
         payload["thumbnail"] = "attach://thumb"
-        files = {"thumb": ("thumb.jpg", thumb, "image/jpeg")}
+        files["thumb"] = ("thumb.jpg", thumb, "image/jpeg")
 
-    return _call("sendAudio", payload, files)
+    return _call("sendAudio", payload, files or None)
 
 
 def send_poll(chat_id: str, question: str, options: list[str], *, anonymous: bool = True) -> dict:
