@@ -89,6 +89,10 @@ def lines(link: dict, *, kind: str = "lineage") -> list[str]:
         return fact_lines(link)
     if kind == "news":
         return news_lines(link)
+    if kind == "reels":
+        # Ролик с живым голосом (src/reels.py): фразы читает владелец, здесь
+        # они нужны только для счёта по кадрам. Пауза — пустая фраза.
+        return [line.get("say", "") for line in link.get("lines", [])]
 
     modern = _clean(link.get("modern", ""))
     ancestor = _clean(link.get("ancestor", ""))

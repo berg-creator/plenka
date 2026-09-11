@@ -33,7 +33,7 @@ from pathlib import Path
 
 import requests
 
-from . import comments, config, publish, service, state, telegram
+from . import comments, config, publish, reels, service, state, telegram
 
 log = logging.getLogger("moderate")
 
@@ -303,6 +303,26 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     print(f"  пост в чате обсуждений: {message.get('message_id')}")
                 else:
                     comments.seed(message)
+                continue
+
+            # Дубль фразы ролика (src/reels.py): голосовое или аудио владельца
+            # в ответ на фразу сценария. Раньше трека — аудиофайл ответом на фразу
+            # иначе пошёл бы искать пост. Кадр ищется по message_id, как пост
+            # у трека; не нашёлся — сообщение идёт дальше прежним путём.
+            if (
+                message.get("reply_to_message")
+                and reels.take_file(message)
+                and str(admin) == str(message.get("from", {}).get("id")) == str(
+                    message.get("chat", {}).get("id")
+                )
+                and (reel := reels.line_of(message["reply_to_message"]["message_id"]))
+            ):
+                print(f"  дубль ролика {reel[0]}, кадр {reel[1]}")
+                if not args.dry_run:
+                    try:
+                        reels.accept(message, reel, admin, push_state)
+                    except Exception as exc:  # noqa: BLE001 — сбой приёма не роняет дежурство
+                        log.error("Дубль ролика не принят: %s", exc)
                 continue
 
             # Полный трек в ответ на запрос (compose.do_ask_tracks). Разбирается
