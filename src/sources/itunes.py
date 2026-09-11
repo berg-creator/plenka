@@ -177,10 +177,11 @@ def album_tracks(collection_id: str | int) -> dict:
         return {}
 
     tracks: list[dict] = []
-    genre = ""
+    genre = album = ""
     for item in data.get("results", []):
         if item.get("wrapperType") == "collection":
             genre = item.get("primaryGenreName", "") or genre
+            album = item.get("collectionName", "")
             continue
         if item.get("kind") != "song":
             continue
@@ -202,6 +203,7 @@ def album_tracks(collection_id: str | int) -> dict:
         "tracks": tracks,
         "genre": genre,
         "duration_sec": sum(t["seconds"] for t in tracks),
+        "album": album,  # не «title» — см. deezer.album_tracks
     }
 
 

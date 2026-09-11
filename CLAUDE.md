@@ -34,7 +34,8 @@ python -m src.check_llm --sample       генератор отвечает + п�
 python -m src.collect --dry-run        что нашлось, без записи
 python -m src.urgent --dry-run         срочные новости за сегодня, без затрат
 python -m src.compose --dry-run        план генерации без затрат
-python -m src.publish --dry-run        что ушло бы в канал
+python -m src.publish --dry-run        что ушло бы в канал, с кнопками стримингов
+python -m src.publish --selftest       кнопки стримингов: строка «Слушать» и ссылки
 python -m src.service --match "Bones"  что нашлось в базе, без обращения к модели
 python -m src.vk --check               токен ВКонтакте и доступ к сообществу
 python -m src.host --check             синтез голоса отвечает

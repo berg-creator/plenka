@@ -83,6 +83,25 @@ SEEN_TTL_DAYS = 120
 # канал задаёт вопрос сам. Токенов это не стоит: вопросы готовые.
 COMMENT_SEED = True
 
+# Кнопки стримингов под постом о релизе (см. publish.listen): ими публикатор
+# заменяет строку «▸ Слушать в …», которая вела в один магазин, а стриминг
+# у каждого свой. Точную ссылку на релиз без ключей даёт лишь магазин, откуда
+# пришла находка: у сервиса с тем же адресом кнопка ведёт прямо на релиз,
+# у остальных — на поиск «артист + название». Страницу выбора song.link
+# не взяли: их API закрыт, а на странице нет ни Spotify, ни Яндекса, ни VK.
+# Логотипы на кнопках канал поставить не может: иконку (icon_custom_emoji_id)
+# Telegram даёт в каналах только ботам с купленным на Fragment именем.
+LISTEN_SERVICES: tuple[tuple[str, str], ...] = (
+    ("Яндекс", "https://music.yandex.ru/search?text={q}"),
+    ("VK", "https://vk.com/search/music?q={q}"),
+    ("Звук", "https://zvuk.com/search?query={q}"),
+    ("Spotify", "https://open.spotify.com/search/{q}"),
+    ("Apple", "https://music.apple.com/search?term={q}"),
+    ("YouTube", "https://music.youtube.com/search?q={q}"),
+    ("SoundCloud", "https://soundcloud.com/search?q={q}"),
+    ("Deezer", "https://www.deezer.com/search/{q}"),
+)
+
 # Лимиты бота-сервиса (src/service.py). Разбор стоит примерно столько же токенов,
 # сколько пост канала, а бесплатный миллион уже наполовину расписан очередью,
 # поэтому потолок нужен с самого начала — накрутить его всегда успеется.

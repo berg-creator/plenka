@@ -177,19 +177,20 @@ def edit_markup(chat_id: str, message_id: int, buttons: list[list[dict]] | None)
         pass
 
 
-def send_photo_file(chat_id: str, path: Path, caption: str) -> dict:
+def send_photo_file(
+    chat_id: str, path: Path, caption: str, *, buttons: list[list[dict]] | None = None
+) -> dict:
     """Отправляет картинку с диска. Нужна сервису: карточку разбора мы рисуем
     сами, публичной ссылки на неё нет — файл уходит прямо в загрузку."""
+    payload = {
+        "chat_id": chat_id,
+        "caption": sanitize(caption)[:MAX_CAPTION],
+        "parse_mode": "HTML",
+    }
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
     with path.open("rb") as handle:
-        return _call(
-            "sendPhoto",
-            {
-                "chat_id": chat_id,
-                "caption": sanitize(caption)[:MAX_CAPTION],
-                "parse_mode": "HTML",
-            },
-            files={"photo": (path.name, handle, "image/jpeg")},
-        )
+        return _call("sendPhoto", payload, files={"photo": (path.name, handle, "image/jpeg")})
 
 
 def send_video_file(chat_id: str, path: Path, caption: str, *, seconds: int = 0) -> dict:
@@ -240,16 +241,18 @@ def send_chat_action(chat_id: str, action: str = "typing") -> None:
         pass
 
 
-def send_photo(chat_id: str, photo_url: str, caption: str) -> dict:
-    return _call(
-        "sendPhoto",
-        {
-            "chat_id": chat_id,
-            "photo": photo_url,
-            "caption": sanitize(caption)[:MAX_CAPTION],
-            "parse_mode": "HTML",
-        },
-    )
+def send_photo(
+    chat_id: str, photo_url: str, caption: str, *, buttons: list[list[dict]] | None = None
+) -> dict:
+    payload = {
+        "chat_id": chat_id,
+        "photo": photo_url,
+        "caption": sanitize(caption)[:MAX_CAPTION],
+        "parse_mode": "HTML",
+    }
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    return _call("sendPhoto", payload)
 
 
 def _seconds(clip: bytes) -> int:

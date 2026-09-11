@@ -15,10 +15,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import quote, urlparse
 
 from . import card, config, state, telegram
+from .sources import deezer, itunes
 
 log = logging.getLogger("publish")
 
@@ -62,6 +65,63 @@ def archive(path: Path) -> None:
     path.rename(config.ARCHIVE / path.name)
 
 
+# Последняя строка поста о релизе («▸ Слушать в Apple Music», см. compose.name_button).
+# В Telegram её место занимает ряд кнопок стримингов, а из сохранённого текста
+# она не пропадает: у записи ВКонтакте кнопок нет, и ссылку туда несёт она.
+_LISTEN_LINE = re.compile(r'^▸\s*<a\s+href="([^"]+)"[^>]*>\s*Слушать[^<]*</a>\s*$', re.MULTILINE)
+
+
+def _host(url: str) -> str:
+    return urlparse(url).netloc.casefold().removeprefix("www.")
+
+
+def listen(text: str, artist: str, title: str) -> tuple[str, list[list[dict]]]:
+    """Убирает из текста строку «▸ Слушать…» и собирает вместо неё кнопки
+    стримингов из config.LISTEN_SERVICES.
+
+    Пост без этой строки не трогаем: «Источник» у новости ведёт на статью,
+    «Смотреть на YouTube» — на видео, а не на релиз. Сервис, чей адрес совпал
+    со ссылкой из поста, получает её саму — это точный релиз. Остальные ведут
+    на поиск.
+    """
+    match = _LISTEN_LINE.search(text)
+    query = quote(f"{artist} {title}".strip(), safe="")
+    if not match or not query:
+        return text, []
+
+    link = match.group(1)
+    buttons = [
+        {"text": label, "url": link if _host(search) == _host(link) else search.format(q=query)}
+        for label, search in config.LISTEN_SERVICES
+    ]
+    text = re.sub(r"\n{3,}", "\n\n", _LISTEN_LINE.sub("", text)).strip()
+    # По три в ряд: при четырёх подписи обрезались у всех, кроме VK.
+    return text, [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+
+
+def release_title(post: dict) -> str:
+    """Название релиза для поиска в стримингах.
+
+    Магазин отдаёт его по ссылке из строки «Слушать»: у альбома трек отрывка —
+    лишь открывающий, а кнопка должна вести к релизу целиком. Магазин
+    не ответил — ищем по треку, нет и его — по одному артисту.
+    """
+    match = _LISTEN_LINE.search(post.get("text", ""))
+    if not match:
+        return ""
+    link, title = match.group(1), ""
+    try:
+        if album := itunes.album_id_from_url(link):
+            title = itunes.album_tracks(album).get("album", "")
+        elif album := deezer.album_id_from_url(link):
+            title = deezer.album_tracks(album).get("album", "")
+    except Exception as exc:  # магазин мог не ответить — пост важнее кнопок
+        log.warning("Название релиза не получено: %s", exc)
+    # Формат, который магазин приписывает к названию, поиск только путает.
+    title = re.sub(r"\s+-\s+(Single|EP)$", "", title)
+    return title or post.get("track", "")
+
+
 def send(post: dict, chat_id: str) -> None:
     """Отправляет пост нужным методом: опрос, отрывок трека, фото или текст."""
     text = post.get("text", "").strip()
@@ -93,6 +153,7 @@ def send(post: dict, chat_id: str) -> None:
         text = card.meme_text(post)
 
     cover = post.get("cover", "")
+    text, buttons = listen(text, post.get("artist", ""), release_title(post))
 
     # Полный трек, присланный владельцем (src/moderate.py), важнее отрывка.
     # Файл уже лежит у Telegram и уходит по file_id: качать нечего, а название
@@ -102,7 +163,7 @@ def send(post: dict, chat_id: str) -> None:
     full_track = post.get("full_track_file_id", "")
     if full_track and len(text) <= telegram.MAX_CAPTION:
         try:
-            telegram.send_audio(chat_id, full_track, text)
+            telegram.send_audio(chat_id, full_track, text, buttons=buttons)
             return
         except telegram.TelegramError as exc:
             log.warning("Полный трек не ушёл (%s), пробую отрывком", exc)
@@ -124,6 +185,7 @@ def send(post: dict, chat_id: str) -> None:
                 title=post.get("track", ""),
                 performer=post.get("artist", ""),
                 cover_url=cover,
+                buttons=buttons,
             )
             return
         except telegram.TelegramError as exc:
@@ -132,13 +194,13 @@ def send(post: dict, chat_id: str) -> None:
 
     if cover and len(text) <= telegram.MAX_CAPTION:
         try:
-            telegram.send_photo(chat_id, cover, text)
+            telegram.send_photo(chat_id, cover, text, buttons=buttons)
             return
         except telegram.TelegramError as exc:
             # Обложка могла протухнуть или быть недоступной — текст важнее картинки.
             log.warning("Фото не ушло (%s), отправляю текстом", exc)
 
-    telegram.send_message(chat_id, text)
+    telegram.send_message(chat_id, text, buttons=buttons)
 
 
 def crosspost_vk(post: dict) -> None:
@@ -203,6 +265,33 @@ def _poll_payload(text: str) -> dict | None:
     return {"question": question, "options": options, "is_anonymous": data.get("is_anonymous", True)}
 
 
+def _selftest() -> None:
+    """Кнопки стримингов: строка «Слушать» уходит, точная ссылка остаётся точной.
+
+    Запуск: python -m src.publish --selftest
+    """
+    apple = "https://music.apple.com/us/album/fuel-the-fire-single/6802784931?uo=4"
+    post = f'<b>ЗАГОЛОВОК</b>\n\nТекст.\n\n▸ <a href="{apple}">Слушать в Apple Music</a>'
+    text, rows = listen(post, "Ghostface Playa", "Fuel the Fire")
+    assert text == "<b>ЗАГОЛОВОК</b>\n\nТекст.", text
+    urls = {b["text"]: b["url"] for row in rows for b in row}
+    assert len(urls) == len(config.LISTEN_SERVICES) and all(len(row) <= 3 for row in rows)
+    assert urls["Apple"] == apple
+    assert urls["Spotify"] == "https://open.spotify.com/search/Ghostface%20Playa%20Fuel%20the%20Fire"
+    # Ссылка Deezer точна только для Deezer; «/» и «&» в имени не ломают адрес поиска.
+    deezer_link = "https://www.deezer.com/album/1057397272"
+    _, rows = listen(f'▸ <a href="{deezer_link}">Слушать в Deezer</a>', "AC/DC & Co", "Back")
+    urls = {b["text"]: b["url"] for row in rows for b in row}
+    assert urls["Deezer"] == deezer_link
+    assert urls["Apple"] == "https://music.apple.com/search?term=AC%2FDC%20%26%20Co%20Back"
+    # Новость и видео — не релиз: текст как был, кнопок нет.
+    for line in ('▸ <a href="https://www.nme.com/news">Источник — NME</a>',
+                 '▸ <a href="https://youtu.be/abc">Смотреть на YouTube</a>'):
+        news = f"Текст.\n\n{line}"
+        assert listen(news, "Bones", "") == (news, []), line
+    print("кнопки стримингов: все проверки прошли")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Публикация постов в Telegram")
     parser.add_argument(
@@ -213,6 +302,7 @@ def main() -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="показать пост, не отправляя")
     parser.add_argument("--check", action="store_true", help="проверить настройки бота")
+    parser.add_argument("--selftest", action="store_true", help="проверить сборку кнопок стримингов")
     parser.add_argument("--force", action="store_true", help="игнорировать интервал между постами")
     parser.add_argument(
         "--preview-all",
@@ -220,6 +310,10 @@ def main() -> int:
         help="прислать себе в личку всю очередь целиком, ничего не публикуя",
     )
     args = parser.parse_args()
+
+    if args.selftest:
+        _selftest()
+        return 0
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
@@ -272,7 +366,10 @@ def main() -> int:
         if post.get("rubric") == "meme":
             print(f"Картинка: {post.get('picture') or 'нет — уйдёт текстом'}")
             print(f"Сверху: {post.get('top', '')}\nСнизу: {post.get('bottom', '')}\n")
-        print(post.get("text", ""))
+        text, buttons = listen(post.get("text", ""), post.get("artist", ""), release_title(post))
+        print(text)
+        for row in buttons:
+            print("  " + " · ".join(f"[{b['text']}]" for b in row))
         return 0
 
     if not args.force and not due():

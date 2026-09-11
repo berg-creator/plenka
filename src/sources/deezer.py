@@ -196,6 +196,9 @@ def album_tracks(album_id: str | int) -> dict:
         "tracks": tracks,
         "genre": next((g for g in genres if g), ""),
         "duration_sec": data.get("duration") or sum(t["seconds"] for t in tracks),
+        # Не «title»: collect вливает этот словарь в находку целиком
+        # и затёр бы её название. Нужно кнопкам стримингов под постом.
+        "album": data.get("title", ""),
     }
 
 
