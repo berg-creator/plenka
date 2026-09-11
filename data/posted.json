@@ -377,6 +377,18 @@
       "file": "20260910-152322-9990-release.json",
       "published_at": "2026-09-11T11:09:40+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20260911-113929-7659-news.json",
+      "published_at": "2026-09-11T11:39:30+00:00",
+      "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260911-113937-5088-news.json",
+      "published_at": "2026-09-11T11:39:40+00:00",
+      "rubric": "news"
     }
   ]
 }
