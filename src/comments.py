@@ -9,6 +9,11 @@
 Вопрос берётся из готового набора по рубрике, а не сочиняется моделью:
 токены он бы тратил как полноценный пост, а работы делает на одну строку.
 
+Под постом о релизе этой репликой идёт сам трек, присланный владельцем: вопрос
+уходит ему в подпись. В ленте плеер занимал вторую плитку и делал вид поста
+плавающим — есть трек, два сообщения; нет, одно (решение владельца 12.09.2026).
+В ветке он и открывает обсуждение, и даёт послушать, не уводя из канала.
+
 Отключается одной строкой в src/config.py — COMMENT_SEED.
 """
 
@@ -76,8 +81,8 @@ def question(rubric: str) -> str:
     return random.choice(QUESTIONS.get(rubric, DEFAULT_QUESTIONS))
 
 
-def last_rubric() -> str:
-    """Рубрика последнего опубликованного поста.
+def last_post() -> dict:
+    """Последний опубликованный пост: рубрика и он сам из архива.
 
     Пересылка в чат приходит через секунды после публикации, а посты выходят
     раз в несколько часов — этого хватает, чтобы связать одно с другим без
@@ -85,13 +90,16 @@ def last_rubric() -> str:
     """
     items = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
     if not items:
-        return ""
+        return {}
 
     last = items[-1]
     published = state._parse(last.get("published_at", ""))
     if published is None or state.now() - published > MATCH_WINDOW:
-        return ""
-    return last.get("rubric", "")
+        return {}
+    # Сам пост лежит в архиве под тем же именем: из журнала берётся только
+    # рубрика, а полный трек — из поста.
+    post = state.read_json(config.ARCHIVE / last.get("file", ""), {})
+    return {**post, "rubric": last.get("rubric", "")}
 
 
 def is_channel_post(message: dict, channel_id: int | str) -> bool:
@@ -111,26 +119,22 @@ def seed(message: dict) -> bool:
     if not chat_id or not message_id:
         return False
 
-    # Плеер над постом о релизе (publish.send) — аудио без подписи, и пересылок
-    # у такого поста две: плеер и обложка с текстом. Кнопки стримингов висят
-    # на плеере, а у поста канала с инлайн-клавиатурой Telegram комментарии
-    # не показывает — вопрос под плеером в канале никто не увидит.
-    #
-    # Признак берётся из самой пересылки, а не сверкой с data/posted.json:
-    # публикатор пушит состояние после отправки, дежурство подтягивает git раз
-    # в десять минут, а пересылка приходит через секунды. Аудио без подписи
-    # в канал шлёт только publish.send; у отрывка СЛЕПОЙ ПРОСЛУШКИ подпись
-    # есть, и дежурство отдаёт его quiz.attach раньше, чем сюда.
-    if message.get("audio") and not message.get("caption"):
-        return False
-
     # Опрос сам по себе способ высказаться — под ним вопрос лишний.
-    rubric = last_rubric()
+    post = last_post()
+    rubric = post.get("rubric", "")
     if rubric == "poll" or message.get("poll"):
         return False
 
+    # Полный трек от владельца уходит сюда же — плеером, с вопросом в подписи.
+    # В ленте он занимал вторую плитку и делал вид поста плавающим (есть трек —
+    # два сообщения, нет — одно), а здесь открывает ветку и даёт послушать,
+    # не уводя из канала. Не ушёл — остаётся обычный вопрос.
+    track = post.get("full_track_file_id", "")
     try:
-        telegram.send_message(chat_id, question(rubric), reply_to=message_id)
+        if track:
+            telegram.send_audio(chat_id, track, question(rubric), reply_to=message_id)
+        else:
+            telegram.send_message(chat_id, question(rubric), reply_to=message_id)
     except telegram.TelegramError as exc:
         # Бота могли не пустить в чат или разжаловать — пост от этого не страдает.
         log.warning("Первый комментарий не ушёл: %s", exc)

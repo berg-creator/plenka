@@ -397,11 +397,13 @@ def send_audio(
     seconds: int = 0,
     buttons: list[list[dict]] | None = None,
     quiet: bool = False,
+    reply_to: int | None = None,
 ) -> dict:
-    """Отправляет отрывок трека с текстом поста в подписи.
+    """Отправляет трек с текстом в подписи.
 
-    quiet — без уведомления: плеер над постом с обложкой (publish.send) — часть
-    того же поста, и второй сигнал о нём подписчику ни к чему.
+    reply_to — ответ на пересылку поста в чате обсуждений: так полный трек
+    встаёт первым комментарием под постом (src/comments.py). Без него плеер
+    повис бы в чате отдельной репликой.
 
     Отрывок качаем сами, а не даём Telegram ссылку: магазин помечает превью
     типом `audio/x-m4p`, Telegram его не узнаёт и кладёт в ленту файл, который
@@ -428,6 +430,8 @@ def send_audio(
         payload["title"] = title[:64]
     if performer:
         payload["performer"] = performer[:64]
+    if reply_to is not None:
+        payload["reply_parameters"] = json.dumps({"message_id": reply_to})
 
     files = {}
     clip = audio if isinstance(audio, bytes) else None

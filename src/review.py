@@ -339,8 +339,9 @@ def _selftest() -> None:
             assert apply(good, name, dry_run=False) == 0
             assert post_of(queue / "a-verdict.json")["text"] == new
 
-            # Вышедший пост с записанным сообщением правится в канале: подпись без строки
-            # «▸ Слушать…» (её место заняли кнопки), кнопки те же, в архиве — новый текст.
+            # Вышедший пост с записанным сообщением правится в канале: строка «▸ Слушать…»
+            # в подписи развёрнута в площадки, кнопки старого поста на месте (правка без
+            # reply_markup их сняла бы), в архиве — новый текст.
             message = {"chat": -100, "message_id": 5, "kind": "caption", "buttons": [[{"text": "Apple", "url": "a"}]]}
             released = {"rubric": "verdict", "artist": "nkeeei & Yanix", "text": old, "message": message}
             state.write_json(config.ARCHIVE / "e-verdict.json", released)
@@ -351,7 +352,10 @@ def _selftest() -> None:
             with (mock.patch.object(publish, "release_title", lambda post: ""),
                   mock.patch.object(telegram, "edit_caption", lambda *args, **kw: edited.append((*args, kw)))):
                 assert apply({"edits": [out]}, name, dry_run=False) == 0
-            assert edited == [(-100, 5, new.replace("\n\n" + button, ""), {"buttons": message["buttons"]})], edited
+            assert len(edited) == 1 and edited[0][0::3] == (-100, {"buttons": message["buttons"]}), edited
+            caption = edited[0][2]
+            assert caption.startswith(new.replace("\n\n" + button, "")) and button not in caption, caption
+            assert "\n\n▸ Слушать — <a href=" in caption, caption
             assert post_of(config.ARCHIVE / "e-verdict.json") == {**released, "text": new}
 
             # Канал не принял — запуск красный, архив прежний. Тот же текст уже в канале

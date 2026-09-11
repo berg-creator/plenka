@@ -300,8 +300,8 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
         if message:
             # Пост, пересланный Telegram в чат обсуждений, — повод открыть ветку
             # комментариев первым. Под прослушкой первой идёт сама викторина
-            # (src/quiz.py), вопрос там лишний. У поста о релизе вопрос встаёт
-            # под обложкой, а не под плеером над ней (comments.seed).
+            # (src/quiz.py), вопрос там лишний. Под постом о релизе первым
+            # комментарием идёт полный трек от владельца (comments.seed).
             # Это не запрос к сервису, дальше не идём.
             if comments.is_channel_post(
                 message, config.secret("TELEGRAM_CHANNEL_ID", required=False)
@@ -314,6 +314,11 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     except Exception as exc:  # noqa: BLE001 — сбой не роняет дежурство
                         log.error("Викторина под прослушкой не встала: %s", exc)
                 elif config.COMMENT_SEED:
+                    # Пост вышел секунды назад, и что это за пост — записано
+                    # в репозитории публикатором. Своё дерево дежурство обновляет
+                    # раз в несколько минут, а комментарий нужен сейчас: перед
+                    # ним подтягиваем состояние, иначе трек к посту опоздает.
+                    push_state()
                     comments.seed(message)
                 continue
 
@@ -630,9 +635,10 @@ def _selftest() -> int:
     assert "больше 20 МБ" in attach_track(big, "1")
     print("приём трека: все проверки прошли")
 
-    # Пересылки поста канала в чат обсуждений. У поста о релизе их две: плеер
-    # без подписи и обложка с текстом — первый комментарий встаёт только под
-    # обложкой. Под отрывком прослушки — викторина, а не вопрос.
+    # Пересылки поста канала в чат обсуждений: под обычным постом первым
+    # комментарием идёт вопрос, под постом с полным треком — сам трек плеером,
+    # под отрывком прослушки — викторина.
+    import tempfile
     from unittest import mock
 
     def forward(message_id: int, **body) -> dict:
@@ -641,23 +647,45 @@ def _selftest() -> int:
             "sender_chat": {"id": -1001, "type": "channel"}, **body,
         }}
 
-    said, riddles = [], []
+    said, played, riddles = [], [], []
+    tmp = tempfile.TemporaryDirectory()
+    archive, posted = Path(tmp.name) / "archive", Path(tmp.name) / "posted.json"
+    real = config.ARCHIVE, config.POSTED_FILE
+    config.ARCHIVE, config.POSTED_FILE = archive, posted
 
-    def comment(chat, text, reply_to=None, **_):
-        said.append(reply_to)
+    def published(post: dict) -> None:
+        """Журнал публикаций и архив: по ним первый комментарий узнаёт пост."""
+        state.write_json(archive / "last-release.json", post)
+        state.write_json(posted, {"items": [{"file": "last-release.json", "rubric": "release",
+                                             "published_at": state.iso()}]})
 
-    with (
-        mock.patch.dict(os.environ, {"TELEGRAM_CHANNEL_ID": "-1001"}),
-        mock.patch.object(telegram, "send_message", comment),
-        mock.patch.object(quiz, "attach", lambda message: riddles.append(message["message_id"])),
-    ):
-        process([
-            forward(10, audio={"file_id": "a"}),
-            forward(11, photo=[{"file_id": "p"}], caption="SMOKY MO ВЫПУСТИЛ СИНГЛ"),
-            forward(12, audio={"file_id": "r"}, caption="СЛЕПАЯ ПРОСЛУШКА\n\n30 секунд трека"),
-        ], {}, "1", False, 0)
-    assert said == [11] and riddles == [12], (said, riddles)
-    print("первый комментарий: под обложкой, не под плеером; прослушка — викториной")
+    def run(*updates: dict) -> None:
+        with (
+            mock.patch.dict(os.environ, {"TELEGRAM_CHANNEL_ID": "-1001"}),
+            mock.patch.object(telegram, "send_message",
+                              lambda chat, text, reply_to=None, **_: said.append(reply_to)),
+            mock.patch.object(telegram, "send_audio",
+                              lambda chat, audio, caption, reply_to=None, **_: played.append((audio, reply_to))),
+            mock.patch.object(quiz, "attach", lambda message: riddles.append(message["message_id"])),
+        ):
+            process(list(updates), {}, "1", False, 0)
+
+    try:
+        post = forward(11, photo=[{"file_id": "p"}], caption="SMOKY MO ВЫПУСТИЛ СИНГЛ")
+        riddle = forward(12, audio={"file_id": "r"}, caption="СЛЕПАЯ ПРОСЛУШКА\n\n30 секунд трека")
+        # Трека к посту нет — первым комментарием обычный вопрос.
+        published({"rubric": "release"})
+        run(post, riddle)
+        assert said == [11] and played == [] and riddles == [12], (said, played, riddles)
+        # Трек есть — он и открывает ветку, плеером в ответ на ту же пересылку.
+        said.clear()
+        published({"rubric": "release", "full_track_file_id": "ID"})
+        run(post)
+        assert played == [("ID", 11)] and said == [], (played, said)
+    finally:
+        config.ARCHIVE, config.POSTED_FILE = real
+        tmp.cleanup()
+    print("первый комментарий: вопрос под обычным постом, полный трек — под релизом")
     return 0
 
 

@@ -155,12 +155,12 @@ def to_channel(post: dict, path: Path, chat_id: str) -> None:
 def edit(post: dict) -> None:
     """Правит вышедший пост в канале по сообщению из to_channel (src/review.py).
 
-    Текст готовится тем же путём, что в send: строку «▸ Слушать…» там заменили
-    кнопки, и в подпись она уехать не должна. Подпись длиннее лимита не режется
+    Текст готовится тем же путём, что в send: строка «▸ Слушать…» там развёрнута
+    в ссылки на площадки, и в подпись она уехать не должна. Подпись длиннее лимита не режется
     молча, а отказывает: обрезанный пост хуже непоправленного.
     """
     message = post["message"]
-    text, _ = listen(post.get("text", "").strip(), post.get("artist", ""), release_title(post))
+    text = listen(post.get("text", "").strip(), post.get("artist", ""), release_title(post))
     where = message["chat"], message["message_id"], text
     if message["kind"] != "caption":
         telegram.edit_text(*where, buttons=message.get("buttons"))
@@ -171,8 +171,8 @@ def edit(post: dict) -> None:
 
 
 # Последняя строка поста о релизе («▸ Слушать в Apple Music», см. compose.name_button).
-# В Telegram её место занимает ряд кнопок стримингов, а из сохранённого текста
-# она не пропадает: у записи ВКонтакте кнопок нет, и ссылку туда несёт она.
+# В Telegram она разворачивается в ссылки на площадки, а в сохранённом тексте
+# остаётся как есть: во ВКонтакте уходит запись целиком, и ссылку несёт она.
 _LISTEN_LINE = re.compile(r'^▸\s*<a\s+href="([^"]+)"[^>]*>\s*Слушать[^<]*</a>\s*$', re.MULTILINE)
 
 
@@ -180,9 +180,13 @@ def _host(url: str) -> str:
     return urlparse(url).netloc.casefold().removeprefix("www.")
 
 
-def listen(text: str, artist: str, title: str) -> tuple[str, list[list[dict]]]:
-    """Убирает из текста строку «▸ Слушать…» и собирает вместо неё кнопки
-    стримингов из config.LISTEN_SERVICES.
+def listen(text: str, artist: str, title: str) -> str:
+    """Разворачивает строку «▸ Слушать…» в ссылки на площадки прямо в тексте.
+
+    Кнопок под постом больше нет (решение владельца 12.09.2026): панель из восьми
+    штук читалась в ленте раньше самого поста, а под постом с инлайн-клавиатурой
+    Telegram не показывает «Комментарии» (bugs.telegram.org/c/41803). Ссылка
+    в тексте обсуждению не мешает и жмётся тем же одним нажатием.
 
     Пост без этой строки не трогаем: «Источник» у новости ведёт на статью,
     «Смотреть на YouTube» — на видео, а не на релиз. Сервис, чей адрес совпал
@@ -192,16 +196,19 @@ def listen(text: str, artist: str, title: str) -> tuple[str, list[list[dict]]]:
     match = _LISTEN_LINE.search(text)
     query = quote(f"{artist} {title}".strip(), safe="")
     if not match or not query:
-        return text, []
+        return text
 
     link = match.group(1)
-    buttons = [
-        {"text": label, "url": link if _host(search) == _host(link) else search.format(q=query)}
-        for label, search in config.LISTEN_SERVICES
-    ]
-    text = re.sub(r"\n{3,}", "\n\n", _LISTEN_LINE.sub("", text)).strip()
-    # По три в ряд: при четырёх подписи обрезались у всех, кроме VK.
-    return text, [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+    # Четыре площадки — строка, которая на телефоне ещё не переносится. Магазин
+    # находки прибавляется пятым, если в четвёрку не попал: там лежит сам релиз,
+    # а не догадка поиска, и терять такую ссылку жалко.
+    services = list(config.LISTEN_SERVICES[:4])
+    services += [s for s in config.LISTEN_SERVICES[4:] if _host(s[1]) == _host(link)]
+    line = "▸ Слушать — " + " · ".join(
+        f'<a href="{link if _host(search) == _host(link) else search.format(q=query)}">{label}</a>'
+        for label, search in services
+    )
+    return re.sub(r"\n{3,}", "\n\n", _LISTEN_LINE.sub(lambda _: line, text)).strip()
 
 
 def release_title(post: dict) -> str:
@@ -238,7 +245,7 @@ def _where(message: dict, kind: str, buttons: list[list[dict]] | None = None) ->
 
 
 def send(post: dict, chat_id: str) -> dict | None:
-    """Отправляет пост нужным методом: опрос, отрывок трека, фото или текст.
+    """Отправляет пост нужным методом: опрос, фото с текстом, плеер или текст.
 
     Возвращает сообщение, в котором лежит текст поста (_where): по нему
     вышедший пост правится (edit). Опрос не правится — None.
@@ -271,7 +278,7 @@ def send(post: dict, chat_id: str) -> dict | None:
         text = card.meme_text(post)
 
     cover = post.get("cover", "")
-    text, buttons = listen(text, post.get("artist", ""), release_title(post))
+    text = listen(text, post.get("artist", ""), release_title(post))
     # С четвёртого поста о релизе за сутки — без звука: в пятницу их до девяти,
     # а девять уведомлений подряд отписывают быстрее, чем радуют. В тихие часы
     # молчит любой пост (config.QUIET_FROM_HOUR).
@@ -280,81 +287,26 @@ def send(post: dict, chat_id: str) -> dict | None:
         and releases_today(loud=True) >= config.RELEASE_LOUD_PER_DAY
     )
 
-    # Сверху плеер с кнопками стримингов, под ним обложка крупно с текстом.
-    # Фото и аудио в одно сообщение Telegram не кладёт, а у плеера обложка —
-    # иконка на палец. Кнопки у плеера, а не у фото, — решение владельца
-    # от 11.09.2026 («вариант А»): у поста канала с инлайн-клавиатурой Telegram
-    # не показывает комментарии (bugs.telegram.org/c/41803), и с кнопками
-    # на обложке пост с текстом остался бы без обсуждения. Плеер молчит:
-    # уведомление одно, о посте с текстом.
+    # Пост — всегда одна плитка ленты: обложка в рамке, текст, ссылки на площадки
+    # строкой в нём же. Плеера рядом нет (решение владельца 12.09.2026): полный
+    # трек уходит первым комментарием под постом (src/comments.py), а отрывок
+    # магазина не уходит вовсе — вид ленты не должен зависеть от того, прислали
+    # трек к этому релизу или нет.
     if cover and len(text) <= telegram.MAX_CAPTION:
-        # Плеер не ушёл (нет ни трека, ни отрывка, ошибка) — кнопки едут на фото,
-        # иначе ссылки на стриминги пропали бы из поста.
-        played = send_music(post, chat_id, "", buttons, quiet=True)
-        keys = None if played else buttons
         try:
             # Рамка канала: рубрика сверху, подпись снизу. Не нарисовалась
             # (нет сети, битый файл) — обложка уходит как была.
             framed = card.cover(post)
             if framed:
-                photo = telegram.send_photo_file(chat_id, framed, text, buttons=keys, quiet=quiet)
+                photo = telegram.send_photo_file(chat_id, framed, text, quiet=quiet)
             else:
-                photo = telegram.send_photo(chat_id, cover, text, buttons=keys, quiet=quiet)
-            return _where(photo, "caption", keys)
+                photo = telegram.send_photo(chat_id, cover, text, quiet=quiet)
+            return _where(photo, "caption")
         except telegram.TelegramError as exc:
-            # Обложка могла протухнуть. Музыку второй раз не пробуем: она уже
-            # ушла или только что не смогла — текст уходит обычным сообщением.
+            # Обложка могла протухнуть — текст уходит обычным сообщением.
             log.warning("Фото не ушло (%s), текст уходит сообщением", exc)
-        return _where(telegram.send_message(chat_id, text, buttons=keys, quiet=quiet), "text", keys)
 
-    if played := send_music(post, chat_id, text, buttons, quiet=quiet):
-        return _where(played, "caption", buttons)
-    return _where(telegram.send_message(chat_id, text, buttons=buttons, quiet=quiet), "text", buttons)
-
-
-def send_music(
-    post: dict, chat_id: str, caption: str, buttons: list[list[dict]] | None = None,
-    *, quiet: bool = False,
-) -> dict | None:
-    """Полный трек от владельца, иначе отрывок магазина. Ушедшее сообщение, None — не ушло ничего."""
-    if len(caption) > telegram.MAX_CAPTION:
-        return None
-
-    # Полный трек, присланный владельцем (src/moderate.py), важнее отрывка.
-    # Файл уже лежит у Telegram и уходит по file_id: качать нечего, а название
-    # и артиста при повторе Telegram берёт из самого файла — переданные поверх
-    # он игнорирует, проверено вживую. Поэтому дежурство при приёме заливает трек
-    # заново, уже с названием, артистом и обложкой из поста.
-    full_track = post.get("full_track_file_id", "")
-    if full_track:
-        try:
-            return telegram.send_audio(chat_id, full_track, caption, buttons=buttons, quiet=quiet)
-        except telegram.TelegramError as exc:
-            log.warning("Полный трек не ушёл (%s), пробую отрывком", exc)
-
-    preview = post.get("preview", "")
-    if not preview:
-        return None
-    # Ссылка Deezer на отрывок живёт часы, пост в очереди — дни: перед
-    # отправкой берём у магазина свежую, а не сохранённую при генерации.
-    from .compose import fresh_preview
-
-    preview = fresh_preview(post) or preview
-    try:
-        return telegram.send_audio(
-            chat_id,
-            preview,
-            caption,
-            title=post.get("track", ""),
-            performer=post.get("artist", ""),
-            cover_url=post.get("cover", ""),
-            buttons=buttons,
-            quiet=quiet,
-        )
-    except telegram.TelegramError as exc:
-        # Ссылка на отрывок живёт не вечно.
-        log.warning("Отрывок не ушёл: %s", exc)
-        return None
+    return _where(telegram.send_message(chat_id, text, quiet=quiet), "text")
 
 
 def crosspost_vk(post: dict) -> None:
@@ -420,9 +372,9 @@ def _poll_payload(text: str) -> dict | None:
 
 
 def _selftest() -> None:
-    """Кнопки стримингов: строка «Слушать» уходит, точная ссылка остаётся точной.
-    Пост с обложкой и музыкой — два сообщения: сверху тихий плеер с кнопками,
-    под ним фото с текстом без кнопок; плеер не ушёл — кнопки на фото.
+    """Площадки стримингов: строка «Слушать» разворачивается в ссылки в тексте.
+    Пост — всегда одна плитка: фото в рамке с текстом, без кнопок и без плеера
+    рядом (полный трек уходит первым комментарием, src/comments.py).
     send возвращает сообщение с текстом поста, to_channel кладёт его в архив.
     Посты о релизах: свой выход, сутки на всё, окно на трек, звук у первых трёх
     за московские сутки и не в тихие часы, обычный пост уступает им слот.
@@ -469,38 +421,38 @@ def _selftest() -> None:
 
     try:
         # Ссылка не из магазина: название релиза берётся из поста, без сети.
-        post = {"text": 'Текст.\n\n▸ <a href="https://x/r">Слушать</a>', "artist": "Bones",
-                "cover": "https://x/c.jpg", "full_track_file_id": "ID"}
+        post = {"text": "Текст.", "artist": "Bones", "cover": "https://x/c.jpg",
+                "full_track_file_id": "ID"}
+        # Строка «Слушать» в подпись сырой не уезжает: она развёрнута в площадки.
+        send({**post, "text": 'Текст.\n\n▸ <a href="https://zvuk.com/release/1">Слушать</a>'}, "0")
+        assert sent[0][1].startswith("Текст.\n\n▸ Слушать — <a href="), sent[0][1]
+        sent.clear()
+        # Пост — одна плитка, даже когда трек есть: он уйдёт в комментарии.
         # Возвращается сообщение с текстом поста: по нему правит автопилот точности.
         where = send(post, "0")
-        assert sent == [("плеер", "", True, True), ("фото", "Текст.", False, False)], sent
-        assert where == {"chat": -100, "message_id": 2, "kind": "caption", "buttons": []}, where
+        assert sent == [("фото", "Текст.", False, False)], sent
+        assert where == {"chat": -100, "message_id": 1, "kind": "caption", "buttons": []}, where
         sent.clear()
-        # Плеер не ушёл — кнопки на фото, иначе ссылки на стриминги пропали бы.
-        where = send({**post, "full_track_file_id": ""}, "0")
-        assert sent == [("фото", "Текст.", False, True)], sent
-        assert where["message_id"] == 1 and where["kind"] == "caption" and where["buttons"], where
+        # Отрывок магазина в ленту не идёт вовсе — ни отдельно, ни вместо фото.
+        where = send({**post, "full_track_file_id": "", "preview": "https://x/30s.m4a"}, "0")
+        assert sent == [("фото", "Текст.", False, False)], sent
+        assert where["message_id"] == 1 and where["kind"] == "caption" and not where["buttons"], where
         sent.clear()
-        # Плеер ушёл, фото нет — текст обычным сообщением, кнопки остались у плеера.
+        # Фото не ушло — текст обычным сообщением.
         where = send({**post, "cover": "https://x/протухла.jpg"}, "0")
-        assert sent == [("плеер", "", True, True), ("текст", "Текст.", False, False)], sent
-        assert where == {"chat": -100, "message_id": 2, "kind": "text", "buttons": []}, where
+        assert sent == [("текст", "Текст.", False, False)], sent
+        assert where == {"chat": -100, "message_id": 1, "kind": "text", "buttons": []}, where
         sent.clear()
-        # Без обложки текст едет с плеером в подписи, и уведомление у него обычное.
+        # Без обложки — тоже текст обычным сообщением.
         where = send({**post, "cover": ""}, "0")
-        assert sent == [("плеер", "Текст.", False, True)], sent
-        assert where["message_id"] == 1 and where["kind"] == "caption" and where["buttons"], where
-        sent.clear()
-        # Ни обложки, ни музыки — текст с кнопками обычным сообщением.
-        where = send({**post, "cover": "", "full_track_file_id": ""}, "0")
-        assert sent == [("текст", "Текст.", False, True)] and where["kind"] == "text" and where["buttons"], where
+        assert sent == [("текст", "Текст.", False, False)] and where["kind"] == "text", where
 
         # В канал: сообщение с текстом ложится в архивный JSON, текст — как был.
         state.write_json(config.QUEUE / "0-release.json", post)
         with mock.patch.dict(os.environ, {"VK_TOKEN": ""}):
             to_channel(post, config.QUEUE / "0-release.json", "0")
         archived = state.read_json(config.ARCHIVE / "0-release.json", {})
-        assert archived == {**post, "message": {"chat": -100, "message_id": 3, "kind": "caption", "buttons": []}}, archived
+        assert archived == {**post, "message": {"chat": -100, "message_id": 2, "kind": "caption", "buttons": []}}, archived
         assert not (config.QUEUE / "0-release.json").exists()
 
         # Четвёртый пост о релизе за московские сутки — молча, и фото, и плеер.
@@ -509,23 +461,23 @@ def _selftest() -> None:
         posted(("release", ago(hours=20)), ("release", ago(hours=3)), ("verdict", ago(hours=2)))
         sent.clear()
         send(release, "0")
-        assert sent == [("плеер", "", True, True), ("фото", "Текст.", False, False)], sent
+        assert sent == [("фото", "Текст.", False, False)], sent
         posted(("release", ago(hours=3)), ("verdict", ago(hours=2)), ("release", ago(hours=1)))
         sent.clear()
         send(release, "0")
-        assert sent == [("плеер", "", True, True), ("фото", "Текст.", True, False)], sent
+        assert sent == [("фото", "Текст.", True, False)], sent
 
         # Тихие часы: ночные выходы (01:00–03:00 МСК) в счёт трёх со звуком не идут,
         # а в 00:30 по Москве молчит любой пост.
         posted(*[("release", ago(hours=h)) for h in (17, 16, 15)])
         sent.clear()
         send(release, "0")
-        assert sent == [("плеер", "", True, True), ("фото", "Текст.", False, False)], sent
+        assert sent == [("фото", "Текст.", False, False)], sent
         state.now = lambda: datetime(2026, 9, 11, 21, 30, tzinfo=timezone.utc)
         sent.clear()
         send(post, "0")
         state.now = lambda: now
-        assert sent == [("плеер", "", True, True), ("фото", "Текст.", True, False)], sent
+        assert sent == [("фото", "Текст.", True, False)], sent
 
         # Обычный пост уступает слот свежему релизу; сутки с четырьмя релизами
         # отданы им целиком, но годовщина ждать не может.
@@ -572,26 +524,32 @@ def _selftest() -> None:
          config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real
         tmp.cleanup()
 
+    def links(text: str) -> dict[str, str]:
+        return {label: url for url, label in re.findall(r'<a href="([^"]+)">([^<]+)</a>', text)}
+
     apple = "https://music.apple.com/us/album/fuel-the-fire-single/6802784931?uo=4"
     post = f'<b>ЗАГОЛОВОК</b>\n\nТекст.\n\n▸ <a href="{apple}">Слушать в Apple Music</a>'
-    text, rows = listen(post, "Ghostface Playa", "Fuel the Fire")
-    assert text == "<b>ЗАГОЛОВОК</b>\n\nТекст.", text
-    urls = {b["text"]: b["url"] for row in rows for b in row}
-    assert len(urls) == len(config.LISTEN_SERVICES) and all(len(row) <= 3 for row in rows)
+    text = listen(post, "Ghostface Playa", "Fuel the Fire")
+    assert text.startswith("<b>ЗАГОЛОВОК</b>\n\nТекст.\n\n▸ Слушать — "), text
+    urls = links(text)
+    # Четыре площадки строкой плюс пятый — магазин находки с точной ссылкой.
+    assert list(urls) == ["Яндекс", "VK", "Звук", "Spotify", "Apple"], urls
     assert urls["Apple"] == apple
     assert urls["Spotify"] == "https://open.spotify.com/search/Ghostface%20Playa%20Fuel%20the%20Fire"
     # Ссылка Deezer точна только для Deezer; «/» и «&» в имени не ломают адрес поиска.
     deezer_link = "https://www.deezer.com/album/1057397272"
-    _, rows = listen(f'▸ <a href="{deezer_link}">Слушать в Deezer</a>', "AC/DC & Co", "Back")
-    urls = {b["text"]: b["url"] for row in rows for b in row}
-    assert urls["Deezer"] == deezer_link
-    assert urls["Apple"] == "https://music.apple.com/search?term=AC%2FDC%20%26%20Co%20Back"
-    # Новость и видео — не релиз: текст как был, кнопок нет.
+    urls = links(listen(f'▸ <a href="{deezer_link}">Слушать в Deezer</a>', "AC/DC & Co", "Back"))
+    assert urls["Deezer"] == deezer_link and "Apple" not in urls, urls
+    assert urls["Яндекс"] == "https://music.yandex.ru/search?text=AC%2FDC%20%26%20Co%20Back"
+    # Магазин из четвёрки не задваивается: точная ссылка встаёт на своё место.
+    urls = links(listen('▸ <a href="https://zvuk.com/release/1">Слушать в Звуке</a>', "Bones", "x"))
+    assert list(urls) == ["Яндекс", "VK", "Звук", "Spotify"] and urls["Звук"] == "https://zvuk.com/release/1"
+    # Новость и видео — не релиз: текст как был.
     for line in ('▸ <a href="https://www.nme.com/news">Источник — NME</a>',
                  '▸ <a href="https://youtu.be/abc">Смотреть на YouTube</a>'):
         news = f"Текст.\n\n{line}"
-        assert listen(news, "Bones", "") == (news, []), line
-    print("кнопки стримингов: все проверки прошли")
+        assert listen(news, "Bones", "") == news, line
+    print("площадки стримингов: все проверки прошли")
 
 
 def main() -> int:
@@ -665,9 +623,6 @@ def main() -> int:
             print(f"Звук: {'да' if loud else 'нет'} (со звуком за московские сутки: {count}"
                   f"{', сейчас тихие часы' if quiet_hours else ''})")
         print(f"Обложка: {post.get('cover') or 'нет'}")
-        # Отрывок меняет способ отправки, а не только вид поста, — в сухом
-        # прогоне это видно должно быть сразу.
-        print(f"Отрывок: {post.get('preview') or 'нет'}")
         if post.get("full_track_file_id"):
             full = "есть — уйдёт полным треком, а не отрывком"
         elif post.get("track_request"):
@@ -675,16 +630,14 @@ def main() -> int:
         else:
             full = "нет"
         print(f"Полный трек: {full}")
-        if post.get("cover") and (post.get("full_track_file_id") or post.get("preview")):
-            print("Вид: сверху плеер с кнопками без уведомления, под ним обложка в рамке с текстом")
+        if post.get("cover"):
+            track = " · полный трек уйдёт первым комментарием" if post.get("full_track_file_id") else ""
+            print(f"Вид: обложка в рамке с текстом, одним сообщением{track}")
         print()
         if post.get("rubric") == "meme":
             print(f"Картинка: {post.get('picture') or 'нет — уйдёт текстом'}")
             print(f"Сверху: {post.get('top', '')}\nСнизу: {post.get('bottom', '')}\n")
-        text, buttons = listen(post.get("text", ""), post.get("artist", ""), release_title(post))
-        print(text)
-        for row in buttons:
-            print("  " + " · ".join(f"[{b['text']}]" for b in row))
+        print(listen(post.get("text", ""), post.get("artist", ""), release_title(post)))
         return 0
 
     # Выход релиза интервала не ждёт: его срок — сутки от выхода релиза.
