@@ -171,8 +171,8 @@ def _quoted(matches: list[str]) -> str:
 def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
     """Список причин, по которым пост нельзя публиковать. Пусто — годится.
 
-    payload — данные, по которым писался пост: с ними пересказ описи
-    сверяется с фактами релиза. Без них эта проверка молчит.
+    payload — данные, по которым писался пост: с ними пересказ описи и выдумки
+    сверяются с фактами релиза. Без них эти проверки молчат.
     """
     issues: list[str] = []
     stripped = text.strip()
@@ -247,7 +247,10 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
 
         # Выдумки — звучание, прошлое и устройство, которых нет в данных.
         # Слова из самих данных (названия, имена, жанр) вырезаются до сверки.
-        own = _without_data(text_only, facts)
+        # Без данных сверять не с чем: автопилот точности (src/review.py) проверяет
+        # свою правку без payload, и законное «до него вышел PYREX» тут забраковалось бы
+        # как прошлое без previous_releases. Выдумки в его правках судит он сам.
+        own = _without_data(text_only, facts) if payload else ""
         sound = INVENTED_SOUND.findall(own)
         if sound:
             issues.append(f"выдуманное звучание: {_quoted(sound)} — релиз никто не слушал, ни звука, ни текстов в данных нет")
@@ -314,6 +317,10 @@ def _selftest() -> None:
     assert retold(smoky, single, "verdict")
     # Разборы бота (service.py) данных не передают — сверять не с чем.
     assert not retold(smoky, {})
+    # Правку автопилота точности (src/review.py) проверяют без данных: законное
+    # прошлое тогда не бракуется, выдумки в правке судит сам автопилот.
+    history = "<b>SMOKY MO ВЫПУСТИЛ СИНГЛ SORRY MAMA</b>\n\nДо него вышел PYREX, и снова без гостей." + link
+    assert not any(p.startswith("выдуманн") for p in problems(history, "release")), problems(history, "release")
 
     # Заголовок капсом — тоже текст.
     kizaru = "<b>KIZARU ВЫПУСТИЛ 22 ТРЕКА</b>\n\nУ kizaru вышел альбом <i>CA$HEY</i>, короткий и ровный." + link
