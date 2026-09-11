@@ -3,6 +3,7 @@ name: Срочные новости
 # Свежий обход лент и посты по инфоповодам — сразу в канал, минуя очередь.
 # Новость, дождавшаяся своей очереди, новостью быть перестаёт, поэтому здесь
 # нет ни модерации, ни задержки: владельцу уходит уведомление уже постфактум.
+# Следом — посты о свежих релизах: они ложатся в очередь, но вперёд неё.
 on:
   schedule:
     # Три захода: утро (ночные новости), день и вечер. Событие, случившееся
@@ -61,12 +62,36 @@ jobs:
           COUNT: ${{ inputs.count || '3' }}
         run: python -m src.urgent -n "$COUNT"
 
+      # Релиз, как и новость, ценен в день выхода (решение владельца от 11.09.2026):
+      # пост о свежей находке пишется сразу, а не ночной пачкой, и публикатор
+      # ставит его вперёд очереди. Шаг после новостей и не срывает сохранение:
+      # новости к этому моменту уже в канале, а их отметки иначе не попали бы в git.
+      - name: Написать посты о свежих релизах
+        continue-on-error: true
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
+          GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m src.compose --fresh
+
+      # Полный трек просим сразу: до слота свежего релиза часы, а не дни.
+      # Не успел владелец — пост выйдет с отрывком.
+      - name: Запросить полные треки
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python -m src.compose --ask-tracks
+
       - name: Сохранить состояние
         run: |
           git config user.name "plenka-bot"
           git config user.email "bot@users.noreply.github.com"
           git add data/ content/
-          git diff --cached --quiet || git commit -m "срочное: новость в день события"
+          git diff --cached --quiet || git commit -m "срочное: новости и свежие релизы"
           # Между checkout и push мог пройти другой воркфлоу — подтягиваем его коммиты.
           git pull --rebase --autostash origin ${{ github.ref_name }}
           git push

@@ -6,6 +6,7 @@
     python -m src.compose --submit     отправить пачку в Batch API (вдвое дешевле)
     python -m src.compose --fetch      забрать готовое из батча и разложить в очередь
     python -m src.compose --now N      сгенерировать N постов сразу, без батча (для отладки)
+    python -m src.compose --fresh      сразу написать посты о свежих релизах (запуски urgent.yml)
 
 Батч устроен асинхронно специально: GitHub Actions не должен часами ждать ответа,
 поэтому один запуск отправляет задание, а следующий забирает результат.
@@ -17,7 +18,8 @@ import argparse
 import logging
 import random
 import re
-from datetime import timedelta, timezone
+from collections.abc import Iterable
+from datetime import datetime, time, timedelta, timezone
 from itertools import islice
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
@@ -88,6 +90,9 @@ def save_post(
         "artist": (source or {}).get("artist", ""),
         "preview": lead.get("preview", ""),
         "track": lead.get("title", ""),
+        # По ним публикатор ставит свежий релиз вперёд очереди (publish.next_post).
+        "released_at": (source or {}).get("released_at") or "",
+        "score": (source or {}).get("score") or 0,
     }
     if rubric_key == "meme":
         # Надписи лежат отдельно от подписи: они рисуются поверх шаблона,
@@ -242,6 +247,59 @@ def store_checked(item: dict, artists: dict[str, dict]) -> bool:
     return True
 
 
+def release_key(item: dict) -> tuple[str, str]:
+    """Один релиз под названиями двух магазинов: «Arsenal - Single» у iTunes
+    и «Arsenal» у Deezer. Артист — тот, по кому находка нашлась: у старых строк
+    inbox без поля tracked в artist стоит он же."""
+    return collect._fold(item.get("tracked") or item.get("artist", "")), itunes._norm(item.get("title", ""))
+
+
+def used_fingerprints() -> set[str]:
+    """Сырьё, которое уже стало постом или вот-вот станет.
+
+    Пачка Batch API уходит в 03:40, а забирается в 07:40, и запуск urgent.yml
+    в 06:20 идёт между ними: без отпечатков из пачки compose --fresh написал бы
+    о тех же релизах второй пост.
+    """
+    jobs = state.read_json(BATCH_FILE, {}).get("jobs", [])
+    return set(state.read_json(USED_FILE, [])) | {(j.get("source") or {}).get("fingerprint") for j in jobs}
+
+
+def release_pools(inbox: Iterable[dict], used: set[str]) -> tuple[list[dict], list[dict]]:
+    """Релизы и клипы под посты, по убыванию веса: свежие для РЕЛИЗА и постарше для ВЕРДИКТА.
+
+    Предзаказ не берётся никуда: магазин отдаёт релиз за недели до выхода, а пост
+    скажет «вышел» — 11.09.2026 так ушёл вердикт на сингл J Dilla. Сравниваются
+    дни, а не часы: iTunes ставит выход на 07:00 UTC, и сингл, который магазин
+    уже отдал, иначе до утра считался бы будущим.
+
+    Свежий, не старше config.RELEASE_STALE_DAYS, идёт только в РЕЛИЗ: ВЕРДИКТ
+    вперёд очереди не встаёт, и свежесть там пропала бы. Не взяла ночная
+    квота — возьмёт ближайший compose --fresh. ВЕРДИКТУ возраст не помеха:
+    он и пишется так, чтобы работать через месяц (prompts/rubrics/verdict.md).
+
+    Дубль из второго магазина отсеивается и тогда, когда пост написан по первому:
+    inbox объявлен merge=union и не переписывается, поэтому сверяем при чтении.
+    """
+    now = state.now()
+    rows = list(inbox)
+    taken = {release_key(i) for i in rows if i["fingerprint"] in used}
+    fresh: list[dict] = []
+    older: list[dict] = []
+    for item in sorted(rows, key=lambda i: i.get("score", 0), reverse=True):
+        if item["kind"] not in ("release", "video") or item["fingerprint"] in used:
+            continue
+        released = state._parse(item.get("released_at") or "")
+        if released is None or released.date() > now.date() or release_key(item) in taken:
+            continue
+        taken.add(release_key(item))
+        if now - released <= timedelta(days=config.RELEASE_STALE_DAYS):
+            fresh.append(item)
+        else:
+            older.append(item)
+    return fresh, older
+
+
 def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     """Составляет задания: (custom_id, ключ рубрики, данные для модели, исходник).
 
@@ -252,7 +310,6 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
     lineage = state.read_json(config.LINEAGE_FILE, {"links": []})["links"]
 
-    candidates = [i for i in inbox if i["kind"] in ("release", "video")]
     news = [i for i in inbox if i["kind"] == "news"]
 
     jobs: list[tuple[str, str, dict, dict]] = []
@@ -273,20 +330,21 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     quota = {key: max(1, round(needed * w / total_weight)) for key, w in weights.items()}
 
     # Сверка подписи с магазином стоит запроса, поэтому ленивая: ровно столько
-    # находок, сколько возьмут РЕЛИЗ и ВЕРДИКТ.
+    # находок, сколько возьмёт рубрика.
     by_name = {a["name"]: a for a in artists}
-    wanted = quota.get("release", 0) + quota.get("verdict", 0)
-    releases = list(islice((i for i in candidates if store_checked(i, by_name)), wanted))
+    fresh, older = release_pools(state.read_jsonl(config.INBOX_FILE), used_fingerprints())
 
-    for item in releases[: quota.get("release", 0)]:
+    def checked(items: list[dict], limit: int) -> list[dict]:
+        return list(islice((i for i in items if store_checked(i, by_name)), limit))
+
+    for item in checked(fresh, quota.get("release", 0)):
         add("release", _release_payload(item), item)
 
     for item in news[: quota.get("news", 0)]:
         add("news", _news_payload(item), item)
 
-    # ВЕРДИКТ — берём свежие релизы, которые не ушли в рубрику РЕЛИЗ.
-    verdict_pool = releases[quota.get("release", 0) :]
-    for item in verdict_pool[: quota.get("verdict", 0)]:
+    # ВЕРДИКТ — релизы постарше: свежие ждут своего РЕЛИЗА (release_pools).
+    for item in checked(older, quota.get("verdict", 0)):
         payload = _release_payload(item)
         payload["stance"] = random.choice(["respect", "roast"])
         payload["subject"] = f"{item.get('artist', '')} — {item.get('title', '')}"
@@ -500,23 +558,57 @@ def do_now(count: int, jobs: list[tuple[str, str, dict, dict]] | None = None) ->
         return 0
 
     created, used, subtext_done = 0, [], []
-    for custom_id, rubric_key, payload, source in jobs:
-        result = generate_checked(rubric_key, payload)
-        if source.get("fingerprint"):
-            used.append(source["fingerprint"])
-        if result["skip"] or not result["text"]:
-            print(f"  — {rubric_key}: пропущено ({result.get('reason', '')})")
-            continue
-        path = save_post(rubric_key, result["text"], source, meme=result)
-        if source.get("subtext_index") is not None:
-            subtext_done.append(source["subtext_index"])
-        created += 1
-        print(f"  ✓ {rubric_key}: {path.name}")
-
-    mark_used(used)
-    mark_subtext_used(subtext_done)
+    # Отметки ставятся и при обрыве на середине: шаг compose --fresh в urgent.yml
+    # не срывает сохранение, и уже написанные посты уедут в git, а неотмеченное
+    # под ними сырьё следующий запуск написал бы второй раз.
+    try:
+        for custom_id, rubric_key, payload, source in jobs:
+            result = generate_checked(rubric_key, payload)
+            if source.get("fingerprint"):
+                used.append(source["fingerprint"])
+            if result["skip"] or not result["text"]:
+                print(f"  — {rubric_key}: пропущено ({result.get('reason', '')})")
+                continue
+            path = save_post(rubric_key, result["text"], source, meme=result)
+            if source.get("subtext_index") is not None:
+                subtext_done.append(source["subtext_index"])
+            created += 1
+            print(f"  ✓ {rubric_key}: {path.name}")
+    finally:
+        mark_used(used)
+        mark_subtext_used(subtext_done)
     print(f"\nСоздано постов: {created}. В очереди: {queue_size()}.")
     return 0
+
+
+def do_fresh(dry_run: bool) -> int:
+    """Посты о свежих релизах — сразу при находке, мимо ночной пачки.
+
+    Решение владельца от 11.09.2026: релиз, как и новость, ценен в день выхода,
+    а ночная пачка клала его в конец очереди, и «вышел альбом» выходил дней
+    через пять. Поэтому запуски urgent.yml после сбора пишут пост о каждом
+    свежем релизе, без квоты рубрики, а публикатор ставит его вперёд очереди
+    (publish.next_post). Лишнее в пятницу там же и протухнет — гадать заранее,
+    какой релиз не успеет, не по чему.
+
+    Без батча намеренно: его ответ ждать часами, а это и есть потерянная свежесть.
+    Путь тот же, что у --now, поэтому находки помечаются использованными,
+    и ночной compose второй раз о них не пишет. Полный трек просит отдельный
+    шаг, compose --ask-tracks: запрос трека живёт в одном месте.
+    """
+    artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
+    by_name = {a["name"]: a for a in artists}
+    fresh, _ = release_pools(state.read_jsonl(config.INBOX_FILE), used_fingerprints())
+    jobs = [("fresh", "release", _release_payload(i), i) for i in fresh if store_checked(i, by_name)]
+    if dry_run:
+        for _, _, payload, _ in jobs:
+            print(f"  РЕЛИЗ  {payload['artist']} — {payload['title']}  (выход {payload['released_at'][:10]})")
+        print(f"\nСвежих релизов к посту: {len(jobs)}. Модель не вызывалась.")
+        return 0
+    if not jobs:
+        print("Свежих релизов нет.")
+        return 0
+    return do_now(len(jobs), jobs)
 
 
 def _lead_from_url(url: str) -> dict:
@@ -759,6 +851,38 @@ def _selftest() -> int:
     assert store_checked({"kind": "release", "artist": "X", "tracked": "X"}, {})  # уже сверена сборщиком
 
     print("релиз: гости и сольники участников под чужим именем не проходят")
+
+    # Свежесть и дубли — на синтетическом inbox, без сети; пост пишется во временную папку.
+    import tempfile
+
+    now = state.now()
+    tonight = datetime.combine(now.date(), time(23, 59), tzinfo=timezone.utc)
+
+    def found(fingerprint: str, title: str, released: datetime, score: int = 95,
+              source: str = "itunes") -> dict:
+        return {"kind": "release", "fingerprint": fingerprint, "score": score, "source": source,
+                "artist": "Slipknot", "tracked": "Slipknot", "title": title,
+                "released_at": state.iso(released)}
+
+    inbox = [
+        found("preorder", "The Black Parade (Deluxe Edition)", now + timedelta(days=42)),
+        found("old", "In My Lifetime", now - timedelta(days=4)),
+        found("single", "Arsenal - Single", now - timedelta(days=1)),
+        found("twin", "Arsenal", now - timedelta(days=1, hours=7), source="deezer"),
+        # iTunes ставит выход на 07:00 UTC: сегодняшний сингл уже в магазине, он не будущий.
+        found("today", "OUTLAST - Single", tonight, score=100),
+    ]
+    fresh, older = release_pools(inbox, set())
+    assert [i["fingerprint"] for i in fresh] == ["today", "single"], fresh
+    assert [i["fingerprint"] for i in older] == ["old"], older  # предзаказа и дубля нет нигде
+    # Пост по «Arsenal - Single» уже написан — Deezer-двойник не вернётся следующей ночью.
+    assert [i["fingerprint"] for i in release_pools(inbox, {"single"})[0]] == ["today"]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        saved = state.read_json(save_post("release", "Текст.", inbox[2], folder=Path(tmp)), {})
+    assert (saved["released_at"], saved["score"]) == (inbox[2]["released_at"], 95), saved
+
+    print("релиз: предзаказ, протухший и дубль магазина в РЕЛИЗ не идут")
     return 0
 
 
@@ -793,7 +917,15 @@ def main() -> int:
         action="store_true",
         help="попросить у владельца полные треки к музыкальным постам очереди (каждый — один раз)",
     )
-    parser.add_argument("--selftest", action="store_true", help="проверить подпись кнопки и исполнителя релиза")
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="сразу написать посты о свежих релизах, без батча (с --dry-run — только показать)",
+    )
+    parser.add_argument(
+        "--selftest", action="store_true",
+        help="проверить подпись кнопки и исполнителя, свежесть и дубли релизов",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -807,6 +939,8 @@ def main() -> int:
         return do_ask_tracks()
     if args.backfill_music:
         return do_backfill_music()
+    if args.fresh:
+        return do_fresh(args.dry_run)
     if args.dry_run:
         return do_dry_run(needed or config.QUEUE_TARGET)
     if args.now:

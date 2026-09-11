@@ -26,10 +26,39 @@ from .sources import deezer, itunes
 log = logging.getLogger("publish")
 
 
-def next_post() -> Path | None:
-    """Самый ранний пост в очереди — порядок задаётся именем файла."""
-    posts = sorted(config.QUEUE.glob("*.json"))
-    return posts[0] if posts else None
+def next_post(dry_run: bool = False) -> Path | None:
+    """Следующий пост: свежий релиз, иначе самый ранний файл очереди.
+
+    Порядок задаёт имя файла, а релиз пишется в конец очереди — при двадцати
+    постах и четырёх слотах «вышел альбом» выходил дней через пять. Решение
+    владельца от 11.09.2026: релиз не старше config.RELEASE_FRESH_HOURS идёт
+    вперёд, в тех же слотах и без отдельных сообщений, из нескольких — самый
+    весомый по score сборщика. Полного трека не ждём: не прислан к слоту —
+    пост уходит с отрывком, свежесть важнее.
+
+    Релиз старше config.RELEASE_STALE_DAYS из очереди убирается: «вышел»
+    про релиз недельной давности врёт. Даты выхода нет (посты до 11.09.2026) —
+    считаем от created_at. Будущая дата вперёд не пускает: iTunes ставит выход
+    на 07:00 UTC, поэтому сравниваются дни, а не часы. Сухой прогон
+    ничего не удаляет, только пишет в лог.
+    """
+    now = state.now()
+    queue, fresh = [], []
+    for path in sorted(config.QUEUE.glob("*.json")):
+        post = state.read_json(path, {})
+        released = state._parse(post.get("released_at") or post.get("created_at") or "")
+        if post.get("rubric") == "release" and released is not None:
+            if now - released > timedelta(days=config.RELEASE_STALE_DAYS):
+                log.warning("Релиз протух, %s: %s", "убрал бы" if dry_run else "убран из очереди", path.name)
+                if not dry_run:
+                    path.unlink()
+                continue
+            if released.date() <= now.date() and now - released <= timedelta(hours=config.RELEASE_FRESH_HOURS):
+                fresh.append((-(post.get("score") or 0), path))
+        queue.append(path)
+    if fresh:
+        return min(fresh)[1]  # весомее — раньше, при равном весе — раньше написанный
+    return queue[0] if queue else None
 
 
 def due() -> bool:
@@ -333,6 +362,42 @@ def _selftest() -> None:
         assert listen(news, "Bones", "") == (news, []), line
     print("кнопки стримингов: все проверки прошли")
 
+    # Очередь во временной папке: свежий релиз вперёд по весу, протухший убирается,
+    # сухой прогон ничего не трогает.
+    import tempfile
+
+    now = state.now()
+
+    def ago(**delta: float) -> str:
+        return state.iso(now - timedelta(**delta))
+
+    real_queue = config.QUEUE
+    with tempfile.TemporaryDirectory() as tmp:
+        config.QUEUE = Path(tmp)
+        try:
+            for name, post in {
+                "1-meme.json": {"rubric": "meme", "created_at": ago(days=6)},
+                "2-release.json": {"rubric": "release", "released_at": ago(hours=10), "score": 80},
+                "3-release.json": {"rubric": "release", "released_at": ago(hours=5), "score": 95},
+                "4-release.json": {"rubric": "release", "released_at": ago(days=4), "score": 100},
+                "5-release.json": {"rubric": "release", "created_at": ago(hours=1)},  # пост до 11.09
+                "6-release.json": {"rubric": "release", "released_at": ago(hours=60), "score": 100},
+                "7-release.json": {"rubric": "release", "released_at": ago(days=-2), "score": 100},
+            }.items():
+                state.write_json(config.QUEUE / name, post)
+            assert next_post(dry_run=True).name == "3-release.json"
+            assert (config.QUEUE / "4-release.json").exists(), "сухой прогон удалил пост"
+            order = []
+            while path := next_post():
+                order.append(path.name)
+                path.unlink()
+            # 4 протух и убран; 6 уже не свежий, 7 ещё не вышел — оба в обычном порядке.
+            assert order == ["3-release.json", "2-release.json", "5-release.json",
+                             "1-meme.json", "6-release.json", "7-release.json"], order
+        finally:
+            config.QUEUE = real_queue
+    print("очередь: свежий релиз вперёд, протухший убран")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Публикация постов в Telegram")
@@ -384,7 +449,7 @@ def main() -> int:
         print(f"Отправлено на просмотр: {len(posts)} постов. Очередь не тронута.")
         return 0
 
-    path = next_post()
+    path = next_post(dry_run=args.dry_run)
     if path is None:
         print("Очередь пуста. Запусти генерацию: python -m src.compose --submit")
         return 0
