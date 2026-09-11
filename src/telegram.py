@@ -319,6 +319,7 @@ def send_audio(
     title: str = "",
     performer: str = "",
     cover_url: str = "",
+    buttons: list[list[dict]] | None = None,
 ) -> dict:
     """Отправляет отрывок трека с текстом поста в подписи.
 
@@ -360,6 +361,8 @@ def send_audio(
         payload["thumbnail"] = "attach://thumb"
         files["thumb"] = ("thumb.jpg", thumb, "image/jpeg")
 
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
     return _call("sendAudio", payload, files or None)
 
 

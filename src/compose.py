@@ -587,15 +587,29 @@ def do_ask_tracks() -> int:
             continue
 
         rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
-        sent = telegram.send_message(
-            admin,
+        text = (
             f"<b>Нужен полный трек</b> · {rubric.title if rubric else post.get('rubric', '')}\n"
             f"{post['artist']} — {post['track']}\n"
             f"<code>{path.name}</code>\n\n"
             "Ответь на это сообщение аудиофайлом — пост выйдет с полным треком "
-            "вместо 30-секундного отрывка. Где трек лежит — кнопками ниже.",
-            buttons=where_to_find(post),
+            "вместо 30-секундного отрывка. Где трек лежит — кнопками ниже."
         )
+        buttons = where_to_find(post)
+        sent = None
+        if post.get("preview"):
+            # Отрывок прямо в запросе: владелец слышит, что ищет, и не скачает
+            # одноимённый трек другого артиста или чужой ремикс. Ответ на аудио
+            # дежурство находит так же, как на текст, — по message_id.
+            try:
+                sent = telegram.send_audio(
+                    admin, post["preview"], text,
+                    title=post["track"], performer=post["artist"],
+                    cover_url=post.get("cover", ""), buttons=buttons,
+                )
+            except telegram.TelegramError as exc:
+                print(f"  отрывок не ушёл ({exc}) — запрос текстом")
+        if sent is None:
+            sent = telegram.send_message(admin, text, buttons=buttons)
         # Отметка пишется сразу после каждой отправки: оборвись запуск на середине,
         # уже спрошенное второй раз не спросится. По message_id дежурство
         # найдёт пост, когда придёт ответ.
