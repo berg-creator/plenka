@@ -102,8 +102,11 @@ def _parse(data: dict) -> dict:
             parsed = json.loads(text)
         except json.JSONDecodeError:
             continue
-        if isinstance(parsed, dict) and "text" in parsed:
+        # Опознаём ответ по skip, а не по text: у схемы ролика поля text нет,
+        # а лишние поля отдаём как есть — см. claude.parse_message.
+        if isinstance(parsed, dict) and "skip" in parsed:
             return {
+                **parsed,
                 "skip": bool(parsed.get("skip", False)),
                 "text": (parsed.get("text") or "").strip(),
                 "reason": (parsed.get("reason") or "").strip(),

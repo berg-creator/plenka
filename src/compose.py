@@ -342,7 +342,14 @@ def do_submit(needed: int) -> int:
         print("Нечего генерировать: inbox пуст. Сначала запусти сбор.")
         return 0
 
-    batch_id = llm.submit_batch([(cid, key, payload) for cid, key, payload, _ in jobs])
+    try:
+        batch_id = llm.submit_batch([(cid, key, payload) for cid, key, payload, _ in jobs])
+    except Exception as exc:
+        # Батч есть только у Клода. Раз он не принял пачку — пишем поштучно,
+        # там на каждом посте сработает запасной генератор.
+        log.warning("Батч не отправился (%s). Генерирую поштучно.", exc)
+        return do_now(len(jobs), jobs)
+
     state.write_json(
         BATCH_FILE,
         {
@@ -403,8 +410,10 @@ def do_fetch() -> int:
     return 0
 
 
-def do_now(count: int) -> int:
-    jobs = plan(count)
+def do_now(count: int, jobs: list[tuple[str, str, dict, dict]] | None = None) -> int:
+    # Готовые задания приходят, когда сюда свалились из сорвавшегося батча:
+    # план уже составлен, второй раз тасовать рубрики незачем.
+    jobs = plan(count) if jobs is None else jobs
     if not jobs:
         print("Нечего генерировать: inbox пуст.")
         return 0
