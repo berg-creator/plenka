@@ -329,6 +329,10 @@ def send_audio(
 
     Превью-картинку Telegram по ссылке не берёт вовсе, поэтому обложка идёт
     вторым файлом в том же запросе.
+
+    Не ссылка — значит file_id файла, который уже лежит у Telegram (полный трек
+    от владельца): он уходит строкой как есть, без загрузки. File_id документа
+    Telegram тоже принимает, но и в ленту кладёт документом, а не плеером.
     """
     payload = {
         "chat_id": chat_id,
@@ -347,7 +351,8 @@ def send_audio(
         files["audio"] = ("preview.m4a", clip, "audio/mp4")
         payload["duration"] = _seconds(clip)
     else:
-        # Не скачалось — пусть Telegram сходит сам: файлом, но хоть с музыкой.
+        # file_id уходит как есть. Ссылка, которая не скачалась, — тоже:
+        # пусть Telegram сходит сам, файлом, но хоть с музыкой.
         payload["audio"] = audio_url
 
     thumb = _thumbnail(cover_url) if cover_url else None

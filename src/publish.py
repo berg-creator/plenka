@@ -81,6 +81,18 @@ def send(post: dict, chat_id: str) -> None:
 
     cover = post.get("cover", "")
 
+    # Полный трек, присланный владельцем (src/moderate.py), важнее отрывка.
+    # Файл уже лежит у Telegram и уходит по file_id: качать нечего, а название
+    # и артиста при повторе Telegram берёт из самого файла — переданные поверх
+    # он игнорирует, проверено вживую.
+    full_track = post.get("full_track_file_id", "")
+    if full_track and len(text) <= telegram.MAX_CAPTION:
+        try:
+            telegram.send_audio(chat_id, full_track, text)
+            return
+        except telegram.TelegramError as exc:
+            log.warning("Полный трек не ушёл (%s), пробую отрывком", exc)
+
     # Музыка важнее картинки: канал про звук, и услышать его надо не уходя
     # из ленты. Обложка при этом не пропадает — идёт превью к отрывку.
     preview = post.get("preview", "")
@@ -227,7 +239,14 @@ def main() -> int:
         print(f"Обложка: {post.get('cover') or 'нет'}")
         # Отрывок меняет способ отправки, а не только вид поста, — в сухом
         # прогоне это видно должно быть сразу.
-        print(f"Отрывок: {post.get('preview') or 'нет'}\n")
+        print(f"Отрывок: {post.get('preview') or 'нет'}")
+        if post.get("full_track_file_id"):
+            full = "есть — уйдёт полным треком, а не отрывком"
+        elif post.get("track_request"):
+            full = f"запрошен у владельца {post['track_request'].get('sent_at', '')}, ответа нет"
+        else:
+            full = "нет"
+        print(f"Полный трек: {full}\n")
         print(post.get("text", ""))
         return 0
 

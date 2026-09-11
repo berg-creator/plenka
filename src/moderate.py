@@ -1,4 +1,4 @@
-"""Единственный поллер бота: нажатия кнопок модерации и запросы к сервису.
+"""Единственный поллер бота: кнопки модерации, запросы к сервису и полные треки от владельца.
 
 Постоянно работающего сервера у проекта нет, поэтому события не приходят
 мгновенно — их забирает по расписанию этот скрипт. Между нажатием кнопки
@@ -26,6 +26,7 @@ import logging
 import os
 import subprocess
 import time
+from pathlib import Path
 
 from . import comments, config, publish, service, state, telegram
 
@@ -79,6 +80,68 @@ def handle(action: str, post_id: str) -> str:
     return "Непонятная команда"
 
 
+def track_file(message: dict) -> dict:
+    """Аудио из сообщения: музыкой или файлом с аудио-типом — mp3 часто шлют документом."""
+    document = message.get("document") or {}
+    if str(document.get("mime_type", "")).startswith("audio/"):
+        return document
+    return message.get("audio") or {}
+
+
+def _post_by_request(message_id: int) -> Path | None:
+    """Пост, к которому ушёл запрос трека (compose.do_ask_tracks).
+
+    Смотрим и архив: ответ мог прийти, когда пост уже вышел, — и тогда владельцу
+    надо сказать это прямо, а не «не нашёл».
+    """
+    for folder in (config.QUEUE, config.ARCHIVE):
+        for path in folder.glob("*.json"):
+            request = state.read_json(path, {}).get("track_request") or {}
+            if request.get("message_id") == message_id:
+                return path
+    return None
+
+
+def attach_track(message: dict) -> str:
+    """Прикладывает к посту полный трек, присланный владельцем. Возвращает ответ ему.
+
+    Храним только file_id: репозиторий открытый, а Telegram отдаёт файл по нему
+    сколько угодно раз — класть сам трек рядом с постом незачем и нельзя.
+    """
+    path = _post_by_request(message["reply_to_message"]["message_id"])
+    if path is None:
+        return "Не нашёл пост под этот запрос — похоже, его удалили из очереди."
+
+    post = state.read_json(path, {})
+    name = f"«{post.get('artist', '')} — {post.get('track', '')}»"
+    if path.parent == config.ARCHIVE:
+        how = "с полным треком" if post.get("full_track_file_id") else "с отрывком"
+        return f"Пост {name} уже вышел — {how}. Этот файл к нему не приложить."
+
+    track = track_file(message)
+    post["full_track_file_id"] = track["file_id"]
+    for key in ("duration", "title", "performer"):
+        if track.get(key):
+            post[f"full_track_{key}"] = track[key]
+    state.write_json(path, post)
+
+    # В git сразу, а не через десять минут: публикатор живёт в другой группе
+    # и берёт пост из репозитория, а не с этого диска. Заодно подтягивается чужое:
+    # если пост тем временем ушёл в архив, ребейз уносит правку следом за файлом
+    # (переименование без изменений git узнаёт), и здесь это видно по его пропаже.
+    push_state()
+    if not path.exists():
+        return f"Не успел: пост {name} только что вышел с отрывком."
+
+    if "audio" not in message:
+        # sendAudio принимает file_id документа, но и в ленту кладёт документом.
+        return (
+            f"Принял: {name} выйдет с полным треком, но файлом-вложением, без плеера. "
+            "Чтобы играл прямо в ленте, пришли его музыкой (mp3 или m4a), а не файлом."
+        )
+    return f"Принял: {name} выйдет с полным треком."
+
+
 def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset: int) -> tuple:
     """Разбирает пачку событий. Возвращает (нажатий, разборов, новый offset).
 
@@ -106,6 +169,27 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     print(f"  пост в чате обсуждений: {message.get('message_id')}")
                 else:
                     comments.seed(message)
+                continue
+
+            # Полный трек в ответ на запрос (compose.do_ask_tracks). Разбирается
+            # до сервиса: это не просьба о разборе и лимит разборов не тратит.
+            if message.get("reply_to_message") and track_file(message):
+                # Прикладывать треки к постам может только владелец и только
+                # у себя в личке: message_id в разных чатах совпадают, и ответ
+                # из группы нашёл бы чужой пост. Чужой файл пропускаем молча.
+                if not str(admin) == str(message.get("from", {}).get("id")) == str(
+                    message.get("chat", {}).get("id")
+                ):
+                    continue
+                if args.dry_run:
+                    print(f"  трек в ответ на {message['reply_to_message'].get('message_id')}")
+                    continue
+                try:
+                    reply = attach_track(message)
+                    telegram.send_message(admin, reply)
+                    print(f"  трек: {reply}")
+                except Exception as exc:  # noqa: BLE001 — сбой приёма не роняет дежурство
+                    log.error("Трек не приложен: %s", exc)
                 continue
 
             if args.dry_run:
@@ -227,15 +311,18 @@ def push_state() -> None:
     if not os.environ.get("GITHUB_ACTIONS"):
         return
 
-    _push_repo(config.ROOT, "data/", "дежурство: разборы и состояние бота")
+    # content/ тоже: кнопки и присланные треки меняют посты, а публикатор
+    # по расписанию берёт их из git, а не с диска дежурства. Без этого удалённый
+    # кнопкой пост до конца смены оставался бы в очереди для публикатора.
+    _push_repo(config.ROOT, ["data/", "content/"], "дежурство: разборы и состояние бота")
 
     # Списки слежения живут в отдельном приватном репозитории — он с этим
     # никак не связан и отправляется своим коммитом.
     if config.PRIVATE.exists() and (config.PRIVATE / ".git").exists():
-        _push_repo(config.PRIVATE, ".", "слежение: списки обновлены")
+        _push_repo(config.PRIVATE, ["."], "слежение: списки обновлены")
 
 
-def _push_repo(cwd, paths: str, message: str) -> None:
+def _push_repo(cwd, paths: list[str], message: str) -> None:
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=cwd,
@@ -244,7 +331,7 @@ def _push_repo(cwd, paths: str, message: str) -> None:
     ).stdout.strip() or "main"
 
     commands = (
-        ["git", "add", paths],
+        ["git", "add", *paths],
         ["git", "commit", "-m", message],
         # Пока идёт смена, в ветку пишут и другие задачи — публикация, сбор.
         # Поэтому перед отправкой всегда подтягиваем чужое.
@@ -254,9 +341,13 @@ def _push_repo(cwd, paths: str, message: str) -> None:
     for command in commands:
         result = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
         if result.returncode != 0:
-            # Коммитить нечего — обычное дело, тишина в логе тут уместнее ошибки.
-            if command[1] != "commit":
-                log.warning("git %s: %s", command[1], result.stderr.strip()[:200])
+            # Коммитить нечего — обычное дело, и тишина в логе тут уместнее ошибки.
+            # Но чужое подтянуть всё равно надо: иначе дерево дежурства устаревает
+            # на всю смену, и ответ на присланный трек опирался бы на очередь
+            # многочасовой давности.
+            if command[1] == "commit":
+                continue
+            log.warning("git %s: %s", command[1], result.stderr.strip()[:200])
             return
 
 

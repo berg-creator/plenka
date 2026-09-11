@@ -474,6 +474,53 @@ def do_backfill_music() -> int:
     return 0
 
 
+def needs_track(post: dict) -> bool:
+    """Музыкальный пост без полного трека, про который владельца ещё не спрашивали."""
+    return bool(post.get("artist") and post.get("track")) and not (
+        post.get("full_track_file_id") or post.get("track_request")
+    )
+
+
+def do_ask_tracks() -> int:
+    """Просит владельца прислать полные треки к музыкальным постам очереди.
+
+    Отрывок в тридцать секунд — это витрина магазина, а не музыка. Искать
+    и скачивать треки сами мы не стали: легального источника нет, поэтому файл
+    присылает владелец — ответом на это сообщение, а принимает его src/moderate.py.
+
+    Отдельный шаг после генерации, а не вызов из save_post: один проход покрывает
+    и свежие посты, и лежавшие в очереди до появления запросов, а сорвавшийся
+    на Telegram запуск просто повторится завтра — пост к тому моменту уже в очереди.
+    Очередь расписана на неделю вперёд, так что на ответ есть дни, а не минуты.
+    """
+    admin = config.secret("TELEGRAM_ADMIN_ID")
+    asked = 0
+    for path in sorted(config.QUEUE.glob("*.json")):
+        post = state.read_json(path, {})
+        if not needs_track(post):
+            continue
+
+        rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
+        sent = telegram.send_message(
+            admin,
+            f"<b>Нужен полный трек</b> · {rubric.title if rubric else post.get('rubric', '')}\n"
+            f"{post['artist']} — {post['track']}\n"
+            f"<code>{path.name}</code>\n\n"
+            "Ответь на это сообщение аудиофайлом — пост выйдет с полным треком "
+            "вместо 30-секундного отрывка.",
+        )
+        # Отметка пишется сразу после каждой отправки: оборвись запуск на середине,
+        # уже спрошенное второй раз не спросится. По message_id дежурство
+        # найдёт пост, когда придёт ответ.
+        post["track_request"] = {"message_id": sent["message_id"], "sent_at": state.iso()}
+        state.write_json(path, post)
+        asked += 1
+        print(f"  ? {post['artist']} — {post['track']}  ({path.name})")
+
+    print(f"Запрошено полных треков: {asked}.")
+    return 0
+
+
 def _selftest() -> int:
     """Проверка подписи кнопки: молча уехавшая подпись врёт читателю,
     а заодно рушит последнюю строку поста. Запуск: python -m src.compose --selftest
@@ -527,6 +574,11 @@ def main() -> int:
         action="store_true",
         help="дописать отрывки к постам, которые уже в очереди",
     )
+    parser.add_argument(
+        "--ask-tracks",
+        action="store_true",
+        help="попросить у владельца полные треки к музыкальным постам очереди (каждый — один раз)",
+    )
     parser.add_argument("--selftest", action="store_true", help="проверить подпись кнопки")
     args = parser.parse_args()
 
@@ -537,6 +589,8 @@ def main() -> int:
 
     if args.selftest:
         return _selftest()
+    if args.ask_tracks:
+        return do_ask_tracks()
     if args.backfill_music:
         return do_backfill_music()
     if args.dry_run:
