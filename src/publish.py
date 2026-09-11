@@ -233,25 +233,33 @@ def send(post: dict, chat_id: str) -> None:
         and releases_today(loud=True) >= config.RELEASE_LOUD_PER_DAY
     )
 
-    # Обложка крупно, музыка следом. Фото и аудио в одно сообщение Telegram
-    # не кладёт, а у плеера обложка — иконка на палец. Решение владельца
-    # от 11.09.2026: текст и кнопки стримингов под фото, плеер — следующим
-    # сообщением, без подписи и без второго уведомления.
+    # Сверху плеер с кнопками стримингов, под ним обложка крупно с текстом.
+    # Фото и аудио в одно сообщение Telegram не кладёт, а у плеера обложка —
+    # иконка на палец. Кнопки у плеера, а не у фото, — решение владельца
+    # от 11.09.2026 («вариант А»): у поста канала с инлайн-клавиатурой Telegram
+    # не показывает комментарии (bugs.telegram.org/c/41803), и с кнопками
+    # на обложке пост с текстом остался бы без обсуждения. Плеер молчит:
+    # уведомление одно, о посте с текстом.
     if cover and len(text) <= telegram.MAX_CAPTION:
+        # Плеер не ушёл (нет ни трека, ни отрывка, ошибка) — кнопки едут на фото,
+        # иначе ссылки на стриминги пропали бы из поста.
+        played = send_music(post, chat_id, "", buttons, quiet=True)
+        keys = None if played else buttons
         try:
             # Рамка канала: рубрика сверху, подпись снизу. Не нарисовалась
             # (нет сети, битый файл) — обложка уходит как была.
             framed = card.cover(post)
             if framed:
-                telegram.send_photo_file(chat_id, framed, text, buttons=buttons, quiet=quiet)
+                telegram.send_photo_file(chat_id, framed, text, buttons=keys, quiet=quiet)
             else:
-                telegram.send_photo(chat_id, cover, text, buttons=buttons, quiet=quiet)
-        except telegram.TelegramError as exc:
-            # Обложка могла протухнуть — тогда текст уезжает вместе с музыкой.
-            log.warning("Фото не ушло (%s), пробую с музыкой", exc)
-        else:
-            send_music(post, chat_id, "", quiet=True)
+                telegram.send_photo(chat_id, cover, text, buttons=keys, quiet=quiet)
             return
+        except telegram.TelegramError as exc:
+            # Обложка могла протухнуть. Музыку второй раз не пробуем: она уже
+            # ушла или только что не смогла — текст уходит обычным сообщением.
+            log.warning("Фото не ушло (%s), текст уходит сообщением", exc)
+        telegram.send_message(chat_id, text, buttons=keys, quiet=quiet)
+        return
 
     if not send_music(post, chat_id, text, buttons, quiet=quiet):
         telegram.send_message(chat_id, text, buttons=buttons, quiet=quiet)
@@ -368,7 +376,8 @@ def _poll_payload(text: str) -> dict | None:
 
 def _selftest() -> None:
     """Кнопки стримингов: строка «Слушать» уходит, точная ссылка остаётся точной.
-    Пост с обложкой и музыкой — два сообщения: фото с текстом, следом тихий плеер.
+    Пост с обложкой и музыкой — два сообщения: сверху тихий плеер с кнопками,
+    под ним фото с текстом без кнопок; плеер не ушёл — кнопки на фото.
     Посты о релизах: свой выход, сутки на всё, окно на трек, звук у первых трёх
     за московские сутки и не в тихие часы, обычный пост уступает им слот.
 
@@ -377,13 +386,22 @@ def _selftest() -> None:
     import tempfile
 
     sent: list[tuple] = []
-    real = card.cover, telegram.send_photo, telegram.send_audio, state.now, config.QUEUE, config.POSTED_FILE
+    real = (card.cover, telegram.send_photo, telegram.send_audio, telegram.send_message, state.now,
+            config.QUEUE, config.POSTED_FILE)
     card.cover = lambda post: None
-    telegram.send_photo = lambda chat, url, caption, buttons=None, quiet=False: sent.append(
-        ("фото", caption, quiet)
-    )
+
+    # Запись: что ушло, подпись, без звука ли, есть ли кнопки.
+    def photo(chat, url, caption, buttons=None, quiet=False):
+        if "протухла" in url:
+            raise telegram.TelegramError("обложка протухла")
+        sent.append(("фото", caption, quiet, bool(buttons)))
+
+    telegram.send_photo = photo
     telegram.send_audio = lambda chat, audio, caption, buttons=None, quiet=False, **_: sent.append(
-        ("плеер", caption, quiet)
+        ("плеер", caption, quiet, bool(buttons))
+    )
+    telegram.send_message = lambda chat, text, buttons=None, quiet=False, **_: sent.append(
+        ("текст", text, quiet, bool(buttons))
     )
     # Часы стоят на 15:00 UTC, то есть 18:00 по Москве: счёт за сутки не зависит
     # от времени прогона. Очередь и журнал публикаций — во временной папке.
@@ -399,13 +417,23 @@ def _selftest() -> None:
         state.write_json(config.POSTED_FILE, {"items": [{"rubric": r, "published_at": t} for r, t in items]})
 
     try:
-        post = {"text": "Текст.", "cover": "https://x/c.jpg", "full_track_file_id": "ID"}
+        # Ссылка не из магазина: название релиза берётся из поста, без сети.
+        post = {"text": 'Текст.\n\n▸ <a href="https://x/r">Слушать</a>', "artist": "Bones",
+                "cover": "https://x/c.jpg", "full_track_file_id": "ID"}
         send(post, "0")
-        assert sent == [("фото", "Текст.", False), ("плеер", "", True)], sent
+        assert sent == [("плеер", "", True, True), ("фото", "Текст.", False, False)], sent
+        sent.clear()
+        # Плеер не ушёл — кнопки на фото, иначе ссылки на стриминги пропали бы.
+        send({**post, "full_track_file_id": ""}, "0")
+        assert sent == [("фото", "Текст.", False, True)], sent
+        sent.clear()
+        # Плеер ушёл, фото нет — текст обычным сообщением, кнопки остались у плеера.
+        send({**post, "cover": "https://x/протухла.jpg"}, "0")
+        assert sent == [("плеер", "", True, True), ("текст", "Текст.", False, False)], sent
         sent.clear()
         # Без обложки текст едет с плеером, и уведомление у него обычное.
         send({**post, "cover": ""}, "0")
-        assert sent == [("плеер", "Текст.", False)], sent
+        assert sent == [("плеер", "Текст.", False, True)], sent
 
         # Четвёртый пост о релизе за московские сутки — молча, и фото, и плеер.
         # Вчерашний по Москве (22:00 МСК 10.09) в счёт не идёт.
@@ -413,23 +441,23 @@ def _selftest() -> None:
         posted(("release", ago(hours=20)), ("release", ago(hours=3)), ("verdict", ago(hours=2)))
         sent.clear()
         send(release, "0")
-        assert sent == [("фото", "Текст.", False), ("плеер", "", True)], sent
+        assert sent == [("плеер", "", True, True), ("фото", "Текст.", False, False)], sent
         posted(("release", ago(hours=3)), ("verdict", ago(hours=2)), ("release", ago(hours=1)))
         sent.clear()
         send(release, "0")
-        assert sent == [("фото", "Текст.", True), ("плеер", "", True)], sent
+        assert sent == [("плеер", "", True, True), ("фото", "Текст.", True, False)], sent
 
         # Тихие часы: ночные выходы (01:00–03:00 МСК) в счёт трёх со звуком не идут,
         # а в 00:30 по Москве молчит любой пост.
         posted(*[("release", ago(hours=h)) for h in (17, 16, 15)])
         sent.clear()
         send(release, "0")
-        assert sent == [("фото", "Текст.", False), ("плеер", "", True)], sent
+        assert sent == [("плеер", "", True, True), ("фото", "Текст.", False, False)], sent
         state.now = lambda: datetime(2026, 9, 11, 21, 30, tzinfo=timezone.utc)
         sent.clear()
         send(post, "0")
         state.now = lambda: now
-        assert sent == [("фото", "Текст.", True), ("плеер", "", True)], sent
+        assert sent == [("плеер", "", True, True), ("фото", "Текст.", True, False)], sent
 
         # Обычный пост уступает слот свежему релизу; сутки с четырьмя релизами
         # отданы им целиком, но годовщина ждать не может.
@@ -472,7 +500,8 @@ def _selftest() -> None:
         ]
         print("выходы релизов: сутки, окно на трек, звук у трёх, обычный слот уступает")
     finally:
-        card.cover, telegram.send_photo, telegram.send_audio, state.now, config.QUEUE, config.POSTED_FILE = real
+        (card.cover, telegram.send_photo, telegram.send_audio, telegram.send_message, state.now,
+         config.QUEUE, config.POSTED_FILE) = real
         tmp.cleanup()
 
     apple = "https://music.apple.com/us/album/fuel-the-fire-single/6802784931?uo=4"
@@ -579,7 +608,7 @@ def main() -> int:
             full = "нет"
         print(f"Полный трек: {full}")
         if post.get("cover") and (post.get("full_track_file_id") or post.get("preview")):
-            print("Вид: обложка в рамке с текстом и кнопками, следом плеер без уведомления")
+            print("Вид: сверху плеер с кнопками без уведомления, под ним обложка в рамке с текстом")
         print()
         if post.get("rubric") == "meme":
             print(f"Картинка: {post.get('picture') or 'нет — уйдёт текстом'}")

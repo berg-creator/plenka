@@ -305,7 +305,9 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
         if message:
             # Пост, пересланный Telegram в чат обсуждений, — повод открыть ветку
             # комментариев первым. Под прослушкой первой идёт сама викторина
-            # (src/quiz.py), вопрос там лишний. Это не запрос к сервису, дальше не идём.
+            # (src/quiz.py), вопрос там лишний. У поста о релизе вопрос встаёт
+            # под обложкой, а не под плеером над ней (comments.seed).
+            # Это не запрос к сервису, дальше не идём.
             if comments.is_channel_post(
                 message, config.secret("TELEGRAM_CHANNEL_ID", required=False)
             ):
@@ -587,7 +589,8 @@ def once(dry_run: bool) -> int:
 
 
 def _selftest() -> int:
-    """Приём трека без сети: что считается треком, от кого и какого размера.
+    """Без сети: что считается треком, от кого и какого размера; под какой
+    пересылкой поста в чат обсуждений встаёт первый комментарий.
 
     Запуск: python -m src.moderate --selftest
     """
@@ -631,6 +634,35 @@ def _selftest() -> int:
     big = reply(1, document={"file_id": "b", "mime_type": "audio/flac", "file_size": 21 * 2**20})
     assert "больше 20 МБ" in attach_track(big, "1")
     print("приём трека: все проверки прошли")
+
+    # Пересылки поста канала в чат обсуждений. У поста о релизе их две: плеер
+    # без подписи и обложка с текстом — первый комментарий встаёт только под
+    # обложкой. Под отрывком прослушки — викторина, а не вопрос.
+    from unittest import mock
+
+    def forward(message_id: int, **body) -> dict:
+        return {"update_id": message_id, "message": {
+            "message_id": message_id, "chat": {"id": -1002}, "is_automatic_forward": True,
+            "sender_chat": {"id": -1001, "type": "channel"}, **body,
+        }}
+
+    said, riddles = [], []
+
+    def comment(chat, text, reply_to=None, **_):
+        said.append(reply_to)
+
+    with (
+        mock.patch.dict(os.environ, {"TELEGRAM_CHANNEL_ID": "-1001"}),
+        mock.patch.object(telegram, "send_message", comment),
+        mock.patch.object(quiz, "attach", lambda message: riddles.append(message["message_id"])),
+    ):
+        process([
+            forward(10, audio={"file_id": "a"}),
+            forward(11, photo=[{"file_id": "p"}], caption="SMOKY MO ВЫПУСТИЛ СИНГЛ"),
+            forward(12, audio={"file_id": "r"}, caption="СЛЕПАЯ ПРОСЛУШКА\n\n30 секунд трека"),
+        ], {}, "1", False, 0)
+    assert said == [11] and riddles == [12], (said, riddles)
+    print("первый комментарий: под обложкой, не под плеером; прослушка — викториной")
     return 0
 
 
@@ -643,7 +675,7 @@ def main() -> int:
         metavar="МИНУТ",
         help="дежурить указанное время, отвечая сразу",
     )
-    parser.add_argument("--selftest", action="store_true", help="проверить приём трека без сети")
+    parser.add_argument("--selftest", action="store_true", help="проверить приём трека и первый комментарий без сети")
     args = parser.parse_args()
 
     if args.selftest:
