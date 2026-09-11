@@ -6,17 +6,22 @@
 канала, а не отдельной поделкой.
 
     python -m src.card --preview    нарисовать пробную карточку
+    python -m src.card --meme-preview generated.json --out /tmp/memes
+                                    мемы из ответов модели или постов очереди
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import textwrap
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from . import config, stories
 
@@ -177,11 +182,195 @@ def save(
     return path
 
 
+# ─────────────────────────── мем ───────────────────────────
+
+# Надпись на меме — обычный гротеск нормального начертания, как в мемах
+# из чатов и тиктока: жирные капсы Impact читаются как мем десятого года.
+# Здесь привычный «телефонный» рисунок Arial нужен намеренно — по нему мем
+# и узнают, — поэтому не Golos Text кадра, а Arimo: свободный близнец Arial
+# с кириллицей. Лежит в репозитории рядом со шрифтами кадра (stories.FONTS):
+# системный Arial есть на macOS, а на раннере Actions его нет.
+MEME_FONT = stories.FONTS / "Arimo-Regular.ttf"
+
+
+@lru_cache(maxsize=16)
+def _meme_font(size: int) -> ImageFont.FreeTypeFont:
+    """Кешируется: надпись перебирает кегли, и читать файл каждый раз незачем."""
+    return ImageFont.truetype(str(MEME_FONT), size)
+
+
+# Кегль и сколько строк на нём можно: одна строка лучше двух, пока кегль
+# не мельчает, две — лучше мелкой одной.
+MEME_SIZES = ((80, 1), (72, 1), (64, 1), (58, 1), (64, 2), (58, 2), (52, 2))
+MEME_PAD = int(WIDTH * 0.045)
+MEME_MARK = "ПЛЁНКА @plenka_fm"
+MEME_MARK_SIZE = 30
+
+# Эмодзи в Arimo нет, и на их месте рисуются пустые квадраты.
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U00002B00-\U00002BFF\U0000FE0F\U0000200D]")
+
+
+def _wrap(draw: ImageDraw.ImageDraw, text: str, f, width: float) -> list[str]:
+    """Перенос по ширине в пикселях: textwrap считает буквы, а «Ш» втрое
+    шире «і», и подбор по буквам то не добивает строку, то выносит за край."""
+    lines: list[str] = []
+    for paragraph in text.split("\n"):
+        line = ""
+        for word in paragraph.split():
+            if line and draw.textlength(f"{line} {word}", font=f) > width:
+                lines.append(line)
+                line = word
+            else:
+                line = f"{line} {word}".strip()
+        if line:
+            lines.append(line)
+    return lines
+
+
+def _meme_block(draw: ImageDraw.ImageDraw, text: str):
+    """Строки, шрифт и кегль одной надписи под ширину картинки."""
+    text = _EMOJI.sub("", stories.strip_html(text or "")).strip()
+    if not text:
+        return [], None, 0
+    for size, max_lines in MEME_SIZES:
+        f = _meme_font(size)
+        lines = _wrap(draw, text, f, WIDTH - 2 * MEME_PAD)
+        if len(lines) <= max_lines:
+            break
+    if len(lines) == 2:
+        # Делим поровну: слово, висящее на второй строке в одиночку, читается
+        # как ошибка вёрстки. Шире жадного переноса не выйдет — его разбиение
+        # тоже среди вариантов.
+        words = text.split()
+        cut = min(
+            range(1, len(words)),
+            key=lambda i: max(
+                draw.textlength(" ".join(words[:i]), font=f),
+                draw.textlength(" ".join(words[i:]), font=f),
+            ),
+        )
+        lines = [" ".join(words[:cut]), " ".join(words[cut:])]
+    return lines, f, size
+
+
+def render_meme(top: str, bottom: str, picture: str) -> Image.Image | None:
+    """Мем: шаблон из каталога, надпись прямо на нём, водяной знак в углу.
+
+    Вид взят у мемов, которые пересылают в чатах: белый обычный гротеск
+    по центру, сверху подводка, снизу поворот. Под картинкой идёт подпись
+    канала — отдельная реплика, её отправляет publish.send.
+
+    Отвергнуты два вида: шутка на белой плашке над шаблоном и чистый шаблон
+    с белой полосой под ним. Белое поле читается как рамка чужого сайта
+    и обрезается при пересылке, поэтому знак канала стоит на самой
+    картинке: полупрозрачный, в нижнем углу, под нижней надписью — так
+    они не пересекаются при любой длине строки.
+
+    Нет шаблона — None, и мем уходит текстом.
+    """
+    source = config.MEME_TEMPLATES / f"{picture}.jpg"
+    if not picture or not source.exists():
+        return None
+    img = Image.open(source).convert("RGB")
+    img = img.resize((WIDTH, round(img.height * WIDTH / img.width)), Image.LANCZOS)
+    draw = ImageDraw.Draw(img)
+
+    placed = []  # (y, строка, шрифт, кегль)
+    lines, f, size = _meme_block(draw, top)
+    for i, line in enumerate(lines):
+        placed.append((MEME_PAD + i * size * 1.15, line, f, size))
+    lines, f, size = _meme_block(draw, bottom)
+    start = img.height - MEME_PAD - MEME_MARK_SIZE * 1.6 - len(lines) * size * 1.15
+    for i, line in enumerate(lines):
+        placed.append((start + i * size * 1.15, line, f, size))
+
+    # Под буквами мягкая тень: тонкая обводка на светлом фоне теряется,
+    # а толстая превращает надпись в тот самый Impact.
+    shadow = Image.new("L", img.size, 0)
+    shade = ImageDraw.Draw(shadow)
+    for y, line, f, size in placed:
+        shade.text((WIDTH / 2, y), line, font=f, fill=150, anchor="ma", stroke_width=size // 9)
+    img.paste((0, 0, 0), (0, 0, *img.size), shadow.filter(ImageFilter.GaussianBlur(6)))
+
+    draw = ImageDraw.Draw(img)
+    for y, line, f, size in placed:
+        draw.text(
+            (WIDTH / 2, y), line, font=f, fill=(255, 255, 255), anchor="ma",
+            stroke_width=max(2, size // 26), stroke_fill=(0, 0, 0),
+        )
+
+    # Знак полупрозрачный: пересланная картинка несёт адрес канала,
+    # но не превращается в рекламу.
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text(
+        (WIDTH - MEME_PAD, img.height - MEME_PAD), MEME_MARK,
+        font=_meme_font(MEME_MARK_SIZE), fill=(255, 255, 255, 170),
+        anchor="rd", stroke_width=2, stroke_fill=(0, 0, 0, 110),
+    )
+    return Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+
+
+def meme_text(meme: dict) -> str:
+    """Мем одним текстом: надписи с картинки и подпись под ней.
+
+    Так мем уходит, когда картинки нет (ВКонтакте, сбой отрисовки), и так его
+    проверяет quality — по всему, что увидит читатель.
+    """
+    on_picture = "\n".join(
+        s.strip() for s in (meme.get("top"), meme.get("bottom")) if isinstance(s, str) and s.strip()
+    )
+    return "\n\n".join(p for p in (on_picture, (meme.get("text") or "").strip()) if p)
+
+
+def meme(post: dict) -> Path | None:
+    """Картинка мема для ленты. None — шаблона нет или он не открылся."""
+    try:
+        img = render_meme(post.get("top", ""), post.get("bottom", ""), post.get("picture", ""))
+    except OSError:  # битый шаблон не должен ронять публикацию
+        return None
+    if img is None:
+        return None
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = OUT_DIR / "meme.jpg"
+    img.save(path, "JPEG", quality=90)
+    return path
+
+
+def meme_preview(paths: list[Path], out: Path) -> int:
+    """Мемы из файлов — посмотреть глазами до публикации. Файл — пост очереди
+    или список ответов модели: поля у них одни и те же."""
+    out.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for path in paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for item in data if isinstance(data, list) else [data]:
+            image = render_meme(item.get("top", ""), item.get("bottom", ""), item.get("picture", ""))
+            if image is None:
+                print(f"— нет шаблона «{item.get('picture', '')}»")
+                continue
+            count += 1
+            target = out / f"meme-{count}-{item['picture']}.jpg"
+            image.save(target, "JPEG", quality=90)
+            print(f"{target}\n  подпись: {item.get('text', '')}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Карточка разбора вкуса")
     parser.add_argument("--verdict", default="ты слушаешь Мемфис через три пересадки и не знал")
     parser.add_argument("--artists", default="Bones, Sematary, Slipknot, Bladee, PHARAOH")
+    parser.add_argument(
+        "--meme-preview",
+        nargs="+",
+        type=Path,
+        metavar="JSON",
+        help="нарисовать мемы из файлов: пост очереди или список ответов модели",
+    )
+    parser.add_argument("--out", type=Path, default=OUT_DIR, help="куда класть картинки мемов")
     args = parser.parse_args()
+
+    if args.meme_preview:
+        return meme_preview(args.meme_preview, args.out)
 
     path = save(args.verdict, [a.strip() for a in args.artists.split(",") if a.strip()])
     print(f"Карточка готова: {path.relative_to(config.ROOT)}")

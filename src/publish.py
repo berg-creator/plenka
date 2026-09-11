@@ -18,7 +18,7 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
-from . import config, state, telegram
+from . import card, config, state, telegram
 
 log = logging.getLogger("publish")
 
@@ -78,6 +78,19 @@ def send(post: dict, chat_id: str) -> None:
             )
             return
         log.warning("Опрос не разобран — отправляю как обычный текст")
+
+    # Мем — картинка с надписью на ней, а под фото подпись канала: это вторая
+    # реплика, а не повтор надписи (card.render_meme). Нет картинки или
+    # не нарисовалась — мем уходит текстом целиком, надписи вместе с подписью.
+    if rubric == "meme":
+        image = card.meme(post)
+        if image:
+            try:
+                telegram.send_photo_file(chat_id, image, text)
+                return
+            except telegram.TelegramError as exc:
+                log.warning("Мем с картинкой не ушёл (%s), отправляю текстом", exc)
+        text = card.meme_text(post)
 
     cover = post.get("cover", "")
 
@@ -140,8 +153,11 @@ def crosspost_vk(post: dict) -> None:
     if post.get("rubric") == "poll":
         return
 
+    # Мем сюда уходит текстом, надписи и подпись подряд: vk.post картинку
+    # с диска не берёт, только ссылку, а мемная нарисована у нас.
+    text = card.meme_text(post) if post.get("rubric") == "meme" else post.get("text", "")
     try:
-        post_id = vk.post(post.get("text", ""), photo_url=post.get("cover", ""))
+        post_id = vk.post(text, photo_url=post.get("cover", ""))
         log.info("Продублировано во ВКонтакте, запись %s", post_id)
     except Exception as exc:
         log.warning("ВКонтакте не принял пост: %s", exc)
@@ -247,6 +263,9 @@ def main() -> int:
         else:
             full = "нет"
         print(f"Полный трек: {full}\n")
+        if post.get("rubric") == "meme":
+            print(f"Картинка: {post.get('picture') or 'нет — уйдёт текстом'}")
+            print(f"Сверху: {post.get('top', '')}\nСнизу: {post.get('bottom', '')}\n")
         print(post.get("text", ""))
         return 0
 

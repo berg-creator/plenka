@@ -75,7 +75,8 @@ def parse_message(message: Any) -> dict:
                 continue
             # Признак ответа по схеме — skip: он есть у всех схем, а text
             # только у постов. Остальные поля отдаются как пришли: у ролика
-            # это строки раскадровки (llm.CLIP_SCHEMA), и терять их нельзя.
+            # это строки раскадровки (llm.CLIP_SCHEMA), у мема — надписи
+            # на картинке и ключ шаблона (llm.MEME_SCHEMA), терять их нельзя.
             if isinstance(data, dict) and "skip" in data:
                 return {
                     **data,

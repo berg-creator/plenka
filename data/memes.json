@@ -1,0 +1,287 @@
+{
+  "note": "Каталог мемных картинок рубрики МЕМ. Модель выбирает картинку по полю when (src/compose.py передаёт ей key и when) и пишет надпись поверх неё, картинка лежит в assets/meme/templates/<key>.jpg. Каталог — смесь: узнаваемые реакции для шуток про общее чувство и странные картинки — нелепые 3D-персонажи, звери с человеческим лицом — для будничного абсурда. Берутся только настоящие мем-картинки с одной сценой и без встроенного текста; сгенерированные нейросетью не добавляются никогда (правило «Лицо канала» в CLAUDE.md). Политики и смерти здесь нет по тем же границам, что и в prompts/rubrics/meme.md. Новый шаблон: файл до 1080 px по длинной стороне в JPEG, запись с key, name, when одной строкой и source — откуда взят.",
+  "memes": [
+    {
+      "key": "harold",
+      "name": "Гарольд, скрывающий боль",
+      "when": "улыбаешься и терпишь, хотя всё плохо; делаешь вид, что тебя это устраивает",
+      "source": "https://i.imgflip.com/gk5el.jpg"
+    },
+    {
+      "key": "disaster-girl",
+      "name": "Девочка на фоне пожара",
+      "when": "злорадство: устроил хаос или наблюдаешь чужой провал и доволен",
+      "source": "https://i.imgflip.com/23ls.jpg"
+    },
+    {
+      "key": "surprised-pikachu",
+      "name": "Удивлённый Пикачу",
+      "when": "искреннее удивление последствиям, которые были абсолютно предсказуемы",
+      "source": "https://i.imgflip.com/2kbn1e.jpg"
+    },
+    {
+      "key": "absolute-cinema",
+      "name": "Скорсезе: Absolute Cinema",
+      "when": "торжественный восторг, шедевр; преувеличенная похвала ерунде",
+      "source": "https://i.imgflip.com/8d317n.png"
+    },
+    {
+      "key": "megamind-peeking",
+      "name": "Грустный Мегамозг исподлобья",
+      "when": "тихое разочарование: ждал чего-то, а этого нет и не будет",
+      "source": "https://i.imgflip.com/64sz4u.png"
+    },
+    {
+      "key": "this-is-fine",
+      "name": "Собака в горящей комнате",
+      "when": "всё рушится, а ты сидишь спокойно и делаешь вид, что так и надо",
+      "source": "https://i.imgflip.com/wxica.jpg"
+    },
+    {
+      "key": "monkey-puppet",
+      "name": "Обезьянка косится в сторону",
+      "when": "неловкость: заметил что-то стыдное и делаешь вид, что не заметил",
+      "source": "https://i.imgflip.com/2gnnjh.jpg"
+    },
+    {
+      "key": "laughing-leo",
+      "name": "Смеющийся Ди Каприо",
+      "when": "смех над нелепостью или чужим провалом, «ну ты даёшь»",
+      "source": "https://i.imgflip.com/4acd7j.png"
+    },
+    {
+      "key": "leo-cheers",
+      "name": "Ди Каприо поднимает бокал",
+      "when": "поздравление и признание: «за тех, кто понял», респект своим",
+      "source": "https://i.imgflip.com/39t1o.jpg"
+    },
+    {
+      "key": "sad-pablo",
+      "name": "Пабло Эскобар ждёт в одиночестве",
+      "when": "одиночество и скука: все ушли, никто не пришёл, заняться нечем",
+      "source": "https://i.imgflip.com/1c1uej.jpg"
+    },
+    {
+      "key": "waiting-skeleton",
+      "name": "Скелет на скамейке",
+      "when": "ждёшь так долго, что успел истлеть: релиз, снипет, альбом годами",
+      "source": "https://i.imgflip.com/2fm6x.jpg"
+    },
+    {
+      "key": "zhdun",
+      "name": "Ждун",
+      "when": "терпеливое смиренное ожидание того, что зависит не от тебя",
+      "source": "https://i.imgflip.com/1ig6x8.jpg"
+    },
+    {
+      "key": "charlie-conspiracy",
+      "name": "Чарли у стены с нитками",
+      "when": "одержимость и теория заговора: всё связано, притянутые за уши связи",
+      "source": "https://i.imgflip.com/1itoun.jpg"
+    },
+    {
+      "key": "scientist",
+      "name": "Дефо: я в каком-то смысле учёный",
+      "when": "дилетант самодовольно считает себя экспертом",
+      "source": "https://i.imgflip.com/27qxmb.jpg"
+    },
+    {
+      "key": "spiderman-pointing",
+      "name": "Два Человека-паука показывают друг на друга",
+      "when": "двое одинаковых обвиняют друг друга в одном и том же",
+      "source": "https://i.imgflip.com/1tkjq9.jpg"
+    },
+    {
+      "key": "squidward-window",
+      "name": "Сквидвард смотрит в окно",
+      "when": "все веселятся без тебя, а ты смотришь со стороны и завидуешь",
+      "source": "https://i.imgflip.com/145qvv.jpg"
+    },
+    {
+      "key": "gigachad",
+      "name": "Гигачад",
+      "when": "невозмутимо признаёшь то, за что принято стыдить: «да, и что»",
+      "source": "https://i.imgflip.com/3bdd27.jpg"
+    },
+    {
+      "key": "confused-travolta",
+      "name": "Растерянный Траволта",
+      "when": "растерянность: не понимаешь, куда смотреть и с чего начать",
+      "source": "https://i.imgflip.com/vqo9n.jpg"
+    },
+    {
+      "key": "sad-affleck",
+      "name": "Грустный Бен Аффлек",
+      "when": "усталая тихая грусть, когда жаловаться уже бессмысленно",
+      "source": "https://i.imgflip.com/11hja4.jpg"
+    },
+    {
+      "key": "skeptical-cat",
+      "name": "Недоверчивый белый кот",
+      "when": "недоверие и брезгливое «ну-ну» в ответ на громкое заявление",
+      "source": "https://i.imgflip.com/4n7utp.jpg"
+    },
+    {
+      "key": "crying-cat",
+      "name": "Плачущий кот",
+      "when": "горе и жалость к себе, почти всерьёз",
+      "source": "https://i.imgflip.com/2ecgnm.jpg"
+    },
+    {
+      "key": "bateman-music",
+      "name": "Патрик Бейтман рассуждает о музыке",
+      "when": "сноб с жаром читает лекцию о музыке, которую никто не просил",
+      "source": "https://i.imgflip.com/5j2g95.png"
+    },
+    {
+      "key": "smug-bateman",
+      "name": "Ухмыляющийся Бейтман",
+      "when": "молчаливое превосходство: знаешь больше и не скрываешь ухмылку",
+      "source": "https://i.imgflip.com/aobzb.jpg"
+    },
+    {
+      "key": "gosling-drive",
+      "name": "Райан Гослинг из «Драйва»",
+      "when": "«это буквально я»: пафосно узнаёшь себя в одиноком герое",
+      "source": "https://i.imgflip.com/7tiiyc.jpg"
+    },
+    {
+      "key": "cursed-cat",
+      "name": "Чёрный кот выгнулся боком на дороге",
+      "when": "нелепая боевая готовность: морально готов, но выглядишь странно",
+      "source": "https://i.imgflip.com/2wkxyf.png"
+    },
+    {
+      "key": "minecraft-chicken",
+      "name": "Курица из Minecraft",
+      "when": "абсурдная констатация, сказанная с каменным лицом",
+      "source": "https://i.imgflip.com/380jfz.png"
+    },
+    {
+      "key": "villager",
+      "name": "Житель из Minecraft смотрит вверх",
+      "when": "молча смотришь на происходящее, ничего не понимаешь, но терпишь",
+      "source": "https://i.imgflip.com/33vjae.jpg"
+    },
+    {
+      "key": "maxwell",
+      "name": "Трёхмерный кот Максвелл",
+      "when": "невозмутимое присутствие: ничего не делаешь, и в этом весь смысл",
+      "source": "https://i.imgflip.com/7740hi.jpg"
+    },
+    {
+      "key": "bingus",
+      "name": "Лысый кот Бингус",
+      "when": "беззащитная нелепость, неловкая правда о себе",
+      "source": "https://i.imgflip.com/4p6c9o.png"
+    },
+    {
+      "key": "polite-cat",
+      "name": "Вежливый кот с поджатыми губами",
+      "when": "вежливо терпишь то, что категорически не нравится",
+      "source": "https://i.imgflip.com/2dq3nf.jpg"
+    },
+    {
+      "key": "tongue-cat",
+      "name": "Кот с высунутым языком",
+      "when": "в голове пусто: мысль закончилась, не успев начаться",
+      "source": "https://i.imgflip.com/4yi479.jpg"
+    },
+    {
+      "key": "capybara",
+      "name": "Невозмутимая капибара",
+      "when": "полное спокойствие посреди хаоса, всё равно",
+      "source": "https://i.imgflip.com/1ryq4n.jpg"
+    },
+    {
+      "key": "suspicious-dog",
+      "name": "Подозрительный хаски косится",
+      "when": "что-то тут нечисто, не веришь ни слову",
+      "source": "https://i.imgflip.com/1otdce.jpg"
+    },
+    {
+      "key": "hamster-carrot",
+      "name": "Хомяк ест морковку целиком",
+      "when": "жадно поглощаешь то, что тебе явно не по размеру",
+      "source": "https://i.imgflip.com/1s22sq.jpg"
+    },
+    {
+      "key": "sad-hamster",
+      "name": "Грустный хомяк со слезами",
+      "when": "маленькая, но искренняя трагедия",
+      "source": "https://i.imgflip.com/aa3fdj.jpg"
+    },
+    {
+      "key": "proboscis-monkey",
+      "name": "Носач",
+      "when": "самодовольный знаток с лицом, которое говорит само за себя",
+      "source": "https://i.imgflip.com/293qko.jpg"
+    },
+    {
+      "key": "trash-possum",
+      "name": "Опоссум в мусорном баке",
+      "when": "устроился на помойке и вполне доволен жизнью",
+      "source": "https://i.imgflip.com/1uyf6o.jpg"
+    },
+    {
+      "key": "stuck-raccoon",
+      "name": "Толстый енот застрял в решётке",
+      "when": "застрял из-за собственной привычки и ни о чём не жалеешь",
+      "source": "https://i.imgflip.com/2xm19p.jpg"
+    },
+    {
+      "key": "big-floppa",
+      "name": "Шлёпа в кресле",
+      "when": "сидишь с видом хозяина положения, хотя положение так себе",
+      "source": "https://i.imgflip.com/4vuqcs.png"
+    },
+    {
+      "key": "shocked-cat",
+      "name": "Кот в шоке",
+      "when": "громкий шок от чего-то совершенно очевидного",
+      "source": "https://i.imgflip.com/1odde9.jpg"
+    },
+    {
+      "key": "walter",
+      "name": "Бультерьер Уолтер",
+      "when": "простодушное присутствие: пришёл, стоишь, ничего не понимаешь",
+      "source": "https://i.imgflip.com/4jbqj6.png"
+    },
+    {
+      "key": "judging-owl",
+      "name": "Осуждающая сова",
+      "when": "молчаливое осуждение чужого выбора",
+      "source": "https://i.imgflip.com/27w2nq.jpg"
+    },
+    {
+      "key": "sad-cat-phone",
+      "name": "Плачущий кот с телефоном",
+      "when": "тихо страдаешь, уткнувшись в телефон, и не собираешься это прекращать",
+      "source": "https://i.imgflip.com/2ztqsn.jpg"
+    },
+    {
+      "key": "smug-goat",
+      "name": "Ухмыляющаяся коза",
+      "when": "снисходительная ухмылка того, кто знает лучше",
+      "source": "https://i.imgflip.com/2oefkh.jpg"
+    },
+    {
+      "key": "tom-unsettled",
+      "name": "Встревоженный Том",
+      "when": "тихая тревога: что-то пошло не так, и ты это понял",
+      "source": "https://i.imgflip.com/2wderu.jpg"
+    },
+    {
+      "key": "staring-fish",
+      "name": "Рыба с человеческими губами",
+      "when": "странное молчаливое понимание, будничный абсурд",
+      "source": "https://i.imgflip.com/3mha0a.jpg"
+    },
+    {
+      "key": "kermit-window",
+      "name": "Кермит у окна под дождём",
+      "when": "меланхолия и тоска по тому, что уже не вернётся",
+      "source": "https://i.imgflip.com/1x0up9.jpg"
+    }
+  ]
+}

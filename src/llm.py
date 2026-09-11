@@ -79,6 +79,41 @@ CLIP_SCHEMA = {
     "additionalProperties": False,
 }
 
+# Мем — картинка с надписью и подпись под ней, поэтому отвечает он не одним
+# текстом, а полями: что написать на шаблоне сверху и снизу, какой шаблон
+# взять из списка pictures (каталог data/memes.json) и что сказать под фото.
+# Схема отдельная, а не поля в POST_SCHEMA: остальным рубрикам картинка
+# не нужна, а лишнее поле в их ответе — лишний повод модели его заполнить.
+# Порядок полей — порядок мысли: сначала шутка на картинке, потом подпись.
+MEME_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "skip": POST_SCHEMA["properties"]["skip"],
+        "top": {
+            "type": "string",
+            "description": "Надпись на картинке сверху — подводка, до 40 знаков; может быть пустой",
+        },
+        "bottom": {
+            "type": "string",
+            "description": "Надпись на картинке снизу — поворот, до 40 знаков; может быть пустой",
+        },
+        "picture": {
+            "type": "string",
+            "description": "Ключ картинки ровно как в списке pictures",
+        },
+        "text": {
+            "type": "string",
+            "description": "Подпись под картинкой — своя короткая реплика канала, не повтор надписи",
+        },
+        "reason": POST_SCHEMA["properties"]["reason"],
+    },
+    "required": ["skip", "top", "bottom", "picture", "text", "reason"],
+    "additionalProperties": False,
+}
+
+# Схема ответа по рубрике; кого здесь нет, тот отвечает POST_SCHEMA.
+SCHEMAS = {"meme": MEME_SCHEMA}
+
 GEMINI_MODEL = "gemini-2.5-pro"
 
 
@@ -188,7 +223,7 @@ def build_user_prompt(rubric_key: str, payload: dict) -> str:
 
 
 def generate_now(rubric_key: str, payload: dict) -> dict:
-    return _generate(build_user_prompt(rubric_key, payload))
+    return _generate(build_user_prompt(rubric_key, payload), SCHEMAS.get(rubric_key, POST_SCHEMA))
 
 
 def submit_batch(jobs: list[tuple[str, str, dict]]) -> str:
@@ -196,7 +231,7 @@ def submit_batch(jobs: list[tuple[str, str, dict]]) -> str:
     if not supports_batch():
         raise RuntimeError("Батч доступен только при LLM_PROVIDER=anthropic")
     prepared = [
-        (custom_id, voice(), build_user_prompt(key, payload), POST_SCHEMA)
+        (custom_id, voice(), build_user_prompt(key, payload), SCHEMAS.get(key, POST_SCHEMA))
         for custom_id, key, payload in jobs
     ]
     return claude.submit_batch(prepared)

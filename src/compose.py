@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import config, llm, quality, state, telegram
+from . import card, config, llm, quality, state, telegram
 from .sources import deezer, itunes
 
 log = logging.getLogger("compose")
@@ -55,12 +55,15 @@ def save_post(
     text: str,
     source: dict | None = None,
     folder: Path | None = None,
+    meme: dict | None = None,
 ) -> Path:
     """Кладёт готовый пост в очередь. Имя файла задаёт порядок публикации.
 
     folder уводит пост мимо очереди — так пишутся срочные новости
     (config.URGENT): они выходят в день события, а не когда до них дойдёт
     очередь, и публикатору по расписанию их видеть незачем.
+
+    meme — ответ модели на мем: надписи на картинке и ключ шаблона.
     """
     # Чистим разметку сразу при сохранении, чтобы в очереди лежал тот же текст,
     # который уйдёт в канал, — иначе просмотр очереди врёт.
@@ -74,20 +77,47 @@ def save_post(
     path = folder / f"{stamp}-{suffix}-{rubric_key}.json"
 
     lead = _lead_track(source or {})
-    state.write_json(
-        path,
-        {
-            "rubric": rubric_key,
-            "text": text,
-            "created_at": state.iso(),
-            "source_url": (source or {}).get("url", ""),
-            "cover": (source or {}).get("cover", ""),
-            "artist": (source or {}).get("artist", ""),
-            "preview": lead.get("preview", ""),
-            "track": lead.get("title", ""),
-        },
-    )
+    post = {
+        "rubric": rubric_key,
+        "text": text,
+        "created_at": state.iso(),
+        "source_url": (source or {}).get("url", ""),
+        "cover": (source or {}).get("cover", ""),
+        "artist": (source or {}).get("artist", ""),
+        "preview": lead.get("preview", ""),
+        "track": lead.get("title", ""),
+    }
+    if rubric_key == "meme":
+        # Надписи лежат отдельно от подписи: они рисуются поверх шаблона,
+        # а подпись уходит текстом под фото (card.render_meme).
+        meme = meme or {}
+        post |= {
+            "top": _plain(meme.get("top")),
+            "bottom": _plain(meme.get("bottom")),
+            "picture": known_picture(meme.get("picture")),
+        }
+    state.write_json(path, post)
     return path
+
+
+def _plain(value: object) -> str:
+    """Строка из ответа модели, годная и для картинки, и для HTML-текста.
+    GigaChat схему не соблюдает и вместо строки может прислать что угодно."""
+    return telegram.sanitize(value).strip() if isinstance(value, str) else ""
+
+
+def known_picture(key: object) -> str:
+    """Ключ мемной картинки, если он есть в каталоге, иначе пустая строка.
+
+    Незнакомый ключ не бракует пост, а оставляет мем без картинки — он уйдёт
+    текстом: надписи и подпись подряд. Шутка — содержание, картинка — оправа:
+    выбрасывать годный текст из-за опечатки в ключе дороже, чем выпустить его
+    без картинки. К тому же перегенерации у батча нет — ответ приходит один,
+    и бракованный ключ там было бы нечем исправить. А приходит такой ключ
+    в основном от GigaChat: схему ответа он не соблюдает.
+    """
+    keys = {m["key"] for m in state.read_json(config.MEMES_FILE, {"memes": []})["memes"]}
+    return key if isinstance(key, str) and key in keys else ""
 
 
 def name_button(text: str) -> str:
@@ -131,18 +161,20 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
     школьным выводом. Повторная попытка обходится дешевле, чем плохой пост
     в канале.
     """
-    last: dict = {"skip": True, "text": "", "reason": "не удалось сгенерировать"}
+    issues: list[str] = ["не удалось сгенерировать"]
 
     for attempt in range(attempts):
         result = llm.generate_now(rubric_key, payload)
         if result["skip"] or not result["text"]:
             return result  # модель осознанно отказалась — это не брак
 
-        issues = quality.problems(result["text"], rubric_key)
+        # Мем проверяется целиком: подпись под картинкой одна короче любого
+        # поста, а брак ищется во всём, что увидит читатель.
+        checked = card.meme_text(result) if rubric_key == "meme" else result["text"]
+        issues = quality.problems(checked, rubric_key)
         if not issues:
             return result
 
-        last = result
         log.info(
             "Попытка %d для «%s» забракована: %s",
             attempt + 1,
@@ -153,9 +185,7 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
     return {
         "skip": True,
         "text": "",
-        "reason": f"брак после {attempts} попыток: " + "; ".join(
-            quality.problems(last["text"], rubric_key)
-        ),
+        "reason": f"брак после {attempts} попыток: " + "; ".join(issues),
     }
 
 
@@ -247,10 +277,17 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
         }
         add("subtext", payload, {"subtext_index": index})
 
-    # МЕМ — контекст из базы артистов, чтобы шутки были про нашу сцену.
+    # МЕМ — контекст из базы артистов, чтобы шутки были про нашу сцену,
+    # и каталог картинок. Картинку выбирает модель: она — реакция на поворот,
+    # а поворот появляется только вместе с текстом.
+    catalog = state.read_json(config.MEMES_FILE, {"memes": []})["memes"]
+    pictures = [{"key": m["key"], "when": m["when"]} for m in catalog]
     for _ in range(quota.get("meme", 0)):
         sample = random.sample(artists, min(12, len(artists)))
-        add("meme", {"scene": [a["name"] for a in sample]}, {})
+        # Каталог тасуется на каждый мем: модель тянется к первым строкам
+        # списка, и картинки из его конца иначе не выпадали бы никогда.
+        shuffled = random.sample(pictures, len(pictures))
+        add("meme", {"scene": [a["name"] for a in sample], "pictures": shuffled}, {})
 
     # ОПРОС — тоже из базы артистов.
     for _ in range(quota.get("poll", 0)):
@@ -398,7 +435,7 @@ def do_fetch() -> int:
             log.info("Пропущен %s: %s", job["custom_id"], result.get("reason", ""))
             continue
 
-        save_post(job["rubric"], result["text"], source)
+        save_post(job["rubric"], result["text"], source, meme=result)
         if source.get("subtext_index") is not None:
             subtext_done.append(source["subtext_index"])
         created += 1
@@ -426,7 +463,7 @@ def do_now(count: int, jobs: list[tuple[str, str, dict, dict]] | None = None) ->
         if result["skip"] or not result["text"]:
             print(f"  — {rubric_key}: пропущено ({result.get('reason', '')})")
             continue
-        path = save_post(rubric_key, result["text"], source)
+        path = save_post(rubric_key, result["text"], source, meme=result)
         if source.get("subtext_index") is not None:
             subtext_done.append(source["subtext_index"])
         created += 1

@@ -31,6 +31,7 @@ import os
 from datetime import timedelta
 
 from . import compose, config, publish, state, telegram
+from .sources import deezer
 
 log = logging.getLogger("urgent")
 
@@ -72,6 +73,26 @@ def sweep() -> int:
     return removed
 
 
+def with_portrait(item: dict) -> dict:
+    """Новость с портретом первого названного артиста, у которого он есть.
+
+    Без картинки срочная новость уходила голым текстом и терялась в ленте
+    среди постов с обложками. Портрет ищется так же, как у разборов бота:
+    только точное имя из базы и только настоящее фото. Лицо постороннего
+    под новостью хуже, чем новость без лица, поэтому не нашли никого —
+    пост уходит текстом, как раньше.
+    """
+    for name in item.get("artists") or []:
+        try:
+            picture = deezer.artist_picture(name)
+        except Exception as exc:  # noqa: BLE001 — без портрета новость всё равно выйдет
+            log.info("Портрет «%s» не нашёлся: %s", name, exc)
+            continue
+        if picture:
+            return {**item, "cover": picture, "artist": name}
+    return item
+
+
 def run(limit: int, dry_run: bool, target: str) -> int:
     # Свежесть решает: сначала самые новые, а уже потом те, что интереснее
     # по нашим меткам. Иначе горячая новость без знакомых имён проигрывает
@@ -105,7 +126,7 @@ def run(limit: int, dry_run: bool, target: str) -> int:
             print(f"  — пропущено ({result.get('reason', '')}): {item.get('title', '')[:50]}")
             continue
 
-        path = compose.save_post("news", result["text"], item, folder=config.URGENT)
+        path = compose.save_post("news", result["text"], with_portrait(item), folder=config.URGENT)
         post = state.read_json(path, {})
 
         if target == "admin":

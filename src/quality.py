@@ -70,6 +70,10 @@ RUBRICS_WITHOUT_LINK = frozenset({"lineage", "subtext", "meme", "poll"})
 MIN_LENGTH = 60
 MAX_LENGTH = 1500
 
+# Рубрики, где пост открывается заголовком. У мема и опроса его нет,
+# у разборов бота (service.py) — своя форма.
+HEADLINED = ("release", "verdict", "news", "lineage", "subtext", "legend")
+
 
 def problems(text: str, rubric: str) -> list[str]:
     """Список причин, по которым пост нельзя публиковать. Пусто — годится."""
@@ -83,7 +87,9 @@ def problems(text: str, rubric: str) -> list[str]:
     if rubric == "poll":
         return []
 
-    if len(stripped) < MIN_LENGTH:
+    # Мем держится на картинке: две короткие надписи и строка подписи —
+    # законный мем, а не брак, поэтому порог у него ниже.
+    if len(stripped) < (20 if rubric == "meme" else MIN_LENGTH):
         issues.append(f"слишком короткий ({len(stripped)} знаков)")
     if len(stripped) > MAX_LENGTH:
         issues.append(f"слишком длинный ({len(stripped)} знаков)")
@@ -110,6 +116,12 @@ def problems(text: str, rubric: str) -> list[str]:
     # иногда транслитом («Rubrik Otkuda Nogi»), что читается как брак.
     if re.match(r"\s*(<b>)?\s*(рубрика|rubrik[ao])\b", stripped, re.IGNORECASE):
         issues.append("название рубрики вынесено в шапку поста")
+
+    # Первую строку показывают уведомление и список чатов, поэтому пост
+    # начинается с заголовка. Пометку над ним («new tape / 10 треков») убрали:
+    # она съедала крючок, а модель по старой памяти ещё может её поставить.
+    if rubric in HEADLINED and not stripped.startswith("<b>"):
+        issues.append("пост открывается не заголовком <b>")
 
     # Неподдерживаемая разметка, которую Telegram не разберёт.
     if re.search(r"<\s*(br|p|ul|ol|li|h[1-6])\b", stripped, re.IGNORECASE):
