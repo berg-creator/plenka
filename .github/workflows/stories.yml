@@ -44,6 +44,7 @@ jobs:
           # Без ключа шаг не падает, а молча пропускается — как кросспостинг.
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
+          VK_PLAYLIST: ${{ vars.VK_PLAYLIST }}
         run: python -m src.stories ${{ inputs.preview && '--preview' || '--publish' }}
 
       - name: Сохранить состояние

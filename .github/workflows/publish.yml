@@ -57,6 +57,7 @@ jobs:
           # ВКонтакте: кросспостинг включается сам при наличии токена
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
+          VK_PLAYLIST: ${{ vars.VK_PLAYLIST }}
           # Переменная PUBLISH_TARGET задаётся в Settings → Variables.
           # Пока стоит admin — посты уходят в личку. Меняешь на channel, когда готов.
           TARGET: ${{ inputs.target || vars.PUBLISH_TARGET || 'admin' }}

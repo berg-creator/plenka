@@ -332,7 +332,12 @@ def crosspost_vk(post: dict) -> None:
     # с диска не берёт, только ссылку, а мемная нарисована у нас.
     text = card.meme_text(post) if post.get("rubric") == "meme" else post.get("text", "")
     try:
-        post_id = vk.post(text, photo_url=post.get("cover", ""))
+        post_id = vk.post(
+            text,
+            photo_url=post.get("cover", ""),
+            artist=post.get("artist", ""),
+            track=post.get("track", ""),
+        )
         log.info("Продублировано во ВКонтакте, запись %s", post_id)
     except Exception as exc:
         log.warning("ВКонтакте не принял пост: %s", exc)
