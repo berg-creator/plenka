@@ -67,15 +67,28 @@ def next_post(releases: bool = False, dry_run: bool = False) -> Path | None:
     return regular[0] if regular else None
 
 
-def releases_today() -> int:
-    """Сколько постов о релизах вышло за сегодня. Сутки московские: аудитория русская."""
+def night(moment: datetime) -> bool:
+    """Тихие часы по Москве: config.QUIET_FROM_HOUR–QUIET_TO_HOUR."""
+    from .compose import MSK
+
+    hour = moment.astimezone(MSK).hour
+    return hour >= config.QUIET_FROM_HOUR or hour < config.QUIET_TO_HOUR
+
+
+def releases_today(loud: bool = False) -> int:
+    """Сколько постов о релизах вышло за сегодня. Сутки московские: аудитория русская.
+
+    loud — только вышедшие не в тихие часы: ночной пост молчал и в счёт трёх
+    со звуком не идёт. Объём ленты (due) считает все.
+    """
     from .compose import MSK
 
     today = state.now().astimezone(MSK).date()
     count = 0
     for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", []):
         published = state._parse(item.get("published_at", ""))
-        if item.get("rubric") in config.RELEASE_RUBRICS and published and published.astimezone(MSK).date() == today:
+        if (item.get("rubric") in config.RELEASE_RUBRICS and published
+                and published.astimezone(MSK).date() == today and not (loud and night(published))):
             count += 1
     return count
 
@@ -204,7 +217,7 @@ def send(post: dict, chat_id: str) -> None:
         image = card.meme(post)
         if image:
             try:
-                telegram.send_photo_file(chat_id, image, text)
+                telegram.send_photo_file(chat_id, image, text, quiet=night(state.now()))
                 return
             except telegram.TelegramError as exc:
                 log.warning("Мем с картинкой не ушёл (%s), отправляю текстом", exc)
@@ -213,8 +226,12 @@ def send(post: dict, chat_id: str) -> None:
     cover = post.get("cover", "")
     text, buttons = listen(text, post.get("artist", ""), release_title(post))
     # С четвёртого поста о релизе за сутки — без звука: в пятницу их до девяти,
-    # а девять уведомлений подряд отписывают быстрее, чем радуют.
-    quiet = post.get("rubric") in config.RELEASE_RUBRICS and releases_today() >= config.RELEASE_LOUD_PER_DAY
+    # а девять уведомлений подряд отписывают быстрее, чем радуют. В тихие часы
+    # молчит любой пост (config.QUIET_FROM_HOUR).
+    quiet = night(state.now()) or (
+        post.get("rubric") in config.RELEASE_RUBRICS
+        and releases_today(loud=True) >= config.RELEASE_LOUD_PER_DAY
+    )
 
     # Обложка крупно, музыка следом. Фото и аудио в одно сообщение Telegram
     # не кладёт, а у плеера обложка — иконка на палец. Решение владельца
@@ -353,7 +370,7 @@ def _selftest() -> None:
     """Кнопки стримингов: строка «Слушать» уходит, точная ссылка остаётся точной.
     Пост с обложкой и музыкой — два сообщения: фото с текстом, следом тихий плеер.
     Посты о релизах: свой выход, сутки на всё, окно на трек, звук у первых трёх
-    за московские сутки, обычный пост уступает им слот.
+    за московские сутки и не в тихие часы, обычный пост уступает им слот.
 
     Запуск: python -m src.publish --selftest
     """
@@ -400,6 +417,18 @@ def _selftest() -> None:
         posted(("release", ago(hours=3)), ("verdict", ago(hours=2)), ("release", ago(hours=1)))
         sent.clear()
         send(release, "0")
+        assert sent == [("фото", "Текст.", True), ("плеер", "", True)], sent
+
+        # Тихие часы: ночные выходы (01:00–03:00 МСК) в счёт трёх со звуком не идут,
+        # а в 00:30 по Москве молчит любой пост.
+        posted(*[("release", ago(hours=h)) for h in (17, 16, 15)])
+        sent.clear()
+        send(release, "0")
+        assert sent == [("фото", "Текст.", False), ("плеер", "", True)], sent
+        state.now = lambda: datetime(2026, 9, 11, 21, 30, tzinfo=timezone.utc)
+        sent.clear()
+        send(post, "0")
+        state.now = lambda: now
         assert sent == [("фото", "Текст.", True), ("плеер", "", True)], sent
 
         # Обычный пост уступает слот свежему релизу; сутки с четырьмя релизами
@@ -534,9 +563,10 @@ def main() -> int:
         print(f"\nФайл: {path.name}")
         print(f"Рубрика: {post.get('rubric')}")
         if post.get("rubric") in config.RELEASE_RUBRICS:
-            count = releases_today()
-            print(f"Звук: {'нет' if count >= config.RELEASE_LOUD_PER_DAY else 'да'} "
-                  f"(постов о релизах за московские сутки: {count})")
+            count, quiet_hours = releases_today(loud=True), night(state.now())
+            loud = not quiet_hours and count < config.RELEASE_LOUD_PER_DAY
+            print(f"Звук: {'да' if loud else 'нет'} (со звуком за московские сутки: {count}"
+                  f"{', сейчас тихие часы' if quiet_hours else ''})")
         print(f"Обложка: {post.get('cover') or 'нет'}")
         # Отрывок меняет способ отправки, а не только вид поста, — в сухом
         # прогоне это видно должно быть сразу.
