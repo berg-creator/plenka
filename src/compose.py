@@ -19,7 +19,7 @@ import random
 import re
 from datetime import timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 from . import card, config, llm, quality, state, telegram
 from .sources import deezer, itunes
@@ -539,6 +539,34 @@ def needs_track(post: dict) -> bool:
     )
 
 
+def where_to_find(post: dict) -> list[list[dict]]:
+    """Кнопки под запросом трека: где трек лежит, чтобы владелец не искал руками.
+
+    Только площадки, где музыка живёт законно: страница релиза в магазине,
+    откуда он и попал в канал, и поиск на YouTube, SoundCloud и Bandcamp —
+    у части андеграунда там бесплатная загрузка от самого автора. Ссылок
+    на файлообменники и конвертеры здесь нет намеренно: скачивает владелец сам,
+    и выбор источника — его, а не бота.
+    """
+    query = quote_plus(f"{post.get('artist', '')} {post.get('track', '')}".strip())
+    rows = []
+    store = post.get("source_url", "")
+    if store.startswith("http"):
+        host = urlparse(store).netloc.lower()
+        name = next(
+            (label.split(" в ")[-1].split(" на ")[-1] for domain, label in BUTTON_LABELS.items()
+             if host == domain or host.endswith("." + domain)),
+            "Магазин",
+        )
+        rows.append([{"text": name, "url": store}])
+    rows.append([
+        {"text": "YouTube", "url": f"https://www.youtube.com/results?search_query={query}"},
+        {"text": "SoundCloud", "url": f"https://soundcloud.com/search?q={query}"},
+        {"text": "Bandcamp", "url": f"https://bandcamp.com/search?q={query}"},
+    ])
+    return rows
+
+
 def do_ask_tracks() -> int:
     """Просит владельца прислать полные треки к музыкальным постам очереди.
 
@@ -565,7 +593,8 @@ def do_ask_tracks() -> int:
             f"{post['artist']} — {post['track']}\n"
             f"<code>{path.name}</code>\n\n"
             "Ответь на это сообщение аудиофайлом — пост выйдет с полным треком "
-            "вместо 30-секундного отрывка.",
+            "вместо 30-секундного отрывка. Где трек лежит — кнопками ниже.",
+            buttons=where_to_find(post),
         )
         # Отметка пишется сразу после каждой отправки: оборвись запуск на середине,
         # уже спрошенное второй раз не спросится. По message_id дежурство
@@ -594,6 +623,15 @@ def _selftest() -> int:
     assert name_button(button("https://m.youtube.com/watch?v=1")).endswith(
         ">Смотреть на YouTube</a>"
     )
+    # Поиск трека: амперсанд в имени не должен разорвать адрес на два параметра,
+    # а магазин называется площадкой, а не глаголом из кнопки поста.
+    found = where_to_find({"artist": "Simon & Garfunkel", "track": "Mrs Robinson",
+                           "source_url": "https://music.apple.com/us/album/x/1"})
+    assert found[0][0]["text"] == "Apple Music", found[0][0]
+    assert "&" not in found[1][0]["url"].split("?", 1)[1], found[1][0]["url"]
+    assert [b["text"] for b in found[1]] == ["YouTube", "SoundCloud", "Bandcamp"]
+    assert where_to_find({"artist": "A", "track": "B"})[0][0]["text"] == "YouTube"
+
     # Издание в новости трогать нельзя: имя там стоит своё, не выводимое из домена.
     assert name_button(button("https://the-flow.ru/news/1", "Источник — The Flow")).endswith(
         ">Источник — The Flow</a>"
