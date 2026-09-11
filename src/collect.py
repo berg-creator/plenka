@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import re
 import unicodedata
@@ -222,6 +223,79 @@ def fetch_tracks(item: dict) -> dict:
     return {}
 
 
+def _needs_tracks(row: dict) -> bool:
+    """Нужно ли лезть за треклистом. Кроме релизов совсем без него сюда
+    попадают и те, чей треклист собран до появления отрывков: названия там
+    есть, а музыки нет — и пост по такой находке уйдёт немым.
+    """
+    if row.get("kind") != "release":
+        return False
+    tracks = row.get("tracks") or []
+    if not tracks:
+        return True
+    return not any(track.get("preview") for track in tracks)
+
+
+def backfill_tracks() -> int:
+    """Дозагружает треклисты к релизам, найденным до появления этой фактуры.
+
+    Разовая операция после обновления: без неё посты по старым находкам
+    получатся заметно беднее новых. Файл переписывается целиком — inbox
+    небольшой, а частичная дозапись строк тут опаснее.
+    """
+    rows = list(state.read_jsonl(config.INBOX_FILE))
+    pending = [r for r in rows if _needs_tracks(r)]
+    if not pending:
+        print("Треклисты и отрывки уже на месте.")
+        return 0
+
+    filled = 0
+    for row in pending:
+        source = row.get("source")
+        try:
+            # Идентификатор ищем по нарастающей надёжности: сохранённый,
+            # затем из ссылки на магазин, и только в последнюю очередь поиском
+            # по названию — он точный и на релизах с фитами в заголовке молчит.
+            if source == "deezer":
+                album_id = row.get("external_id") or deezer.album_id_from_url(row.get("url", ""))
+                data = deezer.album_tracks(album_id) if album_id else {}
+            else:
+                album_id = (
+                    row.get("external_id")
+                    or itunes.album_id_from_url(row.get("url", ""))
+                    or itunes.find_album(row.get("artist", ""), row.get("title", ""))
+                )
+                data = itunes.album_tracks(album_id) if album_id else {}
+        except Exception as exc:
+            log.warning("%s — %s: %s", row.get("artist"), row.get("title"), exc)
+            continue
+
+        if not data.get("tracks"):
+            continue
+
+        # Последняя проверка на подмену: у сингла один трек, у альбома — сколько
+        # обещал источник. Разошлось — значит, нашёлся не тот релиз, и лучше
+        # остаться без треклиста, чем врать в посте.
+        expected = row.get("track_count")
+        if expected and len(data["tracks"]) != expected:
+            log.warning(
+                "%s — %s: найдено %d треков вместо %s, треклист отброшен",
+                row.get("artist"), row.get("title"), len(data["tracks"]), expected,
+            )
+            continue
+
+        row.update(data)
+        filled += 1
+        print(f"  ✓ {row.get('artist')} — {row.get('title')}: {len(data['tracks'])} треков")
+
+    config.INBOX_FILE.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    print(f"\nДозагружено треклистов: {filled} из {len(pending)}.")
+    return 0
+
+
 def collect_videos(artists: list[dict], seen: state.Seen) -> list[dict]:
     found: list[dict] = []
     for artist in artists:
@@ -369,10 +443,18 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="показать находки, ничего не записывая")
     parser.add_argument("--skip-releases", action="store_true", help="не опрашивать iTunes/Deezer")
     parser.add_argument("--skip-news", action="store_true", help="не читать RSS")
+    parser.add_argument(
+        "--backfill-tracks",
+        action="store_true",
+        help="дозагрузить треклисты к релизам, найденным раньше",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
+
+    if args.backfill_tracks:
+        return backfill_tracks()
 
     artists = load_artists()
     if not artists:
