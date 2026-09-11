@@ -113,7 +113,7 @@ def seed(message: dict) -> bool:
 
     # Опрос сам по себе способ высказаться — под ним вопрос лишний.
     rubric = last_rubric()
-    if rubric == "poll":
+    if rubric == "poll" or message.get("poll"):
         return False
 
     try:

@@ -1,4 +1,5 @@
-"""Единственный поллер бота: кнопки модерации, запросы к сервису и полные треки от владельца.
+"""Единственный поллер бота: кнопки модерации, запросы к сервису, полные треки от владельца
+и голоса СЛЕПОЙ ПРОСЛУШКИ.
 
 Постоянно работающего сервера у проекта нет, поэтому события не приходят
 мгновенно — их забирает по расписанию этот скрипт. Между нажатием кнопки
@@ -7,8 +8,9 @@
 
 **Почему всё в одном скрипте.** У бота один общий offset в getUpdates:
 кто первый забрал событие, для того оно и исчезло. Два независимых опросчика
-воровали бы события друг у друга, поэтому модерация и разборы ПРОЯВКИ
-разбираются здесь же — сообщения уходят в src/service.py.
+воровали бы события друг у друга, поэтому модерация, разборы ПРОЯВКИ
+и прослушка разбираются здесь же — сообщения уходят в src/service.py,
+пересылка отрывка и голоса в опросе под ним — в src/quiz.py.
 
     python -m src.moderate             обработать накопившееся и выйти
     python -m src.moderate --serve 55  дежурить 55 минут, отвечая сразу
@@ -33,7 +35,7 @@ from pathlib import Path
 
 import requests
 
-from . import comments, config, publish, reels, service, state, telegram
+from . import comments, config, publish, quiz, reels, service, state, telegram
 
 log = logging.getLogger("moderate")
 
@@ -302,13 +304,19 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
         message = update.get("message")
         if message:
             # Пост, пересланный Telegram в чат обсуждений, — повод открыть ветку
-            # комментариев первым. Это не запрос к сервису, дальше не идём.
-            if config.COMMENT_SEED and comments.is_channel_post(
+            # комментариев первым. Под прослушкой первой идёт сама викторина
+            # (src/quiz.py), вопрос там лишний. Это не запрос к сервису, дальше не идём.
+            if comments.is_channel_post(
                 message, config.secret("TELEGRAM_CHANNEL_ID", required=False)
             ):
                 if args.dry_run:
                     print(f"  пост в чате обсуждений: {message.get('message_id')}")
-                else:
+                elif quiz.is_riddle(message):
+                    try:
+                        quiz.attach(message)
+                    except Exception as exc:  # noqa: BLE001 — сбой не роняет дежурство
+                        log.error("Викторина под прослушкой не встала: %s", exc)
+                elif config.COMMENT_SEED:
                     comments.seed(message)
                 continue
 
@@ -370,6 +378,15 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     served += 1
             except Exception as exc:  # noqa: BLE001 — чужой запрос не роняет запуск
                 log.error("Сервис не справился с сообщением: %s", exc)
+            continue
+
+        # Голос в прослушке под постом: угадавший получит титул завтра (src/quiz.py).
+        answer = update.get("poll_answer")
+        if answer:
+            if args.dry_run:
+                print(f"  голос в опросе {answer.get('poll_id')}")
+            else:
+                quiz.take_answer(answer)
             continue
 
         query = update.get("callback_query")

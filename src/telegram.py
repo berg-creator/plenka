@@ -151,7 +151,9 @@ def get_updates(offset: int = 0, timeout: int = 0) -> list[dict]:
         {
             "offset": offset,
             "timeout": timeout,
-            "allowed_updates": json.dumps(["callback_query", "message"]),
+            # poll_answer — голоса в неанонимной прослушке под постом (src/quiz.py):
+            # без него Telegram их боту не присылает вовсе.
+            "allowed_updates": json.dumps(["callback_query", "message", "poll_answer"]),
         },
     )
 
@@ -453,25 +455,47 @@ def send_quiz(
     correct: int,
     *,
     explanation: str = "",
+    anonymous: bool = True,
+    reply_to: int | None = None,
 ) -> dict:
     """Нативная викторина: Telegram сам покажет верный ответ и пояснение.
 
     Отличается от обычного опроса тем, что у неё есть правильный вариант —
     человек сразу узнаёт, угадал или нет, и это работает без нашего участия.
-    В канале викторина обязана быть анонимной.
+    В канале викторина обязана быть анонимной. Неанонимная уходит в чат
+    обсуждений ответом на пересылку поста (src/quiz.py): только за такие
+    Telegram сообщает боту, кто что ответил.
     """
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "type": "quiz",
         "question": question[:300],
         "options": json.dumps([o[:100] for o in options[:10]], ensure_ascii=False),
-        "correct_option_id": correct,
-        "is_anonymous": True,
+        # Bot API 9.4 заменил correct_option_id списком: верных вариантов
+        # у викторины теперь может быть несколько.
+        "correct_option_ids": json.dumps([correct]),
+        "is_anonymous": anonymous,
     }
     if explanation:
         payload["explanation"] = sanitize(explanation)[:MAX_EXPLANATION]
         payload["explanation_parse_mode"] = "HTML"
+    if reply_to is not None:
+        payload["reply_parameters"] = json.dumps({"message_id": reply_to})
     return _call("sendPoll", payload)
+
+
+def chat_member(chat_id: str | int, user_id: str | int) -> dict:
+    """Участник чата: статус, метка, права. Что делать при ошибке, решает вызывающий."""
+    return _call("getChatMember", {"chat_id": chat_id, "user_id": user_id})
+
+
+def set_member_tag(chat_id: str | int, user_id: int, tag: str) -> None:
+    """Метка рядом с именем обычного участника группы (Bot API 9.5).
+
+    Боту нужно право can_manage_tags; админу так метку не поставить.
+    До 16 знаков и без эмодзи — иначе запрос отклоняется.
+    """
+    _call("setChatMemberTag", {"chat_id": chat_id, "user_id": user_id, "tag": tag[:16]})
 
 
 def check() -> str:

@@ -222,6 +222,14 @@ def check() -> int:
     if rights:
         print(f"  {_mark(bool(rights.get('can_delete_messages')))} бот может удалять спам")
         print(f"  {_mark(bool(rights.get('can_restrict_members')))} бот может банить")
+        tags = bool(rights.get("can_manage_tags"))
+        print(f"  {_mark(tags)} бот может ставить метки участникам")
+        if not tags:
+            todo.append(
+                "Выдай боту в чате обсуждений право менять метки участников — оно\n"
+                "     в правах администратора чата. Без него СЛЕПАЯ ПРОСЛУШКА не повесит\n"
+                "     угадавшим титул «знаток: …» рядом с именем."
+            )
     else:
         print("  ✗ бот в чате не администратор")
         todo.append(

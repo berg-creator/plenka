@@ -6,6 +6,9 @@ name: Слепая прослушка
 #
 # Токенов рубрика не тратит: отрывки и факты берутся из магазина, генератор
 # текстов тут не участвует вовсе.
+#
+# Запуск держит группу до десяти минут: отрывок уходит в канал, а опрос под ним
+# вешает дежурство (src/moderate.py), и викторина ждёт, пока оно это сделает.
 on:
   schedule:
     # 12:00 UTC — 15:00 по Москве, между дневной и вечерней публикациями.
@@ -37,6 +40,31 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # До запуска, а не в конце: загадку викторина отправляет в git сама,
+      # раньше отрывка, — иначе дежурство не узнает варианты.
+      - name: Представиться для коммитов
+        run: |
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+
+      # Кто угадал — данные о людях: они лежат в приватном хранилище, как списки
+      # слежения. Без него викторина идёт как раньше, только титулов некому дать.
+      - name: Забрать приватное хранилище
+        env:
+          STATE_REPO: ${{ secrets.STATE_REPO }}
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: |
+          if [ -z "$STATE_REPO" ] || [ -z "$STATE_TOKEN" ]; then
+            echo "Приватное хранилище не настроено — титулов не будет."
+            exit 0
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${STATE_TOKEN}@github.com/${STATE_REPO}.git" private-state
+          cd private-state
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          echo "STATE_DIR=${GITHUB_WORKSPACE}/private-state" >> "$GITHUB_ENV"
+
       - name: Отправить викторину
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -47,11 +75,22 @@ jobs:
           TARGET: ${{ inputs.target || vars.PUBLISH_TARGET || 'admin' }}
         run: python -m src.quiz --target "$TARGET"
 
+      # always: титулы раздаются до поиска трека, и если трек не нашёлся,
+      # раздачу всё равно надо записать — иначе завтра она повторится.
       - name: Сохранить состояние
+        if: always()
         run: |
-          git config user.name "plenka-bot"
-          git config user.email "bot@users.noreply.github.com"
           git add data/
           git diff --cached --quiet || git commit -m "прослушка: загадка отмечена"
           git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push
+
+      - name: Сохранить список угадавших
+        if: always()
+        run: |
+          if [ ! -d private-state ]; then exit 0; fi
+          cd private-state
+          git add -A
+          git diff --cached --quiet || git commit -m "прослушка: титулы розданы"
+          git pull --rebase --autostash origin HEAD || true
           git push
