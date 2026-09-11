@@ -1,0 +1,64 @@
+name: Разбор выдумок
+
+# Автопилот точности (src/review.py, бриф — prompts/review.md). Облачный Claude
+# по подписке владельца раз в два часа сверяет новые посты очереди с данными
+# и пушит файл правок в ветку claude/review-<ГГГГММДД-ЧЧММ>. В main ему пушить
+# нельзя, и ветка для него — почтовый ящик, как у роликов (reels.yml). Здесь
+# правки проверяются, применяются к main, а ветка удаляется.
+#
+# Владельцу воркфлоу не пишет: решение владельца — автопилот. Сломалось —
+# запуск красный, а ветка остаётся для разбора.
+on:
+  push:
+    branches: ["claude/review-*"]
+
+# Общая state-write: правка переписывает и удаляет файлы content/queue,
+# откуда их забирает публикатор, — одновременные запуски подрались бы при коммите.
+concurrency:
+  group: state-write
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Коммит правок в main и удаление ветки.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # На снимке, по которому рутина писала правки: пост там лежит ровно как
+      # она его читала, и неверный путь или цитата — её ошибка, а не гонка.
+      - name: Проверить на снимке рутины
+        run: |
+          git fetch --depth 1 origin "$GITHUB_REF_NAME"
+          git worktree add --detach "$RUNNER_TEMP/snapshot" FETCH_HEAD
+          cd "$RUNNER_TEMP/snapshot"
+          python -m src.review --check "content/review/${GITHUB_REF_NAME#claude/review-}.json"
+
+      # К свежему main: между проходом рутины и этим запуском посты выходили
+      # и менялись. Что вышло или поменялось, --apply пропустит сам.
+      - name: Применить к main
+        run: python -m src.review --apply "$RUNNER_TEMP/snapshot/content/review/${GITHUB_REF_NAME#claude/review-}.json"
+
+      - name: Сохранить состояние
+        run: |
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A content/queue
+          git diff --cached --quiet || git commit -m "разбор: выдумки исправлены"
+          git pull --rebase --autostash origin main
+          git push origin HEAD:main
+
+      - name: Удалить ветку
+        run: git push origin --delete "$GITHUB_REF_NAME"
