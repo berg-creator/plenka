@@ -407,6 +407,11 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
 
         result = handle(action, post_id)
         telegram.answer_callback(query["id"], result)
+        # Вышедший или удалённый пост — в git сразу, а не через десять минут:
+        # ежечасный выход релизов (publish --releases) берёт очередь из git
+        # и иначе выпустил бы тот же пост второй раз или удалённый.
+        if action in ("pub", "del"):
+            push_state()
 
         message = query.get("message", {})
         if message.get("message_id"):
