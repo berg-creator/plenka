@@ -17,6 +17,7 @@ import argparse
 import logging
 import random
 import re
+from datetime import timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -349,7 +350,16 @@ def _features(tracks: list[dict]) -> list[str]:
     return names[:8]
 
 
+# Даты в новостях — по Москве: канал русский, и новость, вышедшая в 23:30
+# по UTC, для его читателя уже завтрашняя.
+MSK = timezone(timedelta(hours=3), "MSK")
+
+
 def _news_payload(item: dict) -> dict:
+    # Сегодняшнего числа модель не знает и подставляет наугад: 11.09 в канал
+    # ушла новость с датой «26.09». Поэтому обе даты приходят отсюда,
+    # а других в посте быть не может (prompts/rubrics/news.md).
+    published = state._parse(item.get("released_at", ""))
     return {
         "title": item.get("title", ""),
         "summary": item.get("summary", ""),
@@ -357,6 +367,8 @@ def _news_payload(item: dict) -> dict:
         "lang": item.get("lang", "en"),
         "url": item.get("url", ""),
         "artists": item.get("artists", []),
+        "published": published.astimezone(MSK).strftime("%d.%m.%Y") if published else "",
+        "today": state.now().astimezone(MSK).strftime("%d.%m.%Y"),
     }
 
 
