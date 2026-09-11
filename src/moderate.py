@@ -231,11 +231,19 @@ def attach_track(message: dict, admin: str) -> str:
     сколько угодно раз — класть сам трек рядом с постом незачем и нельзя.
     """
     track = track_file(message)
+    # Молча файл не пропадает: владелец ждёт «принял» или причину отказа.
+    if not message.get("reply_to_message"):
+        return "Не понял, к какому посту этот файл: пришли его ответом на запрос трека."
     # Размер приходит в апдейте: что Telegram боту всё равно не отдаст, не качаем.
     if track.get("file_size", 0) > telegram.MAX_DOWNLOAD:
         return ("Файл больше 20 МБ — Telegram не отдаёт боту такие; "
                 "пришли аудио или видео пониже качеством.")
 
+    telegram.send_chat_action(admin, "upload_voice")
+    # Запрос мог уйти минуту назад из другой задачи (compose, urgent), а дерево
+    # дежурства подтягивается раз в десять минут: без свежей очереди бот ответил
+    # бы «не нашёл пост» на настоящий запрос.
+    push_state()
     path = _post_by_request(message["reply_to_message"]["message_id"])
     if path is None:
         return "Не нашёл пост под этот запрос — похоже, его удалили из очереди."
@@ -246,7 +254,6 @@ def attach_track(message: dict, admin: str) -> str:
         how = "с полным треком" if post.get("full_track_file_id") else "с отрывком"
         return f"Пост {name} уже вышел — {how}. Этот файл к нему не приложить."
 
-    telegram.send_chat_action(admin, "upload_voice")
     try:
         with tempfile.TemporaryDirectory() as work:
             clip, seconds, thumb = normalize_track(track, post, Path(work))
@@ -327,7 +334,9 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
 
             # Полный трек в ответ на запрос (compose.do_ask_tracks). Разбирается
             # до сервиса: это не просьба о разборе и лимит разборов не тратит.
-            if message.get("reply_to_message") and track_file(message):
+            # Файл не ответом — тоже сюда: сервис молча пропустил бы его,
+            # а владелец должен услышать, почему трек не принят.
+            if track_file(message):
                 # Прикладывать треки к постам может только владелец и только
                 # у себя в личке: message_id в разных чатах совпадают, и ответ
                 # из группы нашёл бы чужой пост. Чужой файл пропускаем молча.
@@ -336,7 +345,7 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                 ):
                     continue
                 if args.dry_run:
-                    print(f"  трек в ответ на {message['reply_to_message'].get('message_id')}")
+                    print(f"  трек в ответ на {(message.get('reply_to_message') or {}).get('message_id')}")
                     continue
                 try:
                     reply = attach_track(message, admin)
@@ -421,6 +430,12 @@ def serve(minutes: int) -> int:
     """
     admin = config.secret("TELEGRAM_ADMIN_ID")
     deadline = time.monotonic() + minutes * 60
+    # Смена часами ждёт в очереди и стартует со снимка репозитория на момент
+    # постановки, а предыдущая за это время записала свой offset. Без свежего
+    # дерева первый же коммит offset конфликтует при ребейзе, и до конца смены
+    # не проходит ни один pull и ни один push — так 11.09 бот полдня жил
+    # со старой очередью и старым кодом.
+    push_state()
     offset = state.read_json(OFFSET_FILE, {"offset": 0}).get("offset", 0)
     limits = service.load_state()
     total_handled, total_served = 0, 0
@@ -449,10 +464,32 @@ def serve(minutes: int) -> int:
         if time.monotonic() >= next_push:
             push_state()
             next_push = time.monotonic() + PUSH_EVERY
+            if code_changed():
+                print("Код бота обновился — смена уступает место свежей.")
+                break
 
     push_state()
     print(f"Дежурство окончено. Нажатий: {total_handled}. Разборов: {total_served}.")
     return 0
+
+
+# Код дежурства: поменялся — идущая смена устарела. Список повторяет paths
+# в moderate.yml, по которым пуш ставит в очередь свежую смену.
+CODE = ("src/", "requirements.txt", ".github/workflows/moderate.yml")
+
+
+def code_changed() -> bool:
+    """Подтянул ли push_state код новее того, с которым смена стартовала.
+
+    Процесс держит в памяти модули, загруженные на старте, и новый код на диске
+    для него не существует. Уступить место свежей смене — единственный способ
+    до него дойти.
+    """
+    start = os.environ.get("GITHUB_SHA")
+    if not start:
+        return False  # локально дежурство перезапускают руками
+    diff = subprocess.run(["git", "diff", "--quiet", start, "HEAD", "--", *CODE], cwd=config.ROOT)
+    return diff.returncode == 1  # 0 — без изменений, 128 — git не смог сравнить
 
 
 def push_state() -> None:
@@ -559,6 +596,14 @@ def _selftest() -> int:
     assert taken(reply(1, video=video))
     assert not taken(reply(2, video=video))
     assert not taken(reply(1, chat=-100, video=video))
+
+    # Файл не ответом на запрос — тоже в приём: сервис пропустил бы его молча.
+    alone = {"message_id": 8, "from": {"id": 1}, "chat": {"id": 1}, "video": video}
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        process([{"update_id": 1, "message": alone}], {}, "1", True, 0)
+    assert "трек в ответ на None" in out.getvalue()
+    assert "ответом на запрос" in attach_track(alone, "1")
 
     # Больше 20 МБ не качаем: ответ сразу, без сети и без поиска поста.
     big = reply(1, document={"file_id": "b", "mime_type": "audio/flac", "file_size": 21 * 2**20})
