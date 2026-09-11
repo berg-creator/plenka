@@ -148,6 +148,21 @@ def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
     return releases
 
 
+def album_credit(album_id: str | int) -> tuple[str, list[int]]:
+    """Исполнитель релиза и id всех его основных артистов.
+
+    В списке альбомов артиста имени нет, а в карточке альбома соавторы
+    перечислены с ролями: «Main» — исполнитель, «Featured» — гость. Гость
+    в подпись не попадает, иначе чужой фит снова ушёл бы под его именем.
+    """
+    data = get_json(f"{BASE}/album/{album_id}", min_interval=MIN_INTERVAL)
+    if not data or data.get("error"):
+        return "", []
+    main = [c for c in data.get("contributors") or [] if c.get("role") == "Main"]
+    main = main or [data.get("artist") or {}]
+    return " & ".join(c.get("name", "") for c in main), [c.get("id") for c in main]
+
+
 # Ссылка на релиз несёт его идентификатор: deezer.com/ru/album/123456
 _ALBUM_URL = re.compile(r"deezer\.com/(?:[a-z]{2}/)?album/(\d+)")
 

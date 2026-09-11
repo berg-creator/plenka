@@ -79,6 +79,7 @@ def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
             {
                 "source": "itunes",
                 "artist": item.get("artistName", ""),
+                "artist_ids": [item.get("artistId")],
                 "title": item.get("collectionName", ""),
                 "url": item.get("collectionViewUrl", ""),
                 "cover": (item.get("artworkUrl100") or "").replace("100x100", "600x600"),
@@ -88,6 +89,19 @@ def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
             }
         )
     return releases
+
+
+def album_credit(collection_id: str | int) -> tuple[str, list[int]]:
+    """Исполнитель релиза, как он значится в магазине, и id основного артиста.
+
+    Второго основного артиста («HNTR & Juicy J») iTunes по id не отдаёт —
+    только первого, поэтому соавторов src/collect.py ищет по имени в подписи.
+    """
+    data = get_json(LOOKUP_URL, params={"id": collection_id}, min_interval=MIN_INTERVAL)
+    for item in (data or {}).get("results", []):
+        if item.get("wrapperType") == "collection":
+            return item.get("artistName", ""), [item.get("artistId")]
+    return "", []
 
 
 # Ссылка на релиз несёт его идентификатор: .../album/asthebluntburnsslow/6794327130

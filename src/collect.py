@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from . import config, state
@@ -116,13 +117,25 @@ def collect_releases(artists: list[dict], seen: state.Seen) -> list[dict]:
             key = state.fingerprint("release", artist["name"], item.get("title", ""))
             if key in seen:
                 continue
+
+            credit, credit_ids = store_credit(item)
+            if not credit:
+                continue  # магазин не ответил — виденным не помечаем, сверим в следующий обход
             seen.add(key)
+            tracked_id = artist.get(f"{item.get('source')}_id")
+            if not own_release(artist["name"], tracked_id, credit, credit_ids):
+                log.info("%s: «%s» — релиз %s, не берём", artist["name"], item.get("title", ""), credit)
+                continue
 
             record = {
                 "kind": "release",
                 "fingerprint": key,
                 "score": TIER_SCORE.get(artist.get("tier", "scene"), 50),
-                "artist": artist["name"],
+                # Подпись — как в магазине, а не имя из списка слежения.
+                "artist": credit,
+                # По кому релиз нашёлся: по нему бот узнаёт релиз для подписчиков
+                # (src/service.py), а compose — что подпись уже сверена.
+                "tracked": artist["name"],
                 "tier": artist.get("tier"),
                 "tags": artist.get("tags", []),
                 "title": item.get("title", ""),
@@ -137,6 +150,55 @@ def collect_releases(artists: list[dict], seen: state.Seen) -> list[dict]:
             record.update(fetch_tracks(item))
             found.append(record)
     return found
+
+
+def store_credit(item: dict) -> tuple[str, list]:
+    """Исполнитель релиза, как он значится в магазине, и id основных артистов.
+
+    iTunes кладёт исполнителя прямо в список релизов, Deezer — только
+    в карточку альбома. Без поля artist карточка ищется по id или по ссылке:
+    так compose сверяет старые находки, у которых подпись взята из списка слежения.
+    """
+    if item.get("artist"):
+        return item["artist"], item.get("artist_ids", [])
+    source = itunes if item.get("source") == "itunes" else deezer
+    album = item.get("external_id") or source.album_id_from_url(item.get("url", ""))
+    try:
+        return source.album_credit(album) if album else ("", [])
+    except Exception as exc:  # магазин мог не ответить — релиз сверим в другой раз
+        log.warning("Исполнитель не получен (%s): %s", item.get("title", ""), exc)
+        return "", []
+
+
+def own_release(name: str, tracked_id: int | None, credit: str, credit_ids: list) -> bool:
+    """Основной ли исполнитель релиза тот, за кем мы следим.
+
+    По id артиста магазин отдаёт не только его релизы. У iTunes там же чужие
+    синглы, куда его позвали на фит («Gunda Manu — Hurry Up (feat. City Morgue)»),
+    и сольники участников группы (Inspectah Deck у Wu-Tang Clan). Сборщик
+    подписывал их именем из списка слежения, и канал сообщал, что у City Morgue
+    вышел трек, где City Morgue только гость.
+
+    Гостевой релиз не берём вовсе, а не помечаем «позвали на фит»: признак
+    пришлось бы протащить через все рубрики и бота, и один недосмотр в промпте
+    вернёт ту же ложь. Совместный релиз («HNTR & Juicy J») — наш: артист в нём
+    один из основных, а подпись остаётся полной, как в магазине.
+
+    Сначала сверяется id основного исполнителя: он переживает разницу написаний
+    («Smoky Mo» у iTunes, «Смоки Мо» у нас). Соавторов iTunes по id не отдаёт,
+    их ищем по имени — целиком, между разделителями «, » и « & », иначе
+    «Juicy J» нашёлся бы в «Juicy Jones».
+    """
+    if tracked_id and tracked_id in credit_ids:
+        return True
+    pattern = rf"(?:^|, | & ){re.escape(_fold(name))}(?:, | & |$)"
+    return re.search(pattern, _fold(credit)) is not None
+
+
+def _fold(text: str) -> str:
+    """Имя без регистра и диакритики: iTunes пишет «JAŸ-Z», у нас «JAY-Z»."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold().strip()
 
 
 def fetch_tracks(item: dict) -> dict:

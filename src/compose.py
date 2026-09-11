@@ -18,10 +18,11 @@ import logging
 import random
 import re
 from datetime import timedelta, timezone
+from itertools import islice
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
-from . import card, config, llm, quality, state, telegram
+from . import card, collect, config, llm, quality, state, telegram
 from .sources import deezer, itunes
 
 log = logging.getLogger("compose")
@@ -216,6 +217,31 @@ def mark_subtext_used(indices: list[int]) -> None:
     state.write_json(config.SUBTEXT_FILE, payload)
 
 
+def store_checked(item: dict, artists: dict[str, dict]) -> bool:
+    """Подпись релиза сверена с магазином — проверка при чтении inbox.
+
+    До исправления сборщик подписывал релиз тем, по кому он нашёлся, и в inbox
+    остались «City Morgue — Hurry Up (feat. City Morgue)», где City Morgue
+    только гость, и сольники Inspectah Deck под именем Wu-Tang Clan. Переписать
+    эти строки нельзя: inbox объявлен merge=union, и правка вернулась бы дублем.
+    Поэтому старую находку сверяем с магазином по id из ссылки, а новую сборщик
+    уже сверил сам — у неё есть поле tracked. Магазин не ответил — релиз
+    пропускаем: лучше без поста, чем пост под чужим именем.
+    """
+    if item["kind"] != "release" or item.get("tracked"):
+        return True
+    name = item.get("artist", "")
+    credit, credit_ids = collect.store_credit({**item, "artist": ""})
+    tracked_id = artists.get(name, {}).get(f"{item.get('source')}_id")
+    if not credit or not collect.own_release(name, tracked_id, credit, credit_ids):
+        # ponytail: отсеянное не помечается использованным и сверяется заново каждую ночь.
+        # Таких находок конечное число — новые сборщик не пропускает; пометить, если начнёт тормозить.
+        log.warning("Отсеян релиз «%s — %s»: в магазине %s", name, item.get("title", ""), credit or "не найден")
+        return False
+    item["artist"] = credit
+    return True
+
+
 def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     """Составляет задания: (custom_id, ключ рубрики, данные для модели, исходник).
 
@@ -226,7 +252,7 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
     lineage = state.read_json(config.LINEAGE_FILE, {"links": []})["links"]
 
-    releases = [i for i in inbox if i["kind"] in ("release", "video")]
+    candidates = [i for i in inbox if i["kind"] in ("release", "video")]
     news = [i for i in inbox if i["kind"] == "news"]
 
     jobs: list[tuple[str, str, dict, dict]] = []
@@ -245,6 +271,12 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     weights = {r.key: r.weight for r in config.RUBRICS if r.weight > 0}
     total_weight = sum(weights.values())
     quota = {key: max(1, round(needed * w / total_weight)) for key, w in weights.items()}
+
+    # Сверка подписи с магазином стоит запроса, поэтому ленивая: ровно столько
+    # находок, сколько возьмут РЕЛИЗ и ВЕРДИКТ.
+    by_name = {a["name"]: a for a in artists}
+    wanted = quota.get("release", 0) + quota.get("verdict", 0)
+    releases = list(islice((i for i in candidates if store_checked(i, by_name)), wanted))
 
     for item in releases[: quota.get("release", 0)]:
         add("release", _release_payload(item), item)
@@ -640,8 +672,9 @@ def do_ask_tracks() -> int:
 
 
 def _selftest() -> int:
-    """Проверка подписи кнопки: молча уехавшая подпись врёт читателю,
-    а заодно рушит последнюю строку поста. Запуск: python -m src.compose --selftest
+    """Проверка подписей. Кнопки: молча уехавшая подпись врёт читателю,
+    а заодно рушит последнюю строку поста. Релиза: чужой фит под именем гостя
+    врёт ещё громче. Запуск: python -m src.compose --selftest
     """
     def button(url: str, label: str = "Слушать") -> str:
         return f'текст\n\n▸ <a href="{url}">{label}</a>'
@@ -674,6 +707,58 @@ def _selftest() -> int:
     assert name_button(inline) == inline
 
     print("кнопка: все проверки прошли")
+
+    # Релиз подписан исполнителем из магазина, а не тем, по кому нашёлся.
+    # Случаи — из очереди 11.09.2026: гости и сольник ушли под чужим именем.
+    own = collect.own_release
+    assert not own("City Morgue", 1361386830, "Gunda Manu", [6807911177])  # Hurry Up (feat. City Morgue)
+    assert not own("City Morgue", 1361386830, "Horuba Music", [6808604562])  # Slow Time (feat. City Morgue)
+    assert not own("Juicy J", 6392055, "CORTIS", [1831651635])  # MOTION (feat. Juicy J)
+    assert not own("Wu-Tang Clan", 200986, "Inspectah Deck", [769718])  # Dragon's Breath и два сингла
+    assert not own("Juicy J", None, "Juicy Jones", [])
+    assert own("City Morgue", 1361386830, "City Morgue, ZillaKami & SosMula", [1361386830])
+    assert own("Juicy J", 6392055, "HNTR & Juicy J", [901890750])  # второй основной — по имени
+    assert own("Wu-Tang Clan", 200986, "Inspectah Deck, Wu-Tang Clan & CZARFACE", [769718])
+    assert own("Смоки Мо", 366970924, "Smoky Mo", [366970924])  # написание разное, id тот же
+    assert own("JAY-Z", None, "JAŸ-Z", [])
+
+    # Сборщик и старые находки inbox — на подменённом магазине, без сети.
+    listing = [
+        {"source": "itunes", "artist": "Gunda Manu", "artist_ids": [6807911177],
+         "title": "Hurry Up (feat. City Morgue) - Single", "released_at": state.iso()},
+        {"source": "itunes", "artist": "City Morgue, ZillaKami & SosMula", "artist_ids": [1361386830],
+         "title": "My Bloody America", "released_at": state.iso()},
+    ]
+    store = {"6809132448": ("Gunda Manu", [6807911177]),
+             "6795547804": ("Inspectah Deck", [769718]),
+             "6797938184": ("Michael Bibi, KETTAMA & Wu-Tang Clan", [685311477])}
+
+    def old(artist: str, title: str, album: str) -> dict:
+        return {"kind": "release", "source": "itunes", "artist": artist, "title": title,
+                "url": f"https://music.apple.com/us/album/x/{album}?uo=4", "external_id": None}
+
+    guest = old("City Morgue", "Hurry Up (feat. City Morgue) - Single", "6809132448")
+    solo = old("Wu-Tang Clan", "Shaolin Rebel 2 (feat. Siahlaw) - Single", "6795547804")
+    joint = old("Wu-Tang Clan", "MYSTERY OF RAW - Single", "6797938184")
+    artists = {"City Morgue": {"itunes_id": 1361386830}, "Wu-Tang Clan": {"itunes_id": 200986}}
+
+    real = itunes.recent_releases, itunes.album_credit
+    itunes.recent_releases = lambda _id: listing
+    itunes.album_credit = lambda album: store[album]
+    try:
+        found = collect.collect_releases([{"name": "City Morgue", "itunes_id": 1361386830}], set())
+        assert not store_checked(guest, artists)
+        assert not store_checked(solo, artists)
+        assert store_checked(joint, artists)
+    finally:
+        itunes.recent_releases, itunes.album_credit = real
+    assert [(r["artist"], r["tracked"]) for r in found] == [
+        ("City Morgue, ZillaKami & SosMula", "City Morgue")
+    ], found
+    assert joint["artist"] == "Michael Bibi, KETTAMA & Wu-Tang Clan", joint
+    assert store_checked({"kind": "release", "artist": "X", "tracked": "X"}, {})  # уже сверена сборщиком
+
+    print("релиз: гости и сольники участников под чужим именем не проходят")
     return 0
 
 
@@ -684,7 +769,9 @@ def do_dry_run(needed: int) -> int:
         print("Заданий нет — inbox пуст. Запусти `python -m src.collect`.")
         return 0
     for _, rubric_key, payload, _ in jobs:
-        title = payload.get("title") or payload.get("subject") or payload.get("modern") or "—"
+        title = payload.get("subject") or payload.get("title") or payload.get("modern") or "—"
+        if rubric_key == "release":  # подпись сверена с магазином — её и показываем
+            title = f"{payload.get('artist', '')} — {title}"
         print(f"  {config.RUBRIC_BY_KEY[rubric_key].title:<12} {str(title)[:60]}")
     print(f"\nВсего заданий: {len(jobs)}")
     return 0
@@ -706,7 +793,7 @@ def main() -> int:
         action="store_true",
         help="попросить у владельца полные треки к музыкальным постам очереди (каждый — один раз)",
     )
-    parser.add_argument("--selftest", action="store_true", help="проверить подпись кнопки")
+    parser.add_argument("--selftest", action="store_true", help="проверить подпись кнопки и исполнителя релиза")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

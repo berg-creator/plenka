@@ -743,7 +743,10 @@ def notify_releases() -> int:
     releases = [
         item
         for item in state.read_jsonl(config.INBOX_FILE)
-        if item.get("kind") in ("release", "video") and item.get("artist")
+        # Релиз без tracked собран до сверки с магазином и подписан тем,
+        # по кому нашёлся: там чужие фиты и сольники участников под именем
+        # группы. Весть «у X вышло новое» по таким не шлём.
+        if (item.get("kind") == "video" or item.get("tracked")) and item.get("artist")
     ]
     if not releases:
         return 0
@@ -754,7 +757,9 @@ def notify_releases() -> int:
 
         for item in releases:
             mark = f"{chat_id}:{item.get('fingerprint', '')}"
-            if mark in sent or item["artist"].casefold() not in wanted:
+            # Подпись совместного релиза полная («HNTR & Juicy J»), а следят
+            # за одним именем — поэтому сверяем с тем, по кому релиз нашёлся.
+            if mark in sent or (item.get("tracked") or item["artist"]).casefold() not in wanted:
                 continue
 
             title = item.get("title", "")
