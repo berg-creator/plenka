@@ -21,6 +21,7 @@ import argparse
 import random
 import re
 import textwrap
+from functools import lru_cache
 from pathlib import Path
 
 import requests
@@ -31,36 +32,97 @@ from . import config, state, vk
 # Вертикальный формат историй.
 WIDTH, HEIGHT = 1080, 1920
 
+# Нижняя часть вертикального кадра занята интерфейсом площадки: подпись,
+# аватарка, кнопки. У Reels, Shorts, VK Клипов и историй эта полоса разной
+# высоты, но 380 пикселей перекрывают худший случай. Ничего своего ниже
+# этой черты не рисуем — иначе подпись канала уезжает под чужие кнопки.
+SAFE_BOTTOM = 380
+
+# Поле и вертикальный ритм — общие для всех поверхностей канала:
+# истории, карточки бота, кадры клипов свёрстаны по одной сетке.
+MARGIN = int(WIDTH * 0.078)
+MARK_Y = HEIGHT - SAFE_BOTTOM - 62
+
 CREAM = (208, 198, 178)
-INK = (34, 31, 28)
+INK = (26, 23, 20)
 ACCENT = (196, 58, 44)
+# Текст поверх фотографии. Не белый: чистый белый на затёртой картинке
+# выглядит наклейкой поверх видео, а не частью кадра.
+LIGHT = (239, 234, 224)
+MUTED = (146, 138, 126)
 
 OUT_DIR = config.ROOT / "assets" / "stories"
 
-# Сначала macOS — на нём карточки рисовались и подбирались кегли.
-# Дальше шрифты раннера GitHub Actions: Liberation Sans совпадает с Arial
-# по метрикам, поэтому вёрстка не разъезжается. Без этих путей Pillow
-# уходит в load_default, и кириллица на автопубликации выглядит бракованно.
-FONT_CANDIDATES = (
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Black.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-)
+# Шрифты лежат в репозитории, а не берутся из системы. Раньше на macOS
+# рисовалось Arial, а на раннере GitHub Actions — Liberation Sans, и вёрстка,
+# подобранная глазами локально, в автопубликации разъезжалась. Плюс Arial —
+# главная примета сгенерированной картинки: его ставят по умолчанию все.
+#
+# Oswald — узкий гротеск: длинное русское слово влезает в строку целиком
+# на ширине 1080, ради этого он и выбран. Golos Text — читаемый текст
+# с родной кириллицей. Оба переменные, поэтому вес задаётся числом,
+# а не отдельным файлом на каждое начертание.
+FONTS = config.ROOT / "assets" / "fonts"
+DISPLAY_FONT = FONTS / "Oswald.ttf"
+TEXT_FONT = FONTS / "GolosText.ttf"
 
 
-def font(size: int) -> ImageFont.FreeTypeFont:
-    for path in FONT_CANDIDATES:
-        if Path(path).exists():
-            try:
-                f = ImageFont.truetype(path, size)
-                if f.getbbox("Ё")[2] > 0:
-                    return f
-            except OSError:
-                continue
-    return ImageFont.load_default(size)
+@lru_cache(maxsize=128)
+def font(size: int, weight: int = 700, *, text: bool = False) -> ImageFont.FreeTypeFont:
+    """Шрифт нужного кегля и веса. `text=True` — для чтения, иначе заголовочный.
+
+    Кешируется: карточка перебирает кегли в подборе, и каждый раз читать
+    файл с диска незачем.
+    """
+    path = TEXT_FONT if text else DISPLAY_FONT
+    f = ImageFont.truetype(str(path), size)
+    f.set_variation_by_axes([weight])
+    return f
+
+
+def tracked(
+    draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, f, fill, track: float = 0
+) -> float:
+    """Строка с разрядкой между буквами. Возвращает правый край.
+
+    Pillow межбуквенного интервала не умеет, а разряженные капсы — половина
+    узнаваемости мелких подписей: без них ярлык читается как подпись
+    к фотографии, а не как марка канала.
+    """
+    x, y = xy
+    for ch in text:
+        draw.text((x, y), ch, font=f, fill=fill)
+        x += draw.textlength(ch, font=f) + track
+    return x
+
+
+def kicker(
+    draw: ImageDraw.ImageDraw, xy: tuple[int, int], label: str, size: int = 40, fill=ACCENT
+) -> int:
+    """Название рубрики: красная линейка и разряженные капсы рядом.
+
+    Раньше рубрика была белым текстом на красной плашке. Плашка читается как
+    ярлык новостного агрегатора и одинаково выглядит у сотни каналов; линейка
+    с разрядкой — приём музыкальной прессы и не спорит с фотографией.
+
+    Линейка красная всегда, а цвет букв задаётся: поверх обложки красное
+    по красному пропадает, и там текст ставится светлым. Возвращает высоту
+    занятого места.
+    """
+    if not label:
+        return 0
+    x, y = xy
+    f = font(size, 600)
+    draw.rectangle([x, y + size * 0.42, x + size * 1.4, y + size * 0.42 + 6], fill=ACCENT)
+    tracked(draw, (x + size * 1.9, y), label.upper(), f, fill, size * 0.14)
+    return int(size * 1.6)
+
+
+def mark(draw: ImageDraw.ImageDraw, xy: tuple[int, int], fill=LIGHT, size: int = 38) -> None:
+    """Подпись канала: имя разрядкой, следом адрес приглушённым."""
+    x, y = xy
+    end = tracked(draw, (x, y), "ПЛЁНКА", font(size, 700), fill, size * 0.22)
+    tracked(draw, (end + size * 0.9, y), "@plenka_fm", font(size, 400), MUTED, size * 0.1)
 
 
 def strip_html(text: str) -> str:
@@ -186,32 +248,20 @@ def render_photo(text: str, cover_url: str, rubric_title: str = "") -> Image.Ima
         return None
 
     draw = ImageDraw.Draw(img)
-    margin = int(WIDTH * 0.09)
-
-    # Плашка рубрики над обложкой
-    if rubric_title:
-        f = font(40)
-        box = draw.textbbox((0, 0), rubric_title, font=f)
-        pad = 22
-        y = int(HEIGHT * 0.10)
-        draw.rectangle([margin, y, margin + box[2] + pad * 2, y + box[3] + pad * 1.4], fill=ACCENT)
-        draw.text((margin + pad, y + pad * 0.55), rubric_title, font=f, fill=(255, 255, 255))
+    kicker(draw, (MARGIN, int(HEIGHT * 0.09)), rubric_title, 44, LIGHT)
 
     # Подпись — только первая фраза целиком: обрыв на полуслове выглядит браком
     caption = first_sentence(text, limit=95)
-    f = font(62)
-    y = int(HEIGHT * 0.74)
-    for line in textwrap.wrap(caption, width=24)[:3]:
-        draw.text((margin + 3, y + 3), line, font=f, fill=(0, 0, 0))
-        draw.text((margin, y), line, font=f, fill=(245, 243, 238))
-        y += 78
+    lines = textwrap.wrap(caption, width=26)[:3]
+    f = font(74)
+    step = int(74 * 1.02)
+    y = MARK_Y - 92 - len(lines) * step
+    for line in lines:
+        draw.text((MARGIN + 3, y + 4), line, font=f, fill=(0, 0, 0))
+        draw.text((MARGIN, y), line, font=f, fill=LIGHT)
+        y += step
 
-    # Подпись канала
-    footer = font(38)
-    fy = HEIGHT - int(HEIGHT * 0.065)
-    draw.rectangle([margin, fy - 16, margin + 92, fy - 8], fill=ACCENT)
-    draw.text((margin, fy), "ПЛЁНКА", font=footer, fill=(245, 243, 238))
-
+    mark(draw, (MARGIN, MARK_Y))
     return img
 
 
@@ -220,42 +270,26 @@ def render(text: str, rubric_title: str = "") -> Image.Image:
     img = background()
     draw = ImageDraw.Draw(img)
 
-    margin = int(WIDTH * 0.10)
-    y = int(HEIGHT * 0.16)
+    y = int(HEIGHT * 0.13)
+    y += kicker(draw, (MARGIN, y), rubric_title, 44) + int(HEIGHT * 0.045)
 
-    # Плашка с названием рубрики
-    if rubric_title:
-        f = font(38)
-        box = draw.textbbox((0, 0), rubric_title, font=f)
-        pad = 22
-        draw.rectangle([margin, y, margin + box[2] + pad * 2, y + box[3] + pad * 1.4],
-                       fill=ACCENT)
-        draw.text((margin + pad, y + pad * 0.55), rubric_title, font=f, fill=(255, 255, 255))
-        y += box[3] + pad * 3
-
-    # Основной текст: кегль подбирается так, чтобы влезть без обрезки
+    # Основной текст: кегль подбирается так, чтобы влезть без обрезки.
+    # Читаемый шрифт, а не заголовочный: здесь текст читают, а не считывают.
     body = shorten(text)
-    for size, per_line in ((78, 21), (68, 24), (60, 28), (52, 32), (44, 38)):
-        f = font(size)
+    for size, per_line in ((70, 24), (62, 27), (54, 31), (46, 36), (40, 42)):
+        f = font(size, 600, text=True)
         lines: list[str] = []
         for paragraph in body.split("\n"):
             lines.extend(textwrap.wrap(paragraph, width=per_line) or [""])
-        height = len(lines) * size * 1.42
-        if y + height < HEIGHT * 0.82:
+        height = len(lines) * size * 1.38
+        if y + height < MARK_Y - 80:
             break
 
     for line in lines:
-        draw.text((margin, y), line, font=f, fill=INK)
-        y += size * 1.42
+        draw.text((MARGIN, y), line, font=f, fill=INK)
+        y += size * 1.38
 
-    # Подпись канала внизу
-    footer = font(40)
-    label = "ПЛЁНКА"
-    fbox = draw.textbbox((0, 0), label, font=footer)
-    fy = HEIGHT - int(HEIGHT * 0.085)
-    draw.text((margin, fy), label, font=footer, fill=INK)
-    draw.rectangle([margin, fy - 18, margin + fbox[2], fy - 10], fill=ACCENT)
-
+    mark(draw, (MARGIN, MARK_Y), fill=INK)
     return img
 
 

@@ -12,6 +12,37 @@ from . import config, llm
 from .providers import gigachat
 
 
+def check_gigachat(required: bool) -> int:
+    """Связь со Сбером и список моделей по ключу.
+
+    required=False — GigaChat здесь только запасной: его поломка означает,
+    что канал остался без подстраховки, но не что проверка провалена.
+    """
+    try:
+        models = gigachat.available_models()
+    except Exception as exc:
+        print(f"✗ GigaChat недоступен: {exc}")
+        print("  Проверь GIGACHAT_CREDENTIALS в .env — это «Ключ авторизации» "
+              "из проекта GigaChat API на developers.sber.ru")
+        if required:
+            return 1
+        print("  Это запасной генератор: канал работает, но подстраховки нет.")
+        return 0
+
+    if not models:
+        print("GigaChat: соединение установлено, список моделей пуст.")
+        return 0
+
+    print("GigaChat, доступные модели:")
+    for name in models:
+        mark = "→" if name == gigachat.model_name() else " "
+        print(f"  {mark} {name}")
+    if gigachat.model_name() not in models:
+        print(f"\n⚠️ Модель {gigachat.model_name()} недоступна по твоему ключу.")
+        print("   Впиши в .env одну из списка: GIGACHAT_MODEL=...")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Проверка генератора текстов")
     parser.add_argument("--sample", action="store_true", help="сгенерировать пробный пост")
@@ -20,24 +51,9 @@ def main() -> int:
     config.load_dotenv()
     print(f"Генератор: {llm.describe()}\n")
 
-    if llm.provider() == "gigachat":
-        try:
-            models = gigachat.available_models()
-        except Exception as exc:
-            print(f"✗ Не удалось подключиться: {exc}")
-            print("\nПроверь GIGACHAT_CREDENTIALS в .env — это «Ключ авторизации» "
-                  "из проекта GigaChat API на developers.sber.ru")
+    if "gigachat" in (llm.provider(), llm.fallback()):
+        if check_gigachat(required=llm.provider() == "gigachat"):
             return 1
-        if models:
-            print("Доступные модели:")
-            for name in models:
-                mark = "→" if name == gigachat.model_name() else " "
-                print(f"  {mark} {name}")
-            if gigachat.model_name() not in models:
-                print(f"\n⚠️ Модель {gigachat.model_name()} недоступна по твоему ключу.")
-                print(f"   Впиши в .env одну из списка: GIGACHAT_MODEL=...")
-        else:
-            print("Список моделей пуст — но соединение установлено.")
 
     if not args.sample:
         print("\nЧтобы проверить качество текста: python -m src.check_llm --sample")

@@ -108,10 +108,17 @@ def _access_token() -> str:
 def generate(system: str, user: str, schema: dict) -> dict:
     """Один запрос к GigaChat. Схема используется как подсказка в промпте:
     строгих JSON-схем этот API не принимает, поэтому ответ разбирается вручную."""
+    # Поля перечисляем по схеме, а не по памяти: схем в проекте две
+    # (пост и раскадровка ролика), и зашитый список полей заставил бы
+    # запасной генератор отвечать не тем, что просили.
+    fields = "\n".join(
+        f'  "{name}": {prop.get("description", prop.get("type", ""))}'
+        for name, prop in schema.get("properties", {}).items()
+    )
     instruction = (
         f"{user}\n\n"
         "Ответ верни строго одним объектом JSON без markdown-обёртки, с полями:\n"
-        '{"skip": true|false, "text": "текст поста", "reason": "если skip — почему"}'
+        f"{fields}"
     )
 
     last_error = ""
@@ -185,6 +192,7 @@ def _parse(data: dict) -> dict:
         return {"skip": not content, "text": content, "reason": ""}
 
     return {
+        **parsed,
         "skip": bool(parsed.get("skip", False)),
         "text": _as_text(parsed.get("text")),
         "reason": _as_text(parsed.get("reason")),

@@ -18,20 +18,41 @@ MIN_INTERVAL = 1.0  # Deezer ограничивает примерно 50 зап
 EMPTY_PICTURE = "d41d8cd98f00b204e9800998ecf8427e"
 
 
+def stored_id(name: str) -> int | None:
+    """Id того же имени из data/artists.json, если он там уже записан.
+
+    Нужен там, где канал и Deezer пишут артиста по-разному: у нас «Guf»
+    латиницей (по нему ищется всё остальное), а на Deezer он заведён
+    кириллицей, и поиском по имени его не достать.
+    """
+    from .. import config, state
+
+    target = name.casefold().strip()
+    for artist in state.read_json(config.ARTISTS_FILE, {}).get("artists", []):
+        if artist.get("name", "").casefold().strip() == target:
+            return artist.get("deezer_id")
+    return None
+
+
 def find_artist_id(name: str) -> int | None:
+    """Id артиста: точное совпадение имени, иначе то, что стоит в базе.
+
+    «Самого похожего из выдачи» здесь больше нет намеренно. По запросу «Guf»
+    Deezer первым отдаёт GUFI — другого артиста из другой страны, и раньше
+    его id уходил в data/artists.json (см. src/resolve_ids.py), а оттуда
+    чужая обложка попадала в ролик под именем Гуфа. Пустой ответ честнее:
+    кадр останется без лица, но не соврёт.
+    """
     data = get_json(
         f"{BASE}/search/artist",
         params={"q": name, "limit": 5},
         min_interval=MIN_INTERVAL,
     )
-    if not data or not data.get("data"):
-        return None
-
     target = name.casefold().strip()
-    for item in data["data"]:
+    for item in (data or {}).get("data") or []:
         if item.get("name", "").casefold().strip() == target:
             return item.get("id")
-    return data["data"][0].get("id")
+    return stored_id(name)
 
 
 def artist_picture(name: str) -> str:
@@ -46,8 +67,6 @@ def artist_picture(name: str) -> str:
         min_interval=MIN_INTERVAL,
     )
     items = (data or {}).get("data") or []
-    if not items:
-        return ""
 
     # Только точное совпадение имени: взять «самого популярного из похожих»
     # значит однажды показать под разбором чужое лицо, а это та же выдумка,
@@ -59,12 +78,21 @@ def artist_picture(name: str) -> str:
     target = name.casefold().strip()
     exact = [i for i in items if i.get("name", "").casefold().strip() == target]
     if not exact:
-        return ""
+        # Имени в выдаче нет — берём id из базы: канал пишет «Guf», а Deezer
+        # знает его как «Гуф», и поиском по нашему написанию его не найти.
+        stored = stored_id(name)
+        return _picture_by_id(stored) if stored else ""
 
     best = max(exact, key=lambda i: i.get("nb_fan", 0))
     url = best.get("picture_xl") or best.get("picture_big") or ""
     # Когда портрета нет, Deezer отдаёт серый силуэт по адресу с хешем пустой
     # строки. Формально картинка есть, показывать её нельзя.
+    return "" if EMPTY_PICTURE in url else url
+
+
+def _picture_by_id(artist_id: int) -> str:
+    data = get_json(f"{BASE}/artist/{artist_id}", min_interval=MIN_INTERVAL)
+    url = (data or {}).get("picture_xl") or (data or {}).get("picture_big") or ""
     return "" if EMPTY_PICTURE in url else url
 
 

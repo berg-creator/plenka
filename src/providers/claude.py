@@ -73,8 +73,12 @@ def parse_message(message: Any) -> dict:
                 data = json.loads(block.text)
             except json.JSONDecodeError:
                 continue
-            if isinstance(data, dict) and "text" in data:
+            # Признак ответа по схеме — skip: он есть у всех схем, а text
+            # только у постов. Остальные поля отдаются как пришли: у ролика
+            # это строки раскадровки (llm.CLIP_SCHEMA), и терять их нельзя.
+            if isinstance(data, dict) and "skip" in data:
                 return {
+                    **data,
                     "skip": bool(data.get("skip", False)),
                     "text": (data.get("text") or "").strip(),
                     "reason": (data.get("reason") or "").strip(),

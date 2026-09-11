@@ -1,8 +1,13 @@
 """Генерация текстов. Провайдер выбирается переменной LLM_PROVIDER.
 
-    LLM_PROVIDER=gigachat    GigaChat от Сбера — работает в России (по умолчанию)
+    LLM_PROVIDER=anthropic   Claude Opus — платно, пишет лучше всех (по умолчанию)
+    LLM_PROVIDER=gigachat    GigaChat от Сбера — работает в России
     LLM_PROVIDER=gemini      Google Gemini 2.5 Pro — бесплатно, но не в России
-    LLM_PROVIDER=anthropic   Claude Opus — платно, тоже недоступен в России
+
+Второй переменной, LLM_FALLBACK, задаётся запасной генератор: если основной
+не ответил — кончились деньги, отвалилась сеть, упал сам сервис — пост пишет
+он, и канал не встаёт. По умолчанию это GigaChat: он работает из России
+и оплачивается отдельно от Клода, так что общей точки отказа у них нет.
 
 Рубрики и промпты от провайдера не зависят: смена одной строки в .env
 меняет генератор целиком, ничего больше править не нужно.
@@ -11,11 +16,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from functools import lru_cache
 
 from . import config
 from .providers import claude, gemini, gigachat
+
+log = logging.getLogger("llm")
 
 # Ответ модели жёстко ограничен схемой — разбирать свободный текст не приходится.
 POST_SCHEMA = {
@@ -38,11 +46,50 @@ POST_SCHEMA = {
     "additionalProperties": False,
 }
 
+# Ролики отвечают не постом, а раскадровкой: что говорит голос и что стоит
+# на экране (см. src/clips.py). Схема отдельная, потому что разбирать
+# короткие строки обратно из готового текста поста было бы гаданием.
+CLIP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "skip": {
+            "type": "boolean",
+            "description": "true, если из новости ролика не выйдет — остальные поля пустые",
+        },
+        "artist": {
+            "type": "string",
+            "description": "Имя артиста ровно как в списке known — по нему ищется фотография",
+        },
+        "lines": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Ровно три фразы закадрового голоса",
+        },
+        "labels": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Ровно три надписи на экран, по два-три слова",
+        },
+        "reason": {
+            "type": "string",
+            "description": "Если skip=true — одной строкой почему",
+        },
+    },
+    "required": ["skip", "artist", "lines", "labels", "reason"],
+    "additionalProperties": False,
+}
+
 GEMINI_MODEL = "gemini-2.5-pro"
 
 
 def provider() -> str:
-    return os.environ.get("LLM_PROVIDER", "gigachat").strip().lower()
+    return os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
+
+
+def fallback() -> str:
+    """Запасной генератор. Пустая строка — фоллбека нет, ошибка идёт наверх."""
+    spare = os.environ.get("LLM_FALLBACK", "gigachat").strip().lower()
+    return "" if spare == provider() else spare
 
 
 def supports_batch() -> bool:
@@ -73,22 +120,61 @@ def service_prompt(kind: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _call(name: str, user: str, schema: dict) -> dict:
+    """Один запрос к конкретному провайдеру. Голос канала одинаков для всех."""
+    if name == "anthropic":
+        return claude.generate(voice(), user, schema)
+    if name == "gemini":
+        return gemini.generate(GEMINI_MODEL, voice(), user, schema)
+    return gigachat.generate(voice(), user, schema)
+
+
+def _generate(user: str, schema: dict = POST_SCHEMA) -> dict:
+    """Запрос к основному генератору, при отказе — к запасному.
+
+    Исключение здесь всегда означает «провайдер недоступен»: сеть, ключ, лимит,
+    пятисотка. Осознанный отказ модели приходит как skip=true и запасного
+    не поднимает — если Клод счёл материал негодным, ГигаЧат тем более.
+    """
+    primary = provider()
+    try:
+        return _call(primary, user, schema)
+    except Exception as exc:
+        spare = fallback()
+        if not spare:
+            raise
+        log.warning("Генератор %s недоступен (%s). Пишет запасной — %s.", primary, exc, spare)
+        return _call(spare, user, schema)
+
+
 def generate_service(kind: str, payload: dict) -> dict:
     """Разбор по запросу человека. Схема ответа та же, что у постов:
     провайдеру всё равно, а нам не нужен второй разборщик ответа."""
-    user = (
+    return _generate(
         f"{service_prompt(kind)}\n\n"
         f"## Данные запроса\n\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
         f"Напиши разбор по правилам выше и голосу канала. "
         f"Если данных не хватает — верни skip=true и причину одной строкой."
     )
-    name = provider()
-    if name == "anthropic":
-        return claude.generate(voice(), user, POST_SCHEMA)
-    if name == "gemini":
-        return gemini.generate(GEMINI_MODEL, voice(), user, POST_SCHEMA)
-    return gigachat.generate(voice(), user, POST_SCHEMA)
+
+
+def generate_clip(payload: dict) -> dict:
+    """Раскадровка новостного ролика: что сказать голосом, что вывести на экран.
+
+    Границы достоверности тут жёстче, чем у поста: строки читают вслух,
+    и выдуманная цифра в ролике стоит дороже пропущенной. Правила — в
+    prompts/rubrics/clip_news.md, сборка — в src/clips.py.
+    """
+    return _generate(
+        f"{rubric_prompt('clip_news')}\n\n"
+        f"## Новость\n\n"
+        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"Сделай раскадровку по правилам выше. Ничего сверх заголовка и краткого "
+        f"содержания не добавляй. Если новость пустая — верни skip=true и причину "
+        f"одной строкой.",
+        CLIP_SCHEMA,
+    )
 
 
 def build_user_prompt(rubric_key: str, payload: dict) -> str:
@@ -102,13 +188,7 @@ def build_user_prompt(rubric_key: str, payload: dict) -> str:
 
 
 def generate_now(rubric_key: str, payload: dict) -> dict:
-    user = build_user_prompt(rubric_key, payload)
-    name = provider()
-    if name == "anthropic":
-        return claude.generate(voice(), user, POST_SCHEMA)
-    if name == "gemini":
-        return gemini.generate(GEMINI_MODEL, voice(), user, POST_SCHEMA)
-    return gigachat.generate(voice(), user, POST_SCHEMA)
+    return _generate(build_user_prompt(rubric_key, payload))
 
 
 def submit_batch(jobs: list[tuple[str, str, dict]]) -> str:
@@ -130,10 +210,17 @@ def fetch_batch(batch_id: str) -> dict[str, dict]:
     return claude.fetch_batch(batch_id)
 
 
-def describe() -> str:
-    """Человекочитаемое название текущего генератора — для логов и отчётов."""
+def _name(key: str) -> str:
     return {
         "gigachat": f"Сбер {gigachat.model_name()}",
         "gemini": f"Google {GEMINI_MODEL} (бесплатный тариф)",
         "anthropic": f"Anthropic {claude.MODEL} (платный)",
-    }.get(provider(), provider())
+    }.get(key, key)
+
+
+def describe() -> str:
+    """Человекочитаемое название генераторов — для логов и отчётов."""
+    spare = fallback()
+    if not spare:
+        return _name(provider())
+    return f"{_name(provider())}, запасной — {_name(spare)}"

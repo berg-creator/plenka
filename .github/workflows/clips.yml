@@ -1,11 +1,11 @@
 name: Клипы
 
 # Вертикальные ролики для VK Клипов и Shorts — единственный бесплатный
-# источник холодного охвата. Три раза в неделю: чаще расходует базу связей
-# быстрее, чем она пополняется руками.
+# источник холодного охвата.
 on:
-  schedule:
-    - cron: "0 8 * * 1,3,5"
+  # Расписание выключено до конвейера с голосом владельца: синтеза в роликах
+  # не будет, а без голоса сервер собирал бы немые ролики. Подложек на сервере
+  # пока тоже нет — ручной запуск упадёт на pick_audio.
   workflow_dispatch:
     inputs:
       count:
@@ -18,6 +18,10 @@ on:
         default: false
       facts:
         description: "Формат А ВЫ ЗНАЛИ вместо разбора связи"
+        type: boolean
+        default: false
+      news:
+        description: "Новостной формат из свежего inbox"
         type: boolean
         default: false
 
@@ -58,10 +62,21 @@ jobs:
           # Закадровый голос. Без ключа ролик собирается молча:
           # голос — украшение, а не условие выпуска.
           FISH_AUDIO_KEY: ${{ secrets.FISH_AUDIO_KEY }}
+          # Строки новостного ролика пишет модель — тем же генератором,
+          # что и посты канала.
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
+          FORMAT=""
+          if [ "${{ inputs.facts }}" = "true" ]; then FORMAT="--facts"; fi
+          if [ "${{ inputs.news }}" = "true" ]; then FORMAT="--news"; fi
           python -m src.clips \
             --build "${{ inputs.count || '1' }}" \
-            ${{ inputs.facts && '--facts' || '' }} \
+            $FORMAT \
             ${{ inputs.preview && '--preview' || '--publish' }}
 
       # Артефакт — запасной путь к файлу, если Telegram не доставил
