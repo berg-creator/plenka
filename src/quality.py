@@ -79,6 +79,10 @@ HEADLINED = ("release", "verdict", "news", "lineage", "subtext", "legend")
 # Ссылка вырезается перед сверкой с данными релиза: в адресе бывают цифры.
 _LINK = re.compile(r"<a\b.*?</a>", re.IGNORECASE | re.DOTALL)
 
+# Брак описи — длинно, но не враньё: исчерпав попытки, compose.generate_checked
+# выпускает такой пост, а не теряет его.
+INVENTORY_ISSUES = ("опись <code>", "пересказ описи")
+
 
 def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
     """Список причин, по которым пост нельзя публиковать. Пусто — годится.

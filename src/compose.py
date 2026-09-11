@@ -168,9 +168,10 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
     в канале.
     """
     issues: list[str] = ["не удалось сгенерировать"]
+    attempt_payload = payload
 
     for attempt in range(attempts):
-        result = llm.generate_now(rubric_key, payload)
+        result = llm.generate_now(rubric_key, attempt_payload)
         if result["skip"] or not result["text"]:
             return result  # модель осознанно отказалась — это не брак
 
@@ -187,6 +188,18 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
             rubric_key,
             "; ".join(issues),
         )
+        # Вслепую модель повторяет тот же брак: 11.09.2026 и GigaChat, и Claude
+        # трижды подряд вставили «16 треков», и пост пропал. Поэтому причина
+        # отказа уходит в следующую попытку рядом с данными.
+        attempt_payload = {**payload, "прошлый_вариант_забракован_за": issues}
+
+    # Опись и её пересказ — длинно, но не враньё, а пост о релизе обещан в течение
+    # суток. 11.09.2026 GigaChat и Haiku трижды подряд вставляли «16 треков»
+    # и с причиной на руках, и пост пропадал. Если брак только такой, выходит
+    # последняя попытка, а строка описи из неё вырезается.
+    if all(issue.startswith(quality.INVENTORY_ISSUES) for issue in issues):
+        log.warning("«%s» выходит с браком описи: %s", rubric_key, "; ".join(issues))
+        return {**result, "text": re.sub(r"\n*<code>[^<]*</code>", "", result["text"])}
 
     return {
         "skip": True,
@@ -760,6 +773,24 @@ def _selftest() -> int:
     а заодно рушит последнюю строку поста. Релиза: чужой фит под именем гостя
     врёт ещё громче. Запуск: python -m src.compose --selftest
     """
+    # Брак описи не губит пост о релизе: модель упёрлась в «16 треков» —
+    # причина уходит в повтор, а выходит последняя попытка без строки описи.
+    seen: list[dict] = []
+
+    def stubborn_model(key: str, payload: dict) -> dict:
+        seen.append(payload)
+        text = "<b>KIZARU ВЫПУСТИЛ CA$HEY</b>\n\n16 треков без единого гостя.\n\n<code>16 треков · 38 минут</code>"
+        return {"skip": False, "reason": "", "text": text}
+
+    real_generate, llm.generate_now = llm.generate_now, stubborn_model
+    try:
+        stubborn = generate_checked("release", {"tracks": [{}] * 16})
+    finally:
+        llm.generate_now = real_generate
+    assert not stubborn["skip"] and "<code>" not in stubborn["text"], stubborn
+    assert len(seen) == 3 and "прошлый_вариант_забракован_за" in seen[-1], seen
+    print("брак описи: причина уходит в повтор, пост выходит без строки описи")
+
     def button(url: str, label: str = "Слушать") -> str:
         return f'текст\n\n▸ <a href="{url}">{label}</a>'
 
