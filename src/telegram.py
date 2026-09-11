@@ -354,8 +354,12 @@ def send_audio(
     thumb: bytes | None = None,
     seconds: int = 0,
     buttons: list[list[dict]] | None = None,
+    quiet: bool = False,
 ) -> dict:
     """Отправляет отрывок трека с текстом поста в подписи.
+
+    quiet — без уведомления: плеер под постом с обложкой (publish.send) — часть
+    того же поста, и второй сигнал о нём подписчику ни к чему.
 
     Отрывок качаем сами, а не даём Telegram ссылку: магазин помечает превью
     типом `audio/x-m4p`, Telegram его не узнаёт и кладёт в ленту файл, который
@@ -402,6 +406,8 @@ def send_audio(
         payload["audio"] = audio
     if seconds:
         payload["duration"] = seconds
+    if quiet:
+        payload["disable_notification"] = True
 
     if thumb is None and cover_url:
         thumb = _thumbnail(cover_url)

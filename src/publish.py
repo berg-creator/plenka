@@ -155,52 +155,75 @@ def send(post: dict, chat_id: str) -> None:
     cover = post.get("cover", "")
     text, buttons = listen(text, post.get("artist", ""), release_title(post))
 
+    # Обложка крупно, музыка следом. Фото и аудио в одно сообщение Telegram
+    # не кладёт, а у плеера обложка — иконка на палец. Решение владельца
+    # от 11.09.2026: текст и кнопки стримингов под фото, плеер — следующим
+    # сообщением, без подписи и без второго уведомления.
+    if cover and len(text) <= telegram.MAX_CAPTION:
+        try:
+            # Рамка канала: рубрика сверху, подпись снизу. Не нарисовалась
+            # (нет сети, битый файл) — обложка уходит как была.
+            framed = card.cover(post)
+            if framed:
+                telegram.send_photo_file(chat_id, framed, text, buttons=buttons)
+            else:
+                telegram.send_photo(chat_id, cover, text, buttons=buttons)
+        except telegram.TelegramError as exc:
+            # Обложка могла протухнуть — тогда текст уезжает вместе с музыкой.
+            log.warning("Фото не ушло (%s), пробую с музыкой", exc)
+        else:
+            send_music(post, chat_id, "", quiet=True)
+            return
+
+    if not send_music(post, chat_id, text, buttons):
+        telegram.send_message(chat_id, text, buttons=buttons)
+
+
+def send_music(
+    post: dict, chat_id: str, caption: str, buttons: list[list[dict]] | None = None,
+    *, quiet: bool = False,
+) -> bool:
+    """Полный трек от владельца, иначе отрывок магазина. False — не ушло ничего."""
+    if len(caption) > telegram.MAX_CAPTION:
+        return False
+
     # Полный трек, присланный владельцем (src/moderate.py), важнее отрывка.
     # Файл уже лежит у Telegram и уходит по file_id: качать нечего, а название
     # и артиста при повторе Telegram берёт из самого файла — переданные поверх
     # он игнорирует, проверено вживую. Поэтому дежурство при приёме заливает трек
     # заново, уже с названием, артистом и обложкой из поста.
     full_track = post.get("full_track_file_id", "")
-    if full_track and len(text) <= telegram.MAX_CAPTION:
+    if full_track:
         try:
-            telegram.send_audio(chat_id, full_track, text, buttons=buttons)
-            return
+            telegram.send_audio(chat_id, full_track, caption, buttons=buttons, quiet=quiet)
+            return True
         except telegram.TelegramError as exc:
             log.warning("Полный трек не ушёл (%s), пробую отрывком", exc)
 
-    # Музыка важнее картинки: канал про звук, и услышать его надо не уходя
-    # из ленты. Обложка при этом не пропадает — идёт превью к отрывку.
     preview = post.get("preview", "")
-    if preview and len(text) <= telegram.MAX_CAPTION:
-        # Ссылка Deezer на отрывок живёт часы, пост в очереди — дни: перед
-        # отправкой берём у магазина свежую, а не сохранённую при генерации.
-        from .compose import fresh_preview
+    if not preview:
+        return False
+    # Ссылка Deezer на отрывок живёт часы, пост в очереди — дни: перед
+    # отправкой берём у магазина свежую, а не сохранённую при генерации.
+    from .compose import fresh_preview
 
-        preview = fresh_preview(post) or preview
-        try:
-            telegram.send_audio(
-                chat_id,
-                preview,
-                text,
-                title=post.get("track", ""),
-                performer=post.get("artist", ""),
-                cover_url=cover,
-                buttons=buttons,
-            )
-            return
-        except telegram.TelegramError as exc:
-            # Ссылка на отрывок живёт не вечно — тогда откатываемся на обложку.
-            log.warning("Отрывок не ушёл (%s), пробую обложкой", exc)
-
-    if cover and len(text) <= telegram.MAX_CAPTION:
-        try:
-            telegram.send_photo(chat_id, cover, text, buttons=buttons)
-            return
-        except telegram.TelegramError as exc:
-            # Обложка могла протухнуть или быть недоступной — текст важнее картинки.
-            log.warning("Фото не ушло (%s), отправляю текстом", exc)
-
-    telegram.send_message(chat_id, text, buttons=buttons)
+    preview = fresh_preview(post) or preview
+    try:
+        telegram.send_audio(
+            chat_id,
+            preview,
+            caption,
+            title=post.get("track", ""),
+            performer=post.get("artist", ""),
+            cover_url=post.get("cover", ""),
+            buttons=buttons,
+            quiet=quiet,
+        )
+        return True
+    except telegram.TelegramError as exc:
+        # Ссылка на отрывок живёт не вечно.
+        log.warning("Отрывок не ушёл: %s", exc)
+        return False
 
 
 def crosspost_vk(post: dict) -> None:
@@ -267,9 +290,28 @@ def _poll_payload(text: str) -> dict | None:
 
 def _selftest() -> None:
     """Кнопки стримингов: строка «Слушать» уходит, точная ссылка остаётся точной.
+    Пост с обложкой и музыкой — два сообщения: фото с текстом, следом тихий плеер.
 
     Запуск: python -m src.publish --selftest
     """
+    sent: list[tuple] = []
+    real = card.cover, telegram.send_photo, telegram.send_audio
+    card.cover = lambda post: None
+    telegram.send_photo = lambda chat, url, caption, buttons=None: sent.append(("фото", caption))
+    telegram.send_audio = lambda chat, audio, caption, buttons=None, quiet=False, **_: sent.append(
+        ("плеер", caption, quiet)
+    )
+    try:
+        post = {"text": "Текст.", "cover": "https://x/c.jpg", "full_track_file_id": "ID"}
+        send(post, "0")
+        assert sent == [("фото", "Текст."), ("плеер", "", True)], sent
+        sent.clear()
+        # Без обложки текст едет с плеером, и уведомление у него обычное.
+        send({**post, "cover": ""}, "0")
+        assert sent == [("плеер", "Текст.", False)], sent
+    finally:
+        card.cover, telegram.send_photo, telegram.send_audio = real
+
     apple = "https://music.apple.com/us/album/fuel-the-fire-single/6802784931?uo=4"
     post = f'<b>ЗАГОЛОВОК</b>\n\nТекст.\n\n▸ <a href="{apple}">Слушать в Apple Music</a>'
     text, rows = listen(post, "Ghostface Playa", "Fuel the Fire")
@@ -362,7 +404,10 @@ def main() -> int:
             full = f"запрошен у владельца {post['track_request'].get('sent_at', '')}, ответа нет"
         else:
             full = "нет"
-        print(f"Полный трек: {full}\n")
+        print(f"Полный трек: {full}")
+        if post.get("cover") and (post.get("full_track_file_id") or post.get("preview")):
+            print("Вид: обложка в рамке с текстом и кнопками, следом плеер без уведомления")
+        print()
         if post.get("rubric") == "meme":
             print(f"Картинка: {post.get('picture') or 'нет — уйдёт текстом'}")
             print(f"Сверху: {post.get('top', '')}\nСнизу: {post.get('bottom', '')}\n")

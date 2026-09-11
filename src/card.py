@@ -101,19 +101,18 @@ def render(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА") -
     return img
 
 
-def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВКА") -> Image.Image | None:
-    """Карточка на портрете артиста.
+def photo_backdrop(photo_url: str) -> Image.Image | None:
+    """Фотография во весь кадр 4:5 с уводом низа в чёрное.
 
-    Человек спрашивает про артиста и ждёт увидеть артиста — служебная плашка
-    с текстом на его месте выглядит как слайд из презентации. Фотография
-    занимает весь кадр, текста на ней минимум: карточку смотрят, а не читают.
+    Общая для разбора бота (render_on_photo) и обложки поста (cover): скачать,
+    обрезать и затемнить — одно действие, и в двух копиях они со временем разошлись бы.
     """
     try:
         response = requests.get(photo_url, timeout=30)
         if response.status_code != 200:
             return None
         photo = Image.open(BytesIO(response.content)).convert("RGB")
-    except Exception:  # noqa: BLE001 — без картинки просто вернёмся к обычной карточке
+    except Exception:  # noqa: BLE001 — без картинки вызывающий уйдёт запасным путём
         return None
 
     # Кадрируем по центру: портреты приходят квадратными, а карточка вытянутая.
@@ -125,12 +124,70 @@ def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВК�
 
     # Затемняем низ, иначе белый текст не прочитается. Обложки бывают пёстрыми
     # до ряби, поэтому к низу уходим почти в чёрное — читаемость важнее картинки.
+    # Верх притемняем тоже, но слабо: там стоит рубрика, а обложки бывают
+    # ярко-красными — по такой красная линейка не читается вовсе.
     shade = Image.new("L", (WIDTH, HEIGHT), 0)
     draw_shade = ImageDraw.Draw(shade)
     for y in range(HEIGHT):
-        share = max(0.0, (y / HEIGHT - 0.18) / 0.82)
-        draw_shade.line([(0, y), (WIDTH, y)], fill=int(242 * share**1.25))
-    img = Image.composite(Image.new("RGB", (WIDTH, HEIGHT), (12, 10, 9)), img, shade)
+        down = max(0.0, (y / HEIGHT - 0.18) / 0.82)
+        up = max(0.0, (0.16 - y / HEIGHT) / 0.16)
+        draw_shade.line([(0, y), (WIDTH, y)], fill=int(max(242 * down**1.25, 120 * up)))
+    return Image.composite(Image.new("RGB", (WIDTH, HEIGHT), (12, 10, 9)), img, shade)
+
+
+def cover(post: dict) -> Path | None:
+    """Обложка поста для ленты: та же фотография, но в рамке канала.
+
+    Квадрат 600×600 из магазина одинаково выглядит у всех, кто пересказывает
+    релизы, и в ленте не опознаётся. Вертикаль 4:5 занимает больше экрана,
+    а рубрика и подпись сверху и снизу делают чужую обложку кадром канала.
+
+    Вклейку на кремовой бумаге пробовали и отказались: обложка — главное,
+    что есть у поста про музыку, и оправа отнимает у неё место, ничего
+    не добавляя. Подпись канала внизу работает как водяной знак и без оправы.
+
+    Артист и трек берутся из полей поста, а не из его текста: подпись под
+    картинкой и так стоит рядом, и повторять её на самой картинке незачем.
+    Нет обложки или не скачалась — None, и публикация уходит прежним путём.
+    """
+    img = photo_backdrop(post.get("cover", "")) if post.get("cover") else None
+    if img is None:
+        return None
+
+    rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
+    draw = ImageDraw.Draw(img)
+    stories.kicker(draw, (stories.MARGIN, int(HEIGHT * 0.07)), rubric.title if rubric else "", 40,
+                   stories.LIGHT)
+
+    caption = " — ".join(part for part in (post.get("artist", ""), post.get("track", "")) if part)
+    if caption:
+        f, lines, size = _fit(
+            draw, caption, HEIGHT * 0.3, ((88, 17), (74, 21), (62, 25), (52, 30))
+        )
+        y = HEIGHT - int(HEIGHT * 0.155) - len(lines) * size * 1.02
+        for line in lines:
+            draw.text((stories.MARGIN + 2, y + 3), line, font=f, fill=(0, 0, 0))
+            draw.text((stories.MARGIN, y), line, font=f, fill=stories.LIGHT)
+            y += size * 1.02
+
+    stories.mark(draw, (stories.MARGIN, HEIGHT - int(HEIGHT * 0.085)), size=36)
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = OUT_DIR / "cover.jpg"
+    img.save(path, "JPEG", quality=90)
+    return path
+
+
+def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВКА") -> Image.Image | None:
+    """Карточка на портрете артиста.
+
+    Человек спрашивает про артиста и ждёт увидеть артиста — служебная плашка
+    с текстом на его месте выглядит как слайд из презентации. Фотография
+    занимает весь кадр, текста на ней минимум: карточку смотрят, а не читают.
+    """
+    img = photo_backdrop(photo_url)
+    if img is None:
+        return None
 
     draw = ImageDraw.Draw(img)
     margin = int(WIDTH * 0.09)
