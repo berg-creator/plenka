@@ -1,0 +1,151 @@
+name: Ролики
+
+# Ролики с живым голосом владельца (src/reels.py). Один конвейер, два входа:
+#
+#   push в claude/reels-*  → сценарий из ветки уходит владельцу по фразам,
+#                            ветка удаляется. Облачный автор в main пушить
+#                            не может, и ветка для него — почтовый ящик.
+#   workflow_dispatch с id → сборка из записанных дублей. Запускает её бот
+#                            (src/moderate.py), когда пришла последняя фраза;
+#                            руками — если бот не смог.
+on:
+  push:
+    branches: ["claude/reels-*"]
+  workflow_dispatch:
+    inputs:
+      id:
+        description: "id сценария, например 20260914-kanye"
+        required: true
+        type: string
+
+# Не общая state-write, и это осознанно: воркфлоу пишет только в приватное
+# хранилище, в data/ и content/ открытого репозитория — ничего. А в state-write
+# ожидающий запуск вытесняется следующим: пересборка ролика отменила бы стоящую
+# в очереди публикацию поста. Группа по ролику: несколько перезаписанных фраз
+# подряд схлопываются в одну пересборку по последним дублям, а разные ролики
+# друг друга не ждут.
+concurrency:
+  group: reels-${{ inputs.id || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  send:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Удалить ветку после рассылки.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Без хранилища рассылать нельзя: какое сообщение к какому кадру, легло бы
+      # на диск машины, которая исчезнет, и бот не узнал бы ни одного ответа.
+      - name: Забрать приватное хранилище
+        env:
+          STATE_REPO: ${{ secrets.STATE_REPO }}
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: |
+          if [ -z "$STATE_REPO" ] || [ -z "$STATE_TOKEN" ]; then
+            echo "::error::Приватное хранилище не настроено: нужны секреты STATE_REPO и STATE_TOKEN."
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${STATE_TOKEN}@github.com/${STATE_REPO}.git" private-state
+          git -C private-state config user.name "plenka-bot"
+          git -C private-state config user.email "bot@users.noreply.github.com"
+          echo "STATE_DIR=${GITHUB_WORKSPACE}/private-state" >> "$GITHUB_ENV"
+
+      # Уже разосланный сценарий второй раз не уходит (см. reels.send), поэтому
+      # берутся все файлы ветки, а не вычисляются новые.
+      - name: Проверить и разослать
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: |
+          shopt -s nullglob
+          for f in content/reels/*.json; do
+            python -m src.reels --check "$f"
+            python -m src.reels --send "$f"
+          done
+
+      - name: Сохранить состояние
+        run: |
+          cd private-state
+          git add -A
+          git diff --cached --quiet || git commit -m "ролики: сценарий разослан"
+          git pull --rebase --autostash
+          git push
+
+      # Ветка без сценария не трогается: мало ли что туда запушили по ошибке.
+      - name: Удалить ветку
+        run: |
+          if ls content/reels/*.json > /dev/null 2>&1; then
+            git push origin --delete "$GITHUB_REF_NAME"
+          fi
+
+  build:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Шрифт отдельно не ставится, в отличие от clips.yml: там он нужен
+      # терминалу финального кадра, а надписи рисуются шрифтами из assets/fonts.
+      - name: Поставить ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      # Сценарий, дубли и подложки лежат там. Сборка только читает: в хранилище
+      # после неё писать нечего, ролик уходит владельцу и в артефакт.
+      - name: Забрать приватное хранилище
+        env:
+          STATE_REPO: ${{ secrets.STATE_REPO }}
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: |
+          if [ -z "$STATE_REPO" ] || [ -z "$STATE_TOKEN" ]; then
+            echo "::error::Приватное хранилище не настроено: нужны секреты STATE_REPO и STATE_TOKEN."
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${STATE_TOKEN}@github.com/${STATE_REPO}.git" private-state
+          echo "STATE_DIR=${GITHUB_WORKSPACE}/private-state" >> "$GITHUB_ENV"
+
+      - name: Собрать и прислать
+        env:
+          # id — через переменную, а не подстановкой в команду: ввод руками.
+          REEL_ID: ${{ inputs.id }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          # Без ключа стока кадры stock соберутся на нарисованном фоне.
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: python -m src.reels --build "$REEL_ID"
+
+      # Запасной путь к ролику, если Telegram не доставил.
+      - name: Сохранить ролик
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reel-${{ inputs.id }}
+          path: assets/clips/reel-*
+          retention-days: 14
+          if-no-files-found: ignore

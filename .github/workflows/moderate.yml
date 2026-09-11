@@ -41,6 +41,9 @@ jobs:
     timeout-minutes: 360
     permissions:
       contents: write
+      # Последний дубль фразы ролика запускает сборку в reels.yml (src/reels.py):
+      # workflow_dispatch — единственное, что GITHUB_TOKEN запускать разрешено.
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
@@ -105,6 +108,8 @@ jobs:
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Ключ запуска сборки ролика — встроенный, отдельного секрета не нужно.
+          GITHUB_TOKEN: ${{ github.token }}
         # 350 минут, а не 360: смена должна закончиться сама и успеть сохранить
         # состояние, а не быть прибитой по таймауту на полуслове.
         run: python -m src.moderate --serve 350
