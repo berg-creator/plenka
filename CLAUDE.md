@@ -38,6 +38,7 @@ python -m src.compose --fresh --dry-run  о каких свежих релиза
 python -m src.publish --dry-run        что ушло бы в канал, с кнопками стримингов
 python -m src.publish --releases --dry-run  какой пост о релизе выйдет следующим выходом
 python -m src.publish --selftest       кнопки стримингов и порядок: обложка, следом плеер
+python -m src.quality --selftest       в РЕЛИЗЕ и ВЕРДИКТЕ нет описи и её пересказа
 python -m src.service --match "Bones"  что нашлось в базе, без обращения к модели
 python -m src.vk --check               токен ВКонтакте и доступ к сообществу
 python -m src.host --check             синтез голоса отвечает

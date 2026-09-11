@@ -177,7 +177,7 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
         # Мем проверяется целиком: подпись под картинкой одна короче любого
         # поста, а брак ищется во всём, что увидит читатель.
         checked = card.meme_text(result) if rubric_key == "meme" else result["text"]
-        issues = quality.problems(checked, rubric_key)
+        issues = quality.problems(checked, rubric_key, payload)
         if not issues:
             return result
 

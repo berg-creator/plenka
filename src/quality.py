@@ -5,6 +5,8 @@
 автоматически и перегенерировать, чем показывать читателям.
 
 Проверки намеренно грубые: цель — отсечь явный брак, а не оценивать стиль.
+
+    python -m src.quality --selftest   опись и её пересказ ловятся, законные цифры проходят
 """
 
 from __future__ import annotations
@@ -74,9 +76,16 @@ MAX_LENGTH = 1500
 # у разборов бота (service.py) — своя форма.
 HEADLINED = ("release", "verdict", "news", "lineage", "subtext", "legend")
 
+# Ссылка вырезается перед сверкой с данными релиза: в адресе бывают цифры.
+_LINK = re.compile(r"<a\b.*?</a>", re.IGNORECASE | re.DOTALL)
 
-def problems(text: str, rubric: str) -> list[str]:
-    """Список причин, по которым пост нельзя публиковать. Пусто — годится."""
+
+def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
+    """Список причин, по которым пост нельзя публиковать. Пусто — годится.
+
+    payload — данные, по которым писался пост: с ними пересказ описи
+    сверяется с фактами релиза. Без них эта проверка молчит.
+    """
     issues: list[str] = []
     stripped = text.strip()
 
@@ -123,6 +132,31 @@ def problems(text: str, rubric: str) -> list[str]:
     if rubric in HEADLINED and not stripped.startswith("<b>"):
         issues.append("пост открывается не заголовком <b>")
 
+    # Описи в РЕЛИЗЕ и ВЕРДИКТЕ нет (решение владельца от 11.09.2026): длину
+    # показывает плеер под постом, а лишняя строка растягивает пост. GigaChat
+    # по старой памяти ставит её обратно или пересказывает прозой: «Один трек,
+    # 2:19, никого не позвал». С данными релиза сверяются точное число треков
+    # и гостей и хронометраж до секунды. «Ни один трек не дотянул до 3 минут»,
+    # «7-минутная вещь», округлённые «2 минуты» и повтор словами проходят:
+    # ложная тревога стоит поста — после трёх попыток
+    # compose.generate_checked его не выпускает.
+    if rubric in ("release", "verdict"):
+        if "<code>" in lowered:
+            issues.append("опись <code> в посте — её убрали")
+        facts = payload or {}
+        count = len(facts.get("tracks") or []) or facts.get("track_count")
+        guests = len(facts.get("features") or [])
+        total = facts.get("total_length")
+        checks = [
+            (f"{count} трек", rf"(?<!\d){count}[\s-]*трек") if count else None,
+            (f"{guests} гост", rf"(?<!\d){guests}[\s-]*гост") if guests else None,
+            (total, rf"(?<![\d:]){re.escape(total)}(?![\d:])") if total else None,
+        ]
+        text_only = _LINK.sub(" ", lowered)
+        retold = [name for name, pattern in filter(None, checks) if re.search(pattern, text_only)]
+        if retold:
+            issues.append("пересказ описи: " + ", ".join(retold))
+
     # Неподдерживаемая разметка, которую Telegram не разберёт.
     if re.search(r"<\s*(br|p|ul|ol|li|h[1-6])\b", stripped, re.IGNORECASE):
         issues.append("неподдерживаемые HTML-теги")
@@ -145,3 +179,60 @@ def problems(text: str, rubric: str) -> list[str]:
 
 def is_ok(text: str, rubric: str) -> bool:
     return not problems(text, rubric)
+
+
+def _selftest() -> None:
+    """Опись и её пересказ в РЕЛИЗЕ и ВЕРДИКТЕ ловятся, законные цифры проходят."""
+    link = '\n\n▸ <a href="https://music.apple.com/us/album/sorry-mama-single/6807382817">Слушать в Apple Music</a>'
+    single = {"tracks": [{"title": "Sorry Mama", "length": "2:19"}], "total_length": "2:19", "features": []}
+    album = {"tracks": [{"title": "", "length": "3:11"}] * 22, "total_length": "70:12", "features": list("ABCDEFGHI")}
+
+    def retold(text: str, facts: dict, rubric: str = "release") -> bool:
+        return any(p.startswith("пересказ описи") for p in problems(text, rubric, facts))
+
+    # Живой пример от 11.09.2026: опись пересказана в первом абзаце.
+    smoky = (
+        "<b>SMOKY MO ИЗВИНИЛСЯ ПЕРЕД МАМОЙ</b>\n\n"
+        "У Смоки Мо вышел сингл <i>Sorry Mama</i>. Один трек, 2:19, никого не позвал." + link
+    )
+    assert retold(smoky, single), problems(smoky, "release", single)
+    assert retold(smoky, single, "verdict")
+    # Разборы бота (service.py) данных не передают — сверять не с чем.
+    assert not retold(smoky, {})
+
+    # Заголовок капсом — тоже текст.
+    kizaru = "<b>KIZARU ВЫПУСТИЛ 22 ТРЕКА</b>\n\nУ kizaru вышел альбом <i>CA$HEY</i>, короткий и ровный." + link
+    assert retold(kizaru, album), problems(kizaru, "release", album)
+
+    # Опись, поставленная по старой памяти.
+    assert "опись <code> в посте — её убрали" in problems(smoky + "\n\n<code>1 трек · 2:19</code>", "release")
+
+    # Пост, который владелец сократил в канале сам (Ghost Mountain, 11.09.2026):
+    # округлённые «2 минуты» в цитате — довод, а не опись.
+    ghost = (
+        "<b>GHOST MOUNTAIN ВЫПУСТИЛ СИНГЛ OUTLAST</b>\n\n"
+        "Парень из орбиты Haunted Mound, где сингл давно главная форма высказывания: "
+        "альбом надо собирать, а трек можно выкинуть в пятницу и уйти.\n\n"
+        "<blockquote>2 минуты — это уже не сингл, это проверка, вспомнят ли тебя через неделю.</blockquote>"
+    )
+    ghost_facts = {**single, "total_length": "2:14"}
+    assert problems(ghost, "release", ghost_facts) == [], problems(ghost, "release", ghost_facts)
+
+    # Цифры, которых нет в данных, — вывод из треклиста.
+    example = (
+        "<b>ARTIST ВЫПУСТИЛ ALBUM И СПРЯТАЛ ГЛАВНОЕ В СЕРЕДИНУ</b>\n\n"
+        "Первые 8 треков идут по 1,5 минуты, потом внезапно 7-минутная вещь. "
+        "После неё ни один трек не дотянул до 3 минут.\n\n"
+        "<blockquote>Столько треков — не щедрость, а отсутствие редактора.</blockquote>" + link
+    )
+    assert not retold(example, album), problems(example, "release", album)
+    print("quality: самопроверка пройдена")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Отбраковка постов перед очередью.")
+    parser.add_argument("--selftest", action="store_true", help="опись и её пересказ ловятся, законные цифры проходят")
+    if parser.parse_args().selftest:
+        _selftest()
