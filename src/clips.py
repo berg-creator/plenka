@@ -23,10 +23,15 @@ SpaceGhostPurrp, а не абстрактный ночной город.
 как реклама. Осталось то, ради чего она заводилась, — закадровый голос
 (см. src/host.py): на экране ярлык в два слова, в наушниках вся мысль.
 
-Форматов два. «ОТКУДА НОГИ» разбирает связь из data/lineage.json.
+Форматов три. «ОТКУДА НОГИ» разбирает связь из data/lineage.json.
 «А ВЫ ЗНАЛИ» (`--facts`) перечисляет факты про названного артиста
 из data/facts.json — там, где разбор требует дослушать до третьего кадра,
 факты держат с первой секунды, и на холодной ленте это решает.
+Новостной (`--news`) берёт свежую новость прямо из data/inbox.jsonl:
+у канала она и так есть, но уходит только текстом, а в ленте роликов
+новость понимают с первой секунды — там ей и место. Крючок несёт саму
+новость, а не вопрос: у разбора связи есть право на «дослушай до третьего
+кадра», у новости его нет.
 
 Обработка — камкордерная: посаженное разрешение, фиолетовый увод, развод
 по каналам, зерно, развёртка. Ориентир — клипы Raider Klan и раннего
@@ -34,8 +39,16 @@ Goth Money: у этой сцены картинка не монохромная 
 и затёртая. Без такой обработки разные исходники читаются как нарезка
 чужого, а не как канал.
 
+Ручная сборка стоит рядом с автоматической, а не вместо неё: `--from`
+берёт готовый item из файла, `--voice` — записанные фразы из папки, и тогда
+ни модель, ни синтез в ролике не участвуют. Нужна она там, где цена ошибки
+выше выигрыша от автомата: в новости про живых людей одна выдуманная цифра
+стоит дороже десяти несобранных роликов.
+
     python -m src.clips --preview        собрать один клип, никуда не отправляя
     python -m src.clips --facts          формат «А ВЫ ЗНАЛИ»: факты подряд
+    python -m src.clips --news           формат «НОВОСТЬ»: свежее из inbox
+    python -m src.clips --news --from data/news_clip.json --voice assets/voice/news-guf/
     python -m src.clips --build 3        собрать три
     python -m src.clips --publish        собрать и выложить во ВКонтакте
 
@@ -51,11 +64,12 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
-from . import config, footage, host, state, stories
+from . import compose, config, footage, host, llm, state, stories
 
 OUT_DIR = config.ROOT / "assets" / "clips"
 AUDIO_DIR = config.ROOT / "assets" / "audio"
@@ -69,12 +83,25 @@ HOOK_SECONDS = 4.0
 TURN_SECONDS = 4.0
 LINK_SECONDS = 5.0
 FACT_SECONDS = 6.0
+CUT_SECONDS = 1.0
 OUTRO_SECONDS = 3.0
+
+# Картинка кадра-врезки. Реакция вместо слов: она стоит ровно на короткой
+# реплике и работает только пока короткая — растянутая до обычного кадра,
+# это уже не врезка, а пауза.
+CUT_IMAGE = "assets/meme/ok.png"
 
 # Первые секунды бесплатных битов часто заняты голосовой биркой продюсера
 # или долгим вступлением. И то и другое убивает начало ролика, поэтому
 # подложку берём не сначала.
 AUDIO_SKIP_SECONDS = 8.0
+
+# Месяцы в родительном падеже: дата новости стоит кикером первого кадра,
+# а locale в Actions английская — «29 АВГУСТА» оттуда не возьмёшь.
+MONTHS = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
 
 CREAM = stories.CREAM
 INK = stories.INK
@@ -151,6 +178,22 @@ def probe_seconds(path: Path) -> float:
         return float(result.stdout.strip())
     except ValueError:
         return 0.0
+
+
+def silence_back(path: Path) -> float:
+    """Когда в подложке снова начинается музыка после паузы. 0.0 — если её нет.
+
+    Бит, записанный под раскадровку, замолкает на врезке и возвращается
+    на финале. Позиция паузы ищется в самом файле, а не задаётся числом:
+    подложку перепишут — число разъедется молча, и музыка вернётся не там.
+    """
+    result = subprocess.run(
+        [ffmpeg(), "-i", str(path), "-af", "silencedetect=noise=-38dB:d=0.35", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+    )
+    found = re.findall(r"silence_end: ([\d.]+)", result.stderr)
+    return float(found[0]) if found else 0.0
 
 
 def run(args: list[str]) -> None:
@@ -308,6 +351,20 @@ def overlay(label: str, body: str, *, big: bool = True, at: float = 0.0) -> Imag
     return layer.filter(ImageFilter.GaussianBlur(0.3))
 
 
+def cut_overlay(at: float = 0.0) -> Image.Image:
+    """Слой кадра-врезки: ни кикера, ни надписи.
+
+    Картинка врезки говорит сама, надпись поверх неё только мешает.
+    Развёртка и счётчик остаются: без них кадр выпадает из ряда и читается
+    как чужая вставка, а не как секунда того же ролика.
+    """
+    layer = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    scanlines(draw)
+    counter(draw, at)
+    return layer
+
+
 def outro_overlay(at: float = 0.0) -> Image.Image:
     """Финальный кадр: марка канала во всю ширину и адрес.
 
@@ -347,9 +404,13 @@ class Shot:
     seconds: float
     subject: str
     context: str
-    # Чем закрыть фон вместо обычного поиска. Единственное значение —
-    # "terminal" у финального кадра.
+    # Чем закрыть фон вместо обычного поиска: "terminal" у финального кадра
+    # или путь к своей картинке у врезки — от корня репозитория.
     backdrop: str = ""
+    # Свой запрос к стоку вместо подбора по приметам. Нужен там, где кадр
+    # написан заранее: под «семьдесят тысяч» должна быть толпа стадиона,
+    # а не то, что выпало по слову «фонк».
+    query: str = ""
 
 
 def storyboard(link: dict) -> list[Shot]:
@@ -450,6 +511,92 @@ def storyboard_facts(item: dict) -> list[Shot]:
     return shots
 
 
+def news_date(item: dict) -> str:
+    """Дата новости словами — кикер первого кадра.
+
+    Дата в кадре работает как штамп на плёнке: она сообщает, что ролик
+    сегодняшний, до того как зритель разберёт слова. Даты нет — кикер
+    остаётся просто «НОВОСТЬ», врать про день нельзя.
+    """
+    when = state._parse(item.get("released_at") or "")
+    return f"{when.day} {MONTHS[when.month - 1]}" if when else "новость"
+
+
+def storyboard_news(item: dict) -> list[Shot]:
+    """Раскадровка новостного ролика: дата, что было, деталь, реплика,
+    врезка, финал.
+
+    Крючок несёт саму новость, а не вопрос. У разбора связи есть право
+    на «дослушай до третьего кадра» — там мысль без развязки не работает.
+    У новости этого права нет: через сутки она никому не нужна, и первые
+    четыре секунды должны сказать всё, ради чего ролик снят.
+
+    Строки пишет модель по схеме llm.CLIP_SCHEMA строго из заголовка
+    и краткого содержания — ролик читают вслух, и выдуманная цифра стоит
+    дороже пропущенной. Последний кадр отдан оценке канала: оценку,
+    в отличие от факта, выдумать нельзя.
+
+    Лицо у каждого кадра своё — список `faces` по кадрам. Одно фото на все
+    четыре кадра читается как зависшая картинка, а в новости про концерт
+    двоих ещё и врёт: половину ролика говорят не про того, кто в кадре.
+    Списка нет — во всех кадрах артист новости, как было.
+
+    Имена пишутся ровно как в data/artists.json, иначе footage.find_artist
+    их не узнает и под новостью про Ghostemane встанет случайный дым.
+    """
+    artist = item.get("artist", "")
+    # Лицо и запрос к стоку — по кадру. Пустое лицо означает «здесь сток»:
+    # одно и то же фото на четыре кадра стоит в ленте как заставка, а ролик
+    # держат сменой картинки не меньше, чем словами.
+    faces = item.get("faces", [])
+    stock = item.get("stock", [])
+    lines = [line for line in item.get("lines", []) if line]
+    labels = [label for label in item.get("labels", []) if label]
+    whole = " ".join((item.get("title", ""), item.get("summary", "")))
+
+    # Кикер, надпись, крупно ли, сколько висит. Двадцать четыре секунды:
+    # деталь получает больше всех, потому что она единственное место,
+    # где ролик сообщает что-то сверх заголовка.
+    plan = (
+        (news_date(item), short(labels[0], 3), True, HOOK_SECONDS),
+        ("ЧТО БЫЛО", short(labels[1], 4), False, LINK_SECONDS),
+        ("ДЕТАЛЬ", short(labels[2], 4), False, FACT_SECONDS),
+        # Реплика канала режется из той же фразы, которую читает голос:
+        # отдельной надписи под неё в схеме нет — на экране обрывок,
+        # в наушниках вся мысль.
+        ("И ЧТО", short(lines[2], 5), False, LINK_SECONDS),
+    )
+
+    shots, at = [], 0.0
+    for index, (kicker, body, big, seconds) in enumerate(plan):
+        face = faces[index] if index < len(faces) else artist
+        query = stock[index] if index < len(stock) else ""
+        shots.append(Shot(overlay(kicker, body, big=big, at=at), seconds, face, whole, query=query))
+        at += seconds
+
+    # Врезка после реплики: секунда картинки под «ну ок». Ролик к этому
+    # месту состоит из одних говорящих кадров, и пауза на реакцию — то,
+    # чем живая лента отличается от сводки новостей.
+    shots.append(Shot(cut_overlay(at), CUT_SECONDS, "", whole, backdrop=CUT_IMAGE))
+    at += CUT_SECONDS
+
+    # Финал по умолчанию терминальный — там написано, что канал работает сам.
+    # Своим запросом («vhs tape») его подменяют поштучно: кассета говорит
+    # то же самое картинкой, но годится не всякой новости.
+    outro = item.get("outro", "")
+    shots.append(
+        Shot(
+            outro_overlay(at),
+            OUTRO_SECONDS,
+            "" if outro else artist,
+            whole,
+            backdrop="" if outro else "terminal",
+            query=outro,
+        )
+    )
+    return shots
+
+
 # --- сборка --------------------------------------------------------------
 
 
@@ -470,12 +617,17 @@ def segment(shot: Shot, out: Path, work: Path) -> str:
     if shot.backdrop == "terminal":
         kind = "терминал"
         source = footage.terminal(work / f"{out.stem}-bg.mp4", shot.seconds, ffmpeg())
+    elif shot.backdrop:
+        # Своя картинка вместо поиска — врезка. Путь от корня репозитория;
+        # абсолютный pathlib подставит как есть.
+        kind = "врезка"
+        still = source = config.ROOT / shot.backdrop
     elif (still := footage.artist_image(shot.subject) if shot.subject else None) is not None:
         kind = "артист"
         source = still
     else:
         kind = "сток"
-        source = footage.fetch(footage.query_for(shot.subject, shot.context))
+        source = footage.fetch(shot.query or footage.query_for(shot.subject, shot.context))
         if source is None:
             kind = "фон"
             source = footage.procedural(work / f"{out.stem}-bg.mp4", shot.seconds, ffmpeg())
@@ -537,8 +689,24 @@ def voice_piece(source: Path | None, seconds: float, dest: Path) -> Path:
     return dest
 
 
+def voice_take(folder: Path, index: int) -> Path | None:
+    """Готовая запись под кадр: имя — номер кадра в раскадровке, с единицы.
+
+    Живой голос вместо синтеза, когда ролик собирается руками. Файла нет —
+    кадр молчит, и синтез сюда не подставляется: один машинный голос
+    посреди записанных фраз слышно сразу, и это хуже тишины.
+    """
+    found = sorted(folder.glob(f"{index + 1}.*"))
+    return found[0] if found else None
+
+
 def narrate(
-    shots: list[Shot], link: dict, work: Path, *, facts: bool = False
+    shots: list[Shot],
+    link: dict,
+    work: Path,
+    *,
+    kind: str = "lineage",
+    voices: Path | None = None,
 ) -> tuple[list[Shot], Path | None]:
     """Озвучивает раскадровку и подгоняет кадры под речь.
 
@@ -550,16 +718,22 @@ def narrate(
     Синтеза нет — возвращаем раскадровку как была и None вместо дорожки:
     ролик собирается молча, расписание из-за чужого сервиса не встаёт.
     """
-    spoken = host.lines(link, facts=facts)
+    spoken = host.lines(link, kind=kind)
     stretched, pieces, voiced = [], [], False
 
     for index, (shot, text) in enumerate(zip(shots, spoken)):
-        said = host.speak(text, work / f"said-{index}.wav") if text else None
+        if voices is not None:
+            said = voice_take(voices, index)
+        else:
+            said = host.speak(text, work / f"said-{index}.wav") if text else None
         seconds = shot.seconds
         if said is not None:
             voiced = True
             # Полсекунды сверх речи: фраза не должна упираться в склейку.
-            seconds = max(seconds, probe_seconds(said) + 0.7)
+            # Врезке хватает четверти: с обычным запасом секундный кадр
+            # растягивается вдвое и перестаёт быть врезкой.
+            tail = 0.25 if shot.backdrop not in ("", "terminal") else 0.7
+            seconds = max(seconds, probe_seconds(said) + tail)
         stretched.append(replace(shot, seconds=seconds))
         pieces.append(voice_piece(said, seconds, work / f"voice-{index}.wav"))
 
@@ -593,6 +767,8 @@ def assemble(
     out: Path,
     work: Path,
     voice: Path | None = None,
+    start: float = AUDIO_SKIP_SECONDS,
+    louder_at: float = 0.0,
 ) -> None:
     """Склейка отрезков и звук.
 
@@ -609,9 +785,23 @@ def assemble(
     listing.write_text("".join(f"file '{p}'\n" for p in parts), encoding="utf-8")
 
     fade_start = max(total - 1.2, 0.1)
+    # Подложка идёт кольцом: своя короче ролика, а библиотечная длиннее —
+    # лишние круги отрежет -t. Сдвиг делается фильтром, а не -ss: при -ss
+    # каждый следующий круг начался бы с того же места, а не сначала.
+    length = probe_seconds(audio)
+    loops = int((start + total) // length) + 1 if length else 1
+    # На финале подложка выходит вперёд: слов там меньше, а последние секунды
+    # решают, подпишется человек или пролистнёт. Ступенькой, а не наплывом —
+    # музыка после паузы входит уже громче, и перехода не слышно.
+    quiet = 0.24 if voice else 0.85
+    level = (
+        f"volume='if(gte(t,{louder_at:.2f}),{quiet * 1.35:.2f},{quiet:.2f})':eval=frame"
+        if louder_at
+        else f"volume={quiet}"
+    )
     bed = (
-        f"afade=t=in:st=0:d=0.4,afade=t=out:st={fade_start}:d=1.2,"
-        f"volume={0.18 if voice else 0.85}"
+        f"atrim=start={start:.3f},asetpts=N/SR/TB,"
+        f"afade=t=in:st=0:d=0.4,afade=t=out:st={fade_start}:d=1.2,{level}"
     )
 
     if voice is None:
@@ -631,7 +821,7 @@ def assemble(
     run([
         ffmpeg(), "-y",
         "-f", "concat", "-safe", "0", "-i", str(listing),
-        "-ss", str(AUDIO_SKIP_SECONDS), "-i", str(audio),
+        "-stream_loop", str(loops), "-i", str(audio),
         *sound,
         "-t", f"{total}",
         "-c:v", "copy",
@@ -667,23 +857,27 @@ def used_keys() -> set[str]:
     return {item.get("key", "") for item in history.get("items", [])}
 
 
-def clip_key(link: dict, facts: bool) -> str:
+def clip_key(link: dict, kind: str) -> str:
     """Отпечаток записи с учётом формата.
 
     Формат в ключе намеренно: базы у форматов разные, но история одна,
-    и без пометки ключи двух баз могли бы совпасть.
+    и без пометки ключи трёх баз могли бы совпасть. У новости отпечаток
+    уже посчитан сборщиком — берём его, а не заголовок: одну и ту же
+    новость ленты пишут разными словами.
     """
-    if facts:
+    if kind == "facts":
         return state.fingerprint(link.get("artist", ""), "facts")
+    if kind == "news":
+        return state.fingerprint(link.get("fingerprint", ""), "news")
     return state.fingerprint(link.get("modern", ""), link.get("ancestor", ""))
 
 
-def remember(link: dict, filename: str, video_id: str = "", facts: bool = False) -> None:
+def remember(link: dict, filename: str, video_id: str = "", kind: str = "lineage") -> None:
     history = state.read_json(config.CLIPS_FILE, {"items": []})
     history.setdefault("items", []).append(
         {
-            "key": clip_key(link, facts),
-            "modern": link.get("modern", "") or link.get("artist", ""),
+            "key": clip_key(link, kind),
+            "modern": link.get("modern", "") or link.get("artist", "") or link.get("title", ""),
             "file": filename,
             "video_id": video_id,
             "built_at": state.iso(),
@@ -706,7 +900,7 @@ def pending_links(limit: int) -> list[dict]:
         for link in data.get("links", [])
         if link.get("modern")
         and link.get("ancestor")
-        and clip_key(link, False) not in seen
+        and clip_key(link, "lineage") not in seen
     ]
     return fresh[:limit]
 
@@ -720,15 +914,66 @@ def pending_facts(limit: int) -> list[dict]:
         for item in data.get("items", [])
         if item.get("artist")
         and item.get("facts")
-        and state.fingerprint(item["artist"], "facts") not in seen
+        and clip_key(item, "facts") not in seen
     ]
     return fresh[:limit]
 
 
-def build(link: dict, *, facts: bool = False) -> Path:
+def pending_news(limit: int) -> list[dict]:
+    """Свежие новости, из которых роликов ещё не делали, — уже с текстом.
+
+    Inbox читается напрямую, а не через compose.load_inbox_unused: срочные
+    новости (src/urgent.py) помечают материал использованным в тот же день,
+    и клипу не досталось бы ничего. Историю форматы делят одну — clips.json,
+    поэтому один и тот же инфоповод в ролик дважды не попадёт.
+
+    Модель зовётся прямо здесь, а не при сборке: пустую новость — мерч,
+    промо, чужая сцена — она отбрасывает сама, и перебирать кандидатов
+    до первого годного больше негде.
+    """
+    cutoff = state.now() - timedelta(hours=config.URGENT_MAX_AGE_HOURS)
+    seen = used_keys()
+
+    fresh = []
+    for item in state.read_jsonl(config.INBOX_FILE):
+        published = state._parse(item.get("released_at") or "")
+        if item.get("kind") != "news" or published is None or published < cutoff:
+            continue
+        if clip_key(item, "news") not in seen:
+            fresh.append(item)
+    fresh.sort(key=lambda i: i.get("score", 0), reverse=True)
+
+    ready = []
+    for item in fresh:
+        if len(ready) >= limit:
+            break
+        # Список имён из базы уходит модели целиком: источник пишет
+        # «Три 6 Мафия», а фотография ищется по «Three 6 Mafia», и перевод
+        # в написание базы — её работа.
+        told = llm.generate_clip(
+            {**compose._news_payload(item), "known": footage.known_names()}
+        )
+        # Трёх строк нет — считаем отказом: раскадровка на пять кадров
+        # из двух фраз не собирается, а достраивать её самим означало бы
+        # дописать за модель то, чего в новости нет.
+        if told.get("skip") or len(told.get("lines", [])) < 3 or len(told.get("labels", [])) < 3:
+            print(f"  — мимо ({told.get('reason', 'мало строк')}): {item.get('title', '')[:50]}")
+            continue
+        ready.append({**item, **told})
+
+    return ready
+
+
+def build(
+    link: dict,
+    *,
+    kind: str = "lineage",
+    voices: Path | None = None,
+    music: Path | None = None,
+) -> Path:
     """Собирает один клип и возвращает путь к готовому файлу."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    frames = storyboard_facts(link) if facts else storyboard(link)
+    frames = {"facts": storyboard_facts, "news": storyboard_news}.get(kind, storyboard)(link)
 
     stamp = state.now().strftime("%Y%m%d-%H%M%S")
     name = f"{stamp}-{state.fingerprint(link.get('modern', '') or link.get('artist', ''))[:8]}"
@@ -743,7 +988,7 @@ def build(link: dict, *, facts: bool = False) -> Path:
 
         # Речь синтезируется до кадров: от её длины зависит, сколько каждый
         # кадр висит на экране, а значит и вся раскадровка.
-        frames, voice = narrate(frames, link, work, facts=facts)
+        frames, voice = narrate(frames, link, work, kind=kind, voices=voices)
         total = sum(shot.seconds for shot in frames)
 
         parts, kinds = [], []
@@ -753,12 +998,23 @@ def build(link: dict, *, facts: bool = False) -> Path:
             parts.append(part)
         print('  кадры:', ', '.join(kinds))
         print(f"  голос: {'есть' if voice else 'нет'}, длина {total:.1f} с")
-        assemble(parts, pick_audio(mood_for(link)), total, out, work, voice)
+
+        # Своя подложка встаёт по паузе, а не с начала: бит под этот ролик
+        # написан так, что музыка молчит на врезке и возвращается на финале.
+        # Библиотечной подложке сдвигать нечего — у неё режется только
+        # вступление с биркой продюсера.
+        bed, start = music or pick_audio(mood_for(link)), AUDIO_SKIP_SECONDS
+        outro_at = total - frames[-1].seconds
+        if music:
+            back, length = silence_back(music), probe_seconds(music)
+            start = (back - outro_at) % length if back and length else 0.0
+            print(f"  подложка: {bed.name}, музыка возвращается на {outro_at:.1f} с")
+        assemble(parts, bed, total, out, work, voice, start, outro_at)
 
     return out
 
 
-def deliver(path: Path, link: dict) -> dict:
+def deliver(path: Path, link: dict, kind: str = "lineage") -> dict:
     """Отправляет готовый ролик в Telegram.
 
     Прямой заливки во ВКонтакте здесь нет намеренно: `video.save` отвечает
@@ -775,11 +1031,21 @@ def deliver(path: Path, link: dict) -> dict:
 
     # Адресат — владелец в личку, не канал: ролик ему нужно переложить
     # руками, а в ленте канала вертикальное видео только мешает постам.
-    caption = (
-        f"<b>{short(link.get('modern', '') or link.get('artist', ''), 6)}</b>"
-        + (f" → {short(link['ancestor'], 6)}" if link.get("ancestor") else "")
-        + "\n\nПереложить в Клипы ВКонтакте и в Shorts."
-    )
+    if kind == "news":
+        # Дата и срок прямо в подписи: у новостного ролика нет запаса,
+        # завтра его выкладывать уже незачем — а разбор связи полежит.
+        caption = (
+            f"<b>{short(link.get('artist', '') or link.get('title', ''), 6)}</b>"
+            f" · новость от {news_date(link)}"
+            "\n\nВыложить в Клипы ВКонтакте и в Shorts <b>сегодня</b>: "
+            "завтра новость уже мёртвая."
+        )
+    else:
+        caption = (
+            f"<b>{short(link.get('modern', '') or link.get('artist', ''), 6)}</b>"
+            + (f" → {short(link['ancestor'], 6)}" if link.get("ancestor") else "")
+            + "\n\nПереложить в Клипы ВКонтакте и в Shorts."
+        )
     return telegram.send_video_file(config.secret("TELEGRAM_ADMIN_ID"), path, caption)
 
 
@@ -795,11 +1061,24 @@ def _selftest() -> None:
         assert len(shots) == len(spoken), (link.get("modern"), len(shots), len(spoken))
 
     for item in state.read_json(config.FACTS_FILE, {}).get("items", []):
-        shots, spoken = storyboard_facts(item), host.lines(item, facts=True)
+        shots, spoken = storyboard_facts(item), host.lines(item, kind="facts")
         assert len(shots) == len(spoken), (item.get("artist"), len(shots), len(spoken))
         # Имя должно находиться в базе артистов, иначе под фактом встанет
         # случайный сток вместо лица — ради этого имена и пишутся латиницей.
         assert footage.find_artist(item["artist"]), f"нет в artists.json: {item['artist']}"
+
+    # Новостной формат проверяется на выдуманной записи: строки для него
+    # пишет модель, и звать её ради счёта кадров незачем.
+    told = {
+        "title": "Проверка", "summary": "Проверка", "released_at": state.iso(),
+        "artist": "Bones",
+        "lines": ["Что случилось", "Ещё подробность", "И что с того"],
+        "labels": ["Первое", "Второе", "Третье"],
+    }
+    shots, spoken = storyboard_news(told), host.lines(told, kind="news")
+    assert len(shots) == len(spoken), (len(shots), len(spoken))
+    # Врезка зашита в раскадровку, и без файла кадр упадёт уже в ffmpeg.
+    assert (config.ROOT / CUT_IMAGE).exists(), CUT_IMAGE
 
 
 def main() -> int:
@@ -808,6 +1087,10 @@ def main() -> int:
     parser.add_argument("--preview", action="store_true", help="собрать, никуда не отправляя")
     parser.add_argument("--publish", action="store_true", help="собрать и выложить во ВКонтакте")
     parser.add_argument("--facts", action="store_true", help="формат «А ВЫ ЗНАЛИ» вместо разбора связи")
+    parser.add_argument("--news", action="store_true", help="новостной формат из свежего inbox")
+    parser.add_argument("--from", dest="source", metavar="ФАЙЛ", help="готовый item из JSON вместо inbox и модели")
+    parser.add_argument("--voice", metavar="ПАПКА", help="готовые записи 1..N вместо синтеза")
+    parser.add_argument("--music", metavar="ФАЙЛ", help="своя подложка вместо assets/audio")
     parser.add_argument("--selftest", action="store_true", help="проверка раскадровок без сборки")
     args = parser.parse_args()
 
@@ -818,15 +1101,32 @@ def main() -> int:
         print("Раскадровки и фразы сходятся.")
         return 0
 
-    links = pending_facts(args.build) if args.facts else pending_links(args.build)
+    kind = "news" if args.news else "facts" if args.facts else "lineage"
+    if args.source:
+        # Ручная сборка: текст уже написан и сверен, модель не зовём.
+        source = Path(args.source)
+        if not source.exists():
+            print(f"Нет файла {source}.")
+            return 1
+        links = [state.read_json(source, {})]
+    else:
+        links = {"news": pending_news, "facts": pending_facts}.get(kind, pending_links)(args.build)
     if not links:
-        base = "facts.json" if args.facts else "lineage.json"
-        print(f"Всё из {base} уже разошлось по клипам — пора пополнить базу.")
+        if kind == "news":
+            print("Свежих новостей нет: inbox пуст, ролики уже сделаны или новости пустые.")
+        else:
+            base = "facts.json" if kind == "facts" else "lineage.json"
+            print(f"Всё из {base} уже разошлось по клипам — пора пополнить базу.")
         return 0
 
     for link in links:
         try:
-            path = build(link, facts=args.facts)
+            path = build(
+                link,
+                kind=kind,
+                voices=Path(args.voice) if args.voice else None,
+                music=Path(args.music) if args.music else None,
+            )
         except ClipError as exc:
             print(f"Не собрался клип «{(link.get('modern') or link.get('artist', ''))[:40]}»: {exc}")
             return 1
@@ -837,7 +1137,7 @@ def main() -> int:
         video_id = ""
         if args.publish:
             try:
-                video_id = str(deliver(path, link).get("message_id", ""))
+                video_id = str(deliver(path, link, kind).get("message_id", ""))
                 print(f"Отправлен в Telegram: {video_id}")
             except Exception as exc:
                 print(f"Не удалось отправить: {exc}")
@@ -845,7 +1145,7 @@ def main() -> int:
         # Превью связь не расходует: посмотрел, не понравилось — собери заново.
         # База пополняется руками, разбрасываться её строками нельзя.
         if not args.preview:
-            remember(link, path.name, video_id, args.facts)
+            remember(link, path.name, video_id, kind)
 
     return 0
 
