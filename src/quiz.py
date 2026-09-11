@@ -28,8 +28,9 @@ src/moderate.py: второй опросчик воровал бы у него �
 бы ответ всем, кто ещё листает комментарии. Поэтому следующий запуск сначала
 ставит метки за прошлую загадку и только потом загадывает новую, а голоса
 за старую после этого не в счёт: по меткам её угадает кто угодно. Кто угадал —
-данные о людях, они лежат в приватном хранилище (config.PRIVATE); в открытом
-data/quiz.json — только опрос, варианты и ответ.
+данные о людях, они лежат в приватном хранилище (config.PRIVATE). Там же сама
+загадка и опрос под ней: из открытого репозитория ответ подсмотрел бы кто
+угодно, поэтому в data/quiz.json остаются только отпечатки прошлых загадок.
 
     python -m src.quiz                    показать загадку, ничего не отправляя
     python -m src.quiz --target admin     себе в личку: отрывок и викторина, без титулов
@@ -54,6 +55,9 @@ from .sources import itunes
 log = logging.getLogger("quiz")
 
 STATE_FILE = config.DATA / "quiz.json"
+# Загадка до пересылки и опрос под ней — там же, где угадавшие: открытый
+# репозиторий читает кто угодно, и ответ лежал бы в нём весь день.
+RIDDLE = config.PRIVATE / "quiz.json"
 # Кто угадал: пустой файл на человека в папке опроса. Файлы, а не общий JSON:
 # угадавших дописывает дежурство, а стирает запуск викторины, и правки одного
 # файла с двух машин конфликтовали бы при ребейзе, а новый файл рядом
@@ -91,10 +95,9 @@ def _used() -> set[str]:
     return set(state.read_json(STATE_FILE, {}).get("used", []))
 
 
-def _remember(mark: str, **extra) -> None:
+def _remember(mark: str) -> None:
     data = state.read_json(STATE_FILE, {})
     data["used"] = (data.get("used", []) + [mark])[-MEMORY:]
-    data.update(extra)
     state.write_json(STATE_FILE, data)
 
 
@@ -260,7 +263,7 @@ def guessed(answer: dict, poll: dict | None) -> int | None:
 
 def take_answer(answer: dict) -> None:
     """Запоминает угадавшего. Зовёт дежурство (src/moderate.py) на poll_answer."""
-    user = guessed(answer, state.read_json(STATE_FILE, {}).get("poll"))
+    user = guessed(answer, state.read_json(RIDDLE, {}).get("poll"))
     if user is not None:
         folder = WINNERS / answer["poll_id"]
         folder.mkdir(parents=True, exist_ok=True)
@@ -287,7 +290,7 @@ def award() -> int:
     Раздача одна при любом исходе: опрос из quiz.json убирается, список
     угадавших стирается — после неё ответ висит в метках, и угадывать нечего.
     """
-    data = state.read_json(STATE_FILE, {})
+    data = state.read_json(RIDDLE, {})
     poll = data.pop("poll", None)
     people = winners(poll)
     given = 0
@@ -316,7 +319,7 @@ def award() -> int:
         log.info("Титул «%s»: %d из %d угадавших", tag, given, len(people))
         return given
     finally:
-        state.write_json(STATE_FILE, data)
+        state.write_json(RIDDLE, data)
         shutil.rmtree(WINNERS, ignore_errors=True)
 
 
@@ -349,12 +352,12 @@ def publish(item: dict, target: str) -> None:
 
 
 def _sync() -> None:
-    """Отправляет quiz.json в git и забирает чужое: дежурство живёт на другой
-    машине и видит загадку только так. Локально файл у обоих один."""
+    """Отправляет загадку в приватный git и забирает чужое: дежурство живёт
+    на другой машине и видит её только так. Локально файл у обоих один."""
     if os.environ.get("GITHUB_ACTIONS"):
         from .moderate import _push_repo  # moderate сам импортирует quiz
 
-        _push_repo(config.ROOT, ["data/quiz.json"], "прослушка: загадка")
+        _push_repo(config.PRIVATE, [RIDDLE.name], "прослушка: загадка")
 
 
 def to_channel(item: dict, channel: str, awarded: int) -> str:
@@ -369,17 +372,17 @@ def to_channel(item: dict, channel: str, awarded: int) -> str:
         _remember(item["mark"])
         return "в канале: чата обсуждений нет"
 
-    _remember(
-        item["mark"],
-        pending={
-            "artist": item["artist"],
-            "options": item["options"],
-            "correct": item["correct"],
-            "explanation": explanation(item),
-            "date": state.iso()[:10],
-            "awarded": awarded,
-        },
-    )
+    _remember(item["mark"])
+    riddle = state.read_json(RIDDLE, {})
+    riddle["pending"] = {
+        "artist": item["artist"],
+        "options": item["options"],
+        "correct": item["correct"],
+        "explanation": explanation(item),
+        "date": state.iso()[:10],
+        "awarded": awarded,
+    }
+    state.write_json(RIDDLE, riddle)
     _sync()
     _clip(channel, item, IN_COMMENTS)
 
@@ -387,15 +390,15 @@ def to_channel(item: dict, channel: str, awarded: int) -> str:
     while time.monotonic() < deadline:
         time.sleep(15)
         _sync()
-        if "pending" not in state.read_json(STATE_FILE, {}):
+        if "pending" not in state.read_json(RIDDLE, {}):
             return "в комментариях"
 
     # ponytail: дежурство может забрать загадку ровно между последней проверкой
     # и этой записью — тогда викторин будет две. Окно в секунды на исходе WAIT;
     # понадобится — замок в git.
-    data = state.read_json(STATE_FILE, {})
+    data = state.read_json(RIDDLE, {})
     data.pop("pending", None)
-    state.write_json(STATE_FILE, data)
+    state.write_json(RIDDLE, data)
     _sync()
     _quiz(channel, item)
     return "в канале: дежурство не повесило её под постом"
@@ -415,7 +418,7 @@ def attach(message: dict) -> bool:
     отдаст её в канал.
     """
     _sync()
-    data = state.read_json(STATE_FILE, {})
+    data = state.read_json(RIDDLE, {})
     riddle = data.get("pending")
     if not riddle:
         log.info("Под прослушкой вешать нечего: загадку уже отдали в канал")
@@ -439,7 +442,7 @@ def attach(message: dict) -> bool:
         "artist": riddle["artist"],
         "date": riddle["date"],
     }
-    state.write_json(STATE_FILE, data)
+    state.write_json(RIDDLE, data)
     _sync()
 
     if riddle.get("awarded"):
