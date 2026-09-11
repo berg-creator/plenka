@@ -413,6 +413,12 @@
       "file": "20260911-195637-8926-news.json",
       "published_at": "2026-09-11T19:56:39+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260911-163728-9079-release.json",
+      "published_at": "2026-09-11T21:57:34+00:00",
+      "rubric": "release"
     }
   ]
 }
