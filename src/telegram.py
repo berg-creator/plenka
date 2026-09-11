@@ -295,6 +295,24 @@ def _download(url: str) -> bytes | None:
         return None
 
 
+# Больше Bot API ботам не отдаёт: getFile отвечает «file is too big».
+MAX_DOWNLOAD = 20 * 1024 * 1024
+
+
+def download_file(file_id: str) -> bytes:
+    """Скачивает файл, присланный боту, в память — больше 20 МБ он всё равно не весит."""
+    path = _call("getFile", {"file_id": file_id})["file_path"]
+    token = config.secret("TELEGRAM_BOT_TOKEN")
+    try:
+        response = requests.get(f"https://api.telegram.org/file/bot{token}/{path}", timeout=120)
+    except requests.RequestException:
+        # Текст исключения несёт адрес вместе с токеном — наружу его не отдаём.
+        raise TelegramError("файл не скачался: нет связи с Telegram") from None
+    if response.status_code != 200:
+        raise TelegramError(f"файл не скачался (код {response.status_code})")
+    return response.content
+
+
 def _thumbnail(cover_url: str) -> bytes | None:
     """Готовит обложку под требования Telegram к превью аудио: JPEG,
     не больше 320 пикселей по стороне и 200 КБ весом. Обложка из магазина
@@ -324,12 +342,14 @@ def _thumbnail(cover_url: str) -> bytes | None:
 
 def send_audio(
     chat_id: str,
-    audio_url: str,
+    audio: str | bytes,
     caption: str,
     *,
     title: str = "",
     performer: str = "",
     cover_url: str = "",
+    thumb: bytes | None = None,
+    seconds: int = 0,
     buttons: list[list[dict]] | None = None,
 ) -> dict:
     """Отправляет отрывок трека с текстом поста в подписи.
@@ -345,6 +365,10 @@ def send_audio(
     Не ссылка — значит file_id файла, который уже лежит у Telegram (полный трек
     от владельца): он уходит строкой как есть, без загрузки. File_id документа
     Telegram тоже принимает, но и в ленту кладёт документом, а не плеером.
+
+    Байты — сам файл: так дежурство перезаливает полный трек от владельца
+    (src/moderate.py). Название, артиста и превью Telegram берёт только при
+    загрузке, поэтому готовая обложка приходит в thumb, длительность — в seconds.
     """
     payload = {
         "chat_id": chat_id,
@@ -357,22 +381,27 @@ def send_audio(
         payload["performer"] = performer[:64]
 
     files = {}
-    if audio_url.startswith("http"):
-        clip = _download(audio_url)
+    clip = audio if isinstance(audio, bytes) else None
+    if clip is None and audio.startswith("http"):
+        clip = _download(audio)
         if not clip:
             # Отдавать Telegram ссылку магазина бесполезно: протухшую он не скачает,
             # а живую положит файлом без плеера. Пусть вызывающий откатится сам.
-            raise TelegramError(f"отрывок не скачался: {audio_url[:80]}")
+            raise TelegramError(f"отрывок не скачался: {audio[:80]}")
+    if clip:
         name, mime = _audio_kind(clip)
         payload["audio"] = "attach://audio"
         files["audio"] = (name, clip, mime)
         if mime == "audio/mp4":
-            payload["duration"] = _seconds(clip)
+            seconds = seconds or _seconds(clip)
     else:
         # file_id файла, который уже лежит у Telegram, уходит как есть.
-        payload["audio"] = audio_url
+        payload["audio"] = audio
+    if seconds:
+        payload["duration"] = seconds
 
-    thumb = _thumbnail(cover_url) if cover_url else None
+    if thumb is None and cover_url:
+        thumb = _thumbnail(cover_url)
     if thumb:
         payload["thumbnail"] = "attach://thumb"
         files["thumb"] = ("thumb.jpg", thumb, "image/jpeg")

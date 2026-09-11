@@ -51,6 +51,16 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # ffmpeg перезаливает присланный владельцем полный трек плеером
+      # (src/moderate.py), а в образе ubuntu-latest его нет. Не встал — смена
+      # всё равно идёт: кнопки и разборы работают, а на трек бот честно ответит,
+      # что принять его не может.
+      - name: Поставить ffmpeg
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Представиться для коммитов
         run: |
           git config user.name "plenka-bot"

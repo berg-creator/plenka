@@ -22,11 +22,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
+
+import requests
 
 from . import comments, config, publish, service, state, telegram
 
@@ -80,12 +85,128 @@ def handle(action: str, post_id: str) -> str:
     return "Непонятная команда"
 
 
+# Звук этих кодеков Telegram играет плеером, и перекодировать его незачем:
+# mp3 и AAC ложатся в новый файл теми же байтами, без потерь. Остальное — flac,
+# wav, opus из webm, alac — сжимается в AAC.
+PLAYABLE = {"mp3": ".mp3", "aac": ".m4a"}
+
+
 def track_file(message: dict) -> dict:
-    """Аудио из сообщения: музыкой или файлом с аудио-типом — mp3 часто шлют документом."""
+    """Файл со звуком из сообщения: музыка, видео или документ аудио- или видеотипа.
+
+    mp3 часто шлют документом, ролик с ютуба — видео или mp4-файлом. Годится всё,
+    откуда ffmpeg достанет звук: в пост уходит не присланный файл, а перезалитый
+    (normalize_track).
+    """
     document = message.get("document") or {}
-    if str(document.get("mime_type", "")).startswith("audio/"):
+    if str(document.get("mime_type", "")).startswith(("audio/", "video/")):
         return document
-    return message.get("audio") or {}
+    return message.get("audio") or message.get("video") or {}
+
+
+def _ff(tool: str, *args: str) -> str:
+    """ffmpeg или ffprobe; возвращает stdout. Причину отказа оба пишут последней
+    строкой stderr — она и уходит в ошибку, а оттуда владельцу."""
+    found = shutil.which(tool)
+    if not found:
+        raise RuntimeError(f"{tool} не найден (локально: brew install ffmpeg)")
+    result = subprocess.run(
+        [found, "-v", "error", *args], capture_output=True, text=True, errors="replace"
+    )
+    if result.returncode != 0:
+        reason = (result.stderr.strip().splitlines() or ["без объяснений"])[-1]
+        raise RuntimeError(f"{tool} не справился: {reason}")
+    return result.stdout
+
+
+def _store_cover(post: dict) -> str:
+    """Обложка из iTunes по артисту и названию — последний шанс, когда её нет
+    ни в посте, ни в файле. Артист сверяется точно: чужая обложка хуже никакой."""
+    try:
+        results = requests.get(
+            "https://itunes.apple.com/search",
+            params={"term": f"{post.get('artist', '')} {post.get('track', '')}",
+                    "entity": "song", "limit": 10},
+            timeout=20,
+        ).json().get("results", [])
+    except Exception:  # noqa: BLE001 — без обложки трек всё равно принимается
+        return ""
+    artist = post.get("artist", "").casefold().strip()
+    return next(
+        (item.get("artworkUrl100", "").replace("100x100", "600x600") for item in results
+         if item.get("artistName", "").casefold().strip() == artist),
+        "",
+    )
+
+
+def normalize_track(track: dict, post: dict, work: Path) -> tuple[bytes, int, bytes | None]:
+    """Звук из присланного файла, готовый к плееру: (файл, секунды, обложка).
+
+    По file_id как есть присланное в канал не годится: mp3 файлом, wav и flac
+    Telegram кладёт в ленту документом, ролик — видео, а у обычного mp3 название
+    и артист из тегов скачанного файла, часто кривых, и обложки может не быть
+    вовсе. Поменять это у файла, уже лежащего у Telegram, нельзя: превью и теги
+    принимаются только при новой загрузке.
+
+    Поэтому перезаливается любой файл, хороший mp3 тоже: один путь на все форматы,
+    и в канале всегда название, артист и обложка из поста. Качество не страдает —
+    mp3 и AAC копируются без перекодирования (PLAYABLE), меняется только обёртка
+    с тегами.
+    """
+    source = work / "source"
+    source.write_bytes(telegram.download_file(track["file_id"]))
+
+    streams = json.loads(_ff(
+        "ffprobe", "-show_entries",
+        "stream=index,codec_type,codec_name:stream_disposition=attached_pic",
+        "-of", "json", str(source),
+    )).get("streams", [])
+    sound = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    if sound is None:
+        raise RuntimeError("в файле нет звука")
+
+    codec = sound.get("codec_name", "")
+    out = work / f"track{PLAYABLE.get(codec, '.m4a')}"
+    _ff(
+        "ffmpeg", "-y", "-i", str(source), "-map", f"0:{sound['index']}",
+        # Теги присланного файла выбрасываем целиком и пишем свои, из поста.
+        "-map_metadata", "-1",
+        "-metadata", f"title={post.get('track', '')}",
+        "-metadata", f"artist={post.get('artist', '')}",
+        *(["-c:a", "copy"] if codec in PLAYABLE else ["-c:a", "aac", "-b:a", "256k"]),
+        # moov в начало файла: плеер начинает играть, не дожидаясь загрузки целиком.
+        *(["-movflags", "+faststart"] if out.suffix == ".m4a" else []),
+        str(out),
+    )
+    try:
+        seconds = round(float(_ff(
+            "ffprobe", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)
+        )))
+    except ValueError:
+        seconds = 0  # плеер покажет 0:00, но играть будет
+
+    # Обложка поста — официальная, из магазина, и берётся всегда, когда есть.
+    # Вшитая в скачанный mp3 бывает от сборника, с водяным знаком сайта или вовсе
+    # от другого релиза, поэтому она только вторая. iTunes — последний шанс.
+    thumb = telegram._thumbnail(post["cover"]) if post.get("cover") else None
+    pic = next((s for s in streams if (s.get("disposition") or {}).get("attached_pic")), None)
+    if thumb is None and pic:
+        cover = work / "cover.jpg"
+        try:
+            # Рамки Telegram для превью: JPEG, до 320 пикселей по стороне и 200 КБ.
+            _ff(
+                "ffmpeg", "-y", "-i", str(source), "-map", f"0:{pic['index']}",
+                "-frames:v", "1", "-q:v", "3",
+                "-vf", "scale=320:320:force_original_aspect_ratio=decrease:force_divisible_by=2",
+                str(cover),
+            )
+            thumb = cover.read_bytes()
+        except RuntimeError:
+            pass  # битая картинка в тегах — не повод отказать в треке
+    if thumb is None:
+        found = _store_cover(post)
+        thumb = telegram._thumbnail(found) if found else None
+    return out.read_bytes(), seconds, thumb
 
 
 def _post_by_request(message_id: int) -> Path | None:
@@ -102,12 +223,19 @@ def _post_by_request(message_id: int) -> Path | None:
     return None
 
 
-def attach_track(message: dict) -> str:
-    """Прикладывает к посту полный трек, присланный владельцем. Возвращает ответ ему.
+def attach_track(message: dict, admin: str) -> str:
+    """Прикладывает к посту полный трек, присланный владельцем. Возвращает ответ ему —
+    пустой, если ответом стал сам плеер.
 
     Храним только file_id: репозиторий открытый, а Telegram отдаёт файл по нему
     сколько угодно раз — класть сам трек рядом с постом незачем и нельзя.
     """
+    track = track_file(message)
+    # Размер приходит в апдейте: что Telegram боту всё равно не отдаст, не качаем.
+    if track.get("file_size", 0) > telegram.MAX_DOWNLOAD:
+        return ("Файл больше 20 МБ — Telegram не отдаёт боту такие; "
+                "пришли аудио или видео пониже качеством.")
+
     path = _post_by_request(message["reply_to_message"]["message_id"])
     if path is None:
         return "Не нашёл пост под этот запрос — похоже, его удалили из очереди."
@@ -118,11 +246,24 @@ def attach_track(message: dict) -> str:
         how = "с полным треком" if post.get("full_track_file_id") else "с отрывком"
         return f"Пост {name} уже вышел — {how}. Этот файл к нему не приложить."
 
-    track = track_file(message)
-    post["full_track_file_id"] = track["file_id"]
-    for key in ("duration", "title", "performer"):
-        if track.get(key):
-            post[f"full_track_{key}"] = track[key]
+    telegram.send_chat_action(admin, "upload_voice")
+    try:
+        with tempfile.TemporaryDirectory() as work:
+            clip, seconds, thumb = normalize_track(track, post, Path(work))
+        # Подтверждение — сам плеер: владелец сразу слышит и видит то, что уйдёт в канал.
+        sent = telegram.send_audio(
+            admin, clip, f"Принял: {name}. Так трек выйдет в канале.",
+            title=post.get("track", ""), performer=post.get("artist", ""),
+            thumb=thumb, seconds=seconds,
+        )
+        if "audio" not in sent:
+            raise RuntimeError("Telegram положил файл документом, а не плеером")
+    except Exception as exc:  # noqa: BLE001 — сбой приёма не трогает пост и не роняет дежурство
+        log.error("Трек к %s не принят: %s", path.name, exc)
+        return f"Не смог принять трек к {name}: {exc}. Пост не тронут — пришли файл ещё раз."
+
+    # В пост — file_id перезалитого файла: у присланного теги и обложка свои.
+    post["full_track_file_id"] = sent["audio"]["file_id"]
     state.write_json(path, post)
 
     # В git сразу, а не через десять минут: публикатор живёт в другой группе
@@ -132,14 +273,7 @@ def attach_track(message: dict) -> str:
     push_state()
     if not path.exists():
         return f"Не успел: пост {name} только что вышел с отрывком."
-
-    if "audio" not in message:
-        # sendAudio принимает file_id документа, но и в ленту кладёт документом.
-        return (
-            f"Принял: {name} выйдет с полным треком, но файлом-вложением, без плеера. "
-            "Чтобы играл прямо в ленте, пришли его музыкой (mp3 или m4a), а не файлом."
-        )
-    return f"Принял: {name} выйдет с полным треком."
+    return ""
 
 
 def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset: int) -> tuple:
@@ -185,9 +319,10 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     print(f"  трек в ответ на {message['reply_to_message'].get('message_id')}")
                     continue
                 try:
-                    reply = attach_track(message)
-                    telegram.send_message(admin, reply)
-                    print(f"  трек: {reply}")
+                    reply = attach_track(message, admin)
+                    if reply:
+                        telegram.send_message(admin, reply)
+                    print(f"  трек: {reply or 'принят, плеер ушёл владельцу'}")
                 except Exception as exc:  # noqa: BLE001 — сбой приёма не роняет дежурство
                     log.error("Трек не приложен: %s", exc)
                 continue
@@ -372,6 +507,46 @@ def once(dry_run: bool) -> int:
     return 0
 
 
+def _selftest() -> int:
+    """Приём трека без сети: что считается треком, от кого и какого размера.
+
+    Запуск: python -m src.moderate --selftest
+    """
+    import contextlib
+    import io
+
+    def reply(sender: int, chat: int = 0, **file) -> dict:
+        return {"message_id": 7, "from": {"id": sender}, "chat": {"id": chat or sender},
+                "reply_to_message": {"message_id": 562}, **file}
+
+    # Ролик с ютуба доходит и видео, и mp4-файлом; flac и mp3 — как пришли.
+    video = {"file_id": "v", "mime_type": "video/mp4"}
+    assert track_file(reply(1, video=video))["file_id"] == "v"
+    assert track_file(reply(1, document={"file_id": "d", "mime_type": "video/mp4"}))["file_id"] == "d"
+    assert track_file(reply(1, document={"file_id": "f", "mime_type": "audio/flac"}))["file_id"] == "f"
+    assert track_file(reply(1, audio={"file_id": "a", "mime_type": "audio/mpeg"}))["file_id"] == "a"
+    # Pdf или фото ответом на запрос — не трек, а обычное сообщение сервису.
+    assert not track_file(reply(1, document={"file_id": "p", "mime_type": "application/pdf"}))
+    assert not track_file(reply(1, photo=[{"file_id": "x"}]))
+
+    def taken(message: dict) -> bool:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            process([{"update_id": 1, "message": message}], {}, "1", True, 0)
+        return "трек в ответ на 562" in out.getvalue()
+
+    # От владельца в личке — в приём; чужой файл и свой, но из группы, — мимо.
+    assert taken(reply(1, video=video))
+    assert not taken(reply(2, video=video))
+    assert not taken(reply(1, chat=-100, video=video))
+
+    # Больше 20 МБ не качаем: ответ сразу, без сети и без поиска поста.
+    big = reply(1, document={"file_id": "b", "mime_type": "audio/flac", "file_size": 21 * 2**20})
+    assert "больше 20 МБ" in attach_track(big, "1")
+    print("приём трека: все проверки прошли")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Обработка событий бота")
     parser.add_argument("--dry-run", action="store_true", help="только показать события")
@@ -381,7 +556,11 @@ def main() -> int:
         metavar="МИНУТ",
         help="дежурить указанное время, отвечая сразу",
     )
+    parser.add_argument("--selftest", action="store_true", help="проверить приём трека без сети")
     args = parser.parse_args()
+
+    if args.selftest:
+        return _selftest()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
