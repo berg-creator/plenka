@@ -158,7 +158,7 @@ deleteMessage) и допиши случаи в _selftest внизу src/telegram
 Сначала проверь, влита ли в origin/main ветка post-form (рубрика МЕМ с картинкой:
 data/memes.json, assets/meme/templates/, card.render_meme). Если нет — работай
 в её рабочей копии .claude/worktrees/post-form, в устаревшее дерево ~/ПЛЕНКА
-не пиши (см. задачу 1).
+не пиши: с 12.09.2026 оно выровнено по origin/main, правки там потеряются.
 
 Что уже есть. Мем выходит картинкой: шаблон из каталога data/memes.json
 (47 штук, key/name/when/source), надпись на самой картинке сверху и снизу
@@ -215,7 +215,7 @@ data/memes.json, assets/meme/templates/, card.render_meme). Если нет — 
 
 ```
 Проект «ПЛЁНКА»: папка ПЛЕНКА в домашней директории. Общайся по-русски.
-Работай в свежем клоне origin/main, не в ~/ПЛЕНКА (см. задачу 1).
+Работай в свежем клоне origin/main, не в ~/ПЛЕНКА.
 
 Контекст: src/collect.py (collect_releases, own_release), src/compose.py
 (fresh_releases, release_key, release_jobs, do_fresh), src/publish.py (next_post,
@@ -264,7 +264,7 @@ python -m src.publish --selftest. В канал ничего не публику
 
 ```
 Проект «ПЛЁНКА»: папка ПЛЕНКА в домашней директории. Общайся по-русски.
-Работай в свежем клоне origin/main, не в ~/ПЛЕНКА (см. задачу 1).
+Работай в свежем клоне origin/main, не в ~/ПЛЕНКА.
 Кода не пиши, пока владелец не ответит.
 
 Для каждой рубрики и каждого пути посчитай задержку от события до поста
