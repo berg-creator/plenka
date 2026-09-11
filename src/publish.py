@@ -110,6 +110,11 @@ def send(post: dict, chat_id: str) -> None:
     # из ленты. Обложка при этом не пропадает — идёт превью к отрывку.
     preview = post.get("preview", "")
     if preview and len(text) <= telegram.MAX_CAPTION:
+        # Ссылка Deezer на отрывок живёт часы, пост в очереди — дни: перед
+        # отправкой берём у магазина свежую, а не сохранённую при генерации.
+        from .compose import fresh_preview
+
+        preview = fresh_preview(post) or preview
         try:
             telegram.send_audio(
                 chat_id,

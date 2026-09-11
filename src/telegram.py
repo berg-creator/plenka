@@ -273,6 +273,17 @@ def _seconds(clip: bytes) -> int:
         return 0
 
 
+def _audio_kind(clip: bytes) -> tuple[str, str]:
+    """Имя и тип файла по содержимому, а не по ссылке.
+
+    iTunes отдаёт отрывок в m4a, Deezer — в mp3. Залитый под чужим типом
+    mp3 Telegram не узнаёт и кладёт в ленту файл с именем вместо плеера.
+    """
+    if clip[4:8] == b"ftyp":
+        return "preview.m4a", "audio/mp4"
+    return "preview.mp3", "audio/mpeg"
+
+
 def _download(url: str) -> bytes | None:
     """Тянет отрывок в память. Превью магазина — около мегабайта, держать его
     в памяти дешевле, чем возиться с временными файлами.
@@ -346,14 +357,19 @@ def send_audio(
         payload["performer"] = performer[:64]
 
     files = {}
-    clip = _download(audio_url) if audio_url.startswith("http") else None
-    if clip:
+    if audio_url.startswith("http"):
+        clip = _download(audio_url)
+        if not clip:
+            # Отдавать Telegram ссылку магазина бесполезно: протухшую он не скачает,
+            # а живую положит файлом без плеера. Пусть вызывающий откатится сам.
+            raise TelegramError(f"отрывок не скачался: {audio_url[:80]}")
+        name, mime = _audio_kind(clip)
         payload["audio"] = "attach://audio"
-        files["audio"] = ("preview.m4a", clip, "audio/mp4")
-        payload["duration"] = _seconds(clip)
+        files["audio"] = (name, clip, mime)
+        if mime == "audio/mp4":
+            payload["duration"] = _seconds(clip)
     else:
-        # file_id уходит как есть. Ссылка, которая не скачалась, — тоже:
-        # пусть Telegram сходит сам, файлом, но хоть с музыкой.
+        # file_id файла, который уже лежит у Telegram, уходит как есть.
         payload["audio"] = audio_url
 
     thumb = _thumbnail(cover_url) if cover_url else None
@@ -466,6 +482,9 @@ def _selftest() -> None:
     """
     # Голый «<» — единственное, что действительно роняет отправку.
     assert sanitize("цена < 100") == "цена &lt; 100"
+    # Тип отрывка — по байтам: mp3 под видом m4a ложится в ленту файлом без плеера.
+    assert _audio_kind(b"\x00\x00\x00\x20ftypM4A \x00") == ("preview.m4a", "audio/mp4")
+    assert _audio_kind(b"ID3\x04\x00\x00") == ("preview.mp3", "audio/mpeg")
     assert sanitize("рейтинг <3 из 10") == "рейтинг &lt;3 из 10"
     # Разрешённая разметка проходит целиком.
     assert sanitize('<b>жир</b> и <a href="https://x.ru">ссылка</a>').startswith("<b>жир</b>")

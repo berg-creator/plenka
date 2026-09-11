@@ -499,6 +499,22 @@ def _lead_from_url(url: str) -> dict:
     return {}
 
 
+def fresh_preview(post: dict) -> str:
+    """Свежая ссылка на отрывок прямо перед отправкой.
+
+    Deezer подписывает ссылку на превью сроком в несколько часов, а пост лежит
+    в очереди днями: сохранённая при генерации к публикации уже мертва.
+    Магазин не ответил — пустая строка, и вызывающий берёт сохранённую.
+    """
+    url = post.get("source_url", "")
+    if not url:
+        return ""
+    try:
+        return _lead_from_url(url).get("preview", "")
+    except Exception:  # noqa: BLE001 — сеть магазина не должна ронять отправку
+        return ""
+
+
 def do_backfill_music() -> int:
     """Дописывает отрывок к постам, которые уже лежат в очереди.
 
@@ -596,13 +612,14 @@ def do_ask_tracks() -> int:
         )
         buttons = where_to_find(post)
         sent = None
-        if post.get("preview"):
+        preview = fresh_preview(post) or post.get("preview", "")
+        if preview:
             # Отрывок прямо в запросе: владелец слышит, что ищет, и не скачает
             # одноимённый трек другого артиста или чужой ремикс. Ответ на аудио
             # дежурство находит так же, как на текст, — по message_id.
             try:
                 sent = telegram.send_audio(
-                    admin, post["preview"], text,
+                    admin, preview, text,
                     title=post["track"], performer=post["artist"],
                     cover_url=post.get("cover", ""), buttons=buttons,
                 )
