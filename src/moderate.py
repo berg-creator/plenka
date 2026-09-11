@@ -70,18 +70,13 @@ def handle(action: str, post_id: str) -> str:
         return "Удалил"
 
     if action == "pub":
+        # Одно нажатие публикует на обеих площадках, и сообщение поста
+        # запоминается для правок автопилота — тем же путём, что по расписанию.
         try:
-            publish.send(post, config.secret("TELEGRAM_CHANNEL_ID"))
+            publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
         except telegram.TelegramError as exc:
             log.error("Не удалось опубликовать %s: %s", post_id, exc)
             return f"Ошибка: {exc}"
-
-        # Одно нажатие публикует на обеих площадках. ВКонтакте идёт после
-        # Telegram и не влияет на исход: если там не выйдет, пост уже вышел.
-        publish.crosspost_vk(post)
-
-        publish.record(post, path, "channel")
-        publish.archive(path)
         return "Опубликовано в канал и ВК"
 
     return "Непонятная команда"

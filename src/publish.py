@@ -136,6 +136,40 @@ def archive(path: Path) -> None:
     path.rename(config.ARCHIVE / path.name)
 
 
+def to_channel(post: dict, path: Path, chat_id: str) -> None:
+    """Публикация в канал: Telegram, ВКонтакте, журнал, архив. Одна на три входа —
+    расписание, кнопку «✅ В канал» (src/moderate.py) и срочные новости (src/urgent.py).
+
+    Сообщение с текстом поста ложится в архивный JSON полем message: без него
+    автопилот точности (src/review.py) вышедший пост поправить не может.
+    ВКонтакте идёт после Telegram и на исход не влияет — пост уже вышел.
+    """
+    message = send(post, chat_id)
+    crosspost_vk(post)
+    record(post, path, "channel")
+    if message:
+        state.write_json(path, {**post, "message": message})
+    archive(path)
+
+
+def edit(post: dict) -> None:
+    """Правит вышедший пост в канале по сообщению из to_channel (src/review.py).
+
+    Текст готовится тем же путём, что в send: строку «▸ Слушать…» там заменили
+    кнопки, и в подпись она уехать не должна. Подпись длиннее лимита не режется
+    молча, а отказывает: обрезанный пост хуже непоправленного.
+    """
+    message = post["message"]
+    text, _ = listen(post.get("text", "").strip(), post.get("artist", ""), release_title(post))
+    where = message["chat"], message["message_id"], text
+    if message["kind"] != "caption":
+        telegram.edit_text(*where, buttons=message.get("buttons"))
+        return
+    if len(text) > telegram.MAX_CAPTION:
+        raise telegram.TelegramError(f"подпись {len(text)} знаков — больше {telegram.MAX_CAPTION}")
+    telegram.edit_caption(*where, buttons=message.get("buttons"))
+
+
 # Последняя строка поста о релизе («▸ Слушать в Apple Music», см. compose.name_button).
 # В Telegram её место занимает ряд кнопок стримингов, а из сохранённого текста
 # она не пропадает: у записи ВКонтакте кнопок нет, и ссылку туда несёт она.
@@ -193,8 +227,22 @@ def release_title(post: dict) -> str:
     return title or post.get("track", "")
 
 
-def send(post: dict, chat_id: str) -> None:
-    """Отправляет пост нужным методом: опрос, отрывок трека, фото или текст."""
+def _where(message: dict, kind: str, buttons: list[list[dict]] | None = None) -> dict:
+    """Сообщение с текстом поста: чат, id, подпись это или текст, кнопки под ним.
+
+    Кнопки запоминаются вместе с сообщением: правка без reply_markup их снимает,
+    проверено вживую, а у вышедшего поста взять их больше неоткуда.
+    """
+    return {"chat": message["chat"]["id"], "message_id": message["message_id"], "kind": kind,
+            "buttons": buttons or []}
+
+
+def send(post: dict, chat_id: str) -> dict | None:
+    """Отправляет пост нужным методом: опрос, отрывок трека, фото или текст.
+
+    Возвращает сообщение, в котором лежит текст поста (_where): по нему
+    вышедший пост правится (edit). Опрос не правится — None.
+    """
     text = post.get("text", "").strip()
     rubric = post.get("rubric", "")
 
@@ -217,8 +265,7 @@ def send(post: dict, chat_id: str) -> None:
         image = card.meme(post)
         if image:
             try:
-                telegram.send_photo_file(chat_id, image, text, quiet=night(state.now()))
-                return
+                return _where(telegram.send_photo_file(chat_id, image, text, quiet=night(state.now())), "caption")
             except telegram.TelegramError as exc:
                 log.warning("Мем с картинкой не ушёл (%s), отправляю текстом", exc)
         text = card.meme_text(post)
@@ -250,28 +297,28 @@ def send(post: dict, chat_id: str) -> None:
             # (нет сети, битый файл) — обложка уходит как была.
             framed = card.cover(post)
             if framed:
-                telegram.send_photo_file(chat_id, framed, text, buttons=keys, quiet=quiet)
+                photo = telegram.send_photo_file(chat_id, framed, text, buttons=keys, quiet=quiet)
             else:
-                telegram.send_photo(chat_id, cover, text, buttons=keys, quiet=quiet)
-            return
+                photo = telegram.send_photo(chat_id, cover, text, buttons=keys, quiet=quiet)
+            return _where(photo, "caption", keys)
         except telegram.TelegramError as exc:
             # Обложка могла протухнуть. Музыку второй раз не пробуем: она уже
             # ушла или только что не смогла — текст уходит обычным сообщением.
             log.warning("Фото не ушло (%s), текст уходит сообщением", exc)
-        telegram.send_message(chat_id, text, buttons=keys, quiet=quiet)
-        return
+        return _where(telegram.send_message(chat_id, text, buttons=keys, quiet=quiet), "text", keys)
 
-    if not send_music(post, chat_id, text, buttons, quiet=quiet):
-        telegram.send_message(chat_id, text, buttons=buttons, quiet=quiet)
+    if played := send_music(post, chat_id, text, buttons, quiet=quiet):
+        return _where(played, "caption", buttons)
+    return _where(telegram.send_message(chat_id, text, buttons=buttons, quiet=quiet), "text", buttons)
 
 
 def send_music(
     post: dict, chat_id: str, caption: str, buttons: list[list[dict]] | None = None,
     *, quiet: bool = False,
-) -> bool:
-    """Полный трек от владельца, иначе отрывок магазина. False — не ушло ничего."""
+) -> dict | None:
+    """Полный трек от владельца, иначе отрывок магазина. Ушедшее сообщение, None — не ушло ничего."""
     if len(caption) > telegram.MAX_CAPTION:
-        return False
+        return None
 
     # Полный трек, присланный владельцем (src/moderate.py), важнее отрывка.
     # Файл уже лежит у Telegram и уходит по file_id: качать нечего, а название
@@ -281,21 +328,20 @@ def send_music(
     full_track = post.get("full_track_file_id", "")
     if full_track:
         try:
-            telegram.send_audio(chat_id, full_track, caption, buttons=buttons, quiet=quiet)
-            return True
+            return telegram.send_audio(chat_id, full_track, caption, buttons=buttons, quiet=quiet)
         except telegram.TelegramError as exc:
             log.warning("Полный трек не ушёл (%s), пробую отрывком", exc)
 
     preview = post.get("preview", "")
     if not preview:
-        return False
+        return None
     # Ссылка Deezer на отрывок живёт часы, пост в очереди — дни: перед
     # отправкой берём у магазина свежую, а не сохранённую при генерации.
     from .compose import fresh_preview
 
     preview = fresh_preview(post) or preview
     try:
-        telegram.send_audio(
+        return telegram.send_audio(
             chat_id,
             preview,
             caption,
@@ -305,11 +351,10 @@ def send_music(
             buttons=buttons,
             quiet=quiet,
         )
-        return True
     except telegram.TelegramError as exc:
         # Ссылка на отрывок живёт не вечно.
         log.warning("Отрывок не ушёл: %s", exc)
-        return False
+        return None
 
 
 def crosspost_vk(post: dict) -> None:
@@ -378,37 +423,43 @@ def _selftest() -> None:
     """Кнопки стримингов: строка «Слушать» уходит, точная ссылка остаётся точной.
     Пост с обложкой и музыкой — два сообщения: сверху тихий плеер с кнопками,
     под ним фото с текстом без кнопок; плеер не ушёл — кнопки на фото.
+    send возвращает сообщение с текстом поста, to_channel кладёт его в архив.
     Посты о релизах: свой выход, сутки на всё, окно на трек, звук у первых трёх
     за московские сутки и не в тихие часы, обычный пост уступает им слот.
 
     Запуск: python -m src.publish --selftest
     """
+    import os
     import tempfile
+    from unittest import mock
 
     sent: list[tuple] = []
     real = (card.cover, telegram.send_photo, telegram.send_audio, telegram.send_message, state.now,
-            config.QUEUE, config.POSTED_FILE)
+            config.QUEUE, config.ARCHIVE, config.POSTED_FILE)
     card.cover = lambda post: None
 
-    # Запись: что ушло, подпись, без звука ли, есть ли кнопки.
+    # Запись: что ушло, подпись, без звука ли, есть ли кнопки. id сообщения — его номер.
+    def message(*entry) -> dict:
+        sent.append(entry)
+        return {"message_id": len(sent), "chat": {"id": -100}}
+
     def photo(chat, url, caption, buttons=None, quiet=False):
         if "протухла" in url:
             raise telegram.TelegramError("обложка протухла")
-        sent.append(("фото", caption, quiet, bool(buttons)))
+        return message("фото", caption, quiet, bool(buttons))
 
     telegram.send_photo = photo
-    telegram.send_audio = lambda chat, audio, caption, buttons=None, quiet=False, **_: sent.append(
-        ("плеер", caption, quiet, bool(buttons))
-    )
-    telegram.send_message = lambda chat, text, buttons=None, quiet=False, **_: sent.append(
-        ("текст", text, quiet, bool(buttons))
-    )
+    telegram.send_audio = lambda chat, audio, caption, buttons=None, quiet=False, **_: message(
+        "плеер", caption, quiet, bool(buttons))
+    telegram.send_message = lambda chat, text, buttons=None, quiet=False, **_: message(
+        "текст", text, quiet, bool(buttons))
     # Часы стоят на 15:00 UTC, то есть 18:00 по Москве: счёт за сутки не зависит
     # от времени прогона. Очередь и журнал публикаций — во временной папке.
     now = datetime(2026, 9, 11, 15, 0, tzinfo=timezone.utc)
     state.now = lambda: now
     tmp = tempfile.TemporaryDirectory()
-    config.QUEUE, config.POSTED_FILE = Path(tmp.name) / "queue", Path(tmp.name) / "posted.json"
+    config.QUEUE, config.ARCHIVE, config.POSTED_FILE = (
+        Path(tmp.name) / "queue", Path(tmp.name) / "archive", Path(tmp.name) / "posted.json")
 
     def ago(**delta: float) -> str:
         return state.iso(now - timedelta(**delta))
@@ -420,20 +471,37 @@ def _selftest() -> None:
         # Ссылка не из магазина: название релиза берётся из поста, без сети.
         post = {"text": 'Текст.\n\n▸ <a href="https://x/r">Слушать</a>', "artist": "Bones",
                 "cover": "https://x/c.jpg", "full_track_file_id": "ID"}
-        send(post, "0")
+        # Возвращается сообщение с текстом поста: по нему правит автопилот точности.
+        where = send(post, "0")
         assert sent == [("плеер", "", True, True), ("фото", "Текст.", False, False)], sent
+        assert where == {"chat": -100, "message_id": 2, "kind": "caption", "buttons": []}, where
         sent.clear()
         # Плеер не ушёл — кнопки на фото, иначе ссылки на стриминги пропали бы.
-        send({**post, "full_track_file_id": ""}, "0")
+        where = send({**post, "full_track_file_id": ""}, "0")
         assert sent == [("фото", "Текст.", False, True)], sent
+        assert where["message_id"] == 1 and where["kind"] == "caption" and where["buttons"], where
         sent.clear()
         # Плеер ушёл, фото нет — текст обычным сообщением, кнопки остались у плеера.
-        send({**post, "cover": "https://x/протухла.jpg"}, "0")
+        where = send({**post, "cover": "https://x/протухла.jpg"}, "0")
         assert sent == [("плеер", "", True, True), ("текст", "Текст.", False, False)], sent
+        assert where == {"chat": -100, "message_id": 2, "kind": "text", "buttons": []}, where
         sent.clear()
-        # Без обложки текст едет с плеером, и уведомление у него обычное.
-        send({**post, "cover": ""}, "0")
+        # Без обложки текст едет с плеером в подписи, и уведомление у него обычное.
+        where = send({**post, "cover": ""}, "0")
         assert sent == [("плеер", "Текст.", False, True)], sent
+        assert where["message_id"] == 1 and where["kind"] == "caption" and where["buttons"], where
+        sent.clear()
+        # Ни обложки, ни музыки — текст с кнопками обычным сообщением.
+        where = send({**post, "cover": "", "full_track_file_id": ""}, "0")
+        assert sent == [("текст", "Текст.", False, True)] and where["kind"] == "text" and where["buttons"], where
+
+        # В канал: сообщение с текстом ложится в архивный JSON, текст — как был.
+        state.write_json(config.QUEUE / "0-release.json", post)
+        with mock.patch.dict(os.environ, {"VK_TOKEN": ""}):
+            to_channel(post, config.QUEUE / "0-release.json", "0")
+        archived = state.read_json(config.ARCHIVE / "0-release.json", {})
+        assert archived == {**post, "message": {"chat": -100, "message_id": 3, "kind": "caption", "buttons": []}}, archived
+        assert not (config.QUEUE / "0-release.json").exists()
 
         # Четвёртый пост о релизе за московские сутки — молча, и фото, и плеер.
         # Вчерашний по Москве (22:00 МСК 10.09) в счёт не идёт.
@@ -501,7 +569,7 @@ def _selftest() -> None:
         print("выходы релизов: сутки, окно на трек, звук у трёх, обычный слот уступает")
     finally:
         (card.cover, telegram.send_photo, telegram.send_audio, telegram.send_message, state.now,
-         config.QUEUE, config.POSTED_FILE) = real
+         config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real
         tmp.cleanup()
 
     apple = "https://music.apple.com/us/album/fuel-the-fire-single/6802784931?uo=4"
@@ -632,10 +700,7 @@ def main() -> int:
     )
 
     if args.target == "channel":
-        send(post, chat_id)
-        crosspost_vk(post)
-        record(post, path, "channel")
-        archive(path)
+        to_channel(post, path, chat_id)
         print(f"Опубликовано в канал: {path.name}. Осталось в очереди: {len(list(config.QUEUE.glob('*.json')))}")
     else:
         # В личку пост уходит с кнопками решения и остаётся в очереди,

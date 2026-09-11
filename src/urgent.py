@@ -132,10 +132,7 @@ def run(limit: int, dry_run: bool, target: str) -> int:
         if target == "admin":
             publish.send_for_approval(post, path, chat, label="🔴 СРОЧНАЯ НОВОСТЬ")
         else:
-            publish.send(post, chat)
-            publish.crosspost_vk(post)
-            publish.record(post, path, target)
-            publish.archive(path)
+            publish.to_channel(post, path, chat)
 
         # Отпечаток гасим только после удачной отправки: упавшая сеть не должна
         # съедать инфоповод молча — на следующем запуске он ещё будет свежим.

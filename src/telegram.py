@@ -182,6 +182,37 @@ def edit_markup(chat_id: str, message_id: int, buttons: list[list[dict]] | None)
         pass
 
 
+def edit_text(chat_id: str | int, message_id: int, text: str, *, buttons: list[list[dict]] | None = None) -> dict:
+    """Новый текст уже отправленного сообщения — правка вышедшего поста (src/review.py).
+
+    Кнопки передаются заново: правка без reply_markup снимает их с сообщения.
+    Превью ссылок выключено, как при отправке, — иначе правка его включила бы.
+    """
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": sanitize(text)[:MAX_TEXT],
+        "parse_mode": "HTML",
+        "link_preview_options": json.dumps({"is_disabled": True}),
+    }
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    return _call("editMessageText", payload)
+
+
+def edit_caption(chat_id: str | int, message_id: int, caption: str, *, buttons: list[list[dict]] | None = None) -> dict:
+    """Новая подпись фото или плеера. Кнопки — заново, как в edit_text."""
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "caption": sanitize(caption)[:MAX_CAPTION],
+        "parse_mode": "HTML",
+    }
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    return _call("editMessageCaption", payload)
+
+
 def send_photo_file(
     chat_id: str, path: Path, caption: str, *, buttons: list[list[dict]] | None = None,
     quiet: bool = False,

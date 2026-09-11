@@ -22,24 +22,28 @@ prompts/review.md) сверяет новые посты очереди с дан
 
 Путь одной правки:
 
-1. Рутина смотрит git log. Новых постов бота с прошлого прохода нет — выходит,
-   ничего не читая: лимиты подписки не бесконечны. Есть — сверяет и пишет
-   content/review/<ГГГГММДД-ЧЧММ>.json: пост, rewrite (новый полный текст)
-   или drop (снять из очереди), дословная цитата выдумки и чего нет в данных.
-   Выдумок нет — не пушит ничего.
+1. Рутина смотрит git log. Новых и вышедших постов бота с прошлого прохода
+   нет — выходит, ничего не читая: лимиты подписки не бесконечны. Есть —
+   сверяет и пишет content/review/<ГГГГММДД-ЧЧММ>.json: пост, rewrite (новый
+   полный текст) или drop (снять из очереди), дословная цитата выдумки и чего
+   нет в данных. Выдумок нет — не пушит ничего.
 2. --check на снимке, по которому рутина писала правки: цитата есть в посте
    и ушла из нового текста, новый текст проходит quality.problems (там же
    заголовок <b> у рубрик с заголовком), строка кнопки «▸ <a …>» осталась
    как была. Мем и опрос только снимаются: подпись мема держится на картинке,
    а опрос — это JSON. Проверке не нужны ни сеть, ни пакеты сверх стандартной
    библиотеки — её же рутина зовёт перед пушем.
-3. --apply на свежем main. Между проходом и применением пост мог выйти или
-   поменяться: такой пропускается, а не затирается устаревшей правкой.
-   Битый файл не применяется целиком и красит запуск.
+3. --apply на свежем main. Между проходом и применением пост мог поменяться:
+   такой пропускается, а не затирается устаревшей правкой. Битый файл
+   не применяется целиком и красит запуск.
 
-Вышедшие посты не правятся: publish.py не хранит id сообщения в канале,
-а без него editMessageCaption и editMessageText звать не с чем. ВКонтакте
-не правится вовсе.
+Вышедший пост правится прямо в канале. publish.to_channel кладёт в архивный
+JSON сообщение с текстом поста — поле message, вместе с кнопками: правка
+без reply_markup их снимает. --apply зовёт publish.edit, а тот
+editMessageCaption или editMessageText. Снять вышедший нельзя, только
+rewrite; старый пост без message пропускается — править не с чем. Отказ
+канала красит запуск, но годные правки рядом применяются: в канале они уже
+вышли, и архив должен помнить их текст. ВКонтакте не правится вовсе.
 
     python -m src.review --check content/review/20260912-0835.json    проверка без сети
     python -m src.review --apply content/review/20260912-0835.json --dry-run
@@ -68,7 +72,7 @@ POST_PATH = re.compile(r"content/(queue|archive)/[\w-]+\.json")
 BUTTON = re.compile(r"(?m)^▸\s*<a\s+href=.*$")
 TAG = re.compile(r"<[^>]+>")
 
-PUBLISHED = "пост уже вышел — в канале не правлю: publish.py не хранит id сообщения"
+PUBLISHED = "пост вышел, а сообщение в канале не записано — править не с чем"
 
 
 def _filled(value) -> bool:
@@ -91,7 +95,7 @@ def _shape(edit) -> str:
         return "правка — это объект"
     file, action = edit.get("file"), edit.get("action")
     if not isinstance(file, str) or not POST_PATH.fullmatch(file):
-        return "file: путь поста вида content/queue/<имя>.json"
+        return "file: путь поста вида content/queue/<имя>.json или content/archive/<имя>.json"
     if action not in ACTIONS:
         return f"action «{action}»: rewrite или drop"
     missing = [field for field in ("fragment", "why") if not _filled(edit.get(field))]
@@ -104,17 +108,27 @@ def _shape(edit) -> str:
     return ""
 
 
-def _post(file: str) -> tuple[dict | None, str]:
-    """Пост из правки, как он лежит сейчас. None — править нечего, и почему."""
+def _current(file: str) -> Path:
+    """Где пост лежит сейчас: в очереди, а вышедший — в архиве."""
     path = config.ROOT / file
-    if file.startswith("content/queue/") and path.is_file():
-        try:
-            return json.loads(path.read_text(encoding="utf-8")), ""
-        except ValueError:
-            return None, "пост — битый JSON"
-    if (config.ARCHIVE / path.name).is_file():
-        return None, PUBLISHED
-    return None, "поста уже нет"
+    return path if file.startswith("content/queue/") and path.is_file() else config.ARCHIVE / path.name
+
+
+def _post(edit: dict) -> tuple[dict | None, str]:
+    """Пост из правки, как он лежит сейчас. None — править нечего, и почему."""
+    path = _current(edit["file"])
+    if not path.is_file():
+        return None, "поста уже нет"
+    try:
+        post = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return None, "пост — битый JSON"
+    if path.parent == config.ARCHIVE:
+        if edit["action"] == "drop":
+            return None, "пост уже вышел — снять нельзя, только rewrite"
+        if not post.get("message"):
+            return None, PUBLISHED
+    return post, ""
 
 
 def _text_problems(post: dict, edit: dict) -> list[str]:
@@ -164,7 +178,7 @@ def check(review, name: str = "") -> tuple[list[str], dict[int, str]]:
         if wrong:
             errors.append(f"{where}: {wrong}")
             continue
-        post, reason = _post(edit["file"])
+        post, reason = _post(edit)
         if post is not None and plain(edit["fragment"]) not in plain(post.get("text", "")):
             post, reason = None, "цитаты fragment нет в тексте поста — не дословно или пост поменялся"
         if post is None:
@@ -174,12 +188,34 @@ def check(review, name: str = "") -> tuple[list[str], dict[int, str]]:
     return errors, skipped
 
 
+def _write(edit: dict, path: Path) -> str:
+    """Пишет одну правку. Непустая строка — канал её не принял, и почему."""
+    if edit["action"] == "drop":
+        path.unlink()
+        return ""
+    post = {**json.loads(path.read_text(encoding="utf-8")), "text": edit["text"]}
+    if path.parent == config.ARCHIVE:
+        # Не наверху: --check зовёт облачный автор, а publish тянет requests и Pillow.
+        from . import publish, telegram
+
+        try:
+            publish.edit(post)
+        except telegram.TelegramError as exc:
+            # «not modified» — этот текст уже в канале: прошлый запуск поправил,
+            # а коммит не дошёл. «not found» — пост удалили руками. Остальное — поломка.
+            if "message is not modified" not in str(exc) and "message to edit not found" not in str(exc):
+                return f"в канале не поправлен — {exc}"
+    state.write_json(path, post)
+    return ""
+
+
 def apply(review, name: str, dry_run: bool) -> int:
-    """Применяет правки к очереди. 1 — файл битый, и не тронуто ничего.
+    """Применяет правки: очередь переписывает и снимает, вышедшее правит в канале.
+    1 — файл битый и не тронуто ничего, или канал не принял правку.
 
     Сначала проверяется весь файл, потом пишется: применённый наполовину файл
     хуже неприменённого — следующий проход рутины не узнает, какая половина
-    осталась.
+    осталась. Отказ канала — не порок файла: годные правки рядом применяются.
     """
     errors, skipped = check(review, name)
     for error in errors:
@@ -188,33 +224,37 @@ def apply(review, name: str, dry_run: bool) -> int:
         print(f"Правки {name} не применены: ошибок {len(errors)}.")
         return 1
 
-    done = 0
+    done = failed = 0
     for index, edit in enumerate(review["edits"]):
-        path = config.ROOT / edit["file"]
+        path = _current(edit["file"])
         if index in skipped:
             print(f"  — {path.name}: {skipped[index]}")
             continue
-        print(f"  {'снят' if edit['action'] == 'drop' else 'переписан'} {path.name}: {edit['why']}")
-        done += 1
-        if dry_run:
+        problem = "" if dry_run else _write(edit, path)
+        if problem:
+            print(f"  ✗ {path.name}: {problem}")
+            failed += 1
             continue
-        if edit["action"] == "drop":
-            path.unlink()
-        else:
-            post = json.loads(path.read_text(encoding="utf-8"))
-            state.write_json(path, {**post, "text": edit["text"]})
-    print(f"{'Применилось бы' if dry_run else 'Применено'} правок: {done}, пропущено: {len(skipped)}.")
-    return 0
+        what = "снят" if edit["action"] == "drop" else "поправлен в канале" if path.parent == config.ARCHIVE else "переписан"
+        print(f"  {what} {path.name}: {edit['why']}")
+        done += 1
+    print(f"{'Применилось бы' if dry_run else 'Применено'} правок: {done}, пропущено: {len(skipped)}, "
+          f"не принял канал: {failed}.")
+    return 1 if failed else 0
 
 
 def _selftest() -> None:
-    """Без сети, во временной папке: правка, снятие, отказ на битом тексте, вышедший пост.
+    """Без сети, во временной папке: правка, снятие, отказ на битом тексте,
+    вышедший пост — правка в канале, отказ канала и пропуск без сообщения.
 
     Запуск: python -m src.review --selftest
     """
     import contextlib
     import io
     import tempfile
+    from unittest import mock
+
+    from . import publish, telegram
 
     button = '▸ <a href="https://music.apple.com/us/album/x/6809882935">Слушать в Apple Music</a>'
     # Живой пример из очереди 11.09.2026: содержание трека, который никто не слушал.
@@ -273,8 +313,8 @@ def _selftest() -> None:
             refused("запрещённый оборот", text=new.replace("<i>Поцелуи</i>.", "<i>Поцелуи</i>. Стоит отметить, что это сингл."))
             refused("только drop", {"edits": [{**drop, "action": "rewrite", "text": "Подпись без выдумки и без шутки."}]})
             refused("только для поста в очереди", {"edits": [{**drop, "file": "content/archive/c-release.json"}]})
-            # Вышедший пост в канале не правится: пропуск с причиной, архив не трогается.
-            refused("уже вышел", file="content/archive/c-release.json")
+            # Вышедший пост без записанного сообщения править не с чем: пропуск с причиной.
+            refused("не записано", file="content/archive/c-release.json")
 
             # Сухой прогон не трогает ничего.
             assert apply(good, name, dry_run=True) == 0
@@ -298,6 +338,34 @@ def _selftest() -> None:
             # Перезапуск воркфлоу: пост уже переписан, мем снят — пропуски, а не красный запуск.
             assert apply(good, name, dry_run=False) == 0
             assert post_of(queue / "a-verdict.json")["text"] == new
+
+            # Вышедший пост с записанным сообщением правится в канале: подпись без строки
+            # «▸ Слушать…» (её место заняли кнопки), кнопки те же, в архиве — новый текст.
+            message = {"chat": -100, "message_id": 5, "kind": "caption", "buttons": [[{"text": "Apple", "url": "a"}]]}
+            released = {"rubric": "verdict", "artist": "nkeeei & Yanix", "text": old, "message": message}
+            state.write_json(config.ARCHIVE / "e-verdict.json", released)
+            out = {**fix, "file": "content/archive/e-verdict.json"}
+            assert check({"edits": [out]}, name) == ([], {})
+            refused("снять нельзя", {"edits": [{**drop, "file": "content/queue/e-verdict.json"}]})
+            edited = []
+            with (mock.patch.object(publish, "release_title", lambda post: ""),
+                  mock.patch.object(telegram, "edit_caption", lambda *args, **kw: edited.append((*args, kw)))):
+                assert apply({"edits": [out]}, name, dry_run=False) == 0
+            assert edited == [(-100, 5, new.replace("\n\n" + button, ""), {"buttons": message["buttons"]})], edited
+            assert post_of(config.ARCHIVE / "e-verdict.json") == {**released, "text": new}
+
+            # Канал не принял — запуск красный, архив прежний. Тот же текст уже в канале
+            # (прошлый запуск поправил, коммит не дошёл) — это успех.
+            for error, code, text in (("Forbidden: not enough rights", 1, old), ("message is not modified", 0, new)):
+                state.write_json(config.ARCHIVE / "e-verdict.json", released)
+
+                def refuse(*_, error=error, **__):
+                    raise telegram.TelegramError(f"editMessageCaption: Bad Request: {error}")
+
+                with (mock.patch.object(publish, "release_title", lambda post: ""),
+                      mock.patch.object(telegram, "edit_caption", refuse)):
+                    assert apply({"edits": [out]}, name, dry_run=False) == code, error
+                assert post_of(config.ARCHIVE / "e-verdict.json")["text"] == text, error
         finally:
             config.ROOT, config.ARCHIVE = saved
 
@@ -305,15 +373,16 @@ def _selftest() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Автопилот точности: правки выдумок в постах")
     parser.add_argument("--check", metavar="ФАЙЛ", help="проверить файл правок по постам, без сети")
-    parser.add_argument("--apply", metavar="ФАЙЛ", help="применить правки: переписать или снять посты очереди")
+    parser.add_argument("--apply", metavar="ФАЙЛ",
+                        help="применить правки: переписать или снять посты очереди, поправить вышедшие в канале")
     parser.add_argument("--dry-run", action="store_true", help="с --apply: показать, что изменится, ничего не меняя")
     parser.add_argument("--selftest", action="store_true",
-                        help="правка, снятие, отказ на битом тексте и вышедший пост — без сети")
+                        help="правка, снятие, отказ на битом тексте и правка вышедшего поста — без сети")
     args = parser.parse_args()
 
     if args.selftest:
         _selftest()
-        print("Правка, снятие, отказ на битом тексте, вышедший пост: все проверки прошли.")
+        print("Правка, снятие, отказ на битом тексте, правка вышедшего поста в канале: все проверки прошли.")
         return 0
     if not (args.check or args.apply):
         parser.print_help()
@@ -332,6 +401,7 @@ def main() -> int:
         return 1
 
     if args.apply:
+        config.load_dotenv()  # токен бота для правки в канале; в Actions он в окружении
         return apply(review, path.stem, args.dry_run)
 
     errors, skipped = check(review, path.stem)
