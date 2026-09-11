@@ -94,6 +94,7 @@ def send_message(
     preview: bool = False,
     buttons: list[list[dict]] | None = None,
     reply_to: int | None = None,
+    quiet: bool = False,
 ) -> dict:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
@@ -103,6 +104,8 @@ def send_message(
     }
     if buttons:
         payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    if quiet:
+        payload["disable_notification"] = True
     if reply_to is not None:
         # Ответ на пост, пересланный в чат обсуждений, — это и есть комментарий
         # под постом. Без reply_to сообщение повиснет отдельной репликой в чате.
@@ -178,7 +181,8 @@ def edit_markup(chat_id: str, message_id: int, buttons: list[list[dict]] | None)
 
 
 def send_photo_file(
-    chat_id: str, path: Path, caption: str, *, buttons: list[list[dict]] | None = None
+    chat_id: str, path: Path, caption: str, *, buttons: list[list[dict]] | None = None,
+    quiet: bool = False,
 ) -> dict:
     """Отправляет картинку с диска. Нужна сервису: карточку разбора мы рисуем
     сами, публичной ссылки на неё нет — файл уходит прямо в загрузку."""
@@ -189,6 +193,8 @@ def send_photo_file(
     }
     if buttons:
         payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    if quiet:
+        payload["disable_notification"] = True
     with path.open("rb") as handle:
         return _call("sendPhoto", payload, files={"photo": (path.name, handle, "image/jpeg")})
 
@@ -242,7 +248,8 @@ def send_chat_action(chat_id: str, action: str = "typing") -> None:
 
 
 def send_photo(
-    chat_id: str, photo_url: str, caption: str, *, buttons: list[list[dict]] | None = None
+    chat_id: str, photo_url: str, caption: str, *, buttons: list[list[dict]] | None = None,
+    quiet: bool = False,
 ) -> dict:
     payload = {
         "chat_id": chat_id,
@@ -252,6 +259,8 @@ def send_photo(
     }
     if buttons:
         payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    if quiet:
+        payload["disable_notification"] = True
     return _call("sendPhoto", payload)
 
 

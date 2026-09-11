@@ -16,7 +16,7 @@ import argparse
 import json
 import logging
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -26,43 +26,72 @@ from .sources import deezer, itunes
 log = logging.getLogger("publish")
 
 
-def next_post(dry_run: bool = False) -> Path | None:
-    """Следующий пост: свежий релиз, иначе самый ранний файл очереди.
+def next_post(releases: bool = False, dry_run: bool = False) -> Path | None:
+    """Следующий обычный пост — самый ранний файл очереди; с releases —
+    пост о свежем релизе, готовый к своему выходу.
 
-    Порядок задаёт имя файла, а релиз пишется в конец очереди — при двадцати
-    постах и четырёх слотах «вышел альбом» выходил дней через пять. Решение
-    владельца от 11.09.2026: релиз не старше config.RELEASE_FRESH_HOURS идёт
-    вперёд, в тех же слотах и без отдельных сообщений, из нескольких — самый
-    весомый по score сборщика. Полного трека не ждём: не прислан к слоту —
-    пост уходит с отрывком, свежесть важнее.
+    Решения владельца от 11.09.2026. Пост о релизе (config.RELEASE_RUBRICS)
+    в четыре обычных слота не идёт: у него свой выход, раз в час по одному,
+    самый весомый по score сборщика. Выходит он не раньше чем через
+    config.RELEASE_TRACK_WAIT_HOURS после написания — окно на полный трек
+    от владельца; трек пришёл — сразу. Дольше не ждёт, если так опоздал бы
+    к сроку: тогда уходит с отрывком.
 
-    Релиз старше config.RELEASE_STALE_DAYS из очереди убирается: «вышел»
-    про релиз недельной давности врёт. Даты выхода нет (посты до 11.09.2026) —
-    считаем от created_at. Будущая дата вперёд не пускает: iTunes ставит выход
-    на 07:00 UTC, поэтому сравниваются дни, а не часы. Сухой прогон
-    ничего не удаляет, только пишет в лог.
+    Старше config.RELEASE_MAX_AGE_HOURS от выхода пост убирается из очереди
+    при любом запуске, сухой прогон только пишет в лог. Даты выхода нет
+    (посты до 11.09.2026) — считаем от created_at. Будущая дата не пускает:
+    iTunes ставит выход на 07:00 UTC, поэтому сравниваются дни, а не часы.
     """
     now = state.now()
-    queue, fresh = [], []
+    max_age = timedelta(hours=config.RELEASE_MAX_AGE_HOURS)
+    wait = timedelta(hours=config.RELEASE_TRACK_WAIT_HOURS)
+    regular, ready = [], []
     for path in sorted(config.QUEUE.glob("*.json")):
         post = state.read_json(path, {})
+        if post.get("rubric") not in config.RELEASE_RUBRICS:
+            regular.append(path)
+            continue
         released = state._parse(post.get("released_at") or post.get("created_at") or "")
-        if post.get("rubric") == "release" and released is not None:
-            if now - released > timedelta(days=config.RELEASE_STALE_DAYS):
-                log.warning("Релиз протух, %s: %s", "убрал бы" if dry_run else "убран из очереди", path.name)
-                if not dry_run:
-                    path.unlink()
-                continue
-            if released.date() <= now.date() and now - released <= timedelta(hours=config.RELEASE_FRESH_HOURS):
-                fresh.append((-(post.get("score") or 0), path))
-        queue.append(path)
-    if fresh:
-        return min(fresh)[1]  # весомее — раньше, при равном весе — раньше написанный
-    return queue[0] if queue else None
+        if released is None or released.date() > now.date():
+            continue
+        if now - released > max_age:
+            log.warning("Релиз протух, %s: %s", "убрал бы" if dry_run else "убран из очереди", path.name)
+            if not dry_run:
+                path.unlink()
+            continue
+        written = state._parse(post.get("created_at") or "") or now
+        if post.get("full_track_file_id") or now - written >= wait or now - released >= max_age - wait:
+            ready.append((-(post.get("score") or 0), path))
+    if releases:
+        return min(ready)[1] if ready else None  # весомее — раньше, при равном весе — раньше написанный
+    return regular[0] if regular else None
 
 
-def due() -> bool:
-    """Пора ли публиковать — исходя из времени прошлой публикации."""
+def releases_today() -> int:
+    """Сколько постов о релизах вышло за сегодня. Сутки московские: аудитория русская."""
+    from .compose import MSK
+
+    today = state.now().astimezone(MSK).date()
+    count = 0
+    for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", []):
+        published = state._parse(item.get("published_at", ""))
+        if item.get("rubric") in config.RELEASE_RUBRICS and published and published.astimezone(MSK).date() == today:
+            count += 1
+    return count
+
+
+def due(post: dict) -> bool:
+    """Пора ли публиковать обычный пост — исходя из времени прошлой публикации.
+
+    Считаются все публикации, выходы релизов тоже: обычный пост вечнозелёный
+    и уступает слот свежему релизу. А сутки, где постов о релизах больше
+    config.RELEASE_LOUD_PER_DAY, отданы им целиком — одного интервала мало:
+    в пятницу девять выходов кончаются к полудню, и вечерние слоты добавили бы
+    ленте ещё два поста сверх девяти. Решения владельца от 11.09.2026.
+    Годовщину это не касается: завтра она уже не годовщина.
+    """
+    if post.get("rubric") != "legend" and releases_today() > config.RELEASE_LOUD_PER_DAY:
+        return False
     posted = state.read_json(config.POSTED_FILE, {"items": []})
     items = posted.get("items", [])
     if not items:
@@ -183,6 +212,9 @@ def send(post: dict, chat_id: str) -> None:
 
     cover = post.get("cover", "")
     text, buttons = listen(text, post.get("artist", ""), release_title(post))
+    # С четвёртого поста о релизе за сутки — без звука: в пятницу их до девяти,
+    # а девять уведомлений подряд отписывают быстрее, чем радуют.
+    quiet = post.get("rubric") in config.RELEASE_RUBRICS and releases_today() >= config.RELEASE_LOUD_PER_DAY
 
     # Обложка крупно, музыка следом. Фото и аудио в одно сообщение Telegram
     # не кладёт, а у плеера обложка — иконка на палец. Решение владельца
@@ -194,9 +226,9 @@ def send(post: dict, chat_id: str) -> None:
             # (нет сети, битый файл) — обложка уходит как была.
             framed = card.cover(post)
             if framed:
-                telegram.send_photo_file(chat_id, framed, text, buttons=buttons)
+                telegram.send_photo_file(chat_id, framed, text, buttons=buttons, quiet=quiet)
             else:
-                telegram.send_photo(chat_id, cover, text, buttons=buttons)
+                telegram.send_photo(chat_id, cover, text, buttons=buttons, quiet=quiet)
         except telegram.TelegramError as exc:
             # Обложка могла протухнуть — тогда текст уезжает вместе с музыкой.
             log.warning("Фото не ушло (%s), пробую с музыкой", exc)
@@ -204,8 +236,8 @@ def send(post: dict, chat_id: str) -> None:
             send_music(post, chat_id, "", quiet=True)
             return
 
-    if not send_music(post, chat_id, text, buttons):
-        telegram.send_message(chat_id, text, buttons=buttons)
+    if not send_music(post, chat_id, text, buttons, quiet=quiet):
+        telegram.send_message(chat_id, text, buttons=buttons, quiet=quiet)
 
 
 def send_music(
@@ -320,26 +352,99 @@ def _poll_payload(text: str) -> dict | None:
 def _selftest() -> None:
     """Кнопки стримингов: строка «Слушать» уходит, точная ссылка остаётся точной.
     Пост с обложкой и музыкой — два сообщения: фото с текстом, следом тихий плеер.
+    Посты о релизах: свой выход, сутки на всё, окно на трек, звук у первых трёх
+    за московские сутки, обычный пост уступает им слот.
 
     Запуск: python -m src.publish --selftest
     """
+    import tempfile
+
     sent: list[tuple] = []
-    real = card.cover, telegram.send_photo, telegram.send_audio
+    real = card.cover, telegram.send_photo, telegram.send_audio, state.now, config.QUEUE, config.POSTED_FILE
     card.cover = lambda post: None
-    telegram.send_photo = lambda chat, url, caption, buttons=None: sent.append(("фото", caption))
+    telegram.send_photo = lambda chat, url, caption, buttons=None, quiet=False: sent.append(
+        ("фото", caption, quiet)
+    )
     telegram.send_audio = lambda chat, audio, caption, buttons=None, quiet=False, **_: sent.append(
         ("плеер", caption, quiet)
     )
+    # Часы стоят на 15:00 UTC, то есть 18:00 по Москве: счёт за сутки не зависит
+    # от времени прогона. Очередь и журнал публикаций — во временной папке.
+    now = datetime(2026, 9, 11, 15, 0, tzinfo=timezone.utc)
+    state.now = lambda: now
+    tmp = tempfile.TemporaryDirectory()
+    config.QUEUE, config.POSTED_FILE = Path(tmp.name) / "queue", Path(tmp.name) / "posted.json"
+
+    def ago(**delta: float) -> str:
+        return state.iso(now - timedelta(**delta))
+
+    def posted(*items: tuple[str, str]) -> None:
+        state.write_json(config.POSTED_FILE, {"items": [{"rubric": r, "published_at": t} for r, t in items]})
+
     try:
         post = {"text": "Текст.", "cover": "https://x/c.jpg", "full_track_file_id": "ID"}
         send(post, "0")
-        assert sent == [("фото", "Текст."), ("плеер", "", True)], sent
+        assert sent == [("фото", "Текст.", False), ("плеер", "", True)], sent
         sent.clear()
         # Без обложки текст едет с плеером, и уведомление у него обычное.
         send({**post, "cover": ""}, "0")
         assert sent == [("плеер", "Текст.", False)], sent
+
+        # Четвёртый пост о релизе за московские сутки — молча, и фото, и плеер.
+        # Вчерашний по Москве (22:00 МСК 10.09) в счёт не идёт.
+        release = {**post, "rubric": "release"}
+        posted(("release", ago(hours=20)), ("release", ago(hours=3)), ("verdict", ago(hours=2)))
+        sent.clear()
+        send(release, "0")
+        assert sent == [("фото", "Текст.", False), ("плеер", "", True)], sent
+        posted(("release", ago(hours=3)), ("verdict", ago(hours=2)), ("release", ago(hours=1)))
+        sent.clear()
+        send(release, "0")
+        assert sent == [("фото", "Текст.", True), ("плеер", "", True)], sent
+
+        # Обычный пост уступает слот свежему релизу; сутки с четырьмя релизами
+        # отданы им целиком, но годовщина ждать не может.
+        posted(("meme", ago(hours=5)), ("release", ago(hours=1)))
+        assert not due({"rubric": "meme"})
+        posted(*[("release", ago(hours=h)) for h in (7, 6, 5)])
+        assert due({"rubric": "meme"})
+        posted(*[("release", ago(hours=h)) for h in (8, 7, 6, 5)])
+        assert not due({"rubric": "meme"}) and due({"rubric": "legend"})
+
+        for name, item in {
+            "1-meme.json": {"rubric": "meme", "created_at": ago(days=6)},
+            "2-release.json": {"rubric": "release", "released_at": ago(hours=5), "created_at": ago(hours=3),
+                               "score": 80},
+            # Написан полчаса назад — ждёт полный трек от владельца.
+            "3-release.json": {"rubric": "release", "released_at": ago(hours=5), "created_at": ago(minutes=30),
+                               "score": 95},
+            # Вердикт старше суток от выхода — убирается.
+            "4-verdict.json": {"rubric": "verdict", "released_at": ago(hours=30), "created_at": ago(hours=3),
+                               "score": 100},
+            # Пост до 11.09: даты выхода нет, трек есть — выходит сразу.
+            "5-verdict.json": {"rubric": "verdict", "created_at": ago(hours=1), "full_track_file_id": "ID"},
+            # До срока меньше окна на трек — ждать нельзя.
+            "6-release.json": {"rubric": "release", "released_at": ago(hours=23), "created_at": ago(minutes=10),
+                               "score": 70},
+            # Выйдет послезавтра — не выходит и не убирается.
+            "7-release.json": {"rubric": "release", "released_at": ago(days=-2), "created_at": ago(hours=3),
+                               "score": 100},
+        }.items():
+            state.write_json(config.QUEUE / name, item)
+        assert next_post(dry_run=True).name == "1-meme.json"  # обычный слот постов о релизах не берёт
+        assert (config.QUEUE / "4-verdict.json").exists(), "сухой прогон удалил пост"
+        order = []
+        while path := next_post(releases=True):
+            order.append(path.name)
+            path.unlink()
+        assert order == ["2-release.json", "6-release.json", "5-verdict.json"], order
+        assert sorted(p.name for p in config.QUEUE.glob("*.json")) == [
+            "1-meme.json", "3-release.json", "7-release.json"
+        ]
+        print("выходы релизов: сутки, окно на трек, звук у трёх, обычный слот уступает")
     finally:
-        card.cover, telegram.send_photo, telegram.send_audio = real
+        card.cover, telegram.send_photo, telegram.send_audio, state.now, config.QUEUE, config.POSTED_FILE = real
+        tmp.cleanup()
 
     apple = "https://music.apple.com/us/album/fuel-the-fire-single/6802784931?uo=4"
     post = f'<b>ЗАГОЛОВОК</b>\n\nТекст.\n\n▸ <a href="{apple}">Слушать в Apple Music</a>'
@@ -362,42 +467,6 @@ def _selftest() -> None:
         assert listen(news, "Bones", "") == (news, []), line
     print("кнопки стримингов: все проверки прошли")
 
-    # Очередь во временной папке: свежий релиз вперёд по весу, протухший убирается,
-    # сухой прогон ничего не трогает.
-    import tempfile
-
-    now = state.now()
-
-    def ago(**delta: float) -> str:
-        return state.iso(now - timedelta(**delta))
-
-    real_queue = config.QUEUE
-    with tempfile.TemporaryDirectory() as tmp:
-        config.QUEUE = Path(tmp)
-        try:
-            for name, post in {
-                "1-meme.json": {"rubric": "meme", "created_at": ago(days=6)},
-                "2-release.json": {"rubric": "release", "released_at": ago(hours=10), "score": 80},
-                "3-release.json": {"rubric": "release", "released_at": ago(hours=5), "score": 95},
-                "4-release.json": {"rubric": "release", "released_at": ago(days=4), "score": 100},
-                "5-release.json": {"rubric": "release", "created_at": ago(hours=1)},  # пост до 11.09
-                "6-release.json": {"rubric": "release", "released_at": ago(hours=60), "score": 100},
-                "7-release.json": {"rubric": "release", "released_at": ago(days=-2), "score": 100},
-            }.items():
-                state.write_json(config.QUEUE / name, post)
-            assert next_post(dry_run=True).name == "3-release.json"
-            assert (config.QUEUE / "4-release.json").exists(), "сухой прогон удалил пост"
-            order = []
-            while path := next_post():
-                order.append(path.name)
-                path.unlink()
-            # 4 протух и убран; 6 уже не свежий, 7 ещё не вышел — оба в обычном порядке.
-            assert order == ["3-release.json", "2-release.json", "5-release.json",
-                             "1-meme.json", "6-release.json", "7-release.json"], order
-        finally:
-            config.QUEUE = real_queue
-    print("очередь: свежий релиз вперёд, протухший убран")
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Публикация постов в Telegram")
@@ -411,6 +480,10 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="проверить настройки бота")
     parser.add_argument("--selftest", action="store_true", help="проверить сборку кнопок стримингов")
     parser.add_argument("--force", action="store_true", help="игнорировать интервал между постами")
+    parser.add_argument(
+        "--releases", action="store_true",
+        help="выход свежего релиза: один готовый пост о релизе, мимо обычных слотов",
+    )
     parser.add_argument(
         "--preview-all",
         action="store_true",
@@ -449,9 +522,10 @@ def main() -> int:
         print(f"Отправлено на просмотр: {len(posts)} постов. Очередь не тронута.")
         return 0
 
-    path = next_post(dry_run=args.dry_run)
+    path = next_post(releases=args.releases, dry_run=args.dry_run)
     if path is None:
-        print("Очередь пуста. Запусти генерацию: python -m src.compose --submit")
+        print("Готовых постов о свежих релизах нет." if args.releases
+              else "Очередь пуста. Запусти генерацию: python -m src.compose --submit")
         return 0
 
     post = state.read_json(path, {})
@@ -459,6 +533,10 @@ def main() -> int:
     if args.dry_run:
         print(f"\nФайл: {path.name}")
         print(f"Рубрика: {post.get('rubric')}")
+        if post.get("rubric") in config.RELEASE_RUBRICS:
+            count = releases_today()
+            print(f"Звук: {'нет' if count >= config.RELEASE_LOUD_PER_DAY else 'да'} "
+                  f"(постов о релизах за московские сутки: {count})")
         print(f"Обложка: {post.get('cover') or 'нет'}")
         # Отрывок меняет способ отправки, а не только вид поста, — в сухом
         # прогоне это видно должно быть сразу.
@@ -482,8 +560,10 @@ def main() -> int:
             print("  " + " · ".join(f"[{b['text']}]" for b in row))
         return 0
 
-    if not args.force and not due():
-        print(f"Рано: с прошлой публикации не прошло {config.PUBLISH_INTERVAL_HOURS} ч.")
+    # Выход релиза интервала не ждёт: его срок — сутки от выхода релиза.
+    if not (args.releases or args.force or due(post)):
+        print(f"Рано: с прошлой публикации не прошло {config.PUBLISH_INTERVAL_HOURS} ч "
+              "или сутки отданы релизам.")
         return 0
 
     chat_id = (

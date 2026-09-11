@@ -32,6 +32,28 @@ jobs:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
         run: python -m src.collect
 
+      # Пост о свежем релизе пишет тот же сбор, что его нашёл: от выхода релиза
+      # до поста не больше суток (решение владельца от 11.09.2026), а следующий
+      # сбор — через шесть часов. Сбой генератора не срывает сохранение находок.
+      - name: Написать посты о свежих релизах
+        continue-on-error: true
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
+          GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m src.compose --fresh
+
+      # Полный трек просим сразу: пост ждёт его два часа, потом уходит с отрывком.
+      - name: Запросить полные треки
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python -m src.compose --ask-tracks
+
       # Слежение — вещь неспешная: человек подписался и забыл, а весть о релизе
       # уместна тогда, когда релиз нашёлся. Поэтому рассылка идёт сразу после
       # сбора, а не крутится в дежурстве.
@@ -69,8 +91,8 @@ jobs:
         run: |
           git config user.name "plenka-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add data/
-          git diff --cached --quiet || git commit -m "сбор: новые находки"
+          git add data/ content/
+          git diff --cached --quiet || git commit -m "сбор: новые находки и посты о свежих релизах"
           # Между checkout и push мог пройти другой воркфлоу — подтягиваем его коммиты.
           git pull --rebase --autostash origin ${{ github.ref_name }}
           git push

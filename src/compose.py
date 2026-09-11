@@ -20,7 +20,6 @@ import random
 import re
 from collections.abc import Iterable
 from datetime import datetime, time, timedelta, timezone
-from itertools import islice
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
@@ -254,29 +253,17 @@ def release_key(item: dict) -> tuple[str, str]:
     return collect._fold(item.get("tracked") or item.get("artist", "")), itunes._norm(item.get("title", ""))
 
 
-def used_fingerprints() -> set[str]:
-    """Сырьё, которое уже стало постом или вот-вот станет.
+def fresh_releases(inbox: Iterable[dict], used: set[str]) -> list[dict]:
+    """Релизы и клипы под посты, по убыванию веса: вышедшие не больше суток назад.
 
-    Пачка Batch API уходит в 03:40, а забирается в 07:40, и запуск urgent.yml
-    в 06:20 идёт между ними: без отпечатков из пачки compose --fresh написал бы
-    о тех же релизах второй пост.
-    """
-    jobs = state.read_json(BATCH_FILE, {}).get("jobs", [])
-    return set(state.read_json(USED_FILE, [])) | {(j.get("source") or {}).get("fingerprint") for j in jobs}
+    Решение владельца от 11.09.2026: от выхода релиза до поста — не больше
+    config.RELEASE_MAX_AGE_HOURS, и ВЕРДИКТА это касается так же, как РЕЛИЗА:
+    мнение о релизе недельной давности каналу не нужно.
 
-
-def release_pools(inbox: Iterable[dict], used: set[str]) -> tuple[list[dict], list[dict]]:
-    """Релизы и клипы под посты, по убыванию веса: свежие для РЕЛИЗА и постарше для ВЕРДИКТА.
-
-    Предзаказ не берётся никуда: магазин отдаёт релиз за недели до выхода, а пост
+    Предзаказ не берётся: магазин отдаёт релиз за недели до выхода, а пост
     скажет «вышел» — 11.09.2026 так ушёл вердикт на сингл J Dilla. Сравниваются
     дни, а не часы: iTunes ставит выход на 07:00 UTC, и сингл, который магазин
     уже отдал, иначе до утра считался бы будущим.
-
-    Свежий, не старше config.RELEASE_STALE_DAYS, идёт только в РЕЛИЗ: ВЕРДИКТ
-    вперёд очереди не встаёт, и свежесть там пропала бы. Не взяла ночная
-    квота — возьмёт ближайший compose --fresh. ВЕРДИКТУ возраст не помеха:
-    он и пишется так, чтобы работать через месяц (prompts/rubrics/verdict.md).
 
     Дубль из второго магазина отсеивается и тогда, когда пост написан по первому:
     inbox объявлен merge=union и не переписывается, поэтому сверяем при чтении.
@@ -285,25 +272,23 @@ def release_pools(inbox: Iterable[dict], used: set[str]) -> tuple[list[dict], li
     rows = list(inbox)
     taken = {release_key(i) for i in rows if i["fingerprint"] in used}
     fresh: list[dict] = []
-    older: list[dict] = []
     for item in sorted(rows, key=lambda i: i.get("score", 0), reverse=True):
         if item["kind"] not in ("release", "video") or item["fingerprint"] in used:
             continue
         released = state._parse(item.get("released_at") or "")
         if released is None or released.date() > now.date() or release_key(item) in taken:
             continue
+        if now - released > timedelta(hours=config.RELEASE_MAX_AGE_HOURS):
+            continue
         taken.add(release_key(item))
-        if now - released <= timedelta(days=config.RELEASE_STALE_DAYS):
-            fresh.append(item)
-        else:
-            older.append(item)
-    return fresh, older
+        fresh.append(item)
+    return fresh
 
 
 def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     """Составляет задания: (custom_id, ключ рубрики, данные для модели, исходник).
 
-    Рубрики, которым нужно сырьё (релизы, новости), берут его из inbox.
+    Посты о релизах сюда не входят — их пишет do_fresh при находке.
     Рубрики, которые сырья не требуют (мемы, опросы), генерируются из базы артистов.
     """
     inbox = load_inbox_unused()
@@ -325,30 +310,16 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     # отдельными запусками (ЛЕГЕНДА — календарь, ИНФОПОВОД — src/urgent.py).
     # Раньше их отсекали по имени, а пол max(1, …) всё равно возвращал единицу,
     # и в очередь просачивалась новость, которая к своей публикации протухала.
-    weights = {r.key: r.weight for r in config.RUBRICS if r.weight > 0}
+    # РЕЛИЗА и ВЕРДИКТА здесь нет тоже: пост о релизе пишет do_fresh при находке,
+    # а их веса делят между собой (release_jobs).
+    weights = {
+        r.key: r.weight for r in config.RUBRICS if r.weight > 0 and r.key not in config.RELEASE_RUBRICS
+    }
     total_weight = sum(weights.values())
     quota = {key: max(1, round(needed * w / total_weight)) for key, w in weights.items()}
 
-    # Сверка подписи с магазином стоит запроса, поэтому ленивая: ровно столько
-    # находок, сколько возьмёт рубрика.
-    by_name = {a["name"]: a for a in artists}
-    fresh, older = release_pools(state.read_jsonl(config.INBOX_FILE), used_fingerprints())
-
-    def checked(items: list[dict], limit: int) -> list[dict]:
-        return list(islice((i for i in items if store_checked(i, by_name)), limit))
-
-    for item in checked(fresh, quota.get("release", 0)):
-        add("release", _release_payload(item), item)
-
     for item in news[: quota.get("news", 0)]:
         add("news", _news_payload(item), item)
-
-    # ВЕРДИКТ — релизы постарше: свежие ждут своего РЕЛИЗА (release_pools).
-    for item in checked(older, quota.get("verdict", 0)):
-        payload = _release_payload(item)
-        payload["stance"] = random.choice(["respect", "roast"])
-        payload["subject"] = f"{item.get('artist', '')} — {item.get('title', '')}"
-        add("verdict", payload, item)
 
     # ОТКУДА НОГИ — из курируемой базы связей, сырьё из inbox не нужно.
     random.shuffle(lineage)
@@ -558,7 +529,7 @@ def do_now(count: int, jobs: list[tuple[str, str, dict, dict]] | None = None) ->
         return 0
 
     created, used, subtext_done = 0, [], []
-    # Отметки ставятся и при обрыве на середине: шаг compose --fresh в urgent.yml
+    # Отметки ставятся и при обрыве на середине: шаг compose --fresh в сборе
     # не срывает сохранение, и уже написанные посты уедут в git, а неотмеченное
     # под ними сырьё следующий запуск написал бы второй раз.
     try:
@@ -581,29 +552,48 @@ def do_now(count: int, jobs: list[tuple[str, str, dict, dict]] | None = None) ->
     return 0
 
 
+def release_jobs(items: list[dict]) -> list[tuple[str, str, dict, dict]]:
+    """Одно задание на релиз: РЕЛИЗ («вышел») или сразу ВЕРДИКТ (мнение).
+
+    Решение владельца от 11.09.2026: два поста о том же релизе — дубль, поэтому
+    рубрика одна, жребием по весам release и verdict из config.RUBRICS.
+    Сторона вердикта — тоже жребий: разнос или респект, без вежливой середины.
+    """
+    weights = [config.RUBRIC_BY_KEY[key].weight for key in config.RELEASE_RUBRICS]
+    jobs = []
+    for item in items:
+        rubric = random.choices(config.RELEASE_RUBRICS, weights)[0]
+        payload = _release_payload(item)
+        if rubric == "verdict":
+            payload["stance"] = random.choice(["respect", "roast"])
+            payload["subject"] = f"{item.get('artist', '')} — {item.get('title', '')}"
+        jobs.append((rubric, rubric, payload, item))
+    return jobs
+
+
 def do_fresh(dry_run: bool) -> int:
     """Посты о свежих релизах — сразу при находке, мимо ночной пачки.
 
-    Решение владельца от 11.09.2026: релиз, как и новость, ценен в день выхода,
-    а ночная пачка клала его в конец очереди, и «вышел альбом» выходил дней
-    через пять. Поэтому запуски urgent.yml после сбора пишут пост о каждом
-    свежем релизе, без квоты рубрики, а публикатор ставит его вперёд очереди
-    (publish.next_post). Лишнее в пятницу там же и протухнет — гадать заранее,
-    какой релиз не успеет, не по чему.
+    Решения владельца от 11.09.2026: от выхода релиза до поста — не больше суток,
+    а ночная пачка клала пост в конец очереди, и «вышел альбом» выходил дней
+    через пять. Поэтому каждый сбор (collect.yml и urgent.yml) пишет пост о каждом
+    свежем релизе, без квоты рубрики, а выходит он своим выходом
+    (publish --releases), не занимая четырёх обычных слотов.
 
     Без батча намеренно: его ответ ждать часами, а это и есть потерянная свежесть.
-    Путь тот же, что у --now, поэтому находки помечаются использованными,
-    и ночной compose второй раз о них не пишет. Полный трек просит отдельный
-    шаг, compose --ask-tracks: запрос трека живёт в одном месте.
+    Путь тот же, что у --now, поэтому находки помечаются использованными
+    и второй раз не пишутся. Полный трек просит следующий шаг, compose --ask-tracks:
+    запрос трека живёт в одном месте.
     """
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
     by_name = {a["name"]: a for a in artists}
-    fresh, _ = release_pools(state.read_jsonl(config.INBOX_FILE), used_fingerprints())
-    jobs = [("fresh", "release", _release_payload(i), i) for i in fresh if store_checked(i, by_name)]
+    fresh = fresh_releases(state.read_jsonl(config.INBOX_FILE), set(state.read_json(USED_FILE, [])))
+    jobs = release_jobs([i for i in fresh if store_checked(i, by_name)])
     if dry_run:
-        for _, _, payload, _ in jobs:
-            print(f"  РЕЛИЗ  {payload['artist']} — {payload['title']}  (выход {payload['released_at'][:10]})")
-        print(f"\nСвежих релизов к посту: {len(jobs)}. Модель не вызывалась.")
+        for _, rubric, payload, _ in jobs:
+            print(f"  {config.RUBRIC_BY_KEY[rubric].title:<8} {payload['artist']} — {payload['title']}"
+                  f"  (выход {payload['released_at'][:10]})")
+        print(f"\nСвежих релизов к посту: {len(jobs)}. Рубрика — жребий по весам. Модель не вызывалась.")
         return 0
     if not jobs:
         print("Свежих релизов нет.")
@@ -717,7 +707,9 @@ def do_ask_tracks() -> int:
     Отдельный шаг после генерации, а не вызов из save_post: один проход покрывает
     и свежие посты, и лежавшие в очереди до появления запросов, а сорвавшийся
     на Telegram запуск просто повторится завтра — пост к тому моменту уже в очереди.
-    Очередь расписана на неделю вперёд, так что на ответ есть дни, а не минуты.
+    Трек просят только к постам о релизах, а те ждут ответа
+    config.RELEASE_TRACK_WAIT_HOURS и уходят с отрывком (publish.next_post),
+    поэтому шаг идёт сразу за compose --fresh, в том же запуске.
     """
     admin = config.secret("TELEGRAM_ADMIN_ID")
     asked = 0
@@ -866,23 +858,30 @@ def _selftest() -> int:
 
     inbox = [
         found("preorder", "The Black Parade (Deluxe Edition)", now + timedelta(days=42)),
-        found("old", "In My Lifetime", now - timedelta(days=4)),
-        found("single", "Arsenal - Single", now - timedelta(days=1)),
-        found("twin", "Arsenal", now - timedelta(days=1, hours=7), source="deezer"),
+        # Старше суток — ни РЕЛИЗА, ни ВЕРДИКТА: старые вердикты не нужны.
+        found("old", "In My Lifetime", now - timedelta(hours=25)),
+        found("single", "Arsenal - Single", now - timedelta(hours=20)),
+        found("twin", "Arsenal", now - timedelta(hours=23), source="deezer"),
         # iTunes ставит выход на 07:00 UTC: сегодняшний сингл уже в магазине, он не будущий.
         found("today", "OUTLAST - Single", tonight, score=100),
     ]
-    fresh, older = release_pools(inbox, set())
+    fresh = fresh_releases(inbox, set())
     assert [i["fingerprint"] for i in fresh] == ["today", "single"], fresh
-    assert [i["fingerprint"] for i in older] == ["old"], older  # предзаказа и дубля нет нигде
-    # Пост по «Arsenal - Single» уже написан — Deezer-двойник не вернётся следующей ночью.
-    assert [i["fingerprint"] for i in release_pools(inbox, {"single"})[0]] == ["today"]
+    # Пост по «Arsenal - Single» уже написан — Deezer-двойник назад не вернётся.
+    assert [i["fingerprint"] for i in fresh_releases(inbox, {"single"})] == ["today"]
+
+    # Один пост на релиз: РЕЛИЗ или ВЕРДИКТ по весам, у вердикта — сторона.
+    jobs = release_jobs(fresh * 20)
+    assert len(jobs) == 40 and {rubric for _, rubric, _, _ in jobs} == set(config.RELEASE_RUBRICS), jobs
+    assert all(p["stance"] in ("respect", "roast") for _, rubric, p, _ in jobs if rubric == "verdict")
+    # Ночной plan о релизах не пишет вовсе — ни свежих, ни старых.
+    assert not [rubric for _, rubric, _, _ in plan(config.QUEUE_TARGET) if rubric in config.RELEASE_RUBRICS]
 
     with tempfile.TemporaryDirectory() as tmp:
         saved = state.read_json(save_post("release", "Текст.", inbox[2], folder=Path(tmp)), {})
     assert (saved["released_at"], saved["score"]) == (inbox[2]["released_at"], 95), saved
 
-    print("релиз: предзаказ, протухший и дубль магазина в РЕЛИЗ не идут")
+    print("релиз: предзаказ, старше суток и дубль магазина не пишутся, на релиз один пост")
     return 0
 
 
@@ -894,8 +893,6 @@ def do_dry_run(needed: int) -> int:
         return 0
     for _, rubric_key, payload, _ in jobs:
         title = payload.get("subject") or payload.get("title") or payload.get("modern") or "—"
-        if rubric_key == "release":  # подпись сверена с магазином — её и показываем
-            title = f"{payload.get('artist', '')} — {title}"
         print(f"  {config.RUBRIC_BY_KEY[rubric_key].title:<12} {str(title)[:60]}")
     print(f"\nВсего заданий: {len(jobs)}")
     return 0
