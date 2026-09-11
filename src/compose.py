@@ -255,7 +255,9 @@ def store_checked(item: dict, artists: dict[str, dict]) -> bool:
         # Таких находок конечное число — новые сборщик не пропускает; пометить, если начнёт тормозить.
         log.warning("Отсеян релиз «%s — %s»: в магазине %s", name, item.get("title", ""), credit or "не найден")
         return False
-    item["artist"] = credit
+    # tracked — как у сборщика: по нему release_key узнаёт артиста и после того,
+    # как подпись сменилась на магазинную («Smoky Mo» вместо «Смоки Мо»).
+    item["artist"], item["tracked"] = credit, name
     return True
 
 
@@ -372,12 +374,55 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     return jobs[:needed]
 
 
-def _release_payload(item: dict) -> dict:
+def previous_releases(item: dict, inbox: Iterable[dict], artists: dict[str, dict], limit: int = 5) -> list[dict]:
+    """Прошлые релизы того же артиста из inbox: последние limit, от старых к новым.
+
+    Без них модель сочиняла прошлое сама: 11.09.2026 GigaChat написал у Смоки Мо
+    «уже третий сингл подряд», а за лето их было четыре. Но это не дискография,
+    а то, что канал нашёл с августа 2026, — «первый за год» и «вернулся» из этого
+    не выводятся, и промпты рубрик говорят об этом прямо.
+
+    Старые строки inbox подписаны тем, по кому нашлись, и среди них чужие синглы
+    с его фитом — у City Morgue таких девять. Поэтому каждая сверяется с магазином
+    так же, как свежий релиз: история из чужих релизов — та же выдумка. Дубль
+    второго магазина схлопывается по release_key, строки inbox не переписываются.
+    """
+    released = state._parse(item.get("released_at") or "")
+    if released is None:
+        return []
+    artist = release_key(item)[0]
+    candidates = []
+    for row in inbox:
+        when = state._parse(row.get("released_at") or "")
+        if row.get("kind") == "release" and when and when.date() < released.date() and release_key(row)[0] == artist:
+            candidates.append((when, row))
+
+    taken = {release_key(item)}
+    earlier: list[dict] = []
+    # ponytail: сверка старой строки — запрос к магазину на каждый пост; кешировать, если сбор начнёт тормозить.
+    for when, row in sorted(candidates, key=lambda c: c[0], reverse=True):
+        if len(earlier) == limit:
+            break
+        if release_key(row) in taken or not store_checked(dict(row), artists):
+            continue
+        taken.add(release_key(row))
+        earlier.append({
+            "title": row.get("title", ""),
+            "released_at": when.date().isoformat(),
+            "track_count": row.get("track_count") or len(row.get("tracks") or []) or None,
+        })
+    return earlier[::-1]
+
+
+def _release_payload(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dict] | None = None) -> dict:
     """Данные о релизе для модели.
 
     Кроме служебных полей сюда идёт треклист: единственное, что позволяет
     писать про музыку, ничего не выдумывая. Хронометраж, длина треков и фиты —
     это то, что слышно и на слух, но проверяется по данным.
+
+    inbox и artists дают историю артиста (previous_releases). Нет истории —
+    нет и поля: пустой список модель читает как «раньше ничего не выпускал».
     """
     payload = {
         "artist": item.get("artist", ""),
@@ -401,6 +446,9 @@ def _release_payload(item: dict) -> dict:
         payload["total_length"] = _mmss(item["duration_sec"])
     if item.get("genre"):
         payload["genre_by_store"] = item["genre"]
+    earlier = previous_releases(item, inbox, artists or {})
+    if earlier:
+        payload["previous_releases"] = earlier
 
     return payload
 
@@ -565,18 +613,22 @@ def do_now(count: int, jobs: list[tuple[str, str, dict, dict]] | None = None) ->
     return 0
 
 
-def release_jobs(items: list[dict]) -> list[tuple[str, str, dict, dict]]:
+def release_jobs(
+    items: list[dict], inbox: Iterable[dict] = (), artists: dict[str, dict] | None = None
+) -> list[tuple[str, str, dict, dict]]:
     """Одно задание на релиз: РЕЛИЗ («вышел») или сразу ВЕРДИКТ (мнение).
 
     Решение владельца от 11.09.2026: два поста о том же релизе — дубль, поэтому
     рубрика одна, жребием по весам release и verdict из config.RUBRICS.
     Сторона вердикта — тоже жребий: разнос или респект, без вежливой середины.
+    inbox и artists — для истории артиста в данных (previous_releases).
     """
     weights = [config.RUBRIC_BY_KEY[key].weight for key in config.RELEASE_RUBRICS]
+    rows = list(inbox)
     jobs = []
     for item in items:
         rubric = random.choices(config.RELEASE_RUBRICS, weights)[0]
-        payload = _release_payload(item)
+        payload = _release_payload(item, rows, artists)
         if rubric == "verdict":
             payload["stance"] = random.choice(["respect", "roast"])
             payload["subject"] = f"{item.get('artist', '')} — {item.get('title', '')}"
@@ -600,12 +652,14 @@ def do_fresh(dry_run: bool) -> int:
     """
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
     by_name = {a["name"]: a for a in artists}
-    fresh = fresh_releases(state.read_jsonl(config.INBOX_FILE), set(state.read_json(USED_FILE, [])))
-    jobs = release_jobs([i for i in fresh if store_checked(i, by_name)])
+    rows = list(state.read_jsonl(config.INBOX_FILE))
+    fresh = fresh_releases(rows, set(state.read_json(USED_FILE, [])))
+    jobs = release_jobs([i for i in fresh if store_checked(i, by_name)], rows, by_name)
     if dry_run:
         for _, rubric, payload, _ in jobs:
             print(f"  {config.RUBRIC_BY_KEY[rubric].title:<8} {payload['artist']} — {payload['title']}"
-                  f"  (выход {payload['released_at'][:10]})")
+                  f"  (выход {payload['released_at'][:10]},"
+                  f" прошлых релизов: {len(payload.get('previous_releases', []))})")
         print(f"\nСвежих релизов к посту: {len(jobs)}. Рубрика — жребий по весам. Модель не вызывалась.")
         return 0
     if not jobs:
@@ -865,12 +919,16 @@ def _selftest() -> int:
         assert not store_checked(guest, artists)
         assert not store_checked(solo, artists)
         assert store_checked(joint, artists)
+        # Чужой сингл с его фитом в историю артиста не попадает: сверка та же, что у свежего.
+        guest_before = {**guest, "released_at": state.iso(state.now() - timedelta(days=3))}
+        assert previous_releases(found[0], [guest_before], artists) == []
     finally:
         itunes.recent_releases, itunes.album_credit = real
     assert [(r["artist"], r["tracked"]) for r in found] == [
         ("City Morgue, ZillaKami & SosMula", "City Morgue")
     ], found
     assert joint["artist"] == "Michael Bibi, KETTAMA & Wu-Tang Clan", joint
+    assert joint["tracked"] == "Wu-Tang Clan", joint  # иначе release_key не узнал бы артиста
     assert store_checked({"kind": "release", "artist": "X", "tracked": "X"}, {})  # уже сверена сборщиком
 
     print("релиз: гости и сольники участников под чужим именем не проходят")
@@ -907,6 +965,37 @@ def _selftest() -> int:
     assert all(p["stance"] in ("respect", "roast") for _, rubric, p, _ in jobs if rubric == "verdict")
     # Ночной plan о релизах не пишет вовсе — ни свежих, ни старых.
     assert not [rubric for _, rubric, _, _ in plan(config.QUEUE_TARGET) if rubric in config.RELEASE_RUBRICS]
+
+    # История артиста — из того же inbox: последние 5 раньше релиза, от старых к новым.
+    def before(fingerprint: str, title: str, days: int, artist: str = "Slipknot",
+               source: str = "itunes", **extra: object) -> dict:
+        return {"kind": "release", "fingerprint": fingerprint, "source": source, "artist": artist,
+                "tracked": artist, "title": title, "track_count": 1,
+                "released_at": state.iso(now - timedelta(days=days)), **extra}
+
+    current = before("current", "Arsenal II - Single", 0)
+    history = [
+        before("psycho", "Psychosocial - Single", 70),
+        before("duality", "Duality - Single", 60),
+        before("snuff", "Snuff - Single", 50),
+        before("unsainted", "Unsainted - Single", 40),
+        before("wanyk", "We Are Not Your Kind", 30, source="deezer", track_count=None, tracks=[{}] * 14),
+        before("yen", "Yen - Single", 20),
+        before("yen-deezer", "Yen", 20, source="deezer"),  # тот же сингл во втором магазине
+        before("bother", "Bother - Single", 10, artist="Stone Sour"),
+        before("preorder", "Sic - Single", -30),
+        before("twin", "Arsenal II", 0, source="deezer"),
+        current,
+    ]
+    earlier = previous_releases(current, history, {})
+    assert [r["title"] for r in earlier] == [
+        "Duality - Single", "Snuff - Single", "Unsainted - Single", "We Are Not Your Kind", "Yen - Single",
+    ], earlier
+    assert earlier[3] == {"title": "We Are Not Your Kind", "track_count": 14,
+                          "released_at": (now - timedelta(days=30)).date().isoformat()}, earlier
+    assert _release_payload(current, history, {})["previous_releases"] == earlier
+    assert "previous_releases" not in _release_payload(before("debut", "Debut", 0, artist="Nobody"), history, {})
+    print("история: последние 5 раньше релиза, дубль магазина один раз, чужой артист и предзаказ мимо")
 
     with tempfile.TemporaryDirectory() as tmp:
         saved = state.read_json(save_post("release", "Текст.", inbox[2], folder=Path(tmp)), {})
