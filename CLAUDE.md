@@ -38,6 +38,7 @@ python -m src.publish --dry-run        что ушло бы в канал
 python -m src.service --match "Bones"  что нашлось в базе, без обращения к модели
 python -m src.vk --check               токен ВКонтакте и доступ к сообществу
 python -m src.host --check             синтез голоса отвечает
+python -m src.reels --check ФАЙЛ       сценарий ролика: поля, лимиты, кадры — без сети
 ```
 
 Ручной прогон конвейера:
@@ -87,6 +88,7 @@ python -m src.clips --selftest         кадров в раскадровке с
 **[src/clips.py](src/clips.py)** (два формата: разбор связи из `lineage.json`
 и `--facts` — факты про артиста из `facts.json`), **[src/host.py](src/host.py)**
 (закадровый голос клипов),
+**[src/reels.py](src/reels.py)** (ролики с живым голосом владельца: сценарий из ветки `claude/reels-*` приходит в личку по фразам, голосовые в ответ собираются в ролик с превью и текстом для заливки; бриф — `prompts/reels.md`),
 **[src/health.py](src/health.py)** (сторож, пишет в личку только когда
 что-то сломалось).
 

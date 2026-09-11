@@ -600,7 +600,7 @@ def storyboard_news(item: dict) -> list[Shot]:
 # --- сборка --------------------------------------------------------------
 
 
-def segment(shot: Shot, out: Path, work: Path) -> str:
+def segment(shot: Shot, out: Path, work: Path, *, fade_in: bool = True) -> str:
     """Один отрезок: изображение или видео снизу, надпись сверху.
 
     Приоритет источника: фотография названного артиста → сток по смыслу
@@ -647,6 +647,11 @@ def segment(shot: Shot, out: Path, work: Path) -> str:
         feed = ["-stream_loop", "-1", "-i", str(source)]
         motion = ""
 
+    # Выход из чёрного — мягкая склейка между кадрами. Первому кадру ролика
+    # с превью (src/reels.py) он вредит: обложка, взятая площадкой из первого
+    # кадра, вышла бы чёрной.
+    fade = "fade=t=in:st=0:d=0.12," if fade_in else ""
+
     run([
         ffmpeg(), "-y", *feed,
         "-i", str(png),
@@ -655,7 +660,7 @@ def segment(shot: Shot, out: Path, work: Path) -> str:
         (
             f"[0:v]scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={WIDTH}:{HEIGHT},setsar=1,fps={FPS},{motion}{GRADE}[bg];"
-            f"[bg][1:v]overlay=0:0,fade=t=in:st=0:d=0.12,format=yuv420p[v]"
+            f"[bg][1:v]overlay=0:0,{fade}format=yuv420p[v]"
         ),
         "-map", "[v]", "-an",
         "-c:v", "libx264", "-preset", "medium", "-crf", "23",
