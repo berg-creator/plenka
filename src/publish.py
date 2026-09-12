@@ -165,8 +165,9 @@ def edit(post: dict) -> None:
     if message["kind"] != "caption":
         telegram.edit_text(*where, buttons=message.get("buttons"))
         return
-    if len(text) > telegram.MAX_CAPTION:
-        raise telegram.TelegramError(f"подпись {len(text)} знаков — больше {telegram.MAX_CAPTION}")
+    if telegram.visible_len(text) > telegram.MAX_CAPTION:
+        raise telegram.TelegramError(
+            f"подпись {telegram.visible_len(text)} знаков — больше {telegram.MAX_CAPTION}")
     telegram.edit_caption(*where, buttons=message.get("buttons"))
 
 
