@@ -159,7 +159,10 @@ def cover(post: dict) -> Path | None:
     stories.kicker(draw, (stories.MARGIN, int(HEIGHT * 0.07)), rubric.title if rubric else "", 40,
                    stories.LIGHT)
 
-    caption = " — ".join(part for part in (post.get("artist", ""), post.get("track", "")) if part)
+    # Подписывается сам релиз; ведущий трек — только когда названия релиза нет
+    # (посты до 12.09.2026 его не сохраняли).
+    name = post.get("release") or post.get("track", "")
+    caption = " — ".join(part for part in (post.get("artist", ""), name) if part)
     if caption:
         f, lines, size = _fit(
             draw, caption, HEIGHT * 0.3, ((88, 17), (74, 21), (62, 25), (52, 30))

@@ -89,6 +89,9 @@ def save_post(
         "artist": (source or {}).get("artist", ""),
         "preview": lead.get("preview", ""),
         "track": lead.get("title", ""),
+        # Название самого релиза: на обложке в рамке подписан он, а не ведущий
+        # трек — иначе картинка сообщает, что альбом называется «Филлеры».
+        "release": release_name((source or {}).get("title", "")),
         # По ним публикатор ставит свежий релиз вперёд очереди (publish.next_post).
         "released_at": (source or {}).get("released_at") or "",
         "score": (source or {}).get("score") or 0,
@@ -144,6 +147,12 @@ def name_button(text: str) -> str:
         return f"{match.group(1)}{label}{match.group(4)}" if label else match.group(0)
 
     return _BUTTON_LINE.sub(rename, text)
+
+
+def release_name(title: str) -> str:
+    """Название релиза без магазинного хвоста: «Джеки Будек - Single» — это
+    подпись витрины, а не то, как релиз называют люди."""
+    return re.sub(r"\s*[-–—]\s*(Single|EP)$", "", title.strip(), flags=re.IGNORECASE)
 
 
 def _lead_track(source: dict) -> dict:
@@ -875,6 +884,11 @@ def _selftest() -> int:
     inline = 'в <a href="https://music.apple.com/us/album/x/1">этом альбоме</a> всё ясно'
     assert name_button(inline) == inline
 
+    # Название релиза без витринного хвоста: им подписана обложка в рамке.
+    assert release_name("Джеки Будек - Single") == "Джеки Будек"
+    assert release_name("MYSTERY OF RAW — EP") == "MYSTERY OF RAW"
+    assert release_name("Прими как есть") == "Прими как есть"
+    assert release_name("Single Ladies") == "Single Ladies"
     print("кнопка: все проверки прошли")
 
     # Релиз подписан исполнителем из магазина, а не тем, по кому нашёлся.
