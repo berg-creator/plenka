@@ -24,7 +24,7 @@ from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
 from . import card, collect, config, llm, quality, state, telegram
-from .sources import deezer, itunes
+from .sources import deezer, itunes, youtube_comments
 
 log = logging.getLogger("compose")
 
@@ -177,7 +177,8 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
     в канале.
     """
     issues: list[str] = ["не удалось сгенерировать"]
-    attempt_payload = payload
+    data = dict(payload)
+    attempt_payload = data
 
     for attempt in range(attempts):
         result = llm.generate_now(rubric_key, attempt_payload)
@@ -187,7 +188,9 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
         # Мем проверяется целиком: подпись под картинкой одна короче любого
         # поста, а брак ищется во всём, что увидит читатель.
         checked = card.meme_text(result) if rubric_key == "meme" else result["text"]
-        issues = quality.problems(checked, rubric_key, payload)
+        # Судим по тем данным, которые модель и получила: чужой голос ниже
+        # снимается с задания, и требовать от поста цитаты было бы не за что.
+        issues = quality.problems(checked, rubric_key, attempt_payload)
         if not issues:
             return result
 
@@ -200,7 +203,17 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
         # Вслепую модель повторяет тот же брак: 11.09.2026 и GigaChat, и Claude
         # трижды подряд вставили «16 треков», и пост пропал. Поэтому причина
         # отказа уходит в следующую попытку рядом с данными.
-        attempt_payload = {**payload, "прошлый_вариант_забракован_за": issues}
+        # Чужое мнение модель пересказывает своими словами и с причиной на руках
+        # (GigaChat, 12.09.2026). Это дополнение, а не смысл поста: не сумела
+        # процитировать — снимаем его с задания насовсем, дальше пост пишется
+        # как раньше. Иначе релиз терялся бы из-за приятной мелочи. Причина
+        # про цитату тоже не идёт дальше: имя издания модель брала из неё
+        # и звала The Flow в пост, когда его слов в данных уже не было.
+        hints = issues
+        if any(issue.startswith(quality.FOREIGN_ISSUE) for issue in issues):
+            data.pop("outside", None)
+            hints = [issue for issue in issues if not issue.startswith(quality.FOREIGN_ISSUE)]
+        attempt_payload = {**data, "прошлый_вариант_забракован_за": hints} if hints else data
 
     # Опись и её пересказ — длинно, но не враньё, а пост о релизе обещан в течение
     # суток. 11.09.2026 GigaChat и Haiku трижды подряд вставляли «16 треков»
@@ -424,6 +437,65 @@ def previous_releases(item: dict, inbox: Iterable[dict], artists: dict[str, dict
     return earlier[::-1]
 
 
+
+# Мнение издания берётся из новости не старше двух недель от выхода релиза:
+# дальше это уже разговор о другом, а пост о релизе живёт сутки.
+PRESS_WINDOW_DAYS = 14
+
+
+def outside_voice(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dict] | None = None) -> dict:
+    """Чужой голос о релизе: мнение издания, а если его нет — отзыв слушателя.
+
+    Канал релиз не слушал, и звук у него под запретом (prompts/rubrics/release.md),
+    поэтому отношение в посте держится на одном треклисте и выходит суховатым.
+    Чужой голос — единственное законное мнение о самой музыке: это не выдумка,
+    а проверяемая цитата, и в посте она так и стоит — со словами, кто её сказал.
+
+    Мнение издания ничего не стоит: новости The Flow и RAP.RU уже приходят
+    в сбор из их Telegram-каналов (src/sources/telegram_web.py). Отзыв слушателя
+    стоит ключа и квоты, поэтому он второй — и без ключа его просто нет.
+
+    Новость должна называть и артиста, и сам релиз: одного имени мало —
+    в чужой новости оно стоит просто в перечислении участников.
+
+    Издание пишет по-русски, магазин подписывает артиста латиницей
+    («Smoky Mo» против «Смоки Мо»), поэтому имя ищется во всех известных
+    написаниях — своём, магазинном и алиасах из data/artists.json.
+    """
+    released = state._parse(item.get("released_at") or "")
+    named = release_name(item.get("title", "")).casefold()
+    names = {item.get("tracked") or "", item.get("artist") or ""}
+    names |= set((artists or {}).get(item.get("tracked") or item.get("artist", ""), {}).get("aliases") or [])
+    patterns = [re.compile(rf"(?<!\w){re.escape(n.strip())}(?!\w)", re.IGNORECASE) for n in names if n.strip()]
+
+    found: list[tuple[datetime, dict]] = []
+    for row in inbox:
+        when = state._parse(row.get("released_at") or "")
+        if row.get("kind") != "news" or row.get("source") != "telegram" or when is None:
+            continue
+        if released and abs(when - released) > timedelta(days=PRESS_WINDOW_DAYS):
+            continue
+        haystack = f"{row.get('title', '')} {row.get('summary', '')}"
+        # Имени мало: издание упоминает артиста и в чужой новости — в сборнике
+        # памяти Бориса Рыжего, где Слава КПСС один из участников, а пост
+        # о его сингле процитировал бы её как мнение. Поэтому в записи должно
+        # стоять и название релиза: тогда это точно разговор о нём.
+        if named in haystack.casefold() and any(p.search(haystack) for p in patterns):
+            found.append((when, row))
+
+    if found:
+        # Свежайшая запись: издание пишет о релизе в день выхода, а более
+        # ранняя — про анонс, который к посту уже неактуален.
+        row = max(found, key=lambda f: f[0])[1]
+        # Ссылку на t.me не отдаём даже в данные: чужой канал в ленте не рекламируем.
+        return {"who": row.get("outlet", "издание"), "text": row.get("summary", "")[:400]}
+
+    comment = youtube_comments.top_comment(item.get("artist", ""), release_name(item.get("title", "")))
+    if comment:
+        return {"who": "слушатель под клипом на YouTube", "text": comment["text"]}
+    return {}
+
+
 def _release_payload(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dict] | None = None) -> dict:
     """Данные о релизе для модели.
 
@@ -433,6 +505,8 @@ def _release_payload(item: dict, inbox: Iterable[dict] = (), artists: dict[str, 
 
     inbox и artists дают историю артиста (previous_releases). Нет истории —
     нет и поля: пустой список модель читает как «раньше ничего не выпускал».
+    Оттуда же берётся чужой голос (outside_voice) — мнение издания или отзыв
+    слушателя: единственное законное в посте суждение о самой музыке.
     """
     payload = {
         "artist": item.get("artist", ""),
@@ -459,6 +533,9 @@ def _release_payload(item: dict, inbox: Iterable[dict] = (), artists: dict[str, 
     earlier = previous_releases(item, inbox, artists or {})
     if earlier:
         payload["previous_releases"] = earlier
+    outside = outside_voice(item, inbox, artists)
+    if outside.get("text"):
+        payload["outside"] = outside
 
     return payload
 
@@ -1018,6 +1095,31 @@ def _selftest() -> int:
     assert _release_payload(current, history, {})["previous_releases"] == earlier
     assert "previous_releases" not in _release_payload(before("debut", "Debut", 0, artist="Nobody"), history, {})
     print("история: последние 5 раньше релиза, дубль магазина один раз, чужой артист и предзаказ мимо")
+
+    # Чужой голос: мнение издания ищется в новостях Telegram по любому написанию
+    # имени. Отзыв слушателя тут заглушён — это сеть и квота YouTube.
+    youtube_comments.top_comment = lambda *_: {}
+    press = {"kind": "news", "source": "telegram", "outlet": "The Flow",
+             "title": "Смоки Мо выпустил Sorry Mama",
+             "summary": "Смоки Мо записал самый спокойный релиз за год.",
+             "released_at": state.iso(now - timedelta(days=1))}
+    mo = before("mo", "Sorry Mama - Single", 0, artist="Smoky Mo")
+    known = {"Smoky Mo": {"aliases": ["Смоки Мо"]}}
+    assert outside_voice(mo, [press], known)["who"] == "The Flow", outside_voice(mo, [press], known)
+    assert _release_payload(mo, [press], known)["outside"]["text"].startswith("Смоки Мо записал")
+    # Новость из RSS — не мнение издания, которому верит наша аудитория.
+    assert outside_voice(mo, [{**press, "source": "rss"}], known) == {}
+    # Мнение двухмесячной давности — разговор о другом релизе.
+    assert outside_voice(mo, [{**press, "released_at": state.iso(now - timedelta(days=60))}], known) == {}
+    # Чужое имя в новости релиз не подписывает.
+    assert outside_voice(before("x", "Y - Single", 0, artist="Nobody"), [press], {}) == {}
+    # Имя без названия релиза — новость о чём-то другом: 12.09.2026 так нашёлся
+    # сборник памяти Бориса Рыжего, где Слава КПСС просто один из участников.
+    tribute = {**press, "title": "Вышел трибьют Борису Рыжему",
+               "summary": "В сборнике участвуют Слава КПСС, Смоки Мо и другие."}
+    assert outside_voice(mo, [tribute], known) == {}
+    assert "outside" not in _release_payload(current, history, {})
+    print("чужой голос: мнение издания находится по алиасу, чужое и старое — мимо")
 
     with tempfile.TemporaryDirectory() as tmp:
         saved = state.read_json(save_post("release", "Текст.", inbox[2], folder=Path(tmp)), {})

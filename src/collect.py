@@ -426,7 +426,10 @@ def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
                 "url": entry.get("url", ""),
                 "cover": entry.get("cover", ""),
                 "released_at": entry.get("published_at"),
-                "source": "rss",
+                # Откуда пришла новость, видно по записи: посту о релизе нужно
+                # мнение издания (compose.outside_voice), а чужой RSS этим
+                # изданием не является. Раньше здесь стояло «rss» для всех.
+                "source": entry.get("source", "rss"),
                 "collected_at": state.iso(),
             }
         )

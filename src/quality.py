@@ -7,8 +7,9 @@
 Проверки намеренно грубые: цель — отсечь явный брак, а не оценивать стиль.
 
 Отдельно ловится выдуманное в РЕЛИЗЕ и ВЕРДИКТЕ: звучание и прошлое артиста,
-которых во входных данных нет. Это список корней с живых постов, а не вторая
-модель-проверщик: та стоит денег, а выдумку своего же рода охотно одобрит.
+которых во входных данных нет, и чужая цитата, разошедшаяся с источником.
+Это список корней с живых постов, а не вторая модель-проверщик: та стоит денег,
+а выдумку своего же рода охотно одобрит.
 
     python -m src.quality --selftest   опись, выдуманные звук и прошлое ловятся, законное проходит
 """
@@ -86,6 +87,11 @@ _LINK = re.compile(r"<a\b.*?</a>", re.IGNORECASE | re.DOTALL)
 # Брак описи — длинно, но не враньё: исчерпав попытки, compose.generate_checked
 # выпускает такой пост, а не теряет его.
 INVENTORY_ISSUES = ("опись <code>", "пересказ описи")
+
+# Брак чужой цитаты: по этому началу compose.generate_checked снимает
+# с задания поле outside и пишет пост без чужого голоса — он приятное
+# дополнение, а не смысл поста, и терять из-за него релиз незачем.
+FOREIGN_ISSUE = "чужая цитата"
 
 # Звучание, которого нет в данных: релиз модель не слушала, а эти слова
 # описывают то, что слышно только ушами. Корни собраны с живых постов
@@ -200,6 +206,19 @@ def _without_data(text: str, facts: dict) -> str:
     return text
 
 
+# Чужие слова в посте стоят в «ёлочках» или „лапках“ — GigaChat пишет и так,
+# и так. Прямые кавычки сюда не входят: ими пост называет трек («УННВ выпустил
+# "Сам придумай этому название"»), и цитатой это не является. Порог в 25 знаков
+# отделяет цитату от короткого названия.
+FOREIGN_QUOTE = re.compile(r"[«„]([^«»„“]{25,})[»“]")
+
+
+def _flat(text: str) -> str:
+    """Текст без разметки, регистра и «ё» — для сверки цитаты с источником
+    слово в слово: издание пишет «всё», модель ставит «все»."""
+    return " ".join(re.sub(r"<[^>]+>", " ", text).lower().replace("ё", "е").split())
+
+
 def _quoted(matches: list[str]) -> str:
     return ", ".join(f"«{m}»" for m in dict.fromkeys(matches))
 
@@ -281,12 +300,40 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
         if retold:
             issues.append("пересказ описи: " + ", ".join(retold))
 
+        # Чужой голос (compose.outside_voice) цитируется дословно — пересказ
+        # чужого мнения та же выдумка, только с чужой подписью. Сверяется
+        # с источником по «ёлочкам»; совпавшее вырезается до сверки на выдумки:
+        # оценка звука в словах издания законна, в своих — нет.
+        source = _flat((facts.get("outside") or {}).get("text", ""))
+        borrowed, invented = [], []
+        for quote in FOREIGN_QUOTE.findall(text_only):
+            if len(_without_data(quote, facts).split()) < 4:
+                continue  # название трека в кавычках, а не чужие слова
+            (borrowed if source and _flat(quote) in source else invented).append(quote)
+        # Самое длинное слово имени говорящего: «The Flow» узнаётся по «Flow»,
+        # «слушатель под клипом на YouTube» — по «слушатель».
+        who = (facts.get("outside") or {}).get("who", "")
+        marker = max(who.split(), key=len, default="")
+        named = bool(marker) and _flat(marker) in _flat(text_only)
+        if payload and invented:
+            issues.append(f"{FOREIGN_ISSUE} не сверяется с данными: {_quoted(invented)} — "
+                          "чужие слова приводятся дословно из outside или не приводятся вовсе")
+        elif payload and named and not borrowed:
+            issues.append(f"{FOREIGN_ISSUE} пересказана своими словами: {who} в посте назван, "
+                          "а его слов в «ёлочках» нет — чужое мнение цитируется или не упоминается")
+        elif payload and borrowed and not named:
+            issues.append(f"{FOREIGN_ISSUE} без источника: не сказано, кто это сказал — "
+                          f"чужие слова подписываются именем ({who})")
+        quoteless = text_only
+        for quote in borrowed:
+            quoteless = quoteless.replace(quote, " ")
+
         # Выдумки — звучание, прошлое и устройство, которых нет в данных.
         # Слова из самих данных (названия, имена, жанр) вырезаются до сверки.
         # Без данных сверять не с чем: автопилот точности (src/review.py) проверяет
         # свою правку без payload, и законное «до него вышел PYREX» тут забраковалось бы
         # как прошлое без previous_releases. Выдумки в его правках судит он сам.
-        own = _without_data(text_only, facts) if payload else ""
+        own = _without_data(quoteless, facts) if payload else ""
         sound = INVENTED_SOUND.findall(own)
         if sound:
             issues.append(f"выдуманное звучание: {_quoted(sound)} — релиз никто не слушал, ни звука, ни текстов в данных нет")
@@ -568,6 +615,33 @@ def _selftest() -> None:
               "<i>Бит на миллион</i> вышел в пятницу, и название обещает больше, чем 2 минуты.\n\n"
               "<blockquote>Миллион пока только в названии.</blockquote>")
     assert problems(titled, "release", beat) == [], problems(titled, "release", beat)
+
+    # Чужой голос: дословная цитата издания проходит вместе с оценкой звука
+    # внутри неё, пересказ и цитата без данных — брак.
+    voiced = {**single, "outside": {"who": "The Flow", "text": "Смоки Мо записал самый спокойный бит за год и не стал ничего усложнять."}}
+    cited = ("<b>SMOKY MO ВЫПУСТИЛ СИНГЛ SORRY MAMA</b>\n\n"
+             "The Flow пишет: «самый спокойный бит за год».\n\n"
+             "<blockquote>Извинение по расписанию.</blockquote>")
+    assert problems(cited, "release", voiced) == [], problems(cited, "release", voiced)
+    retold_quote = cited.replace("самый спокойный бит за год", "бит у него вышел расслабленным, как никогда")
+    assert any(p.startswith("чужая цитата") for p in problems(retold_quote, "release", voiced))
+    assert any(p.startswith("чужая цитата") for p in problems(cited, "release", single)), "цитаты без outside быть не может"
+    # Правку автопилота точности проверяют без данных — чужую цитату он не судит.
+    assert not any(p.startswith("чужая цитата") for p in problems(cited, "release"))
+    # Издание названо, а цитаты нет — пересказ (живой пост GigaChat 12.09.2026).
+    paraphrase = cited.replace("The Flow пишет: «самый спокойный бит за год»",
+                               "По словам The Flow, бит тут спокойнее некуда")
+    assert any(p.startswith("чужая цитата") for p in problems(paraphrase, "release", voiced))
+    # Цитата есть, а чья — не сказано: чужое мнение подписано каналом.
+    anonymous = cited.replace("The Flow пишет: ", "")
+    assert any(p.startswith("чужая цитата") for p in problems(anonymous, "release", voiced))
+    # Отзыв слушателя узнаётся по слову «слушатель», а не по всей подписи.
+    listener = {**single, "outside": {"who": "слушатель под клипом на YouTube",
+                                      "text": "этот трек вытащил меня из осени, спасибо"}}
+    heard = ("<b>SMOKY MO ВЫПУСТИЛ СИНГЛ SORRY MAMA</b>\n\n"
+             "Слушатель под клипом: «этот трек вытащил меня из осени».\n\n"
+             "<blockquote>Извинение по расписанию.</blockquote>")
+    assert problems(heard, "release", listener) == [], problems(heard, "release", listener)
     print("quality: самопроверка пройдена")
 
 
