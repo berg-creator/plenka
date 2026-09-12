@@ -13,11 +13,10 @@ on:
     #   15:05 UTC = 18:05 МСК
     #   18:05 UTC = 21:05 МСК
     - cron: "5 6,10,15,18 * * *"
-    # Выход свежего релиза — раз в час по одному, сверх четырёх слотов
-    # (publish --releases): от выхода релиза до поста не больше суток.
-    # Минута 50 — подальше от сборов в :17 и :20: в группе state-write ждёт
-    # только один запуск, и лишний вытеснил бы из очереди срочный сбор.
-    - cron: "50 * * * *"
+    # Выхода свежего релиза здесь нет: он идёт из дежурства (src/moderate.py,
+    # release_shift). Ежечасный крон занимал общую группу state-write, где
+    # у GitHub ждёт только один запуск, и вытеснял из очереди сбор новинок
+    # и срочные новости — находка опаздывала на шесть часов.
   workflow_dispatch:
     inputs:
       target:
@@ -62,9 +61,7 @@ jobs:
           # Пока стоит admin — посты уходят в личку. Меняешь на channel, когда готов.
           TARGET: ${{ inputs.target || vars.PUBLISH_TARGET || 'admin' }}
           FORCE: ${{ inputs.force && '--force' || '' }}
-          # Ежечасный крон — выход релиза, а не обычный слот.
-          RELEASES: ${{ github.event.schedule == '50 * * * *' && '--releases' || '' }}
-        run: python -m src.publish --target "$TARGET" $FORCE $RELEASES
+        run: python -m src.publish --target "$TARGET" $FORCE
 
       - name: Сохранить состояние
         run: |

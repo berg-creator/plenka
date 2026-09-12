@@ -259,7 +259,8 @@ def store_checked(item: dict, artists: dict[str, dict]) -> bool:
     name = item.get("artist", "")
     credit, credit_ids = collect.store_credit({**item, "artist": ""})
     tracked_id = artists.get(name, {}).get(f"{item.get('source')}_id")
-    if not credit or not collect.own_release(name, tracked_id, credit, credit_ids):
+    aliases = artists.get(name, {}).get("aliases")
+    if not credit or not collect.own_release(name, tracked_id, credit, credit_ids, aliases):
         # ponytail: отсеянное не помечается использованным и сверяется заново каждую ночь.
         # Таких находок конечное число — новые сборщик не пропускает; пометить, если начнёт тормозить.
         log.warning("Отсеян релиз «%s — %s»: в магазине %s", name, item.get("title", ""), credit or "не найден")
@@ -904,6 +905,13 @@ def _selftest() -> int:
     assert own("Wu-Tang Clan", 200986, "Inspectah Deck, Wu-Tang Clan & CZARFACE", [769718])
     assert own("Смоки Мо", 366970924, "Smoky Mo", [366970924])  # написание разное, id тот же
     assert own("JAY-Z", None, "JAŸ-Z", [])
+    # Совместный релиз, где наш артист второй и записан по-магазинному:
+    # id там чужой, имени из базы в подписи нет — спасает только алиас.
+    assert not own("Баста", 1372953342, "Ramil' & Basta", [1450326296])
+    assert own("Баста", 1372953342, "Ramil' & Basta", [1450326296], ["Basta"])
+    assert own("Смоки Мо", 366970924, "Vito & Smoky Mo", [1440915898], ["Smoky Mo"])
+    # Алиас ищется так же целиком: «Basta» не находится внутри «Bastard».
+    assert not own("Баста", None, "Bastard & Someone", [], ["Basta"])
 
     # Сборщик и старые находки inbox — на подменённом магазине, без сети.
     listing = [

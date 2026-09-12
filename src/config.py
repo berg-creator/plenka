@@ -81,6 +81,9 @@ NEWS_MAX_AGE_HOURS = URGENT_MAX_AGE_HOURS + 12
 RELEASE_MAX_AGE_HOURS = 24
 RELEASE_TRACK_WAIT_HOURS = 2
 RELEASE_LOUD_PER_DAY = 3
+# Чаще раза в час посты о релизах в ленту не идут: выход считает интервал
+# по журналу публикаций (publish.release_due), а не по расписанию GitHub.
+RELEASE_EVERY_HOURS = 1
 
 # Тихие часы по Москве — решение владельца от 11.09.2026. Выходы релизов идут
 # круглосуточно: ночью пост выходит вовремя, но без звука и в счёт

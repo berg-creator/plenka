@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+import pathlib
 from pathlib import Path
 
 from . import card, config, llm, quality, state, stories, telegram
@@ -751,15 +752,28 @@ def notify_releases() -> int:
     if not releases:
         return 0
 
+    # Один релиз приходит из двух магазинов разными отпечатками («Arsenal»
+    # у Deezer и «Arsenal - Single» у iTunes), и подписчик получал две вести.
+    # Помечаем его ключом, которым дубли схлопывает compose.
+    from .compose import release_key
+
+    def mark_of(chat_id: str, item: dict) -> str:
+        return f"{chat_id}:{':'.join(release_key(item))}"
+
     delivered = 0
     for chat_id, names in watchers.items():
         wanted = {n.casefold() for n in names}
+        # Отметки, записанные до 12.09.2026, стоят по отпечатку. Переносим их
+        # на ключ, иначе смена ключа разослала бы весь inbox заново.
+        for item in releases:
+            if f"{chat_id}:{item.get('fingerprint', '')}" in sent:
+                sent.add(mark_of(chat_id, item))
 
         for item in releases:
-            mark = f"{chat_id}:{item.get('fingerprint', '')}"
             # Подпись совместного релиза полная («HNTR & Juicy J»), а следят
             # за одним именем — поэтому сверяем с тем, по кому релиз нашёлся.
-            if mark in sent or (item.get("tracked") or item["artist"]).casefold() not in wanted:
+            if mark_of(chat_id, item) in sent or (
+                    item.get("tracked") or item["artist"]).casefold() not in wanted:
                 continue
 
             title = item.get("title", "")
@@ -786,7 +800,7 @@ def notify_releases() -> int:
                 log.info("Не доставлено про %s: %s", item["artist"], exc)
                 continue
 
-            sent.add(mark)
+            sent.add(mark_of(chat_id, item))
             delivered += 1
 
     if delivered:
@@ -1089,6 +1103,44 @@ def clear_mode(data: dict, user_id: str) -> None:
     data.get("users", {}).get(user_id, {}).pop("mode", None)
 
 
+def _selftest() -> None:
+    """Весть о релизе уходит подписчику один раз, даже если магазинов два.
+
+    Запуск: python -m src.service --selftest
+    """
+    import tempfile
+
+    sent_to: list[str] = []
+    real = (telegram.send_message, telegram.send_audio, _preview, state.read_jsonl,
+            globals()["WATCH_FILE"])
+    telegram.send_message = lambda chat, text, **_: sent_to.append(text) or {"message_id": 1}
+    telegram.send_audio = lambda chat, audio, caption, **_: sent_to.append(caption) or {"message_id": 1}
+    globals()["_preview"] = lambda url: None  # отрывок из магазина не качаем
+
+    def release(fingerprint: str, title: str, source: str) -> dict:
+        return {"kind": "release", "fingerprint": fingerprint, "artist": "Slipknot",
+                "tracked": "Slipknot", "title": title, "source": source, "url": ""}
+
+    # Тот же релиз двумя магазинами: отпечатки разные, ключ compose один.
+    state.read_jsonl = lambda path: [release("aaa", "Arsenal - Single", "itunes"),
+                                     release("bbb", "Arsenal", "deezer")]
+    tmp = tempfile.TemporaryDirectory()
+    globals()["WATCH_FILE"] = pathlib.Path(tmp.name) / "watch.json"
+    try:
+        state.write_json(WATCH_FILE, {"watchers": {"77": ["Slipknot"]}, "sent": []})
+        assert notify_releases() == 1, sent_to
+        assert notify_releases() == 0, "весть ушла второй раз"
+        # Старая отметка по отпечатку — из файлов, записанных до 12.09.2026:
+        # смена ключа не должна разослать весь inbox заново.
+        state.write_json(WATCH_FILE, {"watchers": {"77": ["Slipknot"]}, "sent": ["77:aaa"]})
+        assert notify_releases() == 0, "старая отметка забыта"
+    finally:
+        (telegram.send_message, telegram.send_audio, globals()["_preview"],
+         state.read_jsonl, globals()["WATCH_FILE"]) = real
+        tmp.cleanup()
+    print("рассылка релизов: один релиз — одна весть, старые отметки помнятся")
+
+
 # ─────────────────────────── командная строка ───────────────────────────
 
 
@@ -1098,12 +1150,17 @@ def main() -> int:
     parser.add_argument("--kind", default="", help="taste | roots | lyrics")
     parser.add_argument("--match", help="показать, что нашлось в базе, без затрат на модель")
     parser.add_argument("--stats", action="store_true", help="расход лимитов")
+    parser.add_argument("--selftest", action="store_true", help="проверить рассылку вестей, без сети")
     parser.add_argument(
         "--notify",
         action="store_true",
         help="разослать вести о новых релизах тем, кто следит",
     )
     args = parser.parse_args()
+
+    if args.selftest:
+        _selftest()
+        return 0
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()

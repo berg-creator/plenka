@@ -444,6 +444,32 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
     return handled, served, last_id
 
 
+def release_shift() -> None:
+    """Выход свежего релиза — из дежурства, а не по ежечасному крону.
+
+    Крон publish.yml занимал общую группу state-write, где GitHub держит только
+    один ожидающий запуск: выход релиза в :50 вытеснял из очереди сбор новинок
+    или срочные новости, и находка опаздывала на шесть часов. Дежурство и так
+    публикует по кнопке и пушит состояние, а интервал между релизами считает
+    publish.release_due по журналу публикаций.
+
+    Поломка выхода смену не роняет: бот важнее одного поста, следующий заход
+    через PUSH_EVERY попробует снова.
+    """
+    target = os.environ.get("PUBLISH_TARGET", "admin")
+    if not publish.release_due():
+        return
+    path = publish.next_post(releases=True, skip_sent=target == "admin")
+    if path is None:
+        return
+    try:
+        publish.deliver(state.read_json(path, {}), path, target)
+    except telegram.TelegramError as exc:
+        log.error("Выход релиза не удался (%s): %s", path.name, exc)
+        return
+    print(f"Выход релиза: {path.name} → {target}")
+
+
 def serve(minutes: int) -> int:
     """Дежурство: держим соединение открытым и отвечаем сразу.
 
@@ -488,6 +514,7 @@ def serve(minutes: int) -> int:
             service.save_state(limits)
 
         if time.monotonic() >= next_push:
+            release_shift()
             push_state()
             next_push = time.monotonic() + PUSH_EVERY
             if code_changed():

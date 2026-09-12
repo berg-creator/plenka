@@ -26,9 +26,13 @@ from .sources import deezer, itunes
 log = logging.getLogger("publish")
 
 
-def next_post(releases: bool = False, dry_run: bool = False) -> Path | None:
+def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = False) -> Path | None:
     """Следующий обычный пост — самый ранний файл очереди; с releases —
     пост о свежем релизе, готовый к своему выходу.
+
+    skip_sent пропускает посты, уже ушедшие владельцу на утверждение
+    (PUBLISH_TARGET=admin): пост остаётся в очереди, пока тот не нажмёт кнопку,
+    и ежечасный выход релиза слал ему один и тот же пост каждый час.
 
     Решения владельца от 11.09.2026. Пост о релизе (config.RELEASE_RUBRICS)
     в четыре обычных слота не идёт: у него свой выход, раз в час по одному,
@@ -48,6 +52,8 @@ def next_post(releases: bool = False, dry_run: bool = False) -> Path | None:
     regular, ready = [], []
     for path in sorted(config.QUEUE.glob("*.json")):
         post = state.read_json(path, {})
+        if skip_sent and post.get("approval_sent_at"):
+            continue
         if post.get("rubric") not in config.RELEASE_RUBRICS:
             regular.append(path)
             continue
@@ -114,6 +120,35 @@ def due(post: dict) -> bool:
     if last is None:
         return True
     return state.now() - last >= timedelta(hours=config.PUBLISH_INTERVAL_HOURS)
+
+
+def release_due() -> bool:
+    """Пора ли выпускать следующий пост о релизе — не чаще раза в час.
+
+    Частоту раньше задавал ежечасный крон publish.yml, но он занимал группу
+    state-write и вытеснял из очереди ожидающий сбор: у GitHub в группе ждёт
+    ровно один запуск. Теперь выход идёт из дежурства (src/moderate.py), а час
+    отсчитывается по журналу публикаций — так же, как интервал обычных постов.
+    """
+    for item in reversed(state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])):
+        if item.get("rubric") not in config.RELEASE_RUBRICS:
+            continue
+        last = state._parse(item.get("published_at", ""))
+        return last is None or state.now() - last >= timedelta(hours=config.RELEASE_EVERY_HOURS)
+    return True
+
+
+def deliver(post: dict, path: Path, target: str) -> None:
+    """Отправка готового поста — одна на публикатор по расписанию и дежурство.
+
+    В канал пост уходит насовсем, владельцу — на утверждение и с отметкой
+    в файле: без неё следующий выход подал бы ему тот же пост снова.
+    """
+    if target == "channel":
+        to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
+        return
+    send_for_approval(post, path, config.secret("TELEGRAM_ADMIN_ID"))
+    state.write_json(path, {**state.read_json(path, {}), "approval_sent_at": state.iso()})
 
 
 def record(post: dict, path: Path, chat: str) -> None:
@@ -546,6 +581,31 @@ def _selftest() -> None:
         assert sorted(p.name for p in config.QUEUE.glob("*.json")) == [
             "1-meme.json", "3-release.json", "7-release.json"
         ]
+
+        # Пост, ушедший владельцу на утверждение, второй раз ему не подаётся:
+        # в личке он остаётся в очереди, пока тот не нажмёт кнопку, и ежечасный
+        # выход слал один и тот же пост каждый час.
+        state.write_json(config.QUEUE / "8-release.json",
+                         {"rubric": "release", "released_at": ago(hours=5), "created_at": ago(hours=3),
+                          "score": 90, "approval_sent_at": ago(hours=1)})
+        assert next_post(releases=True, skip_sent=True) is None
+        assert next_post(releases=True).name == "8-release.json"  # в канал он всё равно пойдёт
+        assert next_post(skip_sent=True).name == "1-meme.json"
+        with mock.patch.dict(os.environ, {"TELEGRAM_ADMIN_ID": "0"}):
+            deliver({"rubric": "meme", "text": "Текст."}, config.QUEUE / "1-meme.json", "admin")
+        assert state.read_json(config.QUEUE / "1-meme.json", {}).get("approval_sent_at")
+        assert next_post(skip_sent=True) is None
+
+        # Выход релиза — не чаще раза в час: интервал считает журнал публикаций,
+        # а не крон (его убрали из publish.yml, выпускает дежурство).
+        posted()
+        assert release_due()
+        posted(("release", ago(minutes=20)))
+        assert not release_due()
+        posted(("release", ago(minutes=20)), ("meme", ago(minutes=5)))
+        assert not release_due(), "обычный пост не открывает выход релиза"
+        posted(("release", ago(hours=2)), ("meme", ago(minutes=5)))
+        assert release_due()
         print("выходы релизов: сутки, окно на трек, звук у трёх, обычный слот уступает")
     finally:
         (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
@@ -634,7 +694,8 @@ def main() -> int:
         print(f"Отправлено на просмотр: {len(posts)} постов. Очередь не тронута.")
         return 0
 
-    path = next_post(releases=args.releases, dry_run=args.dry_run)
+    path = next_post(releases=args.releases, dry_run=args.dry_run,
+                     skip_sent=args.target == "admin" and not args.dry_run)
     if path is None:
         print("Готовых постов о свежих релизах нет." if args.releases
               else "Очередь пуста. Запусти генерацию: python -m src.compose --submit")
@@ -683,19 +744,13 @@ def main() -> int:
               "или сутки отданы релизам.")
         return 0
 
-    chat_id = (
-        config.secret("TELEGRAM_ADMIN_ID")
-        if args.target == "admin"
-        else config.secret("TELEGRAM_CHANNEL_ID")
-    )
-
     if args.target == "channel":
-        to_channel(post, path, chat_id)
+        deliver(post, path, "channel")
         print(f"Опубликовано в канал: {path.name}. Осталось в очереди: {len(list(config.QUEUE.glob('*.json')))}")
     else:
         # В личку пост уходит с кнопками решения и остаётся в очереди,
         # пока ты не нажмёшь «В канал» или «Удалить».
-        send_for_approval(post, path, chat_id)
+        deliver(post, path, "admin")
         print(f"Отправлено на утверждение: {path.name}")
 
     return 0

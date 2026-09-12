@@ -124,7 +124,7 @@ def collect_releases(artists: list[dict], seen: state.Seen) -> list[dict]:
                 continue  # магазин не ответил — виденным не помечаем, сверим в следующий обход
             seen.add(key)
             tracked_id = artist.get(f"{item.get('source')}_id")
-            if not own_release(artist["name"], tracked_id, credit, credit_ids):
+            if not own_release(artist["name"], tracked_id, credit, credit_ids, artist.get("aliases")):
                 log.info("%s: «%s» — релиз %s, не берём", artist["name"], item.get("title", ""), credit)
                 continue
 
@@ -171,7 +171,8 @@ def store_credit(item: dict) -> tuple[str, list]:
         return "", []
 
 
-def own_release(name: str, tracked_id: int | None, credit: str, credit_ids: list) -> bool:
+def own_release(name: str, tracked_id: int | None, credit: str, credit_ids: list,
+                aliases: list[str] | None = None) -> bool:
     """Основной ли исполнитель релиза тот, за кем мы следим.
 
     По id артиста магазин отдаёт не только его релизы. У iTunes там же чужие
@@ -189,11 +190,22 @@ def own_release(name: str, tracked_id: int | None, credit: str, credit_ids: list
     («Smoky Mo» у iTunes, «Смоки Мо» у нас). Соавторов iTunes по id не отдаёт,
     их ищем по имени — целиком, между разделителями «, » и « & », иначе
     «Juicy J» нашёлся бы в «Juicy Jones».
+
+    Магазин подписывает артиста по-своему, и у совместного релиза наше имя
+    в подписи не встречается вовсе: «Ramil\' & Basta» вместо «Баста»,
+    «Vito & Smoky Mo» вместо «Смоки Мо» — оба релиза канал терял. Поэтому
+    рядом с именем сверяются магазинные написания из поля aliases
+    (data/artists.json). Они собраны разово по подписям сольников самого
+    артиста, где id совпал; новому артисту алиас дописывается руками,
+    когда магазин зовёт его иначе.
     """
     if tracked_id and tracked_id in credit_ids:
         return True
-    pattern = rf"(?:^|, | & ){re.escape(_fold(name))}(?:, | & |$)"
-    return re.search(pattern, _fold(credit)) is not None
+    folded = _fold(credit)
+    for known in [name, *(aliases or [])]:
+        if re.search(rf"(?:^|, | & ){re.escape(_fold(known))}(?:, | & |$)", folded):
+            return True
+    return False
 
 
 def _fold(text: str) -> str:
