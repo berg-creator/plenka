@@ -950,7 +950,10 @@
       "tags": [
         "ru-underground"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "YННВ"
+      ]
     },
     {
       "deezer_id": 16779,
@@ -959,7 +962,10 @@
       "tags": [
         "ru-underground"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Krovostok"
+      ]
     },
     {
       "deezer_id": 10292790,
@@ -979,7 +985,10 @@
       "tags": [
         "ru-underground"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Kunteynir"
+      ]
     },
     {
       "deezer_id": 66982102,
@@ -1118,7 +1127,10 @@
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "LSP"
+      ]
     },
     {
       "deezer_id": 5036430,
@@ -1136,7 +1148,10 @@
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Husky"
+      ]
     },
     {
       "deezer_id": 5603958,
@@ -1145,7 +1160,10 @@
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Skryptonite"
+      ]
     },
     {
       "deezer_id": 291076,
@@ -1163,7 +1181,10 @@
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Slava KPSS"
+      ]
     },
     {
       "deezer_id": 64238642,
@@ -1199,7 +1220,10 @@
       "tags": [
         "ru-indie"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Pasosh"
+      ]
     },
     {
       "deezer_id": 12373790,
@@ -1208,7 +1232,10 @@
       "tags": [
         "ru-indie"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Dajte Tank (!)"
+      ]
     },
     {
       "deezer_id": 4505880,
@@ -1217,7 +1244,10 @@
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Kino"
+      ]
     },
     {
       "deezer_id": 4637757,
@@ -1227,7 +1257,10 @@
         "ru-classic",
         "punk"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Grazhdanskaya Oborona"
+      ]
     },
     {
       "deezer_id": 6459787,
@@ -1237,7 +1270,10 @@
         "ru-classic",
         "punk"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Sektor Gaza"
+      ]
     },
     {
       "deezer_id": 4237492,
@@ -1247,7 +1283,10 @@
         "ru-classic",
         "punk"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Korol I Shut"
+      ]
     },
     {
       "deezer_id": 4179081,
@@ -1256,7 +1295,10 @@
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Akvarium"
+      ]
     },
     {
       "deezer_id": 6215386,
@@ -1265,7 +1307,10 @@
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Auktyon"
+      ]
     },
     {
       "deezer_id": 4179069,
@@ -1274,7 +1319,10 @@
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Nautilus Pompilius"
+      ]
     },
     {
       "deezer_id": 14966,
@@ -1283,7 +1331,10 @@
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Agatha Christie"
+      ]
     },
     {
       "deezer_id": 296604,
@@ -1292,7 +1343,10 @@
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Mumiy Troll"
+      ]
     },
     {
       "deezer_id": 4286880,
@@ -1310,7 +1364,10 @@
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Kasta"
+      ]
     },
     {
       "deezer_id": 5330639,
@@ -1319,7 +1376,10 @@
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Kaspiyskiy Gruz"
+      ]
     },
     {
       "deezer_id": 4170095,
@@ -1328,7 +1388,10 @@
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Smoky Mo"
+      ]
     },
     {
       "deezer_id": 2662361,
@@ -1346,7 +1409,10 @@
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru"
+      "tier": "ru",
+      "aliases": [
+        "Basta"
+      ]
     },
     {
       "deezer_id": 98335212,
@@ -1356,7 +1422,10 @@
         "ru-pop-rap",
         "drama"
       ],
-      "tier": "ru_pop"
+      "tier": "ru_pop",
+      "aliases": [
+        "MORGENSHTERN"
+      ]
     },
     {
       "itunes_id": 1465235237,
@@ -1365,7 +1434,10 @@
         "ru-pop-rap",
         "drama"
       ],
-      "tier": "ru_pop"
+      "tier": "ru_pop",
+      "aliases": [
+        "INSTASAMKA"
+      ]
     },
     {
       "deezer_id": 14619893,
@@ -1384,7 +1456,10 @@
       "tags": [
         "ru-pop-rap"
       ],
-      "tier": "ru_pop"
+      "tier": "ru_pop",
+      "aliases": [
+        "Allj"
+      ]
     },
     {
       "deezer_id": 271715,
@@ -1394,7 +1469,10 @@
         "ru-pop-rap",
         "drama"
       ],
-      "tier": "ru_pop"
+      "tier": "ru_pop",
+      "aliases": [
+        "Timati"
+      ]
     },
     {
       "deezer_id": 73922432,
@@ -1421,7 +1499,10 @@
       "tags": [
         "ru-pop"
       ],
-      "tier": "ru_pop"
+      "tier": "ru_pop",
+      "aliases": [
+        "Dora"
+      ]
     },
     {
       "deezer_id": 1582524,
