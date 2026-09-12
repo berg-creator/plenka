@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 import random
+import time
+from collections.abc import Callable
 from datetime import timedelta
 
 from . import config, state, telegram
@@ -73,33 +75,60 @@ DEFAULT_QUESTIONS = (
 )
 
 # Насколько свежей должна быть запись о публикации, чтобы считать, что
-# пересланный в чат пост — это именно она.
+# пересланный в чат пост — это именно она. Годится только для постов, у которых
+# в архиве нет номера сообщения: обычно связь точная, по нему.
 MATCH_WINDOW = timedelta(minutes=30)
+
+# Сколько ждать, пока публикатор закоммитит архив: шаг и число попыток.
+# Публикация целиком укладывается в полминуты, минуты хватает с запасом.
+WAIT_STEP = timedelta(seconds=15)
+WAIT_TRIES = 4
 
 
 def question(rubric: str) -> str:
     return random.choice(QUESTIONS.get(rubric, DEFAULT_QUESTIONS))
 
 
-def last_post() -> dict:
-    """Последний опубликованный пост: рубрика и он сам из архива.
+def origin_id(message: dict) -> int | None:
+    """Номер поста в канале, пересылку которого мы получили."""
+    origin = message.get("forward_origin") or {}
+    return message.get("forward_from_message_id") or origin.get("message_id")
 
-    Пересылка в чат приходит через секунды после публикации, а посты выходят
-    раз в несколько часов — этого хватает, чтобы связать одно с другим без
-    отдельного журнала. Если запись старая, рубрику не угадываем.
+
+def last_post(post_id: int | None = None) -> dict:
+    """Пост, к которому относится пересылка: рубрика из журнала, сам он — из архива.
+
+    Пересылка называет номер поста в канале, а публикатор кладёт этот номер
+    в архив (`message.message_id`) — по нему пост и ищется. Раньше связь шла
+    по времени, и запоздавшее дежурство под постом полугодовой давности
+    ничего бы не нашло.
+
+    Номера нет (старый пост в архиве без него) — берём последний
+    опубликованный, но только если он совсем свежий.
     """
     items = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
     if not items:
+        return {}
+
+    def load(item: dict) -> dict:
+        # Из журнала берётся только рубрика, а полный трек — из самого поста.
+        post = state.read_json(config.ARCHIVE / item.get("file", ""), {})
+        return {**post, "rubric": item.get("rubric", "")}
+
+    if post_id:
+        # Смотрим последние: архив за год перебирать незачем, пересылка
+        # приходит через секунды после публикации.
+        for item in reversed(items[-20:]):
+            post = load(item)
+            if post.get("message", {}).get("message_id") == post_id:
+                return post
         return {}
 
     last = items[-1]
     published = state._parse(last.get("published_at", ""))
     if published is None or state.now() - published > MATCH_WINDOW:
         return {}
-    # Сам пост лежит в архиве под тем же именем: из журнала берётся только
-    # рубрика, а полный трек — из поста.
-    post = state.read_json(config.ARCHIVE / last.get("file", ""), {})
-    return {**post, "rubric": last.get("rubric", "")}
+    return load(last)
 
 
 def is_channel_post(message: dict, channel_id: int | str) -> bool:
@@ -112,15 +141,29 @@ def is_channel_post(message: dict, channel_id: int | str) -> bool:
     )
 
 
-def seed(message: dict) -> bool:
-    """Пишет первый комментарий под пересланным постом. True — написали."""
+def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
+    """Пишет первый комментарий под пересланным постом. True — написали.
+
+    `refresh` подтягивает состояние из репозитория между попытками найти пост:
+    пересылка приходит через три секунды после публикации, а публикатор
+    коммитит архив к двадцатой — без ожидания трек владельца под постом
+    не появлялся вовсе, уходил один голый вопрос (поймано 12.09.2026).
+    """
     chat_id = str(message.get("chat", {}).get("id", ""))
     message_id = message.get("message_id")
     if not chat_id or not message_id:
         return False
 
     # Опрос сам по себе способ высказаться — под ним вопрос лишний.
-    post = last_post()
+    post = last_post(origin_id(message))
+    for _ in range(WAIT_TRIES):
+        if post or refresh is None:
+            break
+        # ponytail: дежурство на эту минуту замолкает. Пересылок 4-8 в сутки,
+        # отдельный поток тут дороже задержки; станет мешать — выносить в очередь.
+        time.sleep(WAIT_STEP.seconds)
+        refresh()
+        post = last_post(origin_id(message))
     rubric = post.get("rubric", "")
     if rubric == "poll" or message.get("poll"):
         return False
@@ -142,3 +185,32 @@ def seed(message: dict) -> bool:
 
     log.info("Первый комментарий под постом рубрики «%s»", rubric or "неизвестной")
     return True
+
+
+def _selftest() -> None:
+    """Пересылка находит свой пост по номеру, а не по времени."""
+    forward = {"forward_origin": {"type": "channel", "message_id": 106}}
+    assert origin_id(forward) == 106
+    assert origin_id({"forward_from_message_id": 105}) == 105
+    assert origin_id({}) is None
+
+    items = [{"file": "a.json", "rubric": "release", "published_at": "2020-01-01T00:00:00+00:00"},
+             {"file": "b.json", "rubric": "verdict", "published_at": "2020-01-01T00:00:00+00:00"}]
+    posts = {"a.json": {"message": {"message_id": 105}, "full_track_file_id": "A"},
+             "b.json": {"message": {"message_id": 106}, "full_track_file_id": "B"}}
+    real_read, real_posted = state.read_json, config.POSTED_FILE
+    state.read_json = lambda path, default=None: (
+        {"items": items} if path == real_posted else posts.get(path.name, {}))
+    try:
+        # Старая связь по времени тут бы промолчала: посты 2020 года.
+        assert last_post(106)["full_track_file_id"] == "B"
+        assert last_post(105)["rubric"] == "release"
+        assert last_post(999) == {}
+        assert last_post() == {}
+    finally:
+        state.read_json = real_read
+    print("первый комментарий: пост находится по номеру пересылки")
+
+
+if __name__ == "__main__":
+    _selftest()

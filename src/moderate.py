@@ -318,8 +318,10 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     # в репозитории публикатором. Своё дерево дежурство обновляет
                     # раз в несколько минут, а комментарий нужен сейчас: перед
                     # ним подтягиваем состояние, иначе трек к посту опоздает.
+                    # Публикатор коммитит не мгновенно, поэтому тем же способом
+                    # comments.seed ждёт его и пробует ещё раз.
                     push_state()
-                    comments.seed(message)
+                    comments.seed(message, refresh=push_state)
                 continue
 
             # Дубль фразы ролика (src/reels.py): голосовое или аудио владельца
