@@ -1,5 +1,19 @@
 {
   "note": "Все адреса проверены вживую командой `python -m src.sources.feeds --check`. Мёртвые и неподходящие ленты не удаляются, а помечаются enabled:false — чтобы помнить, что вариант уже пробовали.",
+  "telegramNote": "Каналы изданий читаются через веб-превью t.me/s/<канал> — см. src/sources/telegram_web.py. Проверены вживую командой `python -m src.sources.telegram_web --check`, неподходящие помечаются enabled:false.",
+  "telegram": [
+    { "name": "The Flow", "channel": "superslowflow", "enabled": true },
+    { "name": "RAP.RU", "channel": "rapruchannel", "enabled": true },
+
+    { "name": "Газгольдер", "channel": "gazgolder", "enabled": false,
+      "note": "Лейбл, а не издание: в ленту шли одни премьеры своих треков — то же самое канал уже берёт из магазинов" },
+    { "name": "SRSLY", "channel": "srslymedia", "enabled": false,
+      "note": "Канал живой, но пишет про кино и поп-культуру — музыкальных поводов почти нет" },
+    { "name": "Rhymes & Punches", "channel": "rhymes_and_punches", "enabled": false,
+      "note": "Канал заброшен в январе 2024-го" },
+    { "name": "Hip-Hop.ru", "channel": "hip_hop_ru_official", "enabled": false,
+      "note": "Канала с таким именем в Telegram нет — превью пустое" }
+  ],
   "feeds": [
     { "name": "Lenta Музыка", "url": "https://lenta.ru/rss/news/culture/music", "lang": "ru", "enabled": true },
     { "name": "Интермедиа", "url": "https://www.intermedia.ru/rss/", "lang": "ru", "enabled": true },

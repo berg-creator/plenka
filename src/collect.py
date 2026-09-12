@@ -17,7 +17,7 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from . import config, state
-from .sources import deezer, feeds, itunes, youtube_rss
+from .sources import deezer, feeds, itunes, telegram_web, youtube_rss
 
 log = logging.getLogger("collect")
 
@@ -332,12 +332,18 @@ def collect_videos(artists: list[dict], seen: state.Seen) -> list[dict]:
 
 
 def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
-    """Новости из RSS. Приоритет тем, где упомянут знакомый артист."""
+    """Новости из RSS и Telegram-каналов. Приоритет тем, где упомянут знакомый артист."""
+    entries: list[dict] = []
+    # Источники разнесены по своим try: RSS по русской сцене вымер, и падение
+    # одного пути не должно уносить второй — новости остались только в Telegram.
     try:
-        entries = feeds.fetch_recent(config.NEWS_MAX_AGE_HOURS)
+        entries += feeds.fetch_recent(config.NEWS_MAX_AGE_HOURS)
     except Exception as exc:
         log.warning("RSS недоступны (%s)", exc)
-        return []
+    try:
+        entries += telegram_web.fetch_recent(config.NEWS_MAX_AGE_HOURS)
+    except Exception as exc:
+        log.warning("Telegram-каналы недоступны (%s)", exc)
 
     # Индекс имён в нижнем регистре для быстрого поиска упоминаний.
     index = {a["name"].casefold(): a for a in artists}

@@ -38,6 +38,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python -m src.publish --check          бот, канал и права настроены
 python -m src.setup --check            что настроено в канале и чате, а что нет
 python -m src.sources.feeds --check    какие RSS-ленты живы
+python -m src.sources.telegram_web --check   какие Telegram-каналы изданий живы
 python -m src.check_llm --sample       генератор отвечает + пробный пост
 python -m src.collect --dry-run        что нашлось, без записи
 python -m src.urgent --dry-run         срочные новости за сегодня, без затрат
@@ -84,7 +85,10 @@ python -m src.clips --selftest         кадров в раскадровке с
 Три независимых шага, связанных только файлами состояния:
 
 1. **[src/collect.py](src/collect.py)** — раз в 6 часов обходит iTunes, Deezer,
-   YouTube и RSS (`src/sources/`), складывает находки в `data/inbox.jsonl`.
+   YouTube, RSS и Telegram-каналы изданий (`src/sources/`), складывает находки
+   в `data/inbox.jsonl`. Инфоповоды русской сцены берутся только из Telegram:
+   RSS по ней вымер целиком (`data/feeds.json`), и веб-превью `t.me/s/<канал>` —
+   единственный путь, не требующий ни ключа, ни чужого токена.
    Отпечатки виденного — в `data/seen.json`.
 2. **[src/compose.py](src/compose.py)** — раз в сутки превращает сырьё из inbox
    в готовые посты `content/queue/*.json`. Батч асинхронный намеренно: один запуск
