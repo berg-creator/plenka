@@ -96,6 +96,12 @@ def save_post(
         "released_at": (source or {}).get("released_at") or "",
         "score": (source or {}).get("score") or 0,
     }
+    # Сниппет: под таким постом первым комментарием идёт сам кусок трека
+    # (comments.seed). Метка лежит в посте, а не выводится из его текста:
+    # слова «сниппет» модель может не написать, а звук от этого не пропадает.
+    if (source or {}).get("snippet"):
+        post["snippet"] = True
+
     if rubric_key == "meme":
         # Надписи лежат отдельно от подписи: они рисуются поверх шаблона,
         # а подпись уходит текстом под фото (card.render_meme).
@@ -576,6 +582,9 @@ def _news_payload(item: dict) -> dict:
         "lang": item.get("lang", "en"),
         "url": item.get("url", ""),
         "artists": item.get("artists", []),
+        # Модели метка говорит, что у поста будет звук, а quality.py по ней
+        # ловит выдуманное звучание: сниппет никто не слушал.
+        "snippet": bool(item.get("snippet")),
         "published": published.astimezone(MSK).strftime("%d.%m.%Y") if published else "",
         "today": state.now().astimezone(MSK).strftime("%d.%m.%Y"),
     }

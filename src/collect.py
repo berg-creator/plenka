@@ -33,7 +33,7 @@ TIER_SCORE = {"core": 100, "ru": 95, "scene": 80, "legend": 70, "ru_pop": 55}
 NEWS_KEYWORDS_RU = (
     "умер", "скончал", "погиб", "арест", "суд", "иск", "биф", "конфликт",
     "воссоедин", "распад", "лейбл", "альбом", "тур", "отменил", "рекорд",
-    "стрим", "чарт", "премьер", "клип", "интервью", "скандал",
+    "стрим", "чарт", "премьер", "клип", "интервью", "скандал", "сниппет",
 )
 NEWS_KEYWORDS_EN = (
     "dies", "died", "death", "arrested", "lawsuit", "sues", "beef", "feud",
@@ -386,6 +386,12 @@ def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
 
         keywords = NEWS_KEYWORDS_RU if entry.get("lang") == "ru" else NEWS_KEYWORDS_EN
         has_keyword = any(word in haystack for word in keywords)
+        # Сниппет — кусок неизданного трека, который артист выложил сам. Для этой
+        # аудитории повод не меньше релиза, и звук к нему есть: под постом он
+        # ложится первым комментарием (comments.seed). Метку ставим здесь, по
+        # данным, а не по готовому тексту — слова «сниппет» модель может и не
+        # написать, а звук под постом зависит не от её формулировки.
+        is_snippet = "сниппет" in haystack
 
         # Гастроли за рубежом интересны, только если это событие само по себе
         # (воссоединение, прощальный тур) — иначе это анонс не для нашей аудитории.
@@ -416,6 +422,7 @@ def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
         found.append(
             {
                 "kind": "news",
+                "snippet": is_snippet,
                 "fingerprint": key,
                 "score": score,
                 "artists": [index[n]["name"] for n in mentioned],
@@ -424,7 +431,10 @@ def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
                 "title": entry.get("title", ""),
                 "summary": entry.get("summary", ""),
                 "url": entry.get("url", ""),
-                "cover": entry.get("cover", ""),
+                # Картинка со страницы издания — только для отобранных новостей
+                # и только когда лента её не отдала: лишний заход по сети на шум
+                # не нужен, а без картинки пост теряется в ленте.
+                "cover": entry.get("cover", "") or feeds.page_image(entry.get("url", "")),
                 "released_at": entry.get("published_at"),
                 # Откуда пришла новость, видно по записи: посту о релизе нужно
                 # мнение издания (compose.outside_voice), а чужой RSS этим

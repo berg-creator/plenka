@@ -307,6 +307,25 @@ def send_video_file(chat_id: str, path: Path, caption: str, *, seconds: int = 0)
         return _call("sendVideo", payload, files={"video": (path.name, handle, "video/mp4")})
 
 
+def send_video_url(chat_id: str, url: str, caption: str, *, reply_to: int | None = None) -> dict:
+    """Ролик по чужой ссылке: файл забирает сам Telegram.
+
+    Так под пост попадает сниппет из паблика, откуда пришёл инфоповод. Качать
+    его себе незачем: боту Bot API отдаёт не больше 20 МБ, а по ссылке те же
+    файлы уходят без нашего диска и без перекодирования — ролик уже mp4.
+    """
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "video": url,
+        "caption": clip(sanitize(caption), MAX_CAPTION),
+        "parse_mode": "HTML",
+        "supports_streaming": True,
+    }
+    if reply_to is not None:
+        payload["reply_parameters"] = json.dumps({"message_id": reply_to})
+    return _call("sendVideo", payload)
+
+
 # Подписчиком считается любой, кто не вышел и не выгнан.
 MEMBER_STATUSES = {"creator", "administrator", "member", "restricted"}
 

@@ -1,52 +1,203 @@
 {
   "note": "Все адреса проверены вживую командой `python -m src.sources.feeds --check`. Мёртвые и неподходящие ленты не удаляются, а помечаются enabled:false — чтобы помнить, что вариант уже пробовали.",
-  "telegramNote": "Каналы изданий читаются через веб-превью t.me/s/<канал> — см. src/sources/telegram_web.py. Проверены вживую командой `python -m src.sources.telegram_web --check`, неподходящие помечаются enabled:false.",
+  "telegramNote": "Каналы изданий читаются через веб-превью t.me/s/<канал> — см. src/sources/telegram_web.py. Проверены вживую командой `python -m src.sources.telegram_web --check`, неподходящие помечаются enabled:false. Поле only сужает канал до постов с этими словами.",
   "telegram": [
-    { "name": "The Flow", "channel": "superslowflow", "enabled": true },
-    { "name": "RAP.RU", "channel": "rapruchannel", "enabled": true },
-
-    { "name": "Газгольдер", "channel": "gazgolder", "enabled": false,
-      "note": "Лейбл, а не издание: в ленту шли одни премьеры своих треков — то же самое канал уже берёт из магазинов" },
-    { "name": "SRSLY", "channel": "srslymedia", "enabled": false,
-      "note": "Канал живой, но пишет про кино и поп-культуру — музыкальных поводов почти нет" },
-    { "name": "Rhymes & Punches", "channel": "rhymes_and_punches", "enabled": false,
-      "note": "Канал заброшен в январе 2024-го" },
-    { "name": "Hip-Hop.ru", "channel": "hip_hop_ru_official", "enabled": false,
-      "note": "Канала с таким именем в Telegram нет — превью пустое" }
+    {
+      "name": "The Flow",
+      "channel": "superslowflow",
+      "enabled": true
+    },
+    {
+      "name": "RAP.RU",
+      "channel": "rapruchannel",
+      "enabled": true
+    },
+    {
+      "name": "РЭП СМИ",
+      "channel": "rapsmi",
+      "enabled": true,
+      "only": [
+        "сниппет"
+      ],
+      "note": "Сниппеты: 4 поста на 73 за трое суток, у трёх из четырёх файл достаётся. Остальное в канале — бульварщина про вес и внешность, каналу она запрещена тоном, поэтому стоит only"
+    },
+    {
+      "name": "Газгольдер",
+      "channel": "gazgolder",
+      "enabled": false,
+      "note": "Лейбл, а не издание: в ленту шли одни премьеры своих треков — то же самое канал уже берёт из магазинов"
+    },
+    {
+      "name": "SRSLY",
+      "channel": "srslymedia",
+      "enabled": false,
+      "note": "Канал живой, но пишет про кино и поп-культуру — музыкальных поводов почти нет"
+    },
+    {
+      "name": "Rhymes & Punches",
+      "channel": "rhymes_and_punches",
+      "enabled": false,
+      "note": "Канал заброшен в январе 2024-го"
+    },
+    {
+      "name": "Hip-Hop.ru",
+      "channel": "hip_hop_ru_official",
+      "enabled": false,
+      "note": "Канала с таким именем в Telegram нет — превью пустое"
+    }
   ],
   "feeds": [
-    { "name": "Lenta Музыка", "url": "https://lenta.ru/rss/news/culture/music", "lang": "ru", "enabled": true },
-    { "name": "Интермедиа", "url": "https://www.intermedia.ru/rss/", "lang": "ru", "enabled": true },
-    { "name": "Sadwave", "url": "https://sadwave.com/feed/", "lang": "ru", "enabled": true },
-    { "name": "Афиша Daily", "url": "https://daily.afisha.ru/rss/", "lang": "ru", "enabled": true },
-    { "name": "Газета Культура", "url": "https://www.gazeta.ru/export/rss/culture.xml", "lang": "ru", "enabled": true },
-    { "name": "Коммерсант Культура", "url": "https://www.kommersant.ru/RSS/section-culture.xml", "lang": "ru", "enabled": true },
-    { "name": "Pitchfork", "url": "https://pitchfork.com/feed/feed-news/rss", "lang": "en", "enabled": true },
-    { "name": "Stereogum", "url": "https://www.stereogum.com/feed/", "lang": "en", "enabled": true },
-    { "name": "Consequence", "url": "https://consequence.net/feed/", "lang": "en", "enabled": true },
-    { "name": "Loudwire", "url": "https://loudwire.com/feed/", "lang": "en", "enabled": true },
-    { "name": "Metal Injection", "url": "https://metalinjection.net/feed", "lang": "en", "enabled": true },
-    { "name": "BrooklynVegan", "url": "https://www.brooklynvegan.com/feed/", "lang": "en", "enabled": true },
-    { "name": "HipHopDX", "url": "https://hiphopdx.com/rss/news.xml", "lang": "en", "enabled": true },
-    { "name": "NME", "url": "https://www.nme.com/news/music/feed", "lang": "en", "enabled": true },
-    { "name": "Рэп Мьюзик", "url": "https://rap-music.ru/rss", "lang": "ru", "enabled": true },
-    { "name": "Eatmusic", "url": "https://www.eatmusic.ru/feed", "lang": "ru", "enabled": true },
-
-    { "name": "The Flow", "url": "https://the-flow.ru/feed", "lang": "ru", "enabled": false,
-      "note": "404 на /feed, /rss, /rss.xml, /turbo и любой User-Agent: новости издание раздаёт только через Telegram, VK и YouTube" },
-    { "name": "Rap.ru", "url": "https://rap.ru/rss.xml", "lang": "ru", "enabled": false,
-      "note": "Сайт переехал на Tilda, ленту не отдаёт ни по одному адресу" },
-    { "name": "SRSLY", "url": "https://srsly.ru/feed", "lang": "ru", "enabled": false,
-      "note": "404 на /feed, /rss, /rss.xml — ленты у издания нет" },
-    { "name": "Hip-Hop.ru", "url": "https://www.hip-hop.ru/rss", "lang": "ru", "enabled": false,
-      "note": "403 — закрыт для автоматических клиентов" },
-    { "name": "NEWSmuz", "url": "https://newsmuz.com/rss", "lang": "ru", "enabled": false,
-      "note": "Лента живая и ежедневная, но пишет про эстраду — Киркоров, Долина, «Интервидение»; ровно тот шум, от которого уходим" },
-    { "name": "rap.ua", "url": "https://www.rap.ua/rss", "lang": "uk", "enabled": false,
-      "note": "Живая лента про рэп, но украиноязычная — русские ключевые слова рубрики её не ловят" },
-    { "name": "The FADER", "url": "https://www.thefader.com/rss", "lang": "en", "enabled": false,
-      "note": "Лента недоступна, адрес изменился" },
-    { "name": "Звуки.ру", "url": "https://zvuki.ru/rss/", "lang": "ru", "enabled": false,
-      "note": "403 — закрыт для автоматических клиентов" }
+    {
+      "name": "Lenta Музыка",
+      "url": "https://lenta.ru/rss/news/culture/music",
+      "lang": "ru",
+      "enabled": true
+    },
+    {
+      "name": "Интермедиа",
+      "url": "https://www.intermedia.ru/rss/",
+      "lang": "ru",
+      "enabled": true
+    },
+    {
+      "name": "Sadwave",
+      "url": "https://sadwave.com/feed/",
+      "lang": "ru",
+      "enabled": true
+    },
+    {
+      "name": "Афиша Daily",
+      "url": "https://daily.afisha.ru/rss/",
+      "lang": "ru",
+      "enabled": true
+    },
+    {
+      "name": "Газета Культура",
+      "url": "https://www.gazeta.ru/export/rss/culture.xml",
+      "lang": "ru",
+      "enabled": true
+    },
+    {
+      "name": "Коммерсант Культура",
+      "url": "https://www.kommersant.ru/RSS/section-culture.xml",
+      "lang": "ru",
+      "enabled": true
+    },
+    {
+      "name": "Pitchfork",
+      "url": "https://pitchfork.com/feed/feed-news/rss",
+      "lang": "en",
+      "enabled": true
+    },
+    {
+      "name": "Stereogum",
+      "url": "https://www.stereogum.com/feed/",
+      "lang": "en",
+      "enabled": true
+    },
+    {
+      "name": "Consequence",
+      "url": "https://consequence.net/feed/",
+      "lang": "en",
+      "enabled": true
+    },
+    {
+      "name": "Loudwire",
+      "url": "https://loudwire.com/feed/",
+      "lang": "en",
+      "enabled": true
+    },
+    {
+      "name": "Metal Injection",
+      "url": "https://metalinjection.net/feed",
+      "lang": "en",
+      "enabled": true
+    },
+    {
+      "name": "BrooklynVegan",
+      "url": "https://www.brooklynvegan.com/feed/",
+      "lang": "en",
+      "enabled": true
+    },
+    {
+      "name": "HipHopDX",
+      "url": "https://hiphopdx.com/rss/news.xml",
+      "lang": "en",
+      "enabled": true
+    },
+    {
+      "name": "NME",
+      "url": "https://www.nme.com/news/music/feed",
+      "lang": "en",
+      "enabled": true
+    },
+    {
+      "name": "Рэп Мьюзик",
+      "url": "https://rap-music.ru/rss",
+      "lang": "ru",
+      "enabled": true
+    },
+    {
+      "name": "Eatmusic",
+      "url": "https://www.eatmusic.ru/feed",
+      "lang": "ru",
+      "enabled": true
+    },
+    {
+      "name": "The Flow",
+      "url": "https://the-flow.ru/feed",
+      "lang": "ru",
+      "enabled": false,
+      "note": "404 на /feed, /rss, /rss.xml, /turbo и любой User-Agent: новости издание раздаёт только через Telegram, VK и YouTube"
+    },
+    {
+      "name": "Rap.ru",
+      "url": "https://rap.ru/rss.xml",
+      "lang": "ru",
+      "enabled": false,
+      "note": "Сайт переехал на Tilda, ленту не отдаёт ни по одному адресу"
+    },
+    {
+      "name": "SRSLY",
+      "url": "https://srsly.ru/feed",
+      "lang": "ru",
+      "enabled": false,
+      "note": "404 на /feed, /rss, /rss.xml — ленты у издания нет"
+    },
+    {
+      "name": "Hip-Hop.ru",
+      "url": "https://www.hip-hop.ru/rss",
+      "lang": "ru",
+      "enabled": false,
+      "note": "403 — закрыт для автоматических клиентов"
+    },
+    {
+      "name": "NEWSmuz",
+      "url": "https://newsmuz.com/rss",
+      "lang": "ru",
+      "enabled": false,
+      "note": "Лента живая и ежедневная, но пишет про эстраду — Киркоров, Долина, «Интервидение»; ровно тот шум, от которого уходим"
+    },
+    {
+      "name": "rap.ua",
+      "url": "https://www.rap.ua/rss",
+      "lang": "uk",
+      "enabled": false,
+      "note": "Живая лента про рэп, но украиноязычная — русские ключевые слова рубрики её не ловят"
+    },
+    {
+      "name": "The FADER",
+      "url": "https://www.thefader.com/rss",
+      "lang": "en",
+      "enabled": false,
+      "note": "Лента недоступна, адрес изменился"
+    },
+    {
+      "name": "Звуки.ру",
+      "url": "https://zvuki.ru/rss/",
+      "lang": "ru",
+      "enabled": false,
+      "note": "403 — закрыт для автоматических клиентов"
+    }
   ]
 }

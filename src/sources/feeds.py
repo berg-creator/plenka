@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -56,6 +57,20 @@ def fetch_recent(max_age_hours: int = 30) -> list[dict]:
     return items
 
 
+# Дежурная картинка сайта вместо статьи: «Афиша» отдаёт в ленте share_img_v2.png,
+# «Лента» на неартикульных страницах — свой lenta_og.png. Логотип издания под
+# нашей новостью — не иллюстрация, а серая плитка, и текст без картинки честнее.
+# ponytail: отбор по имени файла. Начнёт пропускать чужие заглушки — сверять размер.
+GENERIC_IMAGE = ("logo", "default", "placeholder", "share_img", "share-img", "_og.", "/og-")
+
+
+def _usable(picture: str) -> str:
+    """Ссылка на картинку, если она похожа на иллюстрацию статьи, иначе пусто."""
+    if not picture.startswith("http"):
+        return ""
+    return "" if any(mark in picture.lower() for mark in GENERIC_IMAGE) else picture
+
+
 def _entry_image(entry) -> str:
     """Картинка записи, если лента её отдала.
 
@@ -65,13 +80,45 @@ def _entry_image(entry) -> str:
     что издание приложило само, и ничего не подставляем, когда её нет.
     """
     for media in (entry.get("media_content") or []) + (entry.get("media_thumbnail") or []):
-        url = str(media.get("url", "")).strip()
-        if url.startswith("http"):
-            return url
+        if picture := _usable(str(media.get("url", "")).strip()):
+            return picture
     for link in entry.get("links") or []:
         if str(link.get("type", "")).startswith("image/"):
-            return str(link.get("href", "")).strip()
+            return _usable(str(link.get("href", "")).strip())
     return ""
+
+
+# Картинка статьи в разметке страницы. og:image кладут все издания — по нему
+# ссылку на новость показывают соцсети, и картинка там ровно та, которой
+# издание эту новость проиллюстрировало.
+OG_IMAGE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']'
+    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']og:image["\']',
+    re.IGNORECASE,
+)
+
+
+def page_image(url: str) -> str:
+    """Картинка новости со страницы издания — когда лента её не отдала.
+
+    Формат картинки в RSS никто не соблюдает: «Интермедиа» кладёт её в свой
+    `<image>` внутри записи, а feedparser такой тег не отдаёт вовсе — новость
+    про Kai Angel 12.09.2026 вышла в канал голым текстом, и это повторялось.
+    Разбирать чужие самодельные теги пришлось бы для каждой ленты отдельно,
+    поэтому берём og:image: он есть у всех и означает то же самое.
+
+    Своей картинки у новости быть не может — рисовать иллюстрацию к чужому
+    событию значит выдумывать. Нет og:image — пост уходит текстом, как раньше.
+    """
+    if not url.startswith("http"):
+        return ""
+    response = get(url, min_interval=0.5)
+    if response is None:
+        return ""
+    found = OG_IMAGE.search(response.text)
+    if not found:
+        return ""
+    return _usable((found.group(1) or found.group(2) or "").strip())
 
 
 def _entry_date(entry) -> datetime | None:
@@ -115,7 +162,40 @@ def check() -> int:
     return dead
 
 
+def _selftest() -> None:
+    """Картинка статьи: свой тег «Интермедиа» мимо, og:image и дежурный логотип."""
+    import feedparser
+
+    rss = (
+        '<?xml version="1.0"?><rss version="2.0"><channel><title>t</title><item>'
+        "<title>Kai Angel совместил в «Shh!» рэп и гитарную музыку</title>"
+        "<link>https://www.intermedia.ru/news/406629</link><description>d</description>"
+        "<pubDate>Sat, 12 Sep 2026 11:58:00 +0300</pubDate>"
+        "<image><url>https://cdn1.intermedia.ru/img/406629.jpg</url></image>"
+        "</item></channel></rss>"
+    )
+    entry = feedparser.parse(rss).entries[0]
+    # Свой тег «Интермедиа» feedparser не отдаёт вовсе — отсюда новость про
+    # Kai Angel и вышла 12.09.2026 голым текстом. Выручает page_image.
+    assert _entry_image(entry) == "", _entry_image(entry)
+
+    page = '<meta property="og:image" content="https://cdn1.intermedia.ru/img/406629.jpg">'
+    assert OG_IMAGE.search(page).group(1).endswith("406629.jpg")
+    assert OG_IMAGE.search("<meta content='https://x.ru/a.jpg' name='og:image'/>").group(2)
+    assert not OG_IMAGE.search('<meta property="og:title" content="нет картинки">')
+
+    assert _usable("https://www.intermedia.ru/img/news_x350/406629.jpg?t=1")
+    # Логотип издания — не иллюстрация: «Афиша» и «Лента» отдают его дежурно.
+    assert not _usable("https://daily.afisha.ru/static/share_img_v2.png")
+    assert not _usable("https://icdn.lenta.ru/assets/webpack/images/lenta_og.873.png")
+    assert not _usable("/img/relative.jpg")
+    print("✓ картинка новости: свой тег мимо, og:image находится, логотип отсеян")
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        _selftest()
+        raise SystemExit(0)
     if "--check" in sys.argv:
         print("Проверяю RSS-ленты:\n")
         dead_count = check()

@@ -14,6 +14,13 @@
 плавающим — есть трек, два сообщения; нет, одно (решение владельца 12.09.2026).
 В ветке он и открывает обсуждение, и даёт послушать, не уводя из канала.
 
+Под постом о сниппете этой репликой идёт сам кусок трека — ролик из паблика,
+откуда пришёл инфоповод. Своего файла у канала тут нет и быть не может: трек
+неизданный, взять его негде. Ссылку Telegram отдаёт с временным ключом, поэтому
+она берётся в момент отправки (telegram_web.snippet_video), а не при сборе.
+Большого ролика превью не отдаёт вовсе — тогда под постом остаётся вопрос,
+а сам инфоповод «такой-то показал сниппет» силы не теряет.
+
 Отключается одной строкой в src/config.py — COMMENT_SEED.
 """
 
@@ -26,6 +33,7 @@ from collections.abc import Callable
 from datetime import timedelta
 
 from . import config, state, telegram
+from .sources import telegram_web
 
 log = logging.getLogger("comments")
 
@@ -51,6 +59,13 @@ QUESTIONS: dict[str, tuple[str, ...]] = {
         "ваши ставки, чем это кончится",
         "кто-нибудь удивлён? я нет",
         "как думаете, это надолго",
+    ),
+    # Под сниппетом лежит сам кусок трека, и вопрос спрашивает про звук,
+    # а не про новость: рубрика у такого поста всё равно ИНФОПОВОД.
+    "snippet": (
+        "норм звучит?",
+        "берём или мимо?",
+        "ждём целиком или и так понятно",
     ),
     "meme": (
         "узнали кого-нибудь?",
@@ -173,9 +188,15 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
     # два сообщения, нет — одно), а здесь открывает ветку и даёт послушать,
     # не уводя из канала. Не ушёл — остаётся обычный вопрос.
     track = post.get("full_track_file_id", "")
+    # Сниппет живёт в чужом посте, и ссылку на файл Telegram выдаёт с временным
+    # ключом — берём её сейчас, а не при сборе: между сбором и выходом поста
+    # проходят часы. Большого файла превью не отдаёт, тогда остаётся вопрос.
+    snippet = telegram_web.snippet_video(post.get("source_url", "")) if post.get("snippet") else ""
     try:
         if track:
             telegram.send_audio(chat_id, track, question(rubric), reply_to=message_id)
+        elif snippet:
+            telegram.send_video_url(chat_id, snippet, question("snippet"), reply_to=message_id)
         else:
             telegram.send_message(chat_id, question(rubric), reply_to=message_id)
     except telegram.TelegramError as exc:
@@ -209,7 +230,33 @@ def _selftest() -> None:
         assert last_post() == {}
     finally:
         state.read_json = real_read
-    print("первый комментарий: пост находится по номеру пересылки")
+    # Под сниппетом первым комментарием идёт ролик из паблика, и ссылка на файл
+    # берётся в момент отправки: при сборе ключ в ней был бы уже просроченным.
+    sent: list[tuple] = []
+    posted = [{"file": "s.json", "rubric": "news", "published_at": state.iso()}]
+    snippet = {"message": {"message_id": 200}, "snippet": True,
+               "source_url": "https://t.me/rapsmi/1"}
+    state.read_json = lambda path, default=None: (
+        {"items": posted} if path == real_posted else snippet)
+    real_video, real_url, real_msg = (
+        telegram_web.snippet_video, telegram.send_video_url, telegram.send_message)
+    telegram_web.snippet_video = lambda url: "https://cdn.telesco.pe/x.mp4?token=k"
+    telegram.send_video_url = lambda chat, url, caption, reply_to=None: sent.append(("видео", url))
+    telegram.send_message = lambda chat, text, reply_to=None, **_: sent.append(("вопрос", text))
+    forwarded = {"chat": {"id": -100}, "message_id": 5, "forward_from_message_id": 200}
+    try:
+        assert seed(forwarded)
+        assert sent == [("видео", "https://cdn.telesco.pe/x.mp4?token=k")], sent
+        # Большого ролика превью не отдаёт — тогда остаётся обычный вопрос.
+        sent.clear()
+        telegram_web.snippet_video = lambda url: ""
+        assert seed(forwarded) and sent[0][0] == "вопрос", sent
+    finally:
+        state.read_json = real_read
+        telegram_web.snippet_video, telegram.send_video_url = real_video, real_url
+        telegram.send_message = real_msg
+
+    print("первый комментарий: пост находится по номеру пересылки, сниппет уходит роликом")
 
 
 if __name__ == "__main__":
