@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import struct
@@ -65,6 +66,22 @@ API = "https://api.telegram.org/bot{token}/{method}"
 # Ограничения Telegram: подпись к фото короче обычного сообщения.
 MAX_TEXT = 4096
 MAX_CAPTION = 1024
+
+
+def visible_len(text: str) -> int:
+    """Длина текста так, как её считает Telegram: после разбора HTML.
+
+    Теги и экранирование в лимит не входят — важно для строки площадок
+    (src/publish.listen): восемь ссылок занимают в разметке под шестьсот
+    символов, а на экране — полсотни. Считать сырую длину значит отказаться
+    от обложки на ровном месте: пост уходил текстом (проверено 12.09.2026).
+    """
+    return len(html.unescape(_TAG.sub("", text)))
+
+
+def clip(text: str, limit: int) -> str:
+    """Обрезает подпись по видимой длине, не кромсая разметку почём зря."""
+    return text if visible_len(text) <= limit else text[:limit]
 
 
 class TelegramError(RuntimeError):
@@ -205,7 +222,7 @@ def edit_caption(chat_id: str | int, message_id: int, caption: str, *, buttons: 
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "message_id": message_id,
-        "caption": sanitize(caption)[:MAX_CAPTION],
+        "caption": clip(sanitize(caption), MAX_CAPTION),
         "parse_mode": "HTML",
     }
     if buttons:
@@ -221,7 +238,7 @@ def send_photo_file(
     сами, публичной ссылки на неё нет — файл уходит прямо в загрузку."""
     payload = {
         "chat_id": chat_id,
-        "caption": sanitize(caption)[:MAX_CAPTION],
+        "caption": clip(sanitize(caption), MAX_CAPTION),
         "parse_mode": "HTML",
     }
     if buttons:
@@ -245,7 +262,7 @@ def send_video_file(chat_id: str, path: Path, caption: str, *, seconds: int = 0)
     with path.open("rb") as handle:
         payload = {
             "chat_id": chat_id,
-            "caption": sanitize(caption)[:MAX_CAPTION],
+            "caption": clip(sanitize(caption), MAX_CAPTION),
             "parse_mode": "HTML",
             "supports_streaming": True,
         }
@@ -287,7 +304,7 @@ def send_photo(
     payload = {
         "chat_id": chat_id,
         "photo": photo_url,
-        "caption": sanitize(caption)[:MAX_CAPTION],
+        "caption": clip(sanitize(caption), MAX_CAPTION),
         "parse_mode": "HTML",
     }
     if buttons:
@@ -423,7 +440,7 @@ def send_audio(
     """
     payload = {
         "chat_id": chat_id,
-        "caption": sanitize(caption)[:MAX_CAPTION],
+        "caption": clip(sanitize(caption), MAX_CAPTION),
         "parse_mode": "HTML",
     }
     if title:
@@ -605,6 +622,14 @@ def _selftest() -> None:
     assert sanitize("> цитата") == "цитата"
     # Неподдерживаемые теги вырезаются, полезные — нет.
     assert sanitize("<div>текст<br>ещё</div>") == "текст\nещё"
+
+    # Лимит подписи Telegram считает по видимому тексту: строка площадок
+    # занимает в разметке сотни символов, на экране — полсотни.
+    link = '<a href="https://music.apple.com/us/album/x?uo=4">Слушать в Apple Music</a>'
+    assert visible_len(link) == len("Слушать в Apple Music"), visible_len(link)
+    assert visible_len("Цена &lt; 100") == len("Цена < 100")
+    assert clip("а" * 30 + link, 60) == "а" * 30 + link
+    assert len(clip("а" * 90, 60)) == 60
     print("sanitize: все проверки прошли")
 
 

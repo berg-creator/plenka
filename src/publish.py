@@ -292,7 +292,7 @@ def send(post: dict, chat_id: str) -> dict | None:
     # трек уходит первым комментарием под постом (src/comments.py), а отрывок
     # магазина не уходит вовсе — вид ленты не должен зависеть от того, прислали
     # трек к этому релизу или нет.
-    if cover and len(text) <= telegram.MAX_CAPTION:
+    if cover and telegram.visible_len(text) <= telegram.MAX_CAPTION:
         try:
             # Рамка канала: рубрика сверху, подпись снизу. Не нарисовалась
             # (нет сети, битый файл) — обложка уходит как была.
