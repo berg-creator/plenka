@@ -487,19 +487,19 @@ def send_audio(
         payload["reply_parameters"] = json.dumps({"message_id": reply_to})
 
     files = {}
-    clip = audio if isinstance(audio, bytes) else None
-    if clip is None and audio.startswith("http"):
-        clip = _download(audio)
-        if not clip:
+    blob = audio if isinstance(audio, bytes) else None
+    if blob is None and audio.startswith("http"):
+        blob = _download(audio)
+        if not blob:
             # Отдавать Telegram ссылку магазина бесполезно: протухшую он не скачает,
             # а живую положит файлом без плеера. Пусть вызывающий откатится сам.
             raise TelegramError(f"отрывок не скачался: {audio[:80]}")
-    if clip:
-        name, mime = _audio_kind(clip)
+    if blob:
+        name, mime = _audio_kind(blob)
         payload["audio"] = "attach://audio"
-        files["audio"] = (name, clip, mime)
+        files["audio"] = (name, blob, mime)
         if mime == "audio/mp4":
-            seconds = seconds or _seconds(clip)
+            seconds = seconds or _seconds(blob)
     else:
         # file_id файла, который уже лежит у Telegram, уходит как есть.
         payload["audio"] = audio
@@ -679,6 +679,20 @@ def _selftest() -> None:
     # Рез посреди разметки: обрубок тега вырезан, открытое закрыто.
     assert clip("<b>" + "а" * 90, 60) == "<b>" + "а" * 57 + "</b>"
     assert clip("а" * 55 + link, 60) == "а" * 55
+
+    # Полный трек первым комментарием: file_id уходит строкой, подпись обрезается
+    # той самой clip(). 12.09.2026 локальная переменная с этим же именем затенила
+    # функцию, и дежурство падало на каждом посте о релизе.
+    calls: list[tuple] = []
+    real_call, globals()["_call"] = _call, lambda method, payload, files=None: (
+        calls.append((method, payload, files)) or {"message_id": 1})
+    try:
+        send_audio("-100", "FILE_ID", "Подпись", reply_to=7)
+    finally:
+        globals()["_call"] = real_call
+    method, payload, files = calls[0]
+    assert method == "sendAudio" and payload["audio"] == "FILE_ID" and files is None, calls[0]
+    assert payload["caption"] == "Подпись" and "reply_parameters" in payload, payload
     print("sanitize: все проверки прошли")
 
 
