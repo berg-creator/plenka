@@ -23,7 +23,7 @@ from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from . import config, stories
+from . import config, footage, stories
 
 # Вертикаль 4:5 — формат, который Telegram и ВКонтакте показывают крупно
 # и не режут в ленте.
@@ -101,17 +101,23 @@ def render(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА") -
     return img
 
 
-def photo_backdrop(photo_url: str) -> Image.Image | None:
+def photo_backdrop(source: str | Path) -> Image.Image | None:
     """Фотография во весь кадр 4:5 с уводом низа в чёрное.
 
     Общая для разбора бота (render_on_photo) и обложки поста (cover): скачать,
     обрезать и затемнить — одно действие, и в двух копиях они со временем разошлись бы.
+    Ссылка приходит от магазина, готовый файл — от footage (портрет артиста уже
+    скачан), поэтому берутся оба вида.
     """
     try:
-        response = requests.get(photo_url, timeout=30)
-        if response.status_code != 200:
-            return None
-        photo = Image.open(BytesIO(response.content)).convert("RGB")
+        if isinstance(source, Path):
+            data = source.read_bytes()
+        else:
+            response = requests.get(source, timeout=30)
+            if response.status_code != 200:
+                return None
+            data = response.content
+        photo = Image.open(BytesIO(data)).convert("RGB")
     except Exception:  # noqa: BLE001 — без картинки вызывающий уйдёт запасным путём
         return None
 
@@ -149,8 +155,19 @@ def cover(post: dict) -> Path | None:
     Артист и трек берутся из полей поста, а не из его текста: подпись под
     картинкой и так стоит рядом, и повторять её на самой картинке незачем.
     Нет обложки или не скачалась — None, и публикация уходит прежним путём.
+
+    У разборов (ОТКУДА НОГИ, МЕЖДУ СТРОК) обложки нет вовсе, а пост без медиа
+    в ленте проматывают — поэтому кадром становится фотография артиста,
+    упомянутого в тексте (footage.artist_image, тот же поиск, что у клипов).
+    Внизу тогда стоит его имя: лицо без подписи ленте ничего не говорит.
     """
-    img = photo_backdrop(post.get("cover", "")) if post.get("cover") else None
+    source: str | Path = post.get("cover", "")
+    artist, name = post.get("artist", ""), post.get("release") or post.get("track", "")
+    if not source:
+        text = post.get("text", "")
+        source, artist, name = footage.artist_image(text) or "", footage.find_artist(text), ""
+
+    img = photo_backdrop(source) if source else None
     if img is None:
         return None
 
@@ -161,8 +178,7 @@ def cover(post: dict) -> Path | None:
 
     # Подписывается сам релиз; ведущий трек — только когда названия релиза нет
     # (посты до 12.09.2026 его не сохраняли).
-    name = post.get("release") or post.get("track", "")
-    caption = " — ".join(part for part in (post.get("artist", ""), name) if part)
+    caption = " — ".join(part for part in (artist, name) if part)
     if caption:
         f, lines, size = _fit(
             draw, caption, HEIGHT * 0.3, ((88, 17), (74, 21), (62, 25), (52, 30))

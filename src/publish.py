@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from . import card, config, state, telegram
+from . import card, config, footage, state, telegram
 from .sources import deezer, itunes
 
 log = logging.getLogger("publish")
@@ -288,24 +288,31 @@ def send(post: dict, chat_id: str) -> dict | None:
         and releases_today(loud=True) >= config.RELEASE_LOUD_PER_DAY
     )
 
-    # Пост — всегда одна плитка ленты: обложка в рамке, текст, ссылки на площадки
+    # Пост — всегда одна плитка ленты: картинка в рамке, текст, ссылки на площадки
     # строкой в нём же. Плеера рядом нет (решение владельца 12.09.2026): полный
     # трек уходит первым комментарием под постом (src/comments.py), а отрывок
     # магазина не уходит вовсе — вид ленты не должен зависеть от того, прислали
     # трек к этому релизу или нет.
-    if cover and telegram.visible_len(text) <= telegram.MAX_CAPTION:
-        try:
-            # Рамка канала: рубрика сверху, подпись снизу. Не нарисовалась
-            # (нет сети, битый файл) — обложка уходит как была.
-            framed = card.cover(post)
-            if framed:
-                photo = telegram.send_photo_file(chat_id, framed, text, quiet=quiet)
-            else:
-                photo = telegram.send_photo(chat_id, cover, text, quiet=quiet)
-            return _where(photo, "caption")
-        except telegram.TelegramError as exc:
-            # Обложка могла протухнуть — текст уходит обычным сообщением.
-            log.warning("Фото не ушло (%s), текст уходит сообщением", exc)
+    #
+    # Картинка нужна любому посту: без медиа его в ленте проматывают. У релиза
+    # это обложка, у разбора — фотография артиста из текста (card.cover).
+    # Мем сюда доходит только когда своя картинка не нарисовалась, и чужое лицо
+    # к нему не клеим: шутка уходит текстом.
+    if telegram.visible_len(text) <= telegram.MAX_CAPTION:
+        # Рамка канала: рубрика сверху, подпись снизу. Не нарисовалась
+        # (нет сети, не нашли артиста) — обложка уходит как была, а без неё
+        # пост идёт текстом.
+        framed = card.cover(post) if rubric != "meme" else None
+        if framed or cover:
+            try:
+                if framed:
+                    photo = telegram.send_photo_file(chat_id, framed, text, quiet=quiet)
+                else:
+                    photo = telegram.send_photo(chat_id, cover, text, quiet=quiet)
+                return _where(photo, "caption")
+            except telegram.TelegramError as exc:
+                # Обложка могла протухнуть — текст уходит обычным сообщением.
+                log.warning("Фото не ушло (%s), текст уходит сообщением", exc)
 
     return _where(telegram.send_message(chat_id, text, quiet=quiet), "text")
 
@@ -392,8 +399,8 @@ def _selftest() -> None:
     from unittest import mock
 
     sent: list[tuple] = []
-    real = (card.cover, telegram.send_photo, telegram.send_audio, telegram.send_message, state.now,
-            config.QUEUE, config.ARCHIVE, config.POSTED_FILE)
+    real = (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
+            telegram.send_message, state.now, config.QUEUE, config.ARCHIVE, config.POSTED_FILE)
     card.cover = lambda post: None
 
     # Запись: что ушло, подпись, без звука ли, есть ли кнопки. id сообщения — его номер.
@@ -407,6 +414,8 @@ def _selftest() -> None:
         return message("фото", caption, quiet, bool(buttons))
 
     telegram.send_photo = photo
+    telegram.send_photo_file = lambda chat, path, caption, buttons=None, quiet=False, **_: message(
+        "кадр", caption, quiet, bool(buttons))
     telegram.send_audio = lambda chat, audio, caption, buttons=None, quiet=False, **_: message(
         "плеер", caption, quiet, bool(buttons))
     telegram.send_message = lambda chat, text, buttons=None, quiet=False, **_: message(
@@ -449,9 +458,22 @@ def _selftest() -> None:
         assert sent == [("текст", "Текст.", False, False)], sent
         assert where == {"chat": -100, "message_id": 1, "kind": "text", "buttons": []}, where
         sent.clear()
-        # Без обложки — тоже текст обычным сообщением.
+        # Без обложки и без кадра — текст обычным сообщением.
         where = send({**post, "cover": ""}, "0")
         assert sent == [("текст", "Текст.", False, False)] and where["kind"] == "text", where
+        sent.clear()
+
+        # Разбор приходит без обложки, но кадр ему находит card.cover по тексту:
+        # пост без картинки в ленте проматывают.
+        card.cover = lambda post: Path("кадр.jpg") if post.get("rubric") != "meme" else None
+        where = send({"text": "Текст.", "rubric": "lineage"}, "0")
+        assert sent == [("кадр", "Текст.", False, False)], sent
+        assert where["kind"] == "caption", where
+        sent.clear()
+        # А мему чужое лицо не клеим: своя картинка не нарисовалась — уходит текстом.
+        send({"text": "Текст.", "rubric": "meme", "top": "ВЕРХ", "bottom": "НИЗ"}, "0")
+        assert sent == [("текст", "ВЕРХ\nНИЗ\n\nТекст.", False, False)], sent
+        card.cover = lambda post: None
 
         # В канал: сообщение с текстом ложится в архивный JSON, текст — как был.
         state.write_json(config.QUEUE / "0-release.json", post)
@@ -526,8 +548,8 @@ def _selftest() -> None:
         ]
         print("выходы релизов: сутки, окно на трек, звук у трёх, обычный слот уступает")
     finally:
-        (card.cover, telegram.send_photo, telegram.send_audio, telegram.send_message, state.now,
-         config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real
+        (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
+         telegram.send_message, state.now, config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real
         tmp.cleanup()
 
     def links(text: str) -> dict[str, str]:
@@ -628,7 +650,10 @@ def main() -> int:
             loud = not quiet_hours and count < config.RELEASE_LOUD_PER_DAY
             print(f"Звук: {'да' if loud else 'нет'} (со звуком за московские сутки: {count}"
                   f"{', сейчас тихие часы' if quiet_hours else ''})")
-        print(f"Обложка: {post.get('cover') or 'нет'}")
+        # Картинку видно и без сети: имя артиста ищется в тексте тем же поиском,
+        # что при отправке скачает фотографию (card.cover → footage.artist_image).
+        portrait = "" if post.get("rubric") == "meme" else footage.find_artist(post.get("text", ""))
+        print(f"Картинка: {post.get('cover') or (f'портрет артиста — {portrait}' if portrait else 'нет')}")
         if post.get("full_track_file_id"):
             full = "есть — уйдёт полным треком, а не отрывком"
         elif post.get("track_request"):
@@ -636,14 +661,20 @@ def main() -> int:
         else:
             full = "нет"
         print(f"Полный трек: {full}")
-        if post.get("cover"):
+        shown = listen(post.get("text", ""), post.get("artist", ""), release_title(post))
+        if telegram.visible_len(shown) > telegram.MAX_CAPTION:
+            print(f"Вид: текстом — подпись к фото не больше {telegram.MAX_CAPTION} знаков, "
+                  f"а в посте {telegram.visible_len(shown)}")
+        elif post.get("cover") or portrait:
             track = " · полный трек уйдёт первым комментарием" if post.get("full_track_file_id") else ""
-            print(f"Вид: обложка в рамке с текстом, одним сообщением{track}")
+            print(f"Вид: картинка в рамке с текстом, одним сообщением{track}")
+        else:
+            print("Вид: текстом — картинки нет")
         print()
         if post.get("rubric") == "meme":
             print(f"Картинка: {post.get('picture') or 'нет — уйдёт текстом'}")
             print(f"Сверху: {post.get('top', '')}\nСнизу: {post.get('bottom', '')}\n")
-        print(listen(post.get("text", ""), post.get("artist", ""), release_title(post)))
+        print(shown)
         return 0
 
     # Выход релиза интервала не ждёт: его срок — сутки от выхода релиза.
