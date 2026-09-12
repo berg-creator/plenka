@@ -23,9 +23,36 @@ ALLOWED_TAGS = {
 _BR = re.compile(r"<\s*br\s*/?\s*>", re.IGNORECASE)
 _P_CLOSE = re.compile(r"<\s*/\s*p\s*>", re.IGNORECASE)
 _TAG = re.compile(r"<\s*/?\s*([a-zA-Z][a-zA-Z0-9-]*)[^>]*>")
+_CLOSING = re.compile(r"<\s*/")
 # Всё, что похоже на тег, разбирает _TAG выше; уцелевший «<» — это просто знак
 # «меньше», и Telegram считает его началом тега, отвечая ошибкой разбора.
 _BARE_LT = re.compile(r"<(?!\s*/?\s*[a-zA-Z][a-zA-Z0-9-]*[^>]*>)")
+
+
+def _balance(text: str) -> str:
+    """Закрывает теги, которые модель открыла и забыла, и срезает лишние закрытия.
+
+    На «<b>жир» без пары Telegram отвечает «can't find end tag», на «<i>x</b>» —
+    тем же, и пост не уходит вообще: ни в канал, ни в архив, молча (проверено
+    на Bot API 10.09.2026). Досчитать пары дешевле, чем повторять запрос без
+    разметки: лишнего запроса нет, а пост сохраняет жир и ссылки.
+
+    Внахлёст («<b><i>x</b></i>») лишнее закрытие вырезается, а хвост
+    дописывается в конце — разметка та же, порядок вложения выправлен.
+    """
+    open_tags: list[str] = []
+
+    def pair(match: re.Match[str]) -> str:
+        name = match.group(1).lower()
+        if _CLOSING.match(match.group(0)):
+            if not open_tags or open_tags[-1] != name:
+                return ""
+            open_tags.pop()
+        else:
+            open_tags.append(name)
+        return match.group(0)
+
+    return _TAG.sub(pair, text) + "".join(f"</{name}>" for name in reversed(open_tags))
 
 
 def sanitize(text: str) -> str:
@@ -59,7 +86,9 @@ def sanitize(text: str) -> str:
     text = re.sub(r"(?<=[^\s>\n])(<a\s+href=)", r"\n\n\1", text)
 
     # Схлопываем лишние пустые строки, появившиеся после вырезанных тегов.
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    # Пары досчитываются последними: хвост закрытий дописывается за текстом,
+    # уже обрезанным по краям.
+    return _balance(re.sub(r"\n{3,}", "\n\n", text).strip())
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
@@ -80,8 +109,15 @@ def visible_len(text: str) -> int:
 
 
 def clip(text: str, limit: int) -> str:
-    """Обрезает подпись по видимой длине, не кромсая разметку почём зря."""
-    return text if visible_len(text) <= limit else text[:limit]
+    """Обрезает подпись по видимой длине, не кромсая разметку почём зря.
+
+    Рез приходится на сырой текст, поэтому он может прийтись и на середину
+    тега: обрубок вырезаем, а незакрытое досчитываем — иначе Telegram ответит
+    ошибкой разбора и подпись не уйдёт вовсе.
+    """
+    if visible_len(text) <= limit:
+        return text
+    return _balance(re.sub(r"<[^>]*$", "", text[:limit]))
 
 
 class TelegramError(RuntimeError):
@@ -623,6 +659,16 @@ def _selftest() -> None:
     # Неподдерживаемые теги вырезаются, полезные — нет.
     assert sanitize("<div>текст<br>ещё</div>") == "текст\nещё"
 
+    # Незакрытый и перекрёстный тег Telegram не прощает: «can't find end tag»,
+    # и пост не уходит вовсе. Досчитываем пары сами.
+    assert sanitize("незакрытый <b>жир") == "незакрытый <b>жир</b>"
+    assert sanitize("<i>курсив</b>") == "<i>курсив</i>"
+    assert sanitize("хвост </b> без начала") == "хвост  без начала"
+    assert sanitize("<b><i>внахлёст</b></i>") == "<b><i>внахлёст</i></b>"
+    assert sanitize('<a href="https://x.ru">ссылка') == '<a href="https://x.ru">ссылка</a>'
+    # Закрытия дописываются за текстом, а не за пустыми строками в конце.
+    assert sanitize("<b>жир\n\n") == "<b>жир</b>"
+
     # Лимит подписи Telegram считает по видимому тексту: строка площадок
     # занимает в разметке сотни символов, на экране — полсотни.
     link = '<a href="https://music.apple.com/us/album/x?uo=4">Слушать в Apple Music</a>'
@@ -630,6 +676,9 @@ def _selftest() -> None:
     assert visible_len("Цена &lt; 100") == len("Цена < 100")
     assert clip("а" * 30 + link, 60) == "а" * 30 + link
     assert len(clip("а" * 90, 60)) == 60
+    # Рез посреди разметки: обрубок тега вырезан, открытое закрыто.
+    assert clip("<b>" + "а" * 90, 60) == "<b>" + "а" * 57 + "</b>"
+    assert clip("а" * 55 + link, 60) == "а" * 55
     print("sanitize: все проверки прошли")
 
 
