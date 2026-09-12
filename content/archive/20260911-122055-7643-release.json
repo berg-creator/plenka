@@ -3,6 +3,12 @@
   "cover": "https://cdn-images.dzcdn.net/images/cover/449cf119cc9542ffe8e0b931ad1a03ca/500x500-000000-80-0-0.jpg",
   "created_at": "2026-09-11T12:20:55+00:00",
   "full_track_file_id": "CQACAgIAAxkDAAICS2qkFeFZMZXVtDJdchQOhfXRHrl8AAK8pQACPvAgSa1bb4GHzypEPQQ",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 107
+  },
   "preview": "https://cdnt-preview.dzcdn.net/api/1/1/1/8/f/0/18f2a281215f2c6794fb9d0f2c2826b1.mp3?hdnea=exp=1789102913~acl=/api/1/1/1/8/f/0/18f2a281215f2c6794fb9d0f2c2826b1.mp3*~data=user_id=0,application_id=42~hmac=ceabf2cabfdba21c8547bef9a6daeccbb00923941fa27c0d0f9229f1e9e28212",
   "rubric": "release",
   "source_url": "https://www.deezer.com/album/1075958622",
