@@ -425,6 +425,12 @@
       "file": "20260911-163734-3647-release.json",
       "published_at": "2026-09-12T00:40:13+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20260911-081829-1573-verdict.json",
+      "published_at": "2026-09-12T05:07:06+00:00",
+      "rubric": "verdict"
     }
   ]
 }

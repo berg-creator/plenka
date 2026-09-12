@@ -3,6 +3,12 @@
   "cover": "https://cdn-images.dzcdn.net/images/cover/7ffbc61f256eb9f2cae37a071a9eeb7d/500x500-000000-80-0-0.jpg",
   "created_at": "2026-09-11T08:18:29+00:00",
   "full_track_file_id": "CQACAgIAAxkDAAICSmqkFdYvYgPei0YIQyjB7se4D46gAAK7pQACPvAgSUPXdudQXCD4PQQ",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "text",
+    "message_id": 106
+  },
   "preview": "https://cdnt-preview.dzcdn.net/api/1/1/6/0/f/0/60f4d60fff3f3eca17e5672eed620b4e.mp3?hdnea=exp=1789102892~acl=/api/1/1/6/0/f/0/60f4d60fff3f3eca17e5672eed620b4e.mp3*~data=user_id=0,application_id=42~hmac=875f2aa218cad17bd578e8ef061d76e378e5ce9d1ff599d9584c52b967ae0e1b",
   "rubric": "verdict",
   "source_url": "https://www.deezer.com/album/1075976302",
