@@ -274,11 +274,15 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
         sound = INVENTED_SOUND.findall(own)
         if sound:
             issues.append(f"выдуманное звучание: {_quoted(sound)} — релиз никто не слушал, ни звука, ни текстов в данных нет")
-        heard = INVENTED_LISTENING.findall(own)
+        # Эти две не зависят от данных: своё прослушивание и чужой мотив —
+        # выдумка при любом payload. Поэтому по всему тексту, а не по own:
+        # 11.09.2026 автопилот точности вписал в правку «Дослушал до конца»
+        # из образца voice.md, а его --check зовёт problems() без данных.
+        heard = INVENTED_LISTENING.findall(own or text_only)
         if heard:
             issues.append(f"выдуманное прослушивание: {_quoted(heard)} — релиз никто не включал, "
                           "о своих впечатлениях не пиши")
-        motive = INVENTED_MOTIVE.findall(own)
+        motive = INVENTED_MOTIVE.findall(own or text_only)
         if motive:
             issues.append(f"выдуманные намерения: {_quoted(motive)} — зачем записан релиз, "
                           "в данных нет, пиши о том, что вышло")
@@ -399,6 +403,13 @@ def _selftest() -> None:
               "Одному нужна была песня с названием покруче, другому — повод напомнить о себе.")
     assert any(p.startswith("выдуманные намерения") for p in problems(motive, "release", single)), \
         problems(motive, "release", single)
+    # Правку автопилота точности --check судит без данных, а прослушивание
+    # он вписывал сам (11.09.2026, «Дослушал до конца» из образца voice.md).
+    assert any(p.startswith("выдуманное прослушивание") for p in problems(heard, "verdict", None)), \
+        problems(heard, "verdict", None)
+    assert any(p.startswith("выдуманные намерения") for p in problems(motive, "release", None)), \
+        problems(motive, "release", None)
+
     asked = ("<b>OG BUDA & JEKIE DUGN ЗАПИСАЛИ ДЖЕКИ БУДЕК</b>\n\n"
              "Два имени в подписи, один трек в релизе: 2:51, и это всё.\n\n"
              "кто уже включил — как оно?")
