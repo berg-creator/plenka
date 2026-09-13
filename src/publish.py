@@ -108,11 +108,27 @@ def due(post: dict) -> bool:
     в пятницу девять выходов кончаются к полудню, и вечерние слоты добавили бы
     ленте ещё два поста сверх девяти. Решения владельца от 11.09.2026.
     Годовщину это не касается: завтра она уже не годовщина.
+
+    Обычных постов за сутки — столько, сколько прошло часов config.PUBLISH_HOURS_MSK:
+    дежурство проверяет выход каждые 10 минут, и без этого счёта лента получала бы
+    пост каждые три часа. Ночью обычный пост не выходит вовсе.
     """
-    if post.get("rubric") != "legend" and releases_today() > config.RELEASE_LOUD_PER_DAY:
-        return False
+    from .compose import MSK
+
     posted = state.read_json(config.POSTED_FILE, {"items": []})
     items = posted.get("items", [])
+    if post.get("rubric") != "legend":
+        now = state.now().astimezone(MSK)
+        if night(now) or releases_today() > config.RELEASE_LOUD_PER_DAY:
+            return False
+        regular = sum(
+            1 for item in items
+            if item.get("rubric") not in (*config.RELEASE_RUBRICS, "news")
+            and (moment := state._parse(item.get("published_at", "")))
+            and moment.astimezone(MSK).date() == now.date()
+        )
+        if regular >= sum(hour <= now.hour for hour in config.PUBLISH_HOURS_MSK):
+            return False
     if not items:
         return True
 
@@ -550,6 +566,20 @@ def _selftest() -> None:
         assert due({"rubric": "meme"})
         posted(*[("release", ago(hours=h)) for h in (8, 7, 6, 5)])
         assert not due({"rubric": "meme"}) and due({"rubric": "legend"})
+
+        # Обычные посты — по часам выхода: в 18:00 МСК прошло три часа из четырёх.
+        # Пропущенный наверстывается, лишний ждёт 21:00; новости и вчерашнее не в счёт.
+        posted(("meme", ago(hours=8)), ("news", ago(hours=6)), ("lineage", ago(hours=4)))
+        assert due({"rubric": "meme"})
+        posted(("meme", ago(hours=9)), ("meme", ago(hours=6)), ("lineage", ago(hours=4)))
+        assert not due({"rubric": "meme"})
+        posted(*[("meme", ago(hours=h)) for h in (26, 24, 22, 20)])
+        assert due({"rubric": "meme"})
+        # Ночью (00:30 МСК) обычный пост не выходит, годовщина — выходит.
+        state.now = lambda: datetime(2026, 9, 11, 21, 30, tzinfo=timezone.utc)
+        posted()
+        assert not due({"rubric": "meme"}) and due({"rubric": "legend"})
+        state.now = lambda: now
 
         for name, item in {
             "1-meme.json": {"rubric": "meme", "created_at": ago(days=6)},

@@ -3,7 +3,8 @@ name: Срочные новости
 # Свежий обход лент и посты по инфоповодам — сразу в канал, минуя очередь.
 # Новость, дождавшаяся своей очереди, новостью быть перестаёт, поэтому здесь
 # нет ни модерации, ни задержки: владельцу уходит уведомление уже постфактум.
-# Следом — посты о свежих релизах: выходят своим выходом (publish.yml, раз в час).
+# Следом — посты о свежих релизах: их выпускает дежурство (moderate.yml, раз в час).
+# За заход выходит одна новость (config.URGENT_PER_RUN), сниппеты и сцена — первыми.
 on:
   schedule:
     # Три захода: утро (ночные новости), день и вечер. Событие, случившееся
@@ -13,9 +14,9 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: "Сколько новостей взять за раз"
+        description: "Сколько новостей опубликовать за раз"
         type: string
-        default: "3"
+        default: "1"
 
 concurrency:
   group: state-write
@@ -59,7 +60,7 @@ jobs:
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          COUNT: ${{ inputs.count || '3' }}
+          COUNT: ${{ inputs.count || '1' }}
         run: python -m src.urgent -n "$COUNT"
 
       # Релиз, как и новость, ценен в день выхода (решение владельца от 11.09.2026):

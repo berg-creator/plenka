@@ -471,30 +471,39 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
     return handled, served, last_id
 
 
-def release_shift() -> None:
-    """Выход свежего релиза — из дежурства, а не по ежечасному крону.
+def publish_shift() -> None:
+    """Выход постов — из дежурства, а не по крону.
 
     Крон publish.yml занимал общую группу state-write, где GitHub держит только
     один ожидающий запуск: выход релиза в :50 вытеснял из очереди сбор новинок
-    или срочные новости, и находка опаздывала на шесть часов. Дежурство и так
-    публикует по кнопке и пушит состояние, а интервал между релизами считает
-    publish.release_due по журналу публикаций.
+    или срочные новости, и находка опаздывала на шесть часов. Обычные слоты
+    GitHub и вовсе создавал через раз: 13.09.2026 из четырёх вышел один.
+    Дежурство идёт почти без дыр и так публикует по кнопке и пушит состояние,
+    а когда пора — считают publish.release_due и publish.due по журналу публикаций.
+
+    Сначала релиз: он свежий, а обычный пост вечнозелёный. Обычный пост — только
+    в канал: владельцу на утверждение журнал не пишется, и due слал бы ему
+    по посту каждые 10 минут. Крона у publish.yml больше нет: два публикатора
+    на одной очереди выпустили бы один пост дважды.
 
     Поломка выхода смену не роняет: бот важнее одного поста, следующий заход
     через PUSH_EVERY попробует снова.
     """
     target = os.environ.get("PUBLISH_TARGET", "admin")
-    if not publish.release_due():
-        return
-    path = publish.next_post(releases=True, skip_sent=target == "admin")
+    path = publish.next_post(releases=True, skip_sent=target == "admin") if publish.release_due() else None
+    label = "Выход релиза"
+    if path is None and target == "channel":
+        path, label = publish.next_post(), "Выход поста"
+        if path is not None and not publish.due(state.read_json(path, {})):
+            path = None
     if path is None:
         return
     try:
         publish.deliver(state.read_json(path, {}), path, target)
     except telegram.TelegramError as exc:
-        log.error("Выход релиза не удался (%s): %s", path.name, exc)
+        log.error("%s не удался (%s): %s", label, path.name, exc)
         return
-    print(f"Выход релиза: {path.name} → {target}")
+    print(f"{label}: {path.name} → {target}")
 
 
 def serve(minutes: int) -> int:
@@ -541,7 +550,7 @@ def serve(minutes: int) -> int:
             service.save_state(limits)
 
         if time.monotonic() >= next_push:
-            release_shift()
+            publish_shift()
             push_state()
             next_push = time.monotonic() + PUSH_EVERY
             if code_changed():
@@ -583,9 +592,9 @@ def push_state() -> None:
     if not os.environ.get("GITHUB_ACTIONS"):
         return
 
-    # content/ тоже: кнопки и присланные треки меняют посты, а публикатор
-    # по расписанию берёт их из git, а не с диска дежурства. Без этого удалённый
-    # кнопкой пост до конца смены оставался бы в очереди для публикатора.
+    # content/ тоже: кнопки, выходы и присланные треки меняют посты, а генерация
+    # и автопилот точности берут их из git, а не с диска дежурства. Без этого удалённый
+    # кнопкой пост до конца смены оставался бы в очереди для генерации.
     _push_repo(config.ROOT, ["data/", "content/"], "дежурство: разборы и состояние бота")
 
     # Списки слежения живут в отдельном приватном репозитории — он с этим
@@ -814,6 +823,21 @@ def _selftest() -> int:
         config.ARCHIVE, config.POSTED_FILE = real
         tmp.cleanup()
     print("первый комментарий: вопрос под обычным постом, полный трек — под релизом")
+
+    # Выход из дежурства: релиз первым; обычный пост — только в канал и когда пора.
+    delivered = []
+    for release_due, due, target in ((True, True, "channel"), (False, True, "channel"),
+                                     (False, False, "channel"), (False, True, "admin")):
+        with (mock.patch.object(publish, "release_due", lambda: release_due),
+              mock.patch.object(publish, "due", lambda post: due),
+              mock.patch.object(publish, "next_post", lambda releases=False, **_: Path(f"{releases}.json")),
+              mock.patch.object(publish, "deliver", lambda post, path, to: delivered.append((path.name, to))),
+              mock.patch.object(state, "read_json", lambda path, default: {}),
+              mock.patch.dict(os.environ, {"PUBLISH_TARGET": target}),
+              contextlib.redirect_stdout(io.StringIO())):
+            publish_shift()
+    assert delivered == [("True.json", "channel"), ("False.json", "channel")], delivered
+    print("выход из дежурства: релиз первым, обычный пост — в канал по часам")
     return 0
 
 

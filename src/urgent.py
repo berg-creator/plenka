@@ -20,7 +20,8 @@
     python -m src.urgent --dry-run             что нашлось, без затрат
     python -m src.urgent                       написать и опубликовать в канал
     python -m src.urgent --target admin        то же, но себе в личку с кнопками
-    python -m src.urgent -n 5                  взять за раз больше новостей
+    python -m src.urgent -n 5                  опубликовать за раз больше новостей
+    python -m src.urgent --selftest            порядок срочного и замена отброшенной — без сети
 """
 
 from __future__ import annotations
@@ -104,15 +105,23 @@ def with_portrait(item: dict) -> dict:
     return item
 
 
+def priority(item: dict) -> tuple:
+    """Порядок срочного: сниппет, потом русская сцена из Telegram-каналов изданий,
+    потом остальное; внутри — свежее раньше.
+
+    Одна свежесть отдавала места западной эстраде: 11–13.09.2026 в канал ушли
+    Slipknot, Mastodon и Turnstile, а сниппет ICEGERGERT трижды проиграл новостям
+    посвежее (Charli XCX, Lady Gaga) и протух. Русские RSS (Интермедиа) — это
+    эстрада, модель их отбрасывает, поэтому сцена здесь — именно Telegram.
+    """
+    return bool(item.get("snippet")), item.get("source") == "telegram", item.get("released_at") or ""
+
+
 def run(limit: int, dry_run: bool, target: str) -> int:
-    # Свежесть решает: сначала самые новые, а уже потом те, что интереснее
-    # по нашим меткам. Иначе горячая новость без знакомых имён проигрывает
-    # вчерашней про артиста из списка слежения.
-    news = sorted(
-        fresh_news(config.URGENT_MAX_AGE_HOURS),
-        key=lambda i: i.get("released_at") or "",
-        reverse=True,
-    )[:limit]
+    # Отброшенная моделью новость места не занимает: берём следующую, пока
+    # не выйдет limit постов. Попыток втрое больше — столько запуск и тратил,
+    # когда брал три новости сразу.
+    news = sorted(fresh_news(config.URGENT_MAX_AGE_HOURS), key=priority, reverse=True)[:limit * 3]
     if not news:
         print("Свежих новостей нет — inbox пуст или всё уже разобрано.")
         return 0
@@ -121,13 +130,15 @@ def run(limit: int, dry_run: bool, target: str) -> int:
         for item in news:
             print(f"  [{item.get('score', 0):>3}] {item.get('outlet', '')}: "
                   f"{item.get('title', '')[:70]}")
-        print(f"\nВышло бы в канал: {len(news)}. Модель не вызывалась.")
+        print(f"\nВышло бы в канал: до {limit}, по порядку, пока модель не возьмёт. Модель не вызывалась.")
         return 0
 
     chat = config.secret("TELEGRAM_CHANNEL_ID" if target == "channel" else "TELEGRAM_ADMIN_ID")
     sent, used, titles = 0, [], []
 
     for item in news:
+        if sent >= limit:
+            break
         result = compose.generate_checked("news", compose._news_payload(item))
 
         if result["skip"] or not result["text"]:
@@ -171,6 +182,41 @@ def run(limit: int, dry_run: bool, target: str) -> int:
     return 0
 
 
+def _selftest() -> int:
+    """Сниппет и сцена раньше свежей западной новости; отброшенная моделью
+    уступает место следующей, и выходит ровно limit постов."""
+    from pathlib import Path
+    from unittest import mock
+
+    items = [
+        {"fingerprint": "west", "source": "rss", "released_at": "2026-09-12T19:00"},
+        {"fingerprint": "scene", "source": "telegram", "released_at": "2026-09-12T10:00"},
+        {"fingerprint": "snippet", "source": "telegram", "snippet": True, "released_at": "2026-09-11T21:00"},
+        {"fingerprint": "west-old", "source": "rss", "released_at": "2026-09-12T08:00"},
+    ]
+    assert [i["fingerprint"] for i in sorted(items, key=priority, reverse=True)] == \
+        ["snippet", "scene", "west", "west-old"]
+
+    asked, used = [], []
+    def generate(rubric: str, payload: dict) -> dict:
+        asked.append(payload["fingerprint"])
+        return {"skip": payload["fingerprint"] == "snippet", "text": "Текст.", "reason": "мимо"}
+
+    with (mock.patch.object(config, "secret", lambda name: "0"),
+          mock.patch.object(compose, "generate_checked", generate),
+          mock.patch.object(compose, "_news_payload", lambda item: item),
+          mock.patch.object(compose, "save_post", lambda *a, **k: Path("post.json")),
+          mock.patch.object(compose, "mark_used", used.extend),
+          mock.patch.object(state, "read_json", lambda path, default: {}),
+          mock.patch.object(publish, "send_for_approval", lambda *a, **k: None),
+          # globals(), а не «src.urgent»: под -m модуль живёт как __main__.
+          mock.patch.dict(globals(), {"fresh_news": lambda hours: items, "with_portrait": lambda item: item})):
+        run(1, False, "admin")
+    assert asked == ["snippet", "scene"] and used == ["snippet", "scene"], (asked, used)
+    print("срочное: сниппет и сцена первыми, отброшенная уступает место следующей")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Срочные новости в день события")
     parser.add_argument("--dry-run", action="store_true", help="показать находки без затрат")
@@ -185,9 +231,12 @@ def main() -> int:
         type=int,
         default=config.URGENT_PER_RUN,
         metavar="N",
-        help=f"сколько новостей взять за раз (по умолчанию {config.URGENT_PER_RUN})",
+        help=f"сколько новостей опубликовать за раз (по умолчанию {config.URGENT_PER_RUN})",
     )
+    parser.add_argument("--selftest", action="store_true", help="порядок срочного и замена отброшенной — без сети")
     args = parser.parse_args()
+    if args.selftest:
+        return _selftest()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()

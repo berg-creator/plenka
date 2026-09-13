@@ -104,9 +104,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
-          # Смена выпускает и посты о свежих релизах — раз в час, мимо слотов
-          # (src/moderate.py, release_shift). Куда: та же переменная, что
-          # у публикатора по расписанию.
+          # Смена выпускает посты: о свежих релизах — раз в час, мимо слотов,
+          # обычные — по часам config.PUBLISH_HOURS_MSK (src/moderate.py,
+          # publish_shift). Куда: та же переменная, что у ручного publish.yml.
           PUBLISH_TARGET: ${{ vars.PUBLISH_TARGET || 'admin' }}
           # Кнопка «В канал» публикует и во ВКонтакте тоже
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
