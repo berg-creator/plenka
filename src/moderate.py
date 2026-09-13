@@ -27,6 +27,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -87,6 +88,9 @@ def handle(action: str, post_id: str) -> str:
 # wav, opus из webm, alac — сжимается в AAC.
 PLAYABLE = {"mp3": ".mp3", "aac": ".m4a"}
 
+WAIT_FILE = ("Жду аудиофайл: пришли сам трек ответом на запрос — mp3, m4a, видео "
+             "или документом. По ссылке бот трек не скачивает.")
+
 
 def track_file(message: dict) -> dict:
     """Файл со звуком из сообщения: музыка, видео или документ аудио- или видеотипа.
@@ -116,9 +120,16 @@ def _ff(tool: str, *args: str) -> str:
     return result.stdout
 
 
+def _song_name(name: str) -> str:
+    """Название без хвостов магазина: «Сияй (feat. X)» и «Сияй - Single» — это «сияй»."""
+    return re.split(r"\s+[-–(\[]|\s*[(\[]", name, maxsplit=1)[0].casefold().strip()
+
+
 def _store_cover(post: dict) -> str:
     """Обложка из iTunes по артисту и названию — последний шанс, когда её нет
-    ни в посте, ни в файле. Артист сверяется точно: чужая обложка хуже никакой."""
+    ни в посте, ни в файле. Сверяются и артист, и трек: поиск охотно отдаёт
+    другую песню того же артиста, а с ней обложку другого релиза. Чужая обложка
+    хуже никакой."""
     try:
         results = requests.get(
             "https://itunes.apple.com/search",
@@ -129,9 +140,11 @@ def _store_cover(post: dict) -> str:
     except Exception:  # noqa: BLE001 — без обложки трек всё равно принимается
         return ""
     artist = post.get("artist", "").casefold().strip()
+    track = _song_name(post.get("track", ""))
     return next(
         (item.get("artworkUrl100", "").replace("100x100", "600x600") for item in results
-         if item.get("artistName", "").casefold().strip() == artist),
+         if item.get("artistName", "").casefold().strip() == artist
+         and track and _song_name(item.get("trackName", "")) == track),
         "",
     )
 
@@ -368,6 +381,20 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     log.error("Трек не приложен: %s", exc)
                 continue
 
+            # Текст или ссылка ответом на запрос трека: сервис принял бы это
+            # за просьбу о разборе, а владелец ждал бы, что трек принят.
+            if (
+                message.get("reply_to_message")
+                and str(admin) == str(message.get("from", {}).get("id")) == str(
+                    message.get("chat", {}).get("id")
+                )
+                and _post_by_request(message["reply_to_message"]["message_id"])
+            ):
+                print("  не файл в ответ на запрос трека")
+                if not args.dry_run:
+                    telegram.send_message(admin, WAIT_FILE)
+                continue
+
             if args.dry_run:
                 print(f"  сообщение от {message.get('from', {}).get('id')}: "
                       f"{(message.get('text') or '')[:60]}")
@@ -593,6 +620,13 @@ def _push_repo(cwd, paths: list[str], message: str) -> None:
             if command[1] == "commit":
                 continue
             log.warning("git %s: %s", command[1], result.stderr.strip()[:200])
+            if command[1] == "pull":
+                # Конфликт оставляет ребейз висеть: дерево застревает посреди
+                # чужих коммитов до конца смены, и всё, что дежурство запишет
+                # дальше, не уйдёт. Откат возвращает свой коммит и спрятанное;
+                # следующий push_state попробует снова.
+                subprocess.run(["git", "rebase", "--abort"], cwd=cwd, capture_output=True)
+                log.error("git pull: ребейз не сошёлся и откачен, состояние уйдёт следующей попыткой")
             return
 
 
@@ -662,13 +696,55 @@ def _selftest() -> int:
     # Больше 20 МБ не качаем: ответ сразу, без сети и без поиска поста.
     big = reply(1, document={"file_id": "b", "mime_type": "audio/flac", "file_size": 21 * 2**20})
     assert "больше 20 МБ" in attach_track(big, "1")
+
+    # Обложка iTunes: хвосты магазина не мешают узнать тот же трек, другой — не он.
+    assert _song_name("Сияй (feat. Скриптонит) - Single") == _song_name("Сияй") == "сияй"
+    assert _song_name("Sorry Mama - Single") == "sorry mama" != _song_name("Sorry")
+
+    from unittest import mock
+
+    # Текст ответом на запрос трека — «жду аудиофайл», а не разбор вкуса.
+    # Ответ на что-то другое идёт сервису, как раньше.
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "QUEUE", Path(tmp)):
+        state.write_json(Path(tmp) / "r.json", {"track_request": {"message_id": 562}})
+        text = reply(1, text="https://youtu.be/x")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            process([{"update_id": 1, "message": text},
+                     {"update_id": 2, "message": {**text, "reply_to_message": {"message_id": 9}}}],
+                    {}, "1", True, 0)
+        assert out.getvalue().count("не файл в ответ на запрос трека") == 1, out.getvalue()
     print("приём трека: все проверки прошли")
+
+    # Конфликт при подтягивании: ребейз откатывается, а не висит до конца смены.
+    with tempfile.TemporaryDirectory() as tmp:
+        def git(cwd, *args):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                           cwd=cwd, check=True, capture_output=True)
+        origin, mine, theirs = (Path(tmp) / name for name in ("origin", "mine", "theirs"))
+        git(tmp, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(tmp, "clone", "-q", str(origin), str(theirs))
+        for text, message in (("0", "начало"), ("1", "их")):
+            (theirs / "offset.json").write_text(text)
+            git(theirs, "add", ".")
+            git(theirs, "commit", "-qm", message)
+            if message == "начало":
+                git(theirs, "push", "-q", "origin", "HEAD:main")
+                git(tmp, "clone", "-q", str(origin), str(mine))
+        git(theirs, "push", "-q", "origin", "HEAD:main")
+        (mine / "offset.json").write_text("2")
+        git(mine, "config", "user.name", "t")
+        git(mine, "config", "user.email", "t@t")
+        with contextlib.redirect_stderr(io.StringIO()):
+            _push_repo(mine, ["."], "моё")
+        assert not (mine / ".git" / "rebase-merge").exists()
+        assert not (mine / ".git" / "rebase-apply").exists()
+        assert (mine / "offset.json").read_text() == "2"
+    print("подтягивание: конфликтный ребейз откачен, своё на месте")
 
     # Пересылки поста канала в чат обсуждений: под обычным постом первым
     # комментарием идёт вопрос, под постом с полным треком — сам трек плеером,
     # под отрывком прослушки — викторина.
-    import tempfile
-    from unittest import mock
 
     def forward(message_id: int, **body) -> dict:
         return {"update_id": message_id, "message": {
