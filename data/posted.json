@@ -473,6 +473,12 @@
       "file": "20260913-120917-3991-news.json",
       "published_at": "2026-09-13T12:09:25+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260910-152649-9849-lineage.json",
+      "published_at": "2026-09-13T18:06:08+00:00",
+      "rubric": "lineage"
     }
   ]
 }
