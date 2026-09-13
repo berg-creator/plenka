@@ -41,14 +41,25 @@ def fresh_news(max_age_hours: int) -> list[dict]:
 
     Сбор идёт каждые 6 часов и складывает в inbox всё подряд, включая старое
     из медленных лент. Срочной новость считается только пока она новость.
+
+    Новость издания о релизе, который канал сам нашёл в магазине, — не срочная:
+    о нём выходит свой пост, и эта новость стоит в нём цитатой
+    (compose.outside_voice). Отдельно она повторила бы пост о релизе.
+    Отпечатки у них разные (release против news), seen.json такое не ловит.
     """
     cutoff = state.now() - timedelta(hours=max_age_hours)
+    rows = list(state.read_jsonl(config.INBOX_FILE))
+    releases = [r for r in rows if r.get("kind") == "release"]
+    artists = {a["name"]: a for a in state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]}
     items = []
     for item in compose.load_inbox_unused():
         if item.get("kind") != "news":
             continue
         published = state._parse(item.get("released_at") or "")
         if published is None or published < cutoff:
+            continue
+        if any(compose.press_row(r, [item], artists) for r in releases):
+            log.info("Новость о релизе из сбора, пойдёт цитатой в его пост: %s", item.get("title", "")[:60])
             continue
         items.append(item)
     return items

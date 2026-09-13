@@ -71,7 +71,7 @@ def save_post(
     # Чистим разметку сразу при сохранении, чтобы в очереди лежал тот же текст,
     # который уйдёт в канал, — иначе просмотр очереди врёт.
     if rubric_key != "poll":  # опрос хранится как JSON, его трогать нельзя
-        text = name_button(telegram.sanitize(text))
+        text = drop_channel_link(name_button(telegram.sanitize(text)))
 
     folder = folder or config.QUEUE
     folder.mkdir(parents=True, exist_ok=True)
@@ -153,6 +153,23 @@ def name_button(text: str) -> str:
         return f"{match.group(1)}{label}{match.group(4)}" if label else match.group(0)
 
     return _BUTTON_LINE.sub(rename, text)
+
+
+def drop_channel_link(text: str) -> str:
+    """Убирает строку-кнопку, ведущую в чужой Telegram-канал или в никуда.
+
+    Чужой канал в ленте не рекламируем, а новость из t.me/s/<канал> модель
+    по правилу рубрики подписывала «Источник — RAP.RU» со ссылкой на пост
+    издания: 12.09.2026 так вышел «LIL DURK ОПРАВДАН». Данные ссылку уже
+    не несут, но GigaChat подставит и «…» — поэтому режем здесь, где проходит
+    каждый пост.
+    """
+
+    def drop(match: re.Match[str]) -> str:
+        host = urlparse(match.group(2)).netloc.casefold().removeprefix("www.")
+        return "" if host in {"", "t.me", "telegram.me"} else match.group(0)
+
+    return re.sub(r"\n{3,}", "\n\n", _BUTTON_LINE.sub(drop, text)).strip()
 
 
 def release_name(title: str) -> str:
@@ -461,12 +478,31 @@ def outside_voice(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dic
     в сбор из их Telegram-каналов (src/sources/telegram_web.py). Отзыв слушателя
     стоит ключа и квоты, поэтому он второй — и без ключа его просто нет.
 
+    Какая новость годится — решает press_row.
+    """
+    row = press_row(item, inbox, artists)
+    if row:
+        # Ссылку на t.me не отдаём даже в данные: чужой канал в ленте не рекламируем.
+        return {"who": row.get("outlet", "издание"), "text": row.get("summary", "")[:400]}
+
+    comment = youtube_comments.top_comment(item.get("artist", ""), release_name(item.get("title", "")))
+    if comment:
+        return {"who": "слушатель под клипом на YouTube", "text": comment["text"]}
+    return {}
+
+
+def press_row(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dict] | None = None) -> dict:
+    """Новость издания из Telegram о релизе item — свежайшая, либо пустой словарь.
+
     Новость должна называть и артиста, и сам релиз: одного имени мало —
     в чужой новости оно стоит просто в перечислении участников.
 
     Издание пишет по-русски, магазин подписывает артиста латиницей
     («Smoky Mo» против «Смоки Мо»), поэтому имя ищется во всех известных
     написаниях — своём, магазинном и алиасах из data/artists.json.
+
+    Ею же срочные новости узнают дубль (urgent.fresh_news): о таком релизе
+    канал пишет свой пост, а новость издания идёт в него цитатой.
     """
     released = state._parse(item.get("released_at") or "")
     named = release_name(item.get("title", "")).casefold()
@@ -486,20 +522,12 @@ def outside_voice(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dic
         # памяти Бориса Рыжего, где Слава КПСС один из участников, а пост
         # о его сингле процитировал бы её как мнение. Поэтому в записи должно
         # стоять и название релиза: тогда это точно разговор о нём.
-        if named in haystack.casefold() and any(p.search(haystack) for p in patterns):
+        if named and named in haystack.casefold() and any(p.search(haystack) for p in patterns):
             found.append((when, row))
 
-    if found:
-        # Свежайшая запись: издание пишет о релизе в день выхода, а более
-        # ранняя — про анонс, который к посту уже неактуален.
-        row = max(found, key=lambda f: f[0])[1]
-        # Ссылку на t.me не отдаём даже в данные: чужой канал в ленте не рекламируем.
-        return {"who": row.get("outlet", "издание"), "text": row.get("summary", "")[:400]}
-
-    comment = youtube_comments.top_comment(item.get("artist", ""), release_name(item.get("title", "")))
-    if comment:
-        return {"who": "слушатель под клипом на YouTube", "text": comment["text"]}
-    return {}
+    # Свежайшая запись: издание пишет о релизе в день выхода, а более
+    # ранняя — про анонс, который к посту уже неактуален.
+    return max(found, key=lambda f: f[0])[1] if found else {}
 
 
 def _release_payload(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dict] | None = None) -> dict:
@@ -580,7 +608,9 @@ def _news_payload(item: dict) -> dict:
         "summary": item.get("summary", ""),
         "outlet": item.get("outlet", ""),
         "lang": item.get("lang", "en"),
-        "url": item.get("url", ""),
+        # Новость из Telegram издания ведёт на его канал — такую ссылку
+        # не отдаём, и строки «Источник» у поста нет (prompts/rubrics/news.md).
+        "url": "" if urlparse(item.get("url", "")).netloc.casefold() == "t.me" else item.get("url", ""),
         "artists": item.get("artists", []),
         # Модели метка говорит, что у поста будет звук, а quality.py по ней
         # ловит выдуманное звучание: сниппет никто не слушал.
@@ -967,6 +997,14 @@ def _selftest() -> int:
     assert name_button(button("https://the-flow.ru/news/1", "Источник — The Flow")).endswith(
         ">Источник — The Flow</a>"
     )
+    # Чужой Telegram-канал в ленте не рекламируем: строка источника с t.me
+    # и пустышкой «…» уходит целиком, ссылка на статью остаётся.
+    durk = "<b>LIL DURK ОПРАВДАН</b>\n\nСуд решил иначе."
+    assert drop_channel_link(button("https://t.me/rapruchannel/5454", "Источник — RAP.RU")) == "текст"
+    assert drop_channel_link(durk + '\n\n▸ <a href="…">Источник — RAP.RU</a>') == durk
+    assert drop_channel_link(button("https://the-flow.ru/news/1", "Источник — The Flow")).endswith("The Flow</a>")
+    assert _news_payload({"url": "https://t.me/superslowflow/30230"})["url"] == ""
+    assert _news_payload({"url": "https://pitchfork.com/x"})["url"] == "https://pitchfork.com/x"
     # Домен-подделка в пути не должна выдать себя за площадку.
     assert name_button(button("https://evil.ru/?x=deezer.com")).endswith(">Слушать</a>")
     # Ссылка внутри текста — не кнопка, её название остаётся авторским.
@@ -1129,6 +1167,8 @@ def _selftest() -> int:
     tribute = {**press, "title": "Вышел трибьют Борису Рыжему",
                "summary": "В сборнике участвуют Слава КПСС, Смоки Мо и другие."}
     assert outside_voice(mo, [tribute], known) == {}
+    # По той же сверке срочные новости узнают дубль поста о релизе.
+    assert press_row(mo, [press], known) == press and press_row(mo, [tribute], known) == {}
     assert "outside" not in _release_payload(current, history, {})
     print("чужой голос: мнение издания находится по алиасу, чужое и старое — мимо")
 
