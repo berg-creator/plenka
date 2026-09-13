@@ -35,69 +35,70 @@ OUT_DIR = config.ROOT / "assets" / "cards"
 MAX_ARTISTS = 6
 
 
-def _fit(draw: ImageDraw.ImageDraw, text: str, limit: int, sizes: tuple[tuple[int, int], ...]):
-    """Подбирает кегль так, чтобы блок влез в отведённую высоту."""
+def _fit(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    limit: int,
+    sizes: tuple[tuple[int, int], ...],
+    *,
+    text_font: bool = False,
+):
+    """Подбирает кегль так, чтобы блок влез в отведённую высоту.
+
+    `text_font` — шрифт для чтения: список артистов мелкий, и заголовочный
+    жирный в таком кегле слипается.
+    """
     for size, per_line in sizes:
-        f = stories.font(size)
+        f = stories.font(size, 600 if text_font else 700, text=text_font)
         lines = textwrap.wrap(text, width=per_line)
         if len(lines) * size * 1.34 <= limit:
             return f, lines, size
-    f = stories.font(sizes[-1][0])
+    f = stories.font(sizes[-1][0], 600 if text_font else 700, text=text_font)
     return f, textwrap.wrap(text, width=sizes[-1][1])[:6], sizes[-1][0]
 
 
 def render(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА") -> Image.Image:
-    """Карточка: плашка рубрики, список артистов, приговор вкусу, подпись канала."""
+    """Карточка: рубрика, список артистов, приговор вкусу, подпись канала.
+
+    Рубрика и подпись — те же `stories.kicker` и `stories.mark`, что у историй
+    и обложек: карточку пересылают из лички, и в чужих сторис она должна
+    читаться как кадр канала, а не как отдельная поделка.
+    """
     img = stories.background(WIDTH, HEIGHT)
     draw = ImageDraw.Draw(img)
 
-    margin = int(WIDTH * 0.10)
-    y = int(HEIGHT * 0.10)
-
-    # Плашка сверху
-    plate = stories.font(40)
-    box = draw.textbbox((0, 0), label, font=plate)
-    pad = 20
-    draw.rectangle(
-        [margin, y, margin + box[2] + pad * 2, y + box[3] + pad * 1.5], fill=stories.ACCENT
-    )
-    draw.text((margin + pad, y + pad * 0.6), label, font=plate, fill=(255, 255, 255))
-    y += box[3] + pad * 3.4
+    y = int(HEIGHT * 0.09)
+    y += stories.kicker(draw, (stories.MARGIN, y), label, 42) + int(HEIGHT * 0.04)
 
     # Кого прислали. Список — повод узнать себя в чужой карточке.
     if artists:
         shown = ", ".join(artists[:MAX_ARTISTS])
         if len(artists) > MAX_ARTISTS:
             shown += f" и ещё {len(artists) - MAX_ARTISTS}"
-        f, lines, size = _fit(draw, shown, HEIGHT * 0.16, ((36, 42), (32, 48), (28, 56)))
+        f, lines, size = _fit(
+            draw, shown, HEIGHT * 0.16, ((34, 46), (30, 53), (26, 62)), text_font=True
+        )
         for line in lines[:4]:
-            draw.text((margin, y), line, font=f, fill=(110, 100, 86))
+            draw.text((stories.MARGIN, y), line, font=f, fill=(118, 108, 92))
             y += size * 1.34
         y += int(HEIGHT * 0.035)
 
     # Приговор — главное на карточке. Короткая фраза не должна прижиматься
     # к списку артистов, поэтому блок центрируется в оставшемся поле.
-    bottom = HEIGHT * 0.84
+    # Межстрочный плотный: крупный заголовок с разреженными строками
+    # распадается на отдельные фразы.
+    bottom = HEIGHT * 0.82
     f, lines, size = _fit(
-        draw, verdict, bottom - y, ((76, 19), (66, 22), (58, 26), (50, 30), (42, 36))
+        draw, verdict, bottom - y, ((84, 18), (74, 21), (64, 25), (54, 30), (46, 35))
     )
-    block = len(lines) * size * 1.34
+    block = len(lines) * size * 1.14
     y += max(0, (bottom - y - block) / 2)
 
     for line in lines:
-        draw.text((margin, y), line, font=f, fill=stories.INK)
-        y += size * 1.34
+        draw.text((stories.MARGIN, y), line, font=f, fill=stories.INK)
+        y += size * 1.14
 
-    # Подпись канала внизу
-    footer = stories.font(38)
-    fy = HEIGHT - int(HEIGHT * 0.085)
-    draw.rectangle([margin, fy - 16, margin + 96, fy - 8], fill=stories.ACCENT)
-    draw.text((margin, fy), "ПЛЁНКА", font=footer, fill=stories.INK)
-
-    handle = "@plenka_fm"
-    hbox = draw.textbbox((0, 0), handle, font=footer)
-    draw.text((WIDTH - margin - hbox[2], fy), handle, font=footer, fill=(110, 100, 86))
-
+    stories.mark(draw, (stories.MARGIN, HEIGHT - int(HEIGHT * 0.095)), fill=stories.INK, size=36)
     return img
 
 
@@ -209,33 +210,18 @@ def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВК�
         return None
 
     draw = ImageDraw.Draw(img)
-    margin = int(WIDTH * 0.09)
-
-    plate = stories.font(38)
-    box = draw.textbbox((0, 0), label, font=plate)
-    pad = 18
-    y = int(HEIGHT * 0.07)
-    draw.rectangle(
-        [margin, y, margin + box[2] + pad * 2, y + box[3] + pad * 1.5], fill=stories.ACCENT
-    )
-    draw.text((margin + pad, y + pad * 0.6), label, font=plate, fill=(255, 255, 255))
+    # Буквы рубрики светлые: по красной обложке красное пропало бы.
+    stories.kicker(draw, (stories.MARGIN, int(HEIGHT * 0.07)), label, 40, stories.LIGHT)
 
     # Приговор — внизу, по нижней границе кадра.
-    f, lines, size = _fit(draw, verdict, HEIGHT * 0.34, ((70, 20), (60, 24), (52, 28), (44, 33)))
-    y = HEIGHT - int(HEIGHT * 0.14) - len(lines) * size * 1.3
+    f, lines, size = _fit(draw, verdict, HEIGHT * 0.34, ((78, 19), (68, 22), (58, 26), (50, 31)))
+    y = HEIGHT - int(HEIGHT * 0.155) - len(lines) * size * 1.06
     for line in lines:
-        draw.text((margin + 2, y + 2), line, font=f, fill=(0, 0, 0))
-        draw.text((margin, y), line, font=f, fill=(246, 244, 239))
-        y += size * 1.3
+        draw.text((stories.MARGIN + 2, y + 3), line, font=f, fill=(0, 0, 0))
+        draw.text((stories.MARGIN, y), line, font=f, fill=stories.LIGHT)
+        y += size * 1.06
 
-    footer = stories.font(34)
-    fy = HEIGHT - int(HEIGHT * 0.068)
-    draw.rectangle([margin, fy - 14, margin + 84, fy - 7], fill=stories.ACCENT)
-    draw.text((margin, fy), "ПЛЁНКА", font=footer, fill=(246, 244, 239))
-    handle = "@plenka_fm"
-    hbox = draw.textbbox((0, 0), handle, font=footer)
-    draw.text((WIDTH - margin - hbox[2], fy), handle, font=footer, fill=(198, 192, 182))
-
+    stories.mark(draw, (stories.MARGIN, HEIGHT - int(HEIGHT * 0.085)), size=36)
     return img
 
 
