@@ -24,5 +24,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          # Список красных запусков: чтения, которое даёт встроенный ключ, хватает.
+          GITHUB_TOKEN: ${{ github.token }}
         # --quiet: писать только если что-то сломалось, а не каждый день
         run: python -m src.health --quiet

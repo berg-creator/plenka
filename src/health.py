@@ -1,7 +1,8 @@
 """Сторож: следит, чтобы канал не встал молча.
 
-Проверяет четыре вещи — не опустела ли очередь, не зависла ли публикация,
-не перестал ли поступать материал и не иссякли ли входящие новости.
+Проверяет пять вещей — не опустела ли очередь, не зависла ли публикация,
+не перестал ли поступать материал, не иссякли ли входящие новости
+и не падали ли запуски воркфлоу за сутки.
 Если что-то не так, пишет тебе в личку. Без этого поломка обнаруживается
 только когда канал уже неделю молчит.
 """
@@ -9,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import timedelta
 
 from . import config, state, telegram
@@ -56,7 +58,42 @@ def problems() -> list[str]:
     else:
         issues.append("❗ Сбор ни разу не отработал: inbox отсутствует.")
 
+    if failed := failed_runs():
+        issues.append("⚠️ Упали запуски за сутки: " + ", ".join(failed))
+
     return issues
+
+
+def failed_runs() -> list[str]:
+    """Красные запуски воркфлоу за сутки: «Бот ×2 (ссылка)».
+
+    Файлы состояния упавший запуск не трогает, поэтому проверки выше его не видят:
+    12.09.2026 смена бота падала на каждом посте о релизе, а очередь и публикация
+    выглядели здоровыми. Разбор выдумок пропускаем — о своей поломке он пишет сам.
+    Без GITHUB_REPOSITORY (локальный запуск) проверка молча пропускается.
+    """
+    import requests
+
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not repo:
+        return []
+    token = os.environ.get("GITHUB_TOKEN")
+    since = (state.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        response = requests.get(
+            f"https://api.github.com/repos/{repo}/actions/runs",
+            params={"status": "failure", "created": f">={since}", "per_page": 100},
+            headers={"Authorization": f"Bearer {token}"} if token else {},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        return [f"не узнать у GitHub ({exc})"]
+    runs: dict[str, list[str]] = {}
+    for run in response.json().get("workflow_runs", []):
+        if not run.get("path", "").endswith("review.yml"):
+            runs.setdefault(run["name"], []).append(run["html_url"])
+    return [f"{name} ×{len(urls)} ({urls[0]})" for name, urls in runs.items()]
 
 
 def main() -> int:
