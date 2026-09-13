@@ -302,6 +302,34 @@ def fit(draw: ImageDraw.ImageDraw, text: str, sizes, box: int):
     return font, lines, size
 
 
+# Насколько рубрика стоит выше первой строки заголовка.
+KICKER_ABOVE = 74
+
+
+def headline(draw: ImageDraw.ImageDraw, body: str, big: bool) -> tuple:
+    """Шрифт, строки и шаг заголовка — одна раскладка на overlay и text_top."""
+    # Кегли крупнее прежних: узкий гротеск на ту же ширину влезает целиком,
+    # а в ленте роликов размер надписи — это и есть громкость голоса.
+    sizes = (
+        ((186, 11), (160, 13), (136, 16), (112, 19), (94, 23), (78, 28))
+        if big
+        else ((104, 20), (90, 24), (78, 28), (66, 33), (56, 39))
+    )
+    font, lines, size = fit(draw, body, sizes, WIDTH - MARGIN * 2)
+    return font, lines, int(size * 0.98)  # плотный интерлиньяж: заголовок стоит блоком
+
+
+def text_top(label: str, body: str, *, big: bool = True) -> int:
+    """Где по высоте начнётся надпись overlay: рубрика, а без неё — заголовок.
+
+    Нужна кадрам, которые ставят свою картинку над надписью (мем в src/reels.py):
+    не зная этой высоты, картинка ложится под буквы.
+    """
+    _, lines, step = headline(ImageDraw.Draw(Image.new("RGB", (1, 1))), body, big)
+    top = HEAD_BOTTOM - len(lines) * step
+    return top - KICKER_ABOVE if label else top
+
+
 def overlay(label: str, body: str, *, big: bool = True, at: float = 0.0) -> Image.Image:
     """Прозрачный слой с надписью — ложится поверх кадра со стока.
 
@@ -313,19 +341,9 @@ def overlay(label: str, body: str, *, big: bool = True, at: float = 0.0) -> Imag
     layer = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
 
-    box = WIDTH - MARGIN * 2
-    # Кегли крупнее прежних: узкий гротеск на ту же ширину влезает целиком,
-    # а в ленте роликов размер надписи — это и есть громкость голоса.
-    sizes = (
-        ((186, 11), (160, 13), (136, 16), (112, 19), (94, 23), (78, 28))
-        if big
-        else ((104, 20), (90, 24), (78, 28), (66, 33), (56, 39))
-    )
-    font, lines, size = fit(draw, body, sizes, box)
-
-    step = int(size * 0.98)  # плотный интерлиньяж: заголовок стоит блоком
+    font, lines, step = headline(draw, body, big)
     top = HEAD_BOTTOM - len(lines) * step
-    kicker_y = top - 74
+    kicker_y = top - KICKER_ABOVE
 
     # Подложка начинается выше рубрики, а не выше заголовка: рубрика мельче
     # всего в кадре и первой пропадает на светлой фотографии.
