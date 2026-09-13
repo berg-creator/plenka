@@ -264,6 +264,22 @@ def find_artist(text: str) -> str:
     return ""
 
 
+def _blank(data: bytes) -> bool:
+    """Картинка одного цвета или не картинка вовсе.
+
+    Разброс яркости у настоящей фотографии — десятки, у заливки — ноль.
+    Порог 8 оставляет запас на шум сжатия JPEG поверх заливки.
+    """
+    from io import BytesIO
+
+    from PIL import Image, ImageStat
+
+    try:
+        return ImageStat.Stat(Image.open(BytesIO(data)).convert("L")).stddev[0] < 8
+    except OSError:
+        return True
+
+
 def artist_image(text: str) -> Path | None:
     """Фотография артиста, упомянутого в тексте. None — если не нашли.
 
@@ -292,6 +308,11 @@ def artist_image(text: str) -> Path | None:
         except requests.RequestException:
             continue
         if response.status_code != 200 or len(response.content) < 10_000:
+            continue
+        # Однотонная картинка — не фотография. У Ye на Deezer вместо портрета
+        # чёрный квадрат, и чёрная же обложка «Donda»: кадр «лица» выходил
+        # пустым, а первым кадром ролика — пустым и превью.
+        if _blank(response.content):
             continue
 
         path = _run_dir() / f"artist-{abs(hash(name)) % 10**8}.jpg"

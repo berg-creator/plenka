@@ -48,7 +48,7 @@ import random
 import re
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Только лёгкое на уровне модуля: --check зовёт облачный автор перед пушем,
@@ -73,7 +73,9 @@ ID_FORMAT = re.compile(r"\d{8}-[a-z0-9-]+")
 SLOT_FORMAT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[+-]\d{2}:\d{2}")
 HASHTAGS_AT_END = re.compile(r"(#\w+\s*)+$")
 
-TODAY = "сегодня до 21:00 МСК"
+MSK = timezone(timedelta(hours=3), "MSK")
+LAST_HOUR = 21
+TODAY = f"сегодня до {LAST_HOUR}:00 МСК"
 
 # Нижняя граница кадра под фразой. Настоящую длину задаёт дубль (clips.narrate),
 # эта нужна, чтобы и без дубля кадр было видно в превью.
@@ -84,8 +86,12 @@ BIG_TEXT = 20
 # обработка поверх давит яркость, и сразу тёмный цвет стал бы чёрной дырой
 # (тот же довод у footage.procedural).
 DARK = (46, 41, 36)
-# Мем встаёт ниже счётчика кассеты и выше надписи.
+# Мем встаёт ниже счётчика кассеты и выше надписи, с зазором до неё.
 MEME_TOP = 240
+MEME_GAP = 48
+# Что шрифт надписей (Oswald) рисует. Стрелки и эмодзи в нём пустые — вместо
+# них в кадре выходит квадрат: так «4 → 10 сентября» и попало в пробную сборку.
+DRAWABLE = re.compile(r"[\w\s«»„“”\"'!?.,:;%№$€₽+=/()\[\]&@#*×~^°…—–·•-]*")
 
 
 # --- проверка -------------------------------------------------------------
@@ -117,6 +123,9 @@ def _screen_problems(screen, where: str) -> list[str]:
         return [f"{where}: screen.kind «{kind}» — бывает только {', '.join(KINDS)}"]
     if any(field in screen and not isinstance(screen[field], str) for field in ("label", "text")):
         return [f"{where}: label и text — строки"]
+    undrawn = sorted({ch for field in ("label", "text") for ch in screen.get(field, "") if not DRAWABLE.fullmatch(ch)})
+    if undrawn:
+        return [f"{where}: «{' '.join(undrawn)}» шрифт не рисует, в кадре выйдет квадрат — словами или тире"]
     if kind == "face":
         name = screen.get("name")
         if not _filled(name):
@@ -232,8 +241,20 @@ def spoken_frames(script: dict) -> list[int]:
     return [number for number, line in enumerate(script["lines"], 1) if "say" in line]
 
 
-def when(script: dict) -> str:
-    return TODAY if script["publish"] == "today" else script["publish"]
+def when(script: dict, now: datetime | None = None) -> str:
+    """Срок выкладки — от текущего часа, а не от часа написания сценария.
+
+    Рассылка уходит утром, а пакет приходит, когда записаны все фразы, — бывает,
+    и после девяти вечера или после назначенного слота. «Сегодня до 21:00»
+    в полночь звучит как «уже опоздал» и подталкивает отложить на завтра,
+    а свежая тема за сутки остывает.
+    """
+    now = now or datetime.now(MSK)
+    if script["publish"] == "today":
+        return TODAY if now.hour < LAST_HOUR else "сразу, пока тема свежая"
+    if datetime.fromisoformat(script["publish"]) <= now:
+        return f"сразу — слот {script['publish']} уже прошёл"
+    return script["publish"]
 
 
 # --- рассылка ------------------------------------------------------------
@@ -420,24 +441,25 @@ def _card_canvas(work: Path) -> Path:
     return path
 
 
-def _meme_canvas(template: str, work: Path) -> Path:
-    """Мем целиком на вертикальном холсте.
+def _meme_canvas(template: str, work: Path, bottom: int) -> Path:
+    """Мем целиком на вертикальном холсте, между счётчиком кассеты и надписью.
 
     Шаблоны в основном горизонтальные, а кадр — 9:16: обрезка по центру,
     как у фотографий, оставила бы от мема середину без половины героев.
-    Мем вписывается в верхние две трети — ниже надпись и интерфейс площадки.
+    `bottom` — где начинается надпись кадра (clips.text_top). Прежде коробка
+    мема была постоянной, и рубрика ложилась поверх нижней части картинки.
     """
     from PIL import Image
 
     from . import clips
 
     meme = Image.open(config.MEME_TEMPLATES / f"{template}.jpg").convert("RGB")
-    box_w, box_h = clips.WIDTH, int(clips.HEIGHT * 0.55)
+    box_w, box_h = clips.WIDTH, bottom - MEME_GAP - MEME_TOP
     scale = min(box_w / meme.width, box_h / meme.height)
     meme = meme.resize((round(meme.width * scale), round(meme.height * scale)), Image.LANCZOS)
     canvas = Image.new("RGB", (clips.WIDTH, clips.HEIGHT), DARK)
     canvas.paste(meme, ((box_w - meme.width) // 2, MEME_TOP + (box_h - meme.height) // 2))
-    path = work / f"meme-{template}.png"
+    path = work / f"meme-{template}-{bottom}.png"
     canvas.save(path)
     return path
 
@@ -470,7 +492,8 @@ def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> 
         )
         backdrop = ""
         if screen["kind"] == "meme":
-            backdrop = str(_meme_canvas(screen["template"], work))
+            bottom = clips.text_top(label, body, big=len(body) <= BIG_TEXT) if label or body else clips.MARK_Y
+            backdrop = str(_meme_canvas(screen["template"], work, bottom))
         elif screen["kind"] == "card":
             backdrop = str(_card_canvas(work))
         # face ищется по имени (subject), stock — своим запросом (query).
@@ -637,8 +660,19 @@ def _selftest() -> None:
         ({"kind": "face", "name": "Канье"}, "artists.json"),
         ({"kind": "card"}, "text"),
         ({"kind": "stock"}, "query"),
+        ({"kind": "card", "label": "4 → 10 сентября", "text": "удалены"}, "→"),
+        ({"kind": "card", "text": "🔥"}, "квадрат"),
     ):
         broken(word, lines=[{"say": "Фраза", "screen": screen}])
+    drawable = {"kind": "card", "label": "№ 1 · 17/08", "text": "«9 000 — 160 000 ₽»…"}
+    assert problems({**good, "lines": [{"say": "Фраза", "screen": drawable}]}, good["id"]) == []
+
+    # Срок выкладки — от часа сборки.
+    evening = datetime(2026, 9, 14, 22, 0, tzinfo=MSK)
+    assert when(good, evening.replace(hour=10)) == TODAY
+    assert "сразу" in when(good, evening)
+    assert "прошёл" in when({"publish": "2026-09-14T18:00+03:00"}, evening)
+    assert when({"publish": "2026-09-15T18:00+03:00"}, evening) == "2026-09-15T18:00+03:00"
 
     # Раскадровка: кадр на строку, у паузы нет фразы и длина ровно из сценария.
     with tempfile.TemporaryDirectory() as tmp:
@@ -647,6 +681,15 @@ def _selftest() -> None:
         assert spoken[2] == "" and shots[2].seconds == 1.0, (spoken[2], shots[2].seconds)
         assert spoken_frames(good) == [1, 2, 4]
         assert Image.open(shots[2].backdrop).size == (1080, 1920)
+        # Мем кончается выше надписи кадра, а не уходит под буквы.
+        from . import clips
+
+        for label, body in (("ждём официальную отмену", ""), ("ЦИТАТА", "документы удалены"), ("", "")):
+            screen = {"kind": "meme", "template": "this-is-fine", "label": label, "text": body}
+            shot = storyboard({**good, "lines": [{"pause": 1.0, "screen": screen}]}, Path(tmp))[0]
+            rows = Image.open(shot.backdrop).convert("L").point(lambda v: v > 60 and 255).getbbox()
+            limit = clips.text_top(label, body, big=len(body) <= BIG_TEXT) if label or body else clips.MARK_Y
+            assert rows and MEME_TOP <= rows[1] and rows[3] <= limit - MEME_GAP, (label, rows, limit)
 
     # Ответ голосовым на фразу находит ролик и кадр — и в разборе дежурства тоже.
     saved = config.PRIVATE
