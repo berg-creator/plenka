@@ -13,10 +13,11 @@
 Сначала — не читая ни одного поста:
 
 ```bash
-[ "$(git rev-parse --is-shallow-repository)" = true ] && git fetch --shallow-since="8 hours ago" origin main
-git log --no-renames --since="6 hours ago" --diff-filter=AM \
-    --name-only --pretty=format: -- content/queue content/archive \
-  | sort -u | while read -r f; do
+[ "$(git rev-parse --is-shallow-repository)" = true ] && git fetch -q --shallow-since="3 days ago" origin main
+base=$(git rev-list -1 --before="6 hours ago" HEAD)
+git diff --no-renames --diff-filter=AM --name-only "$base" HEAD \
+    -- content/queue content/archive \
+  | while read -r f; do
       [ -f "$f" ] || continue
       case "$f" in content/archive/*) grep -q '"message": {' "$f" || continue ;; esac
       echo "$f"
@@ -26,6 +27,11 @@ git log --no-renames --since="6 hours ago" --diff-filter=AM \
 **Пусто — заканчивай сразу**: ничего не читай, файлов не создавай, не пушь.
 Так проходит большинство запусков, и это бережёт лимиты подписки.
 
+Команду не упрощай до `git log --since`: копия репозитория у тебя неполная,
+и самый ранний скачанный коммит git показывает добавившим все файлы разом.
+13.09.2026 так каждый ночной проход читал все 32 поста вместо двух новых
+и по второму разу правил уже исправленные.
+
 Не пусто — это посты, добавленные, поменянные или опубликованные за шесть
 часов. Окно втрое шире расписания намеренно: запуск может опоздать, а может
 и не состояться вовсе (лимиты подписки), и пропущенные им посты иначе
@@ -34,6 +40,7 @@ git log --no-renames --since="6 hours ago" --diff-filter=AM \
 правка ушла в канал непроверенной.
 Поэтому в список попадут и посты, которые прошлый проход уже видел или
 исправил: проверь их так же — выдумок в них не будет, и пушить будет нечего.
+Исправленный пост не шлифуй: «эмо начала нулевых» → «эмо нулевых» — не правка.
 
 `content/queue/` — очередь. `content/archive/` — посты, **уже вышедшие
 в канал**: правка уходит прямо в сообщение канала, поэтому для них только
