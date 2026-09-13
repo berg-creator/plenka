@@ -461,6 +461,18 @@
       "file": "20260910-152608-2433-lineage.json",
       "published_at": "2026-09-13T11:41:05+00:00",
       "rubric": "lineage"
+    },
+    {
+      "chat": "channel",
+      "file": "20260913-120900-8151-news.json",
+      "published_at": "2026-09-13T12:09:08+00:00",
+      "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260913-120917-3991-news.json",
+      "published_at": "2026-09-13T12:09:25+00:00",
+      "rubric": "news"
     }
   ]
 }
