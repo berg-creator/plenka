@@ -620,6 +620,11 @@ def _push_repo(cwd, paths: list[str], message: str) -> None:
             if command[1] == "commit":
                 continue
             log.warning("git %s: %s", command[1], result.stderr.strip()[:200])
+            if command[1] == "add":
+                # Файла нет на этой машине: загадку прослушки создаёт другая,
+                # и появится он здесь только через pull. Выход на add отрезал бы
+                # его навсегда — 12.09.2026 викторина так и ушла в канал.
+                continue
             if command[1] == "pull":
                 # Конфликт оставляет ребейз висеть: дерево застревает посреди
                 # чужих коммитов до конца смены, и всё, что дежурство запишет
@@ -741,6 +746,24 @@ def _selftest() -> int:
         assert not (mine / ".git" / "rebase-apply").exists()
         assert (mine / "offset.json").read_text() == "2"
     print("подтягивание: конфликтный ребейз откачен, своё на месте")
+
+    # Загадку прослушки создаёт другая машина: у дежурства файла ещё нет,
+    # add на нём падает, а подтянуть его всё равно надо.
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, mine, theirs = (Path(tmp) / name for name in ("origin", "mine", "theirs"))
+        git(tmp, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(tmp, "clone", "-q", str(origin), str(theirs))
+        for name in ("README", "quiz.json"):
+            (theirs / name).write_text("{}")
+            git(theirs, "add", ".")
+            git(theirs, "commit", "-qm", name)
+            git(theirs, "push", "-q", "origin", "HEAD:main")
+            if name == "README":
+                git(tmp, "clone", "-q", str(origin), str(mine))
+        with contextlib.redirect_stderr(io.StringIO()):
+            _push_repo(mine, ["quiz.json"], "загадка")
+        assert (mine / "quiz.json").exists()
+    print("подтягивание: чужой новый файл доезжает, хотя add на нём упал")
 
     # Пересылки поста канала в чат обсуждений: под обычным постом первым
     # комментарием идёт вопрос, под постом с полным треком — сам трек плеером,
