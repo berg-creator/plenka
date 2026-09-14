@@ -163,13 +163,18 @@ def drop_channel_link(text: str) -> str:
     издания: 12.09.2026 так вышел «LIL DURK ОПРАВДАН». Данные ссылку уже
     не несут, но GigaChat подставит и «…» — поэтому режем здесь, где проходит
     каждый пост.
+
+    Строка «▸» без ссылки уходит тоже: 14.09.2026 GigaChat снял ссылку на канал
+    сам, а «▸ Источник — The Flow» оставил текстом, и в ленте она выглядела
+    кнопкой, которая не жмётся.
     """
 
     def drop(match: re.Match[str]) -> str:
         host = urlparse(match.group(2)).netloc.casefold().removeprefix("www.")
         return "" if host in {"", "t.me", "telegram.me"} else match.group(0)
 
-    return re.sub(r"\n{3,}", "\n\n", _BUTTON_LINE.sub(drop, text)).strip()
+    text = re.sub(r"(?m)^▸(?!.*<a\s).*$", "", _BUTTON_LINE.sub(drop, text))
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def release_name(title: str) -> str:
@@ -1002,6 +1007,7 @@ def _selftest() -> int:
     durk = "<b>LIL DURK ОПРАВДАН</b>\n\nСуд решил иначе."
     assert drop_channel_link(button("https://t.me/rapruchannel/5454", "Источник — RAP.RU")) == "текст"
     assert drop_channel_link(durk + '\n\n▸ <a href="…">Источник — RAP.RU</a>') == durk
+    assert drop_channel_link(durk + "\n\n▸ Источник — The Flow") == durk
     assert drop_channel_link(button("https://the-flow.ru/news/1", "Источник — The Flow")).endswith("The Flow</a>")
     assert _news_payload({"url": "https://t.me/superslowflow/30230"})["url"] == ""
     assert _news_payload({"url": "https://pitchfork.com/x"})["url"] == "https://pitchfork.com/x"
