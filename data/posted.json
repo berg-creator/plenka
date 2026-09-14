@@ -485,6 +485,12 @@
       "file": "20260913-193926-7433-news.json",
       "published_at": "2026-09-13T19:39:29+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260910-152914-2888-poll.json",
+      "published_at": "2026-09-14T06:08:05+00:00",
+      "rubric": "poll"
     }
   ]
 }
