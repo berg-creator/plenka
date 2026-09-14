@@ -296,6 +296,8 @@ def award() -> int:
     given = 0
     try:
         if not people:
+            # Молчание здесь в логе не отличить от поломки: опроса не было или голоса не дошли.
+            log.info("Титулы: %s", "угадавших нет" if poll else "опроса под прошлой загадкой не было")
             return 0
         chat, tag = poll["chat"], title(poll["artist"])
         bot = config.secret("TELEGRAM_BOT_TOKEN").split(":")[0]
