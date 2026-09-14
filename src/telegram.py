@@ -285,7 +285,9 @@ def send_photo_file(
         return _call("sendPhoto", payload, files={"photo": (path.name, handle, "image/jpeg")})
 
 
-def send_video_file(chat_id: str, path: Path, caption: str, *, seconds: int = 0) -> dict:
+def send_video_file(
+    chat_id: str, path: Path, caption: str, *, seconds: int = 0, width: int = 1080, height: int = 1920
+) -> dict:
     """Отправляет готовый ролик с диска.
 
     Через это же место идёт доставка клипов: ВКонтакте заливать видео
@@ -293,7 +295,10 @@ def send_video_file(chat_id: str, path: Path, caption: str, *, seconds: int = 0)
     поэтому ролик уходит в Telegram, а во ВКонтакте перекладывается руками.
 
     `supports_streaming` важен для вертикальных роликов: без него Telegram
-    показывает файл вложением, а не проигрывателем.
+    показывает файл вложением, а не проигрывателем. Размеры — по той же
+    причине: без width и height клиент на телефоне рисует проигрыватель
+    в своей рамке, и ролик 9:16 выглядит сплющенным горизонтальным. Отсюда
+    уходят только вертикальные клипы и ролики, поэтому 1080×1920 по умолчанию.
     """
     with path.open("rb") as handle:
         payload = {
@@ -301,6 +306,8 @@ def send_video_file(chat_id: str, path: Path, caption: str, *, seconds: int = 0)
             "caption": clip(sanitize(caption), MAX_CAPTION),
             "parse_mode": "HTML",
             "supports_streaming": True,
+            "width": width,
+            "height": height,
         }
         if seconds:
             payload["duration"] = seconds
