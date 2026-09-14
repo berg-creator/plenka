@@ -163,8 +163,9 @@ def ffmpeg() -> str:
 def probe_seconds(path: Path) -> float:
     """Сколько длится файл. 0.0 — если ffprobe не спросить.
 
-    Нужна только для речи: пока фразу не синтезируешь, её длина неизвестна,
-    а кадр под неё подгоняется, а не наоборот.
+    Нужна прежде всего для речи: пока фразу не синтезируешь, её длина
+    неизвестна, а кадр под неё подгоняется, а не наоборот. Ещё — длина
+    петли значка и стока, чтобы знать, есть ли куда отступить.
     """
     probe = shutil.which("ffprobe")
     if not probe:
@@ -302,13 +303,20 @@ def fit(draw: ImageDraw.ImageDraw, text: str, sizes, box: int):
     return font, lines, size
 
 
-def overlay(label: str, body: str, *, big: bool = True, at: float = 0.0) -> Image.Image:
+def overlay(
+    label: str, body: str, *, big: bool = True, at: float = 0.0, clean: bool = False
+) -> Image.Image:
     """Прозрачный слой с надписью — ложится поверх кадра со стока.
 
     Надпись стоит в нижней трети и прижата влево, а не по центру кадра.
     Причина не в красоте: по центру текст ложится ровно на лицо, а именно
     лицо — то, ради чего кадр выбирали. Внизу остаётся полоса под интерфейс
     площадки (`stories.SAFE_BOTTOM`), туда не заходит ничего своего.
+
+    `clean` — слой роликов с живым голосом (src/reels.py): только надпись,
+    без затемнения, развёртки, счётчика и подписи канала. Кадр там светлый
+    и чистый, поэтому надпись держит не затемнение всего кадра, а мягкая
+    тень вокруг самих букв.
     """
     layer = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
@@ -327,13 +335,14 @@ def overlay(label: str, body: str, *, big: bool = True, at: float = 0.0) -> Imag
     top = HEAD_BOTTOM - len(lines) * step
     kicker_y = top - 74
 
-    # Подложка начинается выше рубрики, а не выше заголовка: рубрика мельче
-    # всего в кадре и первой пропадает на светлой фотографии.
-    scrim(draw, max(0, kicker_y - int(HEIGHT * 0.18)))
-    # Развёртка идёт до надписи: полосы должны лежать на кадре, а не резать
-    # буквы. Текст поверх них остаётся чистым и читается с телефона.
-    scanlines(draw)
-    counter(draw, at)
+    if not clean:
+        # Подложка начинается выше рубрики, а не выше заголовка: рубрика мельче
+        # всего в кадре и первой пропадает на светлой фотографии.
+        scrim(draw, max(0, kicker_y - int(HEIGHT * 0.18)))
+        # Развёртка идёт до надписи: полосы должны лежать на кадре, а не резать
+        # буквы. Текст поверх них остаётся чистым и читается с телефона.
+        scanlines(draw)
+        counter(draw, at)
 
     if label:
         # Буквы светлые, линейка красная: после камкордерной обработки
@@ -346,6 +355,16 @@ def overlay(label: str, body: str, *, big: bool = True, at: float = 0.0) -> Imag
         draw.text((MARGIN + 4, y + 5), line, font=font, fill=(0, 0, 0, 170))
         draw.text((MARGIN, y), line, font=font, fill=LIGHT)
         y += step
+
+    if clean:
+        # Тень — размытый силуэт самих букв, а не плашка: плашка на светлом
+        # кадре читается наклейкой. Размытие съедает плотность, поэтому
+        # прозрачность силуэта поднимается втрое.
+        shade = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+        shade.putalpha(
+            layer.getchannel("A").filter(ImageFilter.GaussianBlur(14)).point(lambda a: min(255, a * 3))
+        )
+        return Image.alpha_composite(shade, layer)
 
     stories.mark(draw, (MARGIN, MARK_Y))
     return layer.filter(ImageFilter.GaussianBlur(0.3))
@@ -600,7 +619,27 @@ def storyboard_news(item: dict) -> list[Shot]:
 # --- сборка --------------------------------------------------------------
 
 
-def segment(shot: Shot, out: Path, work: Path, *, fade_in: bool = True) -> str:
+# Значок канала в роликах с живым голосом: крутящаяся плёнка в левом верхнем
+# углу. Справа и снизу у Shorts и TikTok кнопки и подпись, сверху по центру
+# вкладки — левый верх ниже строки состояния остаётся свободным. Надписи
+# растут от нижней трети вверх и до угла не доходят.
+BADGE_SIZE = 150
+BADGE_X, BADGE_Y = 56, 240
+
+VIDEO_SUFFIXES = {".mp4", ".webm", ".mov"}
+STOCK_SKIP = 2.0
+
+
+def segment(
+    shot: Shot,
+    out: Path,
+    work: Path,
+    *,
+    fade_in: bool = True,
+    grade: str = GRADE,
+    fit: str = "crop",
+    badge: tuple[Path, float] | None = None,
+) -> str:
     """Один отрезок: изображение или видео снизу, надпись сверху.
 
     Приоритет источника: фотография названного артиста → сток по смыслу
@@ -609,6 +648,14 @@ def segment(shot: Shot, out: Path, work: Path, *, fade_in: bool = True) -> str:
 
     Фотография статична, поэтому ей нужен наезд: замерший кадр в ленте
     коротких роликов читается как зависшее видео.
+
+    Параметры ниже нужны роликам с живым голосом (src/reels.py), у клипов
+    всё по-прежнему. `grade` — обработка кадра, пустая строка — без неё.
+    `fit="blur"` — исходник целиком по ширине поверх своей же размытой
+    копии на весь экран: обрезка горизонтального мема под 9:16 оставила бы
+    от него середину без половины героев, а чёрные поля — маленькую картинку
+    в темноте. `badge` — круглое видео в углу и позиция отрезка в ролике:
+    петля значка продолжается с того же места, и на склейке он не дёргается.
     """
     png = work / f"{out.stem}.png"
     shot.layer.save(png, "PNG")
@@ -618,10 +665,11 @@ def segment(shot: Shot, out: Path, work: Path, *, fade_in: bool = True) -> str:
         kind = "терминал"
         source = footage.terminal(work / f"{out.stem}-bg.mp4", shot.seconds, ffmpeg())
     elif shot.backdrop:
-        # Своя картинка вместо поиска — врезка. Путь от корня репозитория;
-        # абсолютный pathlib подставит как есть.
+        # Своя картинка или видео вместо поиска — врезка. Путь от корня
+        # репозитория; абсолютный pathlib подставит как есть.
         kind = "врезка"
-        still = source = config.ROOT / shot.backdrop
+        source = config.ROOT / shot.backdrop
+        still = None if source.suffix.lower() in VIDEO_SUFFIXES else source
     elif (still := footage.artist_image(shot.subject) if shot.subject else None) is not None:
         kind = "артист"
         source = still
@@ -644,7 +692,12 @@ def segment(shot: Shot, out: Path, work: Path, *, fade_in: bool = True) -> str:
             f":d=1:s={WIDTH}x{HEIGHT}:fps={FPS},"
         )
     else:
-        feed = ["-stream_loop", "-1", "-i", str(source)]
+        # Ролики стока часто начинаются с выхода из чёрного: без отступа
+        # кадр первые полторы секунды стоял тёмным, а карточка на его
+        # размытии — чёрной. Отступ только когда ролик длиннее кадра, иначе
+        # петля вернула бы то же чёрное начало.
+        skip = min(STOCK_SKIP, max(0.0, probe_seconds(source) - shot.seconds)) if kind == "сток" else 0.0
+        feed = ["-stream_loop", "-1", "-ss", f"{skip:.2f}", "-i", str(source)]
         motion = ""
 
     # Выход из чёрного — мягкая склейка между кадрами. Первому кадру ролика
@@ -652,15 +705,42 @@ def segment(shot: Shot, out: Path, work: Path, *, fade_in: bool = True) -> str:
     # кадра, вышла бы чёрной.
     fade = "fade=t=in:st=0:d=0.12," if fade_in else ""
 
+    cover = f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,crop={WIDTH}:{HEIGHT}"
+    if fit == "blur":
+        # Кадр чуть выше середины: снизу надпись, ей нужно место.
+        base = (
+            f"[0:v]split[front][back];[back]{cover},gblur=sigma=40[blurred];"
+            f"[front]scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease:force_divisible_by=2[fitted];"
+            f"[blurred][fitted]overlay=(W-w)/2:(H-h)*0.4"
+        )
+    else:
+        base = f"[0:v]{cover}"
+    look = ",".join(step for step in (f"setsar=1,fps={FPS}", motion.rstrip(","), grade) if step)
+
+    corner, extra = "", []
+    if badge is not None:
+        wheel, at = badge
+        loop = probe_seconds(wheel)
+        extra = ["-stream_loop", "-1", "-ss", f"{at % loop if loop else 0:.3f}", "-i", str(wheel)]
+        r = BADGE_SIZE / 2
+        # Круг вырезается прозрачностью с краем в полтора пикселя: жёсткая
+        # граница на 150 точках видна лесенкой.
+        corner = (
+            f"[2:v]scale={BADGE_SIZE}:{BADGE_SIZE},fps={FPS},format=yuva444p,"
+            f"geq=lum='p(X,Y)':cb='p(X,Y)':cr='p(X,Y)'"
+            f":a='255*clip(({r - 1}-hypot(X-{r},Y-{r}))/1.5,0,1)'[badge];"
+            f"[layered][badge]overlay={BADGE_X}:{BADGE_Y},"
+        )
+
     run([
         ffmpeg(), "-y", *feed,
         "-i", str(png),
+        *extra,
         "-t", f"{shot.seconds}",
         "-filter_complex",
         (
-            f"[0:v]scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
-            f"crop={WIDTH}:{HEIGHT},setsar=1,fps={FPS},{motion}{GRADE}[bg];"
-            f"[bg][1:v]overlay=0:0,{fade}format=yuv420p[v]"
+            f"{base},{look}[bg];"
+            f"[bg][1:v]overlay=0:0{'[layered];' + corner if corner else ','}{fade}format=yuv420p[v]"
         ),
         "-map", "[v]", "-an",
         "-c:v", "libx264", "-preset", "medium", "-crf", "23",
@@ -672,23 +752,30 @@ def segment(shot: Shot, out: Path, work: Path, *, fade_in: bool = True) -> str:
     return kind
 
 
-def voice_piece(source: Path | None, seconds: float, dest: Path) -> Path:
+# Небольшая задержка фразы от начала кадра: кадр должен смениться раньше,
+# чем зазвучит фраза, иначе речь наезжает на предыдущую сцену. Ролики
+# с живым голосом ставят ноль: у них запас перед словом оставляет обрезка
+# дубля, а темп короткого ролика важнее.
+VOICE_LEAD = 0.2
+
+
+def voice_piece(source: Path | None, seconds: float, dest: Path, lead: float = VOICE_LEAD) -> Path:
     """Речь одного кадра, добитая тишиной ровно до его длины.
 
     Выравнивание тишиной, а не сдвигами при сведении: куски одинакового
     формата и точной длины склеиваются встык, и дорожка совпадает с видео
     по построению. Считать смещения руками — лишний способ ошибиться.
+
+    48 кГц, а не 24, как отдаёт синтез: живой голос из Telegram несёт верха
+    до 20 кГц, и дикторская обработка роликов работает как раз там.
     """
-    feed = (
-        # Небольшая задержка в начале: кадр должен смениться раньше, чем
-        # зазвучит фраза, иначе речь наезжает на предыдущую сцену.
-        ["-i", str(source)] if source else ["-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono"]
-    )
+    feed = ["-i", str(source)] if source else ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono"]
+    delay = f"adelay={lead * 1000:.0f}|{lead * 1000:.0f}," if lead else ""
     run([
         ffmpeg(), "-y", *feed,
-        "-af", "adelay=200|200,apad" if source else "anull",
+        "-af", f"{delay}apad" if source else "anull",
         "-t", f"{seconds}",
-        "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le",
+        "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le",
         str(dest),
     ])
     return dest
@@ -712,6 +799,8 @@ def narrate(
     *,
     kind: str = "lineage",
     voices: Path | None = None,
+    lead: float = VOICE_LEAD,
+    tail: float | None = None,
 ) -> tuple[list[Shot], Path | None]:
     """Озвучивает раскадровку и подгоняет кадры под речь.
 
@@ -719,6 +808,11 @@ def narrate(
     обрезанная на полуслове, хуже, чем её отсутствие. Поэтому кадр
     растягивается под то, что в нём говорят, и ролик выходит длиннее
     шестнадцати секунд ровно настолько, насколько длинная связь.
+
+    Кадр растягивается на задержку, фразу и запас после неё. Раньше задержка
+    в счёт не входила, и у врезки от запаса в четверть секунды оставалось
+    пять сотых: фраза упиралась в склейку. `tail` задаёт запас всем кадрам
+    сразу — у роликов с живым голосом кадры не делятся на обычные и врезки.
 
     Синтеза нет — возвращаем раскадровку как была и None вместо дорожки:
     ролик собирается молча, расписание из-за чужого сервиса не встаёт.
@@ -737,10 +831,10 @@ def narrate(
             # Полсекунды сверх речи: фраза не должна упираться в склейку.
             # Врезке хватает четверти: с обычным запасом секундный кадр
             # растягивается вдвое и перестаёт быть врезкой.
-            tail = 0.25 if shot.backdrop not in ("", "terminal") else 0.7
-            seconds = max(seconds, probe_seconds(said) + tail)
+            air = tail if tail is not None else 0.25 if shot.backdrop not in ("", "terminal") else 0.7
+            seconds = max(seconds, lead + probe_seconds(said) + air)
         stretched.append(replace(shot, seconds=seconds))
-        pieces.append(voice_piece(said, seconds, work / f"voice-{index}.wav"))
+        pieces.append(voice_piece(said, seconds, work / f"voice-{index}.wav", lead))
 
     if not voiced:
         return shots, None
@@ -774,6 +868,8 @@ def assemble(
     voice: Path | None = None,
     start: float = AUDIO_SKIP_SECONDS,
     louder_at: float = 0.0,
+    voice_grade: str = VOICE_GRADE,
+    duck: str = "",
 ) -> None:
     """Склейка отрезков и звук.
 
@@ -785,6 +881,12 @@ def assemble(
     секундах оно заметнее, чем польза от него. Разница мерялась, а не бралась
     на слух: между речью и подложкой нужно около 6 дБ, иначе в наушниках
     в метро слов не разобрать.
+
+    Ролики с живым голосом решают наоборот и передают `duck` — фильтр
+    sidechaincompress: там бит — половина ролика, он должен качать, а голос
+    сам проседает под себя музыку и отпускает её в паузах. Подложка тогда
+    идёт без приглушения, громкость ей заранее выставляет src/reels.py.
+    `voice_grade` — обработка речи вместо телефонной полосы.
     """
     listing = work / "parts.txt"
     listing.write_text("".join(f"file '{p}'\n" for p in parts), encoding="utf-8")
@@ -798,7 +900,7 @@ def assemble(
     # На финале подложка выходит вперёд: слов там меньше, а последние секунды
     # решают, подпишется человек или пролистнёт. Ступенькой, а не наплывом —
     # музыка после паузы входит уже громче, и перехода не слышно.
-    quiet = 0.24 if voice else 0.85
+    quiet = 1.0 if duck else 0.24 if voice else 0.85
     level = (
         f"volume='if(gte(t,{louder_at:.2f}),{quiet * 1.35:.2f},{quiet:.2f})':eval=frame"
         if louder_at
@@ -812,10 +914,17 @@ def assemble(
     if voice is None:
         sound = ["-af", f"{bed},{MASTER}"]
     else:
+        # Голос делится надвое: одна копия звучит, другая только управляет
+        # приглушением подложки.
+        voices = (
+            f"[1:a]{bed}[music];[2:a]{voice_grade},asplit=2[vox][key];[music][key]{duck}[bed];"
+            if duck
+            else f"[1:a]{bed}[bed];[2:a]{voice_grade}[vox];"
+        )
         sound = [
             "-i", str(voice),
             "-filter_complex",
-            f"[1:a]{bed}[bed];[2:a]{VOICE_GRADE}[vox];"
+            f"{voices}"
             # Лимитер на выходе: сумма двух дорожек упирается в потолок,
             # а перегруз на телефонном динамике слышен как треск.
             f"[bed][vox]amix=inputs=2:duration=first:normalize=0,"
@@ -1084,6 +1193,13 @@ def _selftest() -> None:
     assert len(shots) == len(spoken), (len(shots), len(spoken))
     # Врезка зашита в раскадровку, и без файла кадр упадёт уже в ffmpeg.
     assert (config.ROOT / CUT_IMAGE).exists(), CUT_IMAGE
+
+    # Чистый слой роликов: ни счётчика в углу, ни затемнения низа кадра —
+    # только надпись. У клипов и то и другое на месте.
+    corner, bottom = (MARGIN + 6, 170), (WIDTH // 2, HEIGHT - 10)
+    plain, usual = overlay("ЦИТАТА", "НЕ Я", clean=True), overlay("ЦИТАТА", "НЕ Я")
+    assert plain.getpixel(corner)[3] == 0 and plain.getpixel(bottom)[3] == 0
+    assert usual.getpixel(corner)[3] > 0 and usual.getpixel(bottom)[3] > 0
 
 
 def main() -> int:

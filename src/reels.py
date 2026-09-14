@@ -25,10 +25,19 @@
    ffmpeg и сток — это минуты, а дежурство — единственный опросчик бота,
    и всё это время бот молчал бы.
 
-Сборка — те же примитивы, что у клипов (src/clips.py): надписи, камкордерная
-обработка, narrate с папкой записанных фраз, склейка. Своё здесь только то,
-чего у клипов нет: кадр на каждую строку сценария, мем целиком на вертикальном
-холсте и первый кадр без затемнения — он же превью.
+Сборка — те же примитивы, что у клипов (src/clips.py): надписи, narrate с папкой
+записанных фраз, склейка. А вид другой, и это решение владельца от 14.09.2026:
+камкордерная обработка и затемнение превращали ролик в тёмную кашу, где мем
+был маленькой картинкой посреди чёрного поля. Здесь картинка чистая и на весь
+экран, узнаваемость держит одна крутящаяся плёнка в углу, под голосом качает
+бит, а сам голос проходит дикторскую обработку, а не телефонную полосу.
+
+Кадры меняются каждые две-три секунды: у одной фразы их может быть до трёх.
+Видео-мемы берутся с GIPHY по запросу при сборке — просьба владельца. Чистой
+лицензии, как у стока (src/footage.py), у них нет, поэтому они живут только
+здесь: ролик заливает сам владелец, а автоматика канала их не касается.
+Реальные кадры события — фотографии со страниц источников по og:image, той же
+дорогой, что картинка новости в канале. Видео чужих роликов не берутся вовсе.
 
     python -m src.reels --check content/reels/20260914-kanye.json    проверка без сети
     python -m src.reels --send content/reels/20260914-kanye.json --dry-run
@@ -40,14 +49,17 @@
 from __future__ import annotations
 
 import argparse
+import array
 import html
 import json
 import logging
+import math
 import os
 import random
 import re
 import subprocess
 import tempfile
+import wave
 from datetime import datetime
 from pathlib import Path
 
@@ -58,7 +70,11 @@ from . import config, state
 
 log = logging.getLogger("reels")
 
-KINDS = ("face", "stock", "meme", "card")
+KINDS = ("face", "photo", "stock", "gif", "meme", "card")
+# Кадров на фразу. Больше трёх на две-три секунды речи — уже мельтешение,
+# глаз не успевает понять ни одного.
+SCREENS_MAX = 3
+GIPHY_ID = re.compile(r"[A-Za-z0-9]+")
 
 # Название YouTube режет на ста знаках. Описание на площадках коротких роликов —
 # подпись под видео; держим его в рамке подписи Telegram, 1024 знака: длиннее
@@ -80,12 +96,52 @@ TODAY = "сегодня до 21:00 МСК"
 SAY_SECONDS = 1.5
 # До скольких знаков надпись идёт крупным кеглем.
 BIG_TEXT = 20
-# Основа холста под мем и карточку — светлее, чем кажется нужным: камкордерная
-# обработка поверх давит яркость, и сразу тёмный цвет стал бы чёрной дырой
-# (тот же довод у footage.procedural).
-DARK = (46, 41, 36)
-# Мем встаёт ниже счётчика кассеты и выше надписи.
-MEME_TOP = 240
+
+# Значок канала — единственное постоянное в кадре.
+BADGE = config.ROOT / "assets" / "avatar" / "avatar-wheel.mp4"
+# Карточка стоит на размытом соседнем кадре: чёрный прямоугольник в ленте
+# выглядел провалом, а размытие оставляет цвет и не спорит с надписью.
+CARD_BLUR = "gblur=sigma=30"
+# Мем, видео-мем и фото события идут целиком поверх своей размытой копии,
+# остальное обрезается под 9:16: у фото артиста и стока лицо и сцена в центре.
+# Откатился такой кадр на сток — обрезается и он.
+BLUR_FIT = {"photo", "gif", "meme"}
+
+GIPHY_SEARCH = "https://api.giphy.com/v1/gifs/search"
+# Видео по id отдаётся без ключа: автор может закрепить конкретный мем.
+GIPHY_MEDIA = "https://media.giphy.com/media/{}/giphy.mp4"
+# og:image меньше этого — логотип издания, а не фотография (у XXL — 14 КБ).
+PHOTO_MIN_BYTES = 30_000
+
+# --- звук -----------------------------------------------------------------
+# Дубль чистится до склейки: срез гула ниже 100 Гц и мягкий шумодав. На дублях
+# 20260914-keef3 шипение выше 1,5 кГц в паузах падает на 9–12 дБ, а речь
+# в той же полосе не меняется; агрессивнее (anlmdn) — голос уходит под воду.
+DENOISE = "highpass=f=100,afftdn=nr=12:nf=-50:tn=1"
+# Каждая фраза выравнивается по громкости: дубли пишутся в разное время
+# и на разном расстоянии от телефона, у keef3 разброс был семь дБ.
+VOICE_LUFS = -16.0
+# Где кончается тишина: окна по 10 мс громче порога, подряд не меньше 40 мс.
+# Порог — от выровненной речи, а не от нуля: фон с шумом громче -45 дБ, по
+# которым резали раньше, и полсекунды тишины перед словом оставались.
+# Короткий щелчок до фразы в четыре окна не укладывается.
+SPEECH_DB = -38.0
+SPEECH_RUN = 4
+# Запас вокруг речи: до слова — чтобы не съесть атаку, после — затухание.
+BEFORE_SPEECH = 0.08
+AFTER_SPEECH = 0.15
+# Воздух после дубля до склейки.
+TAIL = 0.2
+# Дикторская цепочка на склеенную дорожку: лёгкая компрессия, полка верхов
+# и де-эссер после неё — подъём верхов сам добавляет свиста на «с» и «ш».
+VOICE_CHAIN = (
+    "acompressor=threshold=0.1:ratio=3:attack=5:release=80:makeup=2,"
+    "highshelf=f=4500:g=2.5,deesser=i=0.4"
+)
+# Громкость бита до приглушения. Выше голоса по среднему: в паузах бит должен
+# качать в полную силу, а разборчивость под речью держит сайдчейн.
+BEAT_LUFS = -15.0
+DUCK = "sidechaincompress=threshold=0.03:ratio=6:attack=10:release=250"
 
 
 # --- проверка -------------------------------------------------------------
@@ -109,14 +165,34 @@ def _artist_names() -> set[str]:
     return {a.get("name", "") for a in state.read_json(config.ARTISTS_FILE, {}).get("artists", [])}
 
 
-def _screen_problems(screen, where: str) -> list[str]:
+def _template_ok(template) -> bool:
+    return _filled(template) and (config.MEME_TEMPLATES / f"{template}.jpg").is_file()
+
+
+def screens(line: dict) -> list[dict]:
+    """Кадры строки: `screen` бывает одним кадром или списком до трёх."""
+    screen = line["screen"]
+    return screen if isinstance(screen, list) else [screen]
+
+
+def _screens_problems(screen, where: str, sources: list) -> list[str]:
+    if not isinstance(screen, list):
+        return _screen_problems(screen, where, sources)
+    if not 1 <= len(screen) <= SCREENS_MAX:
+        return [f"{where}: в screen от одного до {SCREENS_MAX} кадров"]
+    return [error for number, one in enumerate(screen, 1)
+            for error in _screen_problems(one, f"{where}, кадр {number}", sources)]
+
+
+def _screen_problems(screen, where: str, sources: list) -> list[str]:
     if not isinstance(screen, dict):
         return [f"{where}: нет screen — что в кадре"]
     kind = screen.get("kind")
     if kind not in KINDS:
         return [f"{where}: screen.kind «{kind}» — бывает только {', '.join(KINDS)}"]
-    if any(field in screen and not isinstance(screen[field], str) for field in ("label", "text")):
-        return [f"{where}: label и text — строки"]
+    if any(field in screen and not isinstance(screen[field], str)
+           for field in ("label", "text", "query", "id", "template", "url")):
+        return [f"{where}: label, text, query, id, template и url — строки"]
     if kind == "face":
         name = screen.get("name")
         if not _filled(name):
@@ -125,12 +201,16 @@ def _screen_problems(screen, where: str) -> list[str]:
             # По этому имени ищется фотография: «Канье» вместо «Kanye West»
             # оставит кадр без лица, а чужое похожее имя — с чужим лицом.
             return [f"{where}: «{name}» нет в data/artists.json — имя ровно как там, или кадр stock/card"]
-    elif kind == "stock" and not _filled(screen.get("query")):
-        return [f"{where}: у stock нет query — запрос к стоку, по-английски"]
-    elif kind == "meme":
-        template = screen.get("template")
-        if not _filled(template) or not (config.MEME_TEMPLATES / f"{template}.jpg").is_file():
-            return [f"{where}: шаблона мема «{template}» нет в assets/meme/templates/"]
+    elif kind == "photo" and screen.get("url") not in sources:
+        # Фото события — только со страницы, откуда взяты факты: картинка
+        # с чужой страницы могла бы показать не то событие.
+        return [f"{where}: у photo url — ссылка ровно из sources, картинка берётся с этой страницы"]
+    elif kind in ("stock", "gif") and not _filled(screen.get("query")):
+        return [f"{where}: у {kind} нет query — запрос по-английски"]
+    elif kind == "gif" and "id" in screen and not GIPHY_ID.fullmatch(screen["id"]):
+        return [f"{where}: id — код GIPHY из латиницы и цифр, как в конце ссылки на гифку"]
+    elif kind in ("meme", "gif") and (kind == "meme" or "template" in screen) and not _template_ok(screen.get("template")):
+        return [f"{where}: шаблона мема «{screen.get('template')}» нет в assets/meme/templates/"]
     elif kind == "card" and not _filled(screen.get("text")):
         return [f"{where}: у card нет text — надпись и есть кадр"]
     return []
@@ -208,7 +288,7 @@ def problems(script, name: str = "") -> list[str]:
             errors.append(f"{where}: pause — секунды, больше нуля и не больше {PAUSE_MAX:g}")
         if not isinstance(line.get("hint", ""), str):
             errors.append(f"{where}: hint — строка")
-        errors += _screen_problems(line.get("screen"), where)
+        errors += _screens_problems(line.get("screen"), where, sources if isinstance(sources, list) else [])
     return errors
 
 
@@ -409,105 +489,262 @@ def accept(message: dict, reel: tuple[str, int], admin: str, push) -> None:
 # --- сборка ---------------------------------------------------------------
 
 
-def _card_canvas(work: Path) -> Path:
-    from PIL import Image
+def _download(url: str, dest: Path, smallest: int) -> Path | None:
+    """Файл по ссылке или None. Меньше `smallest` байт — не то, что просили."""
+    import requests
 
-    from . import clips
+    from .sources.http import BROWSER_UA
 
-    path = work / "card.png"
-    if not path.exists():
-        Image.new("RGB", (clips.WIDTH, clips.HEIGHT), DARK).save(path)
-    return path
+    try:
+        response = requests.get(url, timeout=60, headers={"User-Agent": BROWSER_UA})
+    except requests.RequestException:
+        return None
+    if not response.ok or len(response.content) < smallest:
+        return None
+    dest.write_bytes(response.content)
+    return dest
 
 
-def _meme_canvas(template: str, work: Path) -> Path:
-    """Мем целиком на вертикальном холсте.
+def _gif(screen: dict, work: Path) -> Path | None:
+    """Видео-мем с GIPHY: по id, иначе первый по запросу. None — не нашлось.
 
-    Шаблоны в основном горизонтальные, а кадр — 9:16: обрезка по центру,
-    как у фотографий, оставила бы от мема середину без половины героев.
-    Мем вписывается в верхние две трети — ниже надпись и интерфейс площадки.
+    Ключ нужен только поиску. Ошибка в лог пишется без адреса запроса:
+    в адресе стоит сам ключ. Первый по запросу, а не случайный: GIPHY отдаёт
+    выдачу по смыслу, и пересборка того же сценария не должна менять мем.
+    """
+    import requests
+
+    dest = work / f"gif-{abs(hash((screen.get('id'), screen['query']))) % 10**8}.mp4"
+    if dest.exists():
+        return dest
+    urls = [GIPHY_MEDIA.format(screen["id"])] if screen.get("id") else []
+    key = config.secret("GIPHY_API_KEY", required=False)
+    if key:
+        found = []
+        try:
+            response = requests.get(GIPHY_SEARCH, timeout=30, params={
+                "api_key": key, "q": screen["query"], "limit": 3, "rating": "pg-13", "lang": "en",
+            })
+            if response.ok:
+                found = response.json().get("data") or []
+            else:
+                log.warning("GIPHY ответил %s на «%s»", response.status_code, screen["query"])
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("GIPHY недоступен (%s) на «%s»", type(exc).__name__, screen["query"])
+        urls += [item["images"]["original"]["mp4"] for item in found
+                 if item.get("images", {}).get("original", {}).get("mp4")]
+    for url in urls:
+        if _download(url, dest, 10_000):
+            return dest
+    log.warning(
+        "Видео-мем «%s» не нашёлся%s — вместо него %s", screen["query"],
+        "" if key else " (нет GIPHY_API_KEY)", "мем-картинка" if screen.get("template") else "сток",
+    )
+    return None
+
+
+def _photo(url: str, work: Path) -> Path | None:
+    """Фотография события со страницы источника, по og:image. None — не нашлось.
+
+    Пересохраняется в JPEG не больше 2160 точек: издания отдают PNG под
+    чужим расширением и снимки агентств по шесть тысяч точек, а ffmpeg
+    узнаёт картинку по расширению и на таком спотыкается.
     """
     from PIL import Image
 
-    from . import clips
+    from .sources import feeds
 
-    meme = Image.open(config.MEME_TEMPLATES / f"{template}.jpg").convert("RGB")
-    box_w, box_h = clips.WIDTH, int(clips.HEIGHT * 0.55)
-    scale = min(box_w / meme.width, box_h / meme.height)
-    meme = meme.resize((round(meme.width * scale), round(meme.height * scale)), Image.LANCZOS)
-    canvas = Image.new("RGB", (clips.WIDTH, clips.HEIGHT), DARK)
-    canvas.paste(meme, ((box_w - meme.width) // 2, MEME_TOP + (box_h - meme.height) // 2))
-    path = work / f"meme-{template}.png"
-    canvas.save(path)
-    return path
+    dest = work / f"photo-{abs(hash(url)) % 10**8}.jpg"
+    if dest.exists():
+        return dest
+    picture = feeds.page_image(url)
+    raw = _download(picture, work / "photo.raw", PHOTO_MIN_BYTES) if picture else None
+    try:
+        image = Image.open(raw).convert("RGB") if raw else None
+    except OSError:
+        image = None
+    if image is None:
+        log.warning("На %s нет годной фотографии — вместо неё сток", url)
+        return None
+    image.thumbnail((2160, 2160))
+    image.save(dest, "JPEG", quality=92)
+    return dest
+
+
+def _fill(screen: dict, work: Path) -> dict:
+    """Чем закрыть кадр — поля clips.Shot: subject, backdrop или query.
+
+    Не нашлось своего — откат по цепочке, сборка не падает: фото события →
+    сток, видео-мем → мем-картинка из template → сток по тому же запросу.
+    """
+    kind = screen["kind"]
+    if kind == "face":
+        return {"subject": screen["name"]}
+    if kind == "meme":
+        return {"backdrop": str(config.MEME_TEMPLATES / f"{screen['template']}.jpg")}
+    found = _photo(screen["url"], work) if kind == "photo" else _gif(screen, work) if kind == "gif" else None
+    if found:
+        return {"backdrop": str(found)}
+    if kind == "gif" and screen.get("template"):
+        return {"backdrop": str(config.MEME_TEMPLATES / f"{screen['template']}.jpg")}
+    return {"query": screen.get("query", "")}
 
 
 def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> list:
-    """Кадр на каждую строку сценария — и ничего сверх.
+    """Кадры ролика по порядку: у строки их от одного до трёх.
 
     Заставки с маркой в конце, как у клипов, нет: крючок у сценария уже есть
     первой фразой, а три секунды заставки — это три секунды, на которых ролик
     пролистывают, и повтор по кругу начинался бы с неё, а не с крючка.
 
-    `seconds` — длины кадров, когда они уже известны по дублям: счётчик кассеты
-    показывает настоящее время кадра в ролике, а без второго прохода он врал бы
-    на разницу между нижней границей и записанной фразой.
+    `seconds` — длины строк, когда они уже известны по дублям. Строка делится
+    между своими кадрами поровну. Границы округляются до кадра видео от начала
+    ролика, а не у каждого кадра отдельно: на двух десятках склеек погрешность
+    иначе копилась бы, и голос к концу уезжал от картинки.
+
+    Карточка стоит на размытом соседнем кадре — прежнем, а у первой строки
+    на следующем.
     """
+    from PIL import Image
+
     from . import clips
 
-    shots, at = [], 0.0
-    for index, line in enumerate(script["lines"]):
-        screen = line["screen"]
-        length = seconds[index] if seconds else float(line.get("pause") or SAY_SECONDS)
+    lengths = seconds or [float(line.get("pause") or SAY_SECONDS) for line in script["lines"]]
+    plan = [
+        (index, part, len(screens(line)), screen)
+        for index, line in enumerate(script["lines"])
+        for part, screen in enumerate(screens(line))
+    ]
+    fills = [None if screen["kind"] == "card" else _fill(screen, work) for *_, screen in plan]
+
+    shots, line_start, done = [], 0.0, 0.0
+    for number, (index, part, count, screen) in enumerate(plan):
+        if part == 0 and index:
+            line_start += lengths[index - 1]
+        end = round((line_start + lengths[index] * (part + 1) / count) * clips.FPS) / clips.FPS
+        nearest = list(range(number - 1, -1, -1)) + list(range(number + 1, len(plan)))
+        fill = fills[number] or next((fills[i] for i in nearest if fills[i]), {})
         # У лица надпись по умолчанию — имя: холодная лента не обязана узнавать
         # человека в лицо. Пустой text убирает надпись совсем.
         body = screen.get("text", screen.get("name", ""))
         label = screen.get("label", "")
         layer = (
-            clips.overlay(label, body, big=len(body) <= BIG_TEXT, at=at)
+            clips.overlay(label, body, big=len(body) <= BIG_TEXT, clean=True)
             if label or body
-            else clips.cut_overlay(at)
+            else Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
         )
-        backdrop = ""
-        if screen["kind"] == "meme":
-            backdrop = str(_meme_canvas(screen["template"], work))
-        elif screen["kind"] == "card":
-            backdrop = str(_card_canvas(work))
-        # face ищется по имени (subject), stock — своим запросом (query).
         shots.append(clips.Shot(
-            layer, length, screen.get("name", ""), script.get("topic", ""),
-            backdrop=backdrop, query=screen.get("query", ""),
+            layer, end - done, fill.get("subject", ""), script.get("topic", ""),
+            backdrop=fill.get("backdrop", ""), query=fill.get("query", ""),
         ))
-        at += length
+        done = end
     return shots
 
 
+def _meter(path: Path, before: str = "") -> tuple[float, list[tuple[float, float, float]]]:
+    """Громкость по EBU R128: общая в LUFS и ход по времени — (t, M, S).
+
+    M меряется окном 0,4 с, S — тремя секундами. Звука нет — -70, как у тишины.
+    """
+    from . import clips
+
+    stderr = subprocess.run(
+        [clips.ffmpeg(), "-hide_banner", "-nostats", "-i", str(path), "-af", f"{before}ebur128", "-f", "null", "-"],
+        capture_output=True, text=True,
+    ).stderr
+    trace = [
+        (float(t), float(m), float(s))
+        for t, m, s in re.findall(r"t: *([\d.]+) +TARGET:\S+ LUFS +M: *(-?[\d.]+) +S: *(-?[\d.]+)", stderr)
+    ]
+    total = re.findall(r"I:\s+(-?[\d.]+) LUFS", stderr)
+    return (float(total[-1]) if total else -70.0), trace
+
+
+def beat_start(track: Path) -> float:
+    """Откуда брать бит: сильная доля в начале самого длинного места, где качает низ.
+
+    У битов со стока вступление без баса длится от трёх до двадцати пяти
+    секунд, а посреди трека бывает брейк без бочки: отступ одним числом
+    попадал то в тишину, то в провал. Поэтому трек меряется ниже 120 Гц,
+    где бочка и 808: громким считается всё в пределах 6 дБ от почти самого
+    громкого места, и берётся самый длинный такой кусок. Трёхсекундное окно
+    замечает его с опозданием, поэтому сама доля ищется коротким.
+    """
+    _, trace = _meter(track, "lowpass=f=120,")
+    if not trace:
+        return 0.0
+    loud = sorted(s for _, _, s in trace)[int(len(trace) * 0.9)] - 6
+    best, since = (0.0, 0.0), None
+    for t, _, s in [*trace, (trace[-1][0] + 0.1, 0.0, -120.0)]:
+        if s >= loud and since is None:
+            since = t
+        elif s < loud and since is not None:
+            best, since = max(best, (t - since, -since)), None
+    start = -best[1]
+    onset = next((t - 0.4 for t, m, _ in trace if start - 3 <= t <= start and m >= loud), start)
+    return max(0.0, onset)
+
+
+def _speech(path: Path) -> tuple[float, float]:
+    """Где в чистом дубле речь: начало и конец, секунды. Речи нет — весь файл."""
+    with wave.open(str(path)) as take:
+        rate = take.getframerate()
+        samples = array.array("h", take.readframes(take.getnframes()))
+    step = rate // 100
+    gate = (32768 * 10 ** (SPEECH_DB / 20)) ** 2
+    loud = [
+        sum(x * x for x in samples[i:i + step]) / step > gate
+        for i in range(0, len(samples) - step + 1, step)
+    ]
+    runs = [i for i in range(len(loud) - SPEECH_RUN + 1) if all(loud[i:i + SPEECH_RUN])]
+    if not runs:
+        return 0.0, len(samples) / rate
+    return runs[0] / 100, (runs[-1] + SPEECH_RUN) / 100
+
+
 def _trimmed(script: dict, voices: Path | None, work: Path) -> Path:
-    """Дубли без тишины по краям — в своей папке под теми же номерами.
+    """Дубли, готовые к склейке: чистые, одной громкости и без тишины по краям.
 
     Голосовое начинается раньше речи и кончается позже: палец жмёт запись,
     человек вдыхает, отпускает. По полсекунды с краёв на семи фразах — лишние
     семь секунд тишины в ролике на сорок, а короткие ролики пролистывают
     как раз на провалах. Берутся только фразы: пауза остаётся немой, даже если
     в папке случайно лежит файл под её номером.
+
+    Порядок — шумодав, громкость, поиск речи. Край ищется по порогу от уже
+    выровненной речи: абсолютный порог в -45 дБ, по которому резали раньше,
+    тише фона с шумом, и тишина перед словом оставалась целиком.
     """
     from . import clips
 
     out = work / "takes"
     out.mkdir(exist_ok=True)
-    edge = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.1"
     for frame in spoken_frames(script) if voices else []:
         take = clips.voice_take(voices, frame - 1)
-        if take is not None:
-            clips.run([
-                clips.ffmpeg(), "-y", "-i", str(take),
-                "-af", f"{edge},areverse,{edge},areverse", str(out / f"{frame}.wav"),
-            ])
+        if take is None:
+            continue
+        # Больше чем на 20 дБ не поднимаем: пустой дубль превратился бы в рёв шума.
+        gain = min(VOICE_LUFS - _meter(take)[0], 20.0)
+        clean = work / f"clean-{frame}.wav"
+        clips.run([
+            clips.ffmpeg(), "-y", "-i", str(take), "-af", f"{DENOISE},volume={gain:.1f}dB",
+            "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(clean),
+        ])
+        start, end = _speech(clean)
+        clips.run([
+            clips.ffmpeg(), "-y", "-i", str(clean),
+            "-af", f"atrim=start={max(0.0, start - BEFORE_SPEECH):.3f}:end={end + AFTER_SPEECH:.3f}",
+            str(out / f"{frame}.wav"),
+        ])
     return out
 
 
 def bed() -> Path | None:
-    """Подложка: сначала приватное хранилище, потом assets/audio. None — нет нигде."""
+    """Подложка: сначала приватное хранилище, потом assets/audio. None — нет нигде.
+
+    Биты лежат в приватном хранилище, а не в открытом репозитории: лицензия
+    Pixabay разрешает музыку в роликах, но не раздачу самих файлов.
+    """
     from . import clips
 
     for folder in (config.PRIVATE / "audio", clips.AUDIO_DIR):
@@ -515,6 +752,30 @@ def bed() -> Path | None:
         if tracks:
             return random.choice(tracks)
     return None
+
+
+def _beat(total: float, work: Path) -> Path:
+    """Кусок бита на весь ролик, с сильной доли и нужной громкости.
+
+    Громкость меряется на самом куске, а не на треке: тихое вступление
+    занижало бы среднее, и бит выходил бы громче задуманного.
+    """
+    from . import clips
+
+    track, music = bed(), work / "beat.wav"
+    if track is None:
+        # Ролик без музыки лучше, чем никакого: голос в нём главное.
+        # Тишина вместо подложки — чтобы склейка шла тем же путём.
+        log.warning("Подложки нет ни в %s, ни в assets/audio — ролик без музыки", config.PRIVATE / "audio")
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                   "-t", f"{total}", str(music)])
+        return music
+    start, raw = beat_start(track), work / "beat-raw.wav"
+    clips.run([clips.ffmpeg(), "-y", "-ss", f"{start:.2f}", "-i", str(track), "-t", f"{total + 1:.2f}", str(raw)])
+    gain = BEAT_LUFS - _meter(raw)[0]
+    clips.run([clips.ffmpeg(), "-y", "-i", str(raw), "-af", f"volume={gain:.1f}dB", str(music)])
+    print(f"  бит: {track.name} с {start:.1f} с, {gain:+.1f} дБ")
+    return music
 
 
 def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
@@ -527,28 +788,33 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
 
     with tempfile.TemporaryDirectory(prefix="plenka-reel-") as tmp:
         work = Path(tmp)
-        shots, voice = clips.narrate(
-            storyboard(script, work), script, work, kind="reels", voices=_trimmed(script, voices, work)
+        # Сперва голос: длина строки — это длина её дубля, а кадры делят её потом.
+        lines = [clips.Shot(None, float(line.get("pause") or SAY_SECONDS), "", "") for line in script["lines"]]
+        timed, voice = clips.narrate(
+            lines, script, work, kind="reels", voices=_trimmed(script, voices, work), lead=0.0, tail=TAIL
         )
-        shots = storyboard(script, work, [shot.seconds for shot in shots])
+        shots = storyboard(script, work, [shot.seconds for shot in timed])
+        kinds = [screen["kind"] for line in script["lines"] for screen in screens(line)]
         total = sum(shot.seconds for shot in shots)
 
-        parts, kinds = [], []
-        for index, shot in enumerate(shots):
+        parts, used, at = [], [], 0.0
+        for index, (shot, kind) in enumerate(zip(shots, kinds)):
             parts.append(work / f"part-{index}.mp4")
-            kinds.append(clips.segment(shot, parts[-1], work, fade_in=index > 0))
-        print("  кадры:", ", ".join(kinds))
+            # Склейки встык, без выхода из чёрного: при смене кадра каждые
+            # две-три секунды он мигал бы темнотой.
+            used.append(f"{kind}→" + clips.segment(
+                shot, parts[-1], work, fade_in=False,
+                grade=CARD_BLUR if kind == "card" else "",
+                fit="blur" if kind in BLUR_FIT and shot.backdrop else "crop",
+                badge=(BADGE, at),
+            ))
+            at += shot.seconds
+        print("  кадры:", ", ".join(used))
         print(f"  голос: {'есть' if voice else 'нет'}, длина {total:.1f} с")
 
-        music, start = bed(), clips.AUDIO_SKIP_SECONDS
-        if music is None:
-            # Ролик без музыки лучше, чем никакого: голос в нём главное.
-            # Тишина вместо подложки — чтобы склейка шла тем же путём.
-            log.warning("Подложки нет ни в %s, ни в assets/audio — ролик без музыки", config.PRIVATE / "audio")
-            music, start = work / "silence.wav", 0.0
-            clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-                       "-t", f"{total}", str(music)])
-        clips.assemble(parts, music, total, video, work, voice, start)
+        clips.assemble(
+            parts, _beat(total, work), total, video, work, voice, 0.0, voice_grade=VOICE_CHAIN, duck=DUCK
+        )
 
     # Превью вынимается из готового ролика, а не рисуется отдельно: так оно
     # по построению совпадает с первым кадром, который площадка возьмёт обложкой.
@@ -591,14 +857,12 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
 
 
 def _selftest() -> None:
-    """Без сети: валидатор, раскадровка и разбор ответа-голосового.
+    """Без сети: валидатор, раскадровка, поиск речи в дубле и разбор ответа-голосового.
 
     Запуск: python -m src.reels --selftest
     """
     import contextlib
     import io
-
-    from PIL import Image
 
     from . import host, moderate
 
@@ -614,7 +878,10 @@ def _selftest() -> None:
             {"say": "Первая фраза", "hint": "ровно", "screen": {"kind": "face", "name": "Bones"}},
             {"say": "Вторая", "screen": {"kind": "card", "label": "17/08", "text": "два концерта"}},
             {"pause": 1.0, "screen": {"kind": "meme", "template": "this-is-fine"}},
-            {"say": "Третья", "screen": {"kind": "stock", "query": "stadium empty seats"}},
+            {"say": "Третья", "screen": [
+                {"kind": "stock", "query": "stadium empty seats"},
+                {"kind": "gif", "query": "waving goodbye", "template": "this-is-fine"},
+            ]},
         ],
     }
     assert problems(good, good["id"]) == [], problems(good, good["id"])
@@ -631,22 +898,58 @@ def _selftest() -> None:
     broken("tags", tags=["фонк, рэп"])
     broken("фразы", lines=[{"pause": 1.0, "screen": {"kind": "card", "text": "тишина"}}])
     broken("ровно одно", lines=[{"say": "Фраза", "pause": 1.0, "screen": {"kind": "card", "text": "т"}}])
+    photo = {"kind": "photo", "url": good["sources"][0], "query": "concert crowd"}
+    assert problems({**good, "lines": [{"say": "Фраза", "screen": [photo, {"kind": "gif", "query": "bye"}]}]}) == []
     for screen, word in (
-        ({"kind": "gif"}, "kind"),
+        ({"kind": "video"}, "kind"),
         ({"kind": "meme", "template": "нет-такого"}, "шаблона"),
         ({"kind": "face", "name": "Канье"}, "artists.json"),
         ({"kind": "card"}, "text"),
         ({"kind": "stock"}, "query"),
+        ({"kind": "gif"}, "query"),
+        ({"kind": "gif", "query": "bye", "id": "../x"}, "GIPHY"),
+        ({"kind": "gif", "query": "bye", "template": "нет-такого"}, "шаблона"),
+        ({**photo, "url": "https://other.example/page"}, "sources"),
+        ([{"kind": "card", "text": "т"}] * 4, "от одного до"),
+        ([{"kind": "card", "text": "т"}, {"kind": "stock"}], "кадр 2"),
     ):
         broken(word, lines=[{"say": "Фраза", "screen": screen}])
 
-    # Раскадровка: кадр на строку, у паузы нет фразы и длина ровно из сценария.
+    # Раскадровка: кадр на каждый screen, строка делится между своими кадрами,
+    # границы стоят на кадрах видео и в сумме дают ровно длину ролика.
+    # Без ключа GIPHY видео-мем уходит в свою мем-картинку, карточка берёт
+    # фон соседнего кадра.
+    os.environ.pop("GIPHY_API_KEY", None)
     with tempfile.TemporaryDirectory() as tmp:
-        shots, spoken = storyboard(good, Path(tmp)), host.lines(good, kind="reels")
-        assert len(shots) == len(good["lines"]) == len(spoken), (len(shots), len(spoken))
-        assert spoken[2] == "" and shots[2].seconds == 1.0, (spoken[2], shots[2].seconds)
-        assert spoken_frames(good) == [1, 2, 4]
-        assert Image.open(shots[2].backdrop).size == (1080, 1920)
+        shots, spoken = storyboard(good, Path(tmp), [2.0, 1.5, 1.0, 2.5]), host.lines(good, kind="reels")
+        assert len(spoken) == len(good["lines"]) and len(shots) == 5, (len(spoken), len(shots))
+        assert spoken[2] == "" and spoken_frames(good) == [1, 2, 4]
+        assert abs(sum(shot.seconds for shot in shots) - 7.0) < 1e-9
+        assert all(abs(shot.seconds * 30 - round(shot.seconds * 30)) < 1e-6 for shot in shots)
+        assert abs(shots[3].seconds - 1.25) < 0.04 and shots[1].subject == "Bones"
+        assert shots[4].backdrop.endswith("this-is-fine.jpg"), shots[4]
+        assert shots[0].layer.size == (1080, 1920)
+
+    # Речь в дубле: щелчок до фразы не считается её началом, края — по порогу.
+    with tempfile.TemporaryDirectory() as tmp:
+        rate, path = 48000, Path(tmp) / "take.wav"
+        loud = [int(3000 * math.sin(i * 0.05)) for i in range(rate)]
+        click = [9000] * (rate // 100)
+        samples = [0] * (rate // 5) + click + [0] * (rate * 3 // 10) + loud + [0] * (rate // 2)
+        with wave.open(str(path), "wb") as take:
+            take.setnchannels(1), take.setsampwidth(2), take.setframerate(rate)
+            take.writeframes(array.array("h", samples).tobytes())
+        start, end = _speech(path)
+        assert abs(start - 0.51) < 0.02 and abs(end - 1.51) < 0.02, (start, end)
+
+    # Бит берётся с места, где вступает низ, а не с тихого начала.
+    with tempfile.TemporaryDirectory() as tmp:
+        from . import clips
+
+        track = Path(tmp) / "beat.wav"
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=60:d=30",
+                   "-af", "volume='if(lt(t,7),0.01,0.8)':eval=frame", str(track)])
+        assert abs(beat_start(track) - 7.0) < 0.5, beat_start(track)
 
     # Ответ голосовым на фразу находит ролик и кадр — и в разборе дежурства тоже.
     saved = config.PRIVATE
@@ -704,7 +1007,8 @@ def main() -> int:
             print(f"Сценарий {path.name} не годен: ошибок {len(errors)}.")
             return 1
         if args.check:
-            print(f"Сценарий {path.name} годен: фраз {len(spoken_frames(script))}, кадров {len(script['lines'])}.")
+            print(f"Сценарий {path.name} годен: фраз {len(spoken_frames(script))}, строк {len(script['lines'])}, "
+                  f"кадров {sum(len(screens(line)) for line in script['lines'])}.")
             return 0
 
     config.load_dotenv()

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import sys
@@ -118,7 +119,9 @@ def page_image(url: str) -> str:
     found = OG_IMAGE.search(response.text)
     if not found:
         return ""
-    return _usable((found.group(1) or found.group(2) or "").strip())
+    # Адрес в атрибуте экранирован: NBC Chicago отдаёт «&#038;» вместо «&»,
+    # и без разбора параметры размера уходят серверу мусором.
+    return _usable(html.unescape(found.group(1) or found.group(2) or "").strip())
 
 
 def _entry_date(entry) -> datetime | None:
