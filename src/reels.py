@@ -26,11 +26,24 @@
    и всё это время бот молчал бы.
 
 Сборка — те же примитивы, что у клипов (src/clips.py): надписи, narrate с папкой
-записанных фраз, склейка. А вид другой, и это решение владельца от 14.09.2026:
+записанных фраз, склейка. А вид другой, и это решения владельца от 14.09.2026:
 камкордерная обработка и затемнение превращали ролик в тёмную кашу, где мем
 был маленькой картинкой посреди чёрного поля. Здесь картинка чистая и на весь
-экран, узнаваемость держит одна крутящаяся плёнка в углу, под голосом качает
-бит, а сам голос проходит дикторскую обработку, а не телефонную полосу.
+экран, под голосом качает бит, а сам голос проходит дикторскую обработку,
+а не телефонную полосу. Марки канала в кадре нет вовсе: крутящаяся плёнка
+в углу висела над каждым мемом и спорила с ним, а узнаёт ролик голос.
+
+Каждый кадр обрезается под 9:16 вокруг главного (поле `focus`): горизонтальный
+мем целиком поверх своей размытой копии смотрелся вставкой из чужой ленты.
+Размытая подложка осталась только для панорам, от которых обрезка оставила бы
+щель, — это запасной путь, а не вид ролика. Лица кадр не ищет: без OpenCV,
+которого в зависимостях нет и не будет, это гадание, а автор сценария видит
+гифку и одним числом говорит, где в ней герой.
+
+Два эффекта ставятся полями строки и не чаще раза за ролик — повторённый
+приём перестаёт быть шуткой: `"voice": "robot"` — голос робота с лёгким эхом,
+`"beat": "stop"` — бит после фразы слетает, как пластинка под пальцем,
+и возвращается со следующей строкой.
 
 Кадры меняются каждые две-три секунды: у одной фразы их может быть до трёх.
 Видео-мемы берутся с GIPHY по запросу при сборке — просьба владельца. Чистой
@@ -71,6 +84,9 @@ from . import config, state
 log = logging.getLogger("reels")
 
 KINDS = ("face", "photo", "stock", "gif", "meme", "card")
+# Эффекты строки: какой голос и что делает бит после фразы.
+VOICES = ("robot",)
+BEATS = ("stop",)
 # Кадров на фразу. Больше трёх на две-три секунды речи — уже мельтешение,
 # глаз не успевает понять ни одного.
 SCREENS_MAX = 3
@@ -97,15 +113,17 @@ SAY_SECONDS = 1.5
 # До скольких знаков надпись идёт крупным кеглем.
 BIG_TEXT = 20
 
-# Значок канала — единственное постоянное в кадре.
-BADGE = config.ROOT / "assets" / "avatar" / "avatar-wheel.mp4"
 # Карточка стоит на размытом соседнем кадре: чёрный прямоугольник в ленте
 # выглядел провалом, а размытие оставляет цвет и не спорит с надписью.
 CARD_BLUR = "gblur=sigma=30"
-# Мем, видео-мем и фото события идут целиком поверх своей размытой копии,
-# остальное обрезается под 9:16: у фото артиста и стока лицо и сцена в центре.
-# Откатился такой кадр на сток — обрезается и он.
-BLUR_FIT = {"photo", "gif", "meme"}
+# Всё обрезается под 9:16. Шире этого — панорама, от которой в кадре осталась
+# бы пятая часть, и только она встаёт целиком на размытую копию.
+BLUR_WIDER = 2.4
+# Мемная надпись (`caption`) — сверху, как в пересылаемых мемах, но ниже вкладок
+# Shorts и TikTok: верхние двести с лишним точек занимает их интерфейс.
+CAPTION_TOP = 260
+CAPTION_PAD = 60
+CAPTION_SIZES = ((150, 1), (128, 1), (112, 1), (96, 1), (88, 1), (112, 2), (96, 2), (80, 3))
 
 GIPHY_SEARCH = "https://api.giphy.com/v1/gifs/search"
 # Видео по id отдаётся без ключа: автор может закрепить конкретный мем.
@@ -142,6 +160,25 @@ VOICE_CHAIN = (
 # качать в полную силу, а разборчивость под речью держит сайдчейн.
 BEAT_LUFS = -15.0
 DUCK = "sidechaincompress=threshold=0.03:ratio=6:attack=10:release=250"
+# Голос робота: фаза каждого окна спектра обнуляется, и речь садится на ровный
+# гул с шагом окна — 1024 отсчёта при 48 кГц и перекрытии 0,75 дают около
+# 190 Гц, низкий «железный» тон. Огибающая спектра остаётся, поэтому слова
+# разборчивы. Эхо два коротких отражения и тихие: длинное размазало бы слоги.
+VOICE_EFFECTS = {
+    "robot": "afftfilt=real='hypot(re,im)':imag=0:win_size=1024:overlap=0.75,"
+             "aecho=0.9:0.8:70|140:0.3|0.15",
+}
+# Бит, слетевший с пластинки: после фразы кусок бита играет всё медленнее
+# ступенями — asetrate занижает частоту, и звук садится по высоте и темпу
+# разом, как диск под пальцем, — дальше тишина, и бит входит со следующей
+# строкой с того места, где был бы. Синтез из самого бита, а не чужой сэмпл
+# скретча: у звуков из сети нет лицензии. Строке с обрывом добавляется
+# BEAT_STOP секунд, чтобы остановку было слышно без голоса поверх. Ступеней
+# на 0,45 с, остальное — тишина: на keef3 при 0,6 с замедления тишины
+# оставалось треть секунды, и обрыв слышался как провал громкости.
+BEAT_STOP = 1.0
+STOP_STEPS = (0.8, 0.6, 0.42, 0.28, 0.17)
+STOP_SLICE = 0.03
 
 
 # --- проверка -------------------------------------------------------------
@@ -191,8 +228,11 @@ def _screen_problems(screen, where: str, sources: list) -> list[str]:
     if kind not in KINDS:
         return [f"{where}: screen.kind «{kind}» — бывает только {', '.join(KINDS)}"]
     if any(field in screen and not isinstance(screen[field], str)
-           for field in ("label", "text", "query", "id", "template", "url")):
-        return [f"{where}: label, text, query, id, template и url — строки"]
+           for field in ("label", "text", "query", "id", "template", "url", "caption")):
+        return [f"{where}: label, text, caption, query, id, template и url — строки"]
+    focus = screen.get("focus", 0.5)
+    if isinstance(focus, bool) or not isinstance(focus, (int, float)) or not 0 <= focus <= 1:
+        return [f"{where}: focus — где по ширине главное, число от 0 (левый край) до 1 (правый)"]
     if kind == "face":
         name = screen.get("name")
         if not _filled(name):
@@ -269,6 +309,10 @@ def problems(script, name: str = "") -> list[str]:
         errors.append(f"tags: {len(', '.join(tags))} знаков вместе, YouTube принимает {TAGS_MAX}")
 
     lines = script.get("lines") if isinstance(script.get("lines"), list) else []
+    for field in ("voice", "beat"):
+        # Второй раз тот же приём уже не смешной, а навязчивый.
+        if sum(isinstance(line, dict) and field in line for line in lines) > 1:
+            errors.append(f"lines: {field} — не больше одной строки на ролик")
     if not any(isinstance(line, dict) and _filled(line.get("say")) for line in lines):
         errors.append("lines: нет ни одной фразы — нужен хотя бы один say с текстом")
     for number, line in enumerate(lines, 1):
@@ -288,6 +332,13 @@ def problems(script, name: str = "") -> list[str]:
             errors.append(f"{where}: pause — секунды, больше нуля и не больше {PAUSE_MAX:g}")
         if not isinstance(line.get("hint", ""), str):
             errors.append(f"{where}: hint — строка")
+        for field, allowed in (("voice", VOICES), ("beat", BEATS)):
+            if field not in line:
+                continue
+            if line[field] not in allowed:
+                errors.append(f"{where}: {field} бывает только {', '.join(allowed)}")
+            elif "say" not in line:
+                errors.append(f"{where}: {field} — эффект фразы, у паузы его не бывает")
         errors += _screens_problems(line.get("screen"), where, sources if isinstance(sources, list) else [])
     return errors
 
@@ -330,7 +381,9 @@ def header(script: dict) -> str:
         f"<code>{script['id']}</code>\n\n"
         f"Фраз: {len(spoken_frames(script))}, каждая ниже отдельным сообщением. "
         "На каждую ответь голосовым: свайп влево по фразе и запись. Одна фраза — "
-        "одно голосовое, тишину по краям сборка срежет сама. Не понравился дубль — "
+        "одно голосовое, тишину по краям сборка срежет сама. Отпускай кнопку через "
+        "полсекунды после последнего слова, иначе его конец обрежется. "
+        "Не понравился дубль — "
         "ответь на ту же фразу ещё раз.\n\n"
         "Когда придут все, ролик соберётся сам и вернётся сюда с превью "
         "и текстом для заливки.\n\n"
@@ -506,24 +559,28 @@ def _download(url: str, dest: Path, smallest: int) -> Path | None:
 
 
 def _gif(screen: dict, work: Path) -> Path | None:
-    """Видео-мем с GIPHY: по id, иначе первый по запросу. None — не нашлось.
+    """Видео-мем с GIPHY: по id, иначе первый годный по запросу. None — не нашлось.
 
-    Ключ нужен только поиску. Ошибка в лог пишется без адреса запроса:
-    в адресе стоит сам ключ. Первый по запросу, а не случайный: GIPHY отдаёт
-    выдачу по смыслу, и пересборка того же сценария не должна менять мем.
+    Ключ нужен только поиску, и поиск идёт, только если гифку по id не отдали:
+    автор выбрал её глазами, а выдача поиска меняется. Ошибка в лог пишется
+    без адреса запроса: в адресе стоит сам ключ. Из выдачи берётся первый,
+    а не случайный: GIPHY сортирует по смыслу, и пересборка того же сценария
+    не должна менять мем.
     """
     import requests
 
     dest = work / f"gif-{abs(hash((screen.get('id'), screen['query']))) % 10**8}.mp4"
     if dest.exists():
         return dest
-    urls = [GIPHY_MEDIA.format(screen["id"])] if screen.get("id") else []
+    if screen.get("id") and _download(GIPHY_MEDIA.format(screen["id"]), dest, 10_000):
+        log.info("Видео-мем %s скачан по id: %d КБ", screen["id"], dest.stat().st_size // 1024)
+        return dest
     key = config.secret("GIPHY_API_KEY", required=False)
+    found = []
     if key:
-        found = []
         try:
             response = requests.get(GIPHY_SEARCH, timeout=30, params={
-                "api_key": key, "q": screen["query"], "limit": 3, "rating": "pg-13", "lang": "en",
+                "api_key": key, "q": screen["query"], "limit": 5, "rating": "pg-13", "lang": "en",
             })
             if response.ok:
                 found = response.json().get("data") or []
@@ -531,14 +588,20 @@ def _gif(screen: dict, work: Path) -> Path | None:
                 log.warning("GIPHY ответил %s на «%s»", response.status_code, screen["query"])
         except (requests.RequestException, ValueError) as exc:
             log.warning("GIPHY недоступен (%s) на «%s»", type(exc).__name__, screen["query"])
-        urls += [item["images"]["original"]["mp4"] for item in found
-                 if item.get("images", {}).get("original", {}).get("mp4")]
-    for url in urls:
-        if _download(url, dest, 10_000):
+    originals = [item.get("images", {}).get("original", {}) for item in found]
+    # Вертикальные и квадратные вперёд, порядок выдачи внутри сохраняется:
+    # у горизонтальной гифки обрезка под 9:16 оставляет треть.
+    for original in sorted(
+        (o for o in originals if o.get("mp4")),
+        key=lambda o: int(o.get("width") or 0) > int(o.get("height") or 0) * 1.2,
+    ):
+        if _download(original["mp4"], dest, 10_000):
+            log.info("Видео-мем «%s» найден поиском: %d КБ", screen["query"], dest.stat().st_size // 1024)
             return dest
     log.warning(
         "Видео-мем «%s» не нашёлся%s — вместо него %s", screen["query"],
-        "" if key else " (нет GIPHY_API_KEY)", "мем-картинка" if screen.get("template") else "сток",
+        "" if key or screen.get("id") else " (нет GIPHY_API_KEY)",
+        "мем-картинка" if screen.get("template") else "сток",
     )
     return None
 
@@ -590,6 +653,39 @@ def _fill(screen: dict, work: Path) -> dict:
     return {"query": screen.get("query", "")}
 
 
+def caption(layer, text: str):
+    """Мемная надпись сверху кадра: белые буквы с чёрной обводкой и тенью.
+
+    Узкий жирный Oswald, а не Arimo мемов канала (card.render_meme): поверх
+    полноэкранного видео надпись должна читаться с первого взгляда, а в одну
+    строку узкого шрифта та же фраза влезает заметно крупнее. Вид — как у мемов
+    из пересылки: белые буквы, чёрная обводка. Отдельно от `text`: та надпись —
+    ярлык фразы в нижней трети, а эта — реплика самого мема, её место сверху.
+    Верх кадра под неё свободен не всегда: фото выбирай, где голова героя
+    ниже верхней пятой части.
+    """
+    from PIL import Image, ImageDraw, ImageFilter
+
+    from . import card, stories
+
+    ink = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(ink)
+    # Одна строка крупно лучше двух, две — лучше мелкой одной.
+    for size, most in CAPTION_SIZES:
+        font = stories.font(size, 600)
+        lines = card._wrap(draw, text.strip(), font, layer.width - 2 * CAPTION_PAD)
+        if len(lines) <= most:
+            break
+    for number, line in enumerate(lines):
+        draw.text(
+            (layer.width / 2, CAPTION_TOP + number * size * 1.1), line, font=font, fill=(255, 255, 255, 255),
+            anchor="ma", stroke_width=max(4, size // 16), stroke_fill=(0, 0, 0, 255),
+        )
+    shade = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+    shade.putalpha(ink.getchannel("A").filter(ImageFilter.GaussianBlur(10)).point(lambda a: min(255, a * 2)))
+    return Image.alpha_composite(Image.alpha_composite(layer, shade), ink)
+
+
 def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> list:
     """Кадры ролика по порядку: у строки их от одного до трёх.
 
@@ -633,6 +729,8 @@ def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> 
             if label or body
             else Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
         )
+        if _filled(screen.get("caption")):
+            layer = caption(layer, screen["caption"])
         shots.append(clips.Shot(
             layer, end - done, fill.get("subject", ""), script.get("topic", ""),
             backdrop=fill.get("backdrop", ""), query=fill.get("query", ""),
@@ -723,11 +821,14 @@ def _trimmed(script: dict, voices: Path | None, work: Path) -> Path:
         take = clips.voice_take(voices, frame - 1)
         if take is None:
             continue
-        # Больше чем на 20 дБ не поднимаем: пустой дубль превратился бы в рёв шума.
-        gain = min(VOICE_LUFS - _meter(take)[0], 20.0)
+        # Эффект голоса — до выравнивания: робот меняет громкость, и мерить
+        # надо то, что прозвучит. Больше чем на 20 дБ не поднимаем: пустой
+        # дубль превратился бы в рёв шума.
+        chain = ",".join(filter(None, (DENOISE, VOICE_EFFECTS.get(script["lines"][frame - 1].get("voice", "")))))
+        gain = min(VOICE_LUFS - _meter(take, f"{chain},")[0], 20.0)
         clean = work / f"clean-{frame}.wav"
         clips.run([
-            clips.ffmpeg(), "-y", "-i", str(take), "-af", f"{DENOISE},volume={gain:.1f}dB",
+            clips.ffmpeg(), "-y", "-i", str(take), "-af", f"{chain},volume={gain:.1f}dB",
             "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(clean),
         ])
         start, end = _speech(clean)
@@ -754,11 +855,42 @@ def bed() -> Path | None:
     return None
 
 
-def _beat(total: float, work: Path) -> Path:
+def record_stop(music: Path, start: float, end: float, dest: Path) -> Path:
+    """Бит с обрывом: с `start` замедляется ступенями до остановки, к `end` молчит.
+
+    Ступени склеиваются встык, после них тишина добивает промежуток ровно
+    до `end`, а бит продолжается с `end` исходника: длина дорожки не меняется,
+    и голос с картинкой не уезжают. Лёгкое затухание в конце ступеней и
+    вход за 20 мс — без щелчков на стыках.
+    """
+    from . import clips
+
+    rate, count, gap = 48000, len(STOP_STEPS), end - start
+    slowed = sum(STOP_SLICE / step for step in STOP_STEPS)
+    steps = "".join(
+        f"[s{i}]atrim=start={start + i * STOP_SLICE:.3f}:end={start + (i + 1) * STOP_SLICE:.3f},"
+        f"asetpts=PTS-STARTPTS,asetrate={int(rate * step)},aresample={rate}[b{i}];"
+        for i, step in enumerate(STOP_STEPS)
+    )
+    graph = (
+        f"[0:a]aresample={rate},asplit={count + 2}[pre][post]{''.join(f'[s{i}]' for i in range(count))};"
+        f"[pre]atrim=end={start:.3f}[a];{steps}"
+        f"{''.join(f'[b{i}]' for i in range(count))}concat=n={count}:v=0:a=1,"
+        f"afade=t=out:st={slowed * 0.5:.3f}:d={slowed * 0.5:.3f},apad,atrim=end={gap:.3f}[c];"
+        f"[post]atrim=start={end:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.02[d];"
+        f"[a][c][d]concat=n=3:v=0:a=1[out]"
+    )
+    clips.run([clips.ffmpeg(), "-y", "-i", str(music), "-filter_complex", graph, "-map", "[out]", str(dest)])
+    return dest
+
+
+def _beat(total: float, work: Path, stop: tuple[float, float] | None = None) -> Path:
     """Кусок бита на весь ролик, с сильной доли и нужной громкости.
 
     Громкость меряется на самом куске, а не на треке: тихое вступление
-    занижало бы среднее, и бит выходил бы громче задуманного.
+    занижало бы среднее, и бит выходил бы громче задуманного. `stop` — где
+    бит слетает и где возвращается (см. record_stop); у тишины без подложки
+    обрывать нечего.
     """
     from . import clips
 
@@ -775,7 +907,27 @@ def _beat(total: float, work: Path) -> Path:
     gain = BEAT_LUFS - _meter(raw)[0]
     clips.run([clips.ffmpeg(), "-y", "-i", str(raw), "-af", f"volume={gain:.1f}dB", str(music)])
     print(f"  бит: {track.name} с {start:.1f} с, {gain:+.1f} дБ")
+    if stop:
+        print(f"  обрыв бита: {stop[0]:.2f}–{stop[1]:.2f} с")
+        return record_stop(music, *stop, work / "beat-stop.wav")
     return music
+
+
+def aspect(path: str) -> float:
+    """Ширина к высоте картинки или видео. 0 — не узнать, и тогда кадр обрезается."""
+    import shutil
+
+    probe = shutil.which("ffprobe")
+    if not probe:
+        return 0.0
+    size = subprocess.run(
+        [probe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", path],
+        capture_output=True, text=True,
+    ).stdout.strip().split(",")
+    try:
+        return int(size[0]) / int(size[1])
+    except (ValueError, IndexError, ZeroDivisionError):
+        return 0.0
 
 
 def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
@@ -789,31 +941,42 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
     with tempfile.TemporaryDirectory(prefix="plenka-reel-") as tmp:
         work = Path(tmp)
         # Сперва голос: длина строки — это длина её дубля, а кадры делят её потом.
-        lines = [clips.Shot(None, float(line.get("pause") or SAY_SECONDS), "", "") for line in script["lines"]]
-        timed, voice = clips.narrate(
-            lines, script, work, kind="reels", voices=_trimmed(script, voices, work), lead=0.0, tail=TAIL
-        )
-        shots = storyboard(script, work, [shot.seconds for shot in timed])
-        kinds = [screen["kind"] for line in script["lines"] for screen in screens(line)]
+        # Строке с обрывом бита — секунда сверх дубля: остановку должно быть
+        # слышно в тишине, а не под следующей фразой.
+        takes = _trimmed(script, voices, work)
+        lines = []
+        for number, line in enumerate(script["lines"], 1):
+            seconds = float(line.get("pause") or SAY_SECONDS)
+            if line.get("beat") == "stop" and (takes / f"{number}.wav").exists():
+                seconds = clips.probe_seconds(takes / f"{number}.wav") + BEAT_STOP
+            lines.append(clips.Shot(None, seconds, "", ""))
+        timed, voice = clips.narrate(lines, script, work, kind="reels", voices=takes, lead=0.0, tail=TAIL)
+        lengths = [shot.seconds for shot in timed]
+        shots = storyboard(script, work, lengths)
+        flat = [screen for line in script["lines"] for screen in screens(line)]
         total = sum(shot.seconds for shot in shots)
+        stop = next(
+            ((max(sum(lengths[:index]), sum(lengths[:index + 1]) - BEAT_STOP), sum(lengths[:index + 1]))
+             for index, line in enumerate(script["lines"]) if line.get("beat") == "stop"),
+            None,
+        )
 
-        parts, used, at = [], [], 0.0
-        for index, (shot, kind) in enumerate(zip(shots, kinds)):
+        parts, used = [], []
+        for index, (shot, screen) in enumerate(zip(shots, flat)):
             parts.append(work / f"part-{index}.mp4")
             # Склейки встык, без выхода из чёрного: при смене кадра каждые
             # две-три секунды он мигал бы темнотой.
-            used.append(f"{kind}→" + clips.segment(
+            used.append(f"{screen['kind']}→" + clips.segment(
                 shot, parts[-1], work, fade_in=False,
-                grade=CARD_BLUR if kind == "card" else "",
-                fit="blur" if kind in BLUR_FIT and shot.backdrop else "crop",
-                badge=(BADGE, at),
+                grade=CARD_BLUR if screen["kind"] == "card" else "",
+                fit="blur" if shot.backdrop and aspect(shot.backdrop) > BLUR_WIDER else "crop",
+                focus=float(screen.get("focus", 0.5)),
             ))
-            at += shot.seconds
         print("  кадры:", ", ".join(used))
         print(f"  голос: {'есть' if voice else 'нет'}, длина {total:.1f} с")
 
         clips.assemble(
-            parts, _beat(total, work), total, video, work, voice, 0.0, voice_grade=VOICE_CHAIN, duck=DUCK
+            parts, _beat(total, work, stop), total, video, work, voice, 0.0, voice_grade=VOICE_CHAIN, duck=DUCK
         )
 
     # Превью вынимается из готового ролика, а не рисуется отдельно: так оно
@@ -876,12 +1039,13 @@ def _selftest() -> None:
         "tags": ["фонк", "плёнка"],
         "lines": [
             {"say": "Первая фраза", "hint": "ровно", "screen": {"kind": "face", "name": "Bones"}},
-            {"say": "Вторая", "screen": {"kind": "card", "label": "17/08", "text": "два концерта"}},
+            {"say": "Вторая", "beat": "stop", "screen": {"kind": "card", "label": "17/08", "text": "два концерта"}},
             {"pause": 1.0, "screen": {"kind": "meme", "template": "this-is-fine"}},
             {"say": "Третья", "screen": [
                 {"kind": "stock", "query": "stadium empty seats"},
-                {"kind": "gif", "query": "waving goodbye", "template": "this-is-fine"},
-            ]},
+                {"kind": "gif", "query": "waving goodbye", "template": "this-is-fine",
+                 "focus": 0.3, "caption": "я боюсь только его"},
+            ], "voice": "robot"},
         ],
     }
     assert problems(good, good["id"]) == [], problems(good, good["id"])
@@ -898,6 +1062,11 @@ def _selftest() -> None:
     broken("tags", tags=["фонк, рэп"])
     broken("фразы", lines=[{"pause": 1.0, "screen": {"kind": "card", "text": "тишина"}}])
     broken("ровно одно", lines=[{"say": "Фраза", "pause": 1.0, "screen": {"kind": "card", "text": "т"}}])
+    card = {"kind": "card", "text": "т"}
+    broken("voice бывает", lines=[{"say": "Фраза", "voice": "alien", "screen": card}])
+    broken("у паузы", lines=[{"say": "Фраза", "screen": card}, {"pause": 1.0, "beat": "stop", "screen": card}])
+    broken("не больше одной", lines=[{"say": "Раз", "beat": "stop", "screen": card},
+                                     {"say": "Два", "beat": "stop", "screen": card}])
     photo = {"kind": "photo", "url": good["sources"][0], "query": "concert crowd"}
     assert problems({**good, "lines": [{"say": "Фраза", "screen": [photo, {"kind": "gif", "query": "bye"}]}]}) == []
     for screen, word in (
@@ -908,6 +1077,8 @@ def _selftest() -> None:
         ({"kind": "stock"}, "query"),
         ({"kind": "gif"}, "query"),
         ({"kind": "gif", "query": "bye", "id": "../x"}, "GIPHY"),
+        ({"kind": "gif", "query": "bye", "focus": 1.5}, "focus"),
+        ({"kind": "card", "text": "т", "caption": 5}, "строки"),
         ({"kind": "gif", "query": "bye", "template": "нет-такого"}, "шаблона"),
         ({**photo, "url": "https://other.example/page"}, "sources"),
         ([{"kind": "card", "text": "т"}] * 4, "от одного до"),
@@ -929,6 +1100,10 @@ def _selftest() -> None:
         assert abs(shots[3].seconds - 1.25) < 0.04 and shots[1].subject == "Bones"
         assert shots[4].backdrop.endswith("this-is-fine.jpg"), shots[4]
         assert shots[0].layer.size == (1080, 1920)
+        # Мемная надпись ложится сверху, ниже вкладок площадки.
+        band = (0, CAPTION_TOP, 1080, CAPTION_TOP + 100)
+        assert shots[4].layer.crop(band).getchannel("A").getextrema()[1] > 0
+        assert shots[3].layer.crop(band).getchannel("A").getextrema()[1] == 0
 
     # Речь в дубле: щелчок до фразы не считается её началом, края — по порогу.
     with tempfile.TemporaryDirectory() as tmp:
@@ -950,6 +1125,31 @@ def _selftest() -> None:
         clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=60:d=30",
                    "-af", "volume='if(lt(t,7),0.01,0.8)':eval=frame", str(track)])
         assert abs(beat_start(track) - 7.0) < 0.5, beat_start(track)
+
+        # Обрыв бита: длина та же, в промежутке тихо, после него бит вернулся.
+        loud = Path(tmp) / "loud.wav"
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=220:d=6", "-ac", "2", str(loud)])
+        stopped = record_stop(loud, 2.0, 3.0, Path(tmp) / "stopped.wav")
+        assert abs(clips.probe_seconds(stopped) - clips.probe_seconds(loud)) < 0.03
+        _, trace = _meter(stopped)
+        level = {round(t, 1): m for t, m, _ in trace}
+        assert level[1.9] > -30 and level[3.0] < level[1.9] - 30 and level[4.0] > -30, level
+
+        # Кадр обрезается вокруг focus: у картинки «слева красное, справа
+        # синее» кадр с focus 0 красный, с focus 1 синий.
+        from PIL import Image
+
+        half = Image.new("RGB", (1600, 900), (255, 0, 0))
+        half.paste((0, 0, 255), (800, 0, 1600, 900))
+        half.save(Path(tmp) / "half.png")
+        empty = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
+        for focus, channel in ((0.0, 0), (1.0, 2)):
+            part = Path(tmp) / f"focus-{focus}.mp4"
+            clips.segment(clips.Shot(empty, 0.2, "", "", backdrop=str(Path(tmp) / "half.png")), part, Path(tmp),
+                          fade_in=False, grade="", focus=focus)
+            clips.run([clips.ffmpeg(), "-y", "-i", str(part), "-frames:v", "1", str(Path(tmp) / "frame.png")])
+            pixel = Image.open(Path(tmp) / "frame.png").convert("RGB").getpixel((540, 960))
+            assert pixel[channel] > 200, (focus, pixel)
 
     # Ответ голосовым на фразу находит ролик и кадр — и в разборе дежурства тоже.
     saved = config.PRIVATE

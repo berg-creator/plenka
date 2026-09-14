@@ -165,7 +165,7 @@ def probe_seconds(path: Path) -> float:
 
     Нужна прежде всего для речи: пока фразу не синтезируешь, её длина
     неизвестна, а кадр под неё подгоняется, а не наоборот. Ещё — длина
-    петли значка и стока, чтобы знать, есть ли куда отступить.
+    стока, чтобы знать, есть ли куда отступить.
     """
     probe = shutil.which("ffprobe")
     if not probe:
@@ -619,13 +619,6 @@ def storyboard_news(item: dict) -> list[Shot]:
 # --- сборка --------------------------------------------------------------
 
 
-# Значок канала в роликах с живым голосом: крутящаяся плёнка в левом верхнем
-# углу. Справа и снизу у Shorts и TikTok кнопки и подпись, сверху по центру
-# вкладки — левый верх ниже строки состояния остаётся свободным. Надписи
-# растут от нижней трети вверх и до угла не доходят.
-BADGE_SIZE = 150
-BADGE_X, BADGE_Y = 56, 240
-
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mov"}
 STOCK_SKIP = 2.0
 
@@ -638,7 +631,7 @@ def segment(
     fade_in: bool = True,
     grade: str = GRADE,
     fit: str = "crop",
-    badge: tuple[Path, float] | None = None,
+    focus: float = 0.5,
 ) -> str:
     """Один отрезок: изображение или видео снизу, надпись сверху.
 
@@ -651,11 +644,12 @@ def segment(
 
     Параметры ниже нужны роликам с живым голосом (src/reels.py), у клипов
     всё по-прежнему. `grade` — обработка кадра, пустая строка — без неё.
-    `fit="blur"` — исходник целиком по ширине поверх своей же размытой
-    копии на весь экран: обрезка горизонтального мема под 9:16 оставила бы
-    от него середину без половины героев, а чёрные поля — маленькую картинку
-    в темноте. `badge` — круглое видео в углу и позиция отрезка в ролике:
-    петля значка продолжается с того же места, и на склейке он не дёргается.
+    `focus` — где по ширине главное, от 0 (левый край) до 1 (правый): кадр
+    обрезается под 9:16 вокруг этой точки, а не всегда по центру — у мема
+    герой редко стоит посередине. `fit="blur"` — исходник целиком по ширине
+    поверх своей размытой копии: горизонтальная вставка в вертикальном
+    ролике выглядит чужой, поэтому ролики зовут его только для панорам,
+    от которых обрезка оставила бы узкую щель.
     """
     png = work / f"{out.stem}.png"
     shot.layer.save(png, "PNG")
@@ -705,7 +699,10 @@ def segment(
     # кадра, вышла бы чёрной.
     fade = "fade=t=in:st=0:d=0.12," if fade_in else ""
 
-    cover = f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,crop={WIDTH}:{HEIGHT}"
+    cover = (
+        f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
+        f"crop={WIDTH}:{HEIGHT}:x='min(iw-ow,max(0,iw*{focus:.3f}-ow/2))'"
+    )
     if fit == "blur":
         # Кадр чуть выше середины: снизу надпись, ей нужно место.
         base = (
@@ -717,30 +714,14 @@ def segment(
         base = f"[0:v]{cover}"
     look = ",".join(step for step in (f"setsar=1,fps={FPS}", motion.rstrip(","), grade) if step)
 
-    corner, extra = "", []
-    if badge is not None:
-        wheel, at = badge
-        loop = probe_seconds(wheel)
-        extra = ["-stream_loop", "-1", "-ss", f"{at % loop if loop else 0:.3f}", "-i", str(wheel)]
-        r = BADGE_SIZE / 2
-        # Круг вырезается прозрачностью с краем в полтора пикселя: жёсткая
-        # граница на 150 точках видна лесенкой.
-        corner = (
-            f"[2:v]scale={BADGE_SIZE}:{BADGE_SIZE},fps={FPS},format=yuva444p,"
-            f"geq=lum='p(X,Y)':cb='p(X,Y)':cr='p(X,Y)'"
-            f":a='255*clip(({r - 1}-hypot(X-{r},Y-{r}))/1.5,0,1)'[badge];"
-            f"[layered][badge]overlay={BADGE_X}:{BADGE_Y},"
-        )
-
     run([
         ffmpeg(), "-y", *feed,
         "-i", str(png),
-        *extra,
         "-t", f"{shot.seconds}",
         "-filter_complex",
         (
             f"{base},{look}[bg];"
-            f"[bg][1:v]overlay=0:0{'[layered];' + corner if corner else ','}{fade}format=yuv420p[v]"
+            f"[bg][1:v]overlay=0:0,{fade}format=yuv420p[v]"
         ),
         "-map", "[v]", "-an",
         "-c:v", "libx264", "-preset", "medium", "-crf", "23",
