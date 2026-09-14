@@ -23,7 +23,7 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
-from . import card, collect, config, llm, quality, state, telegram
+from . import card, collect, config, footage, llm, quality, state, telegram
 from .sources import deezer, itunes, youtube_comments
 
 log = logging.getLogger("compose")
@@ -389,8 +389,12 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
 
     # ОТКУДА НОГИ — из курируемой базы связей, сырьё из inbox не нужно.
     random.shuffle(lineage)
+    # Артист связи едет в пост: разбор может не назвать ни одного имени
+    # («фонк начался в Мемфисе»), и без него card.cover не найдёт лица —
+    # пост уйдёт в ленту текстом. Где имени нет и в самой связи, его ставит
+    # поле artist в lineage.json.
     for link in lineage[: quota.get("lineage", 0)]:
-        add("lineage", link, {})
+        add("lineage", link, {"artist": link.get("artist") or footage.find_artist(str(link))})
 
     # МЕЖДУ СТРОК — только из курируемой базы: цитаты не должны быть выдуманы.
     subtext = state.read_json(config.SUBTEXT_FILE, {"items": []})["items"]

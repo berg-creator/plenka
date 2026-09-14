@@ -164,8 +164,10 @@ def cover(post: dict) -> Path | None:
     source: str | Path = post.get("cover", "")
     artist, name = post.get("artist", ""), post.get("release") or post.get("track", "")
     if not source:
-        text = post.get("text", "")
-        source, artist, name = footage.artist_image(text) or "", footage.find_artist(text), ""
+        # Имя из текста важнее: подпись должна совпасть с тем, о ком пост.
+        # Не назвал никого — лицом становится артист из данных поста.
+        artist, name = footage.find_artist(post.get("text", "")) or artist, ""
+        source = (footage.artist_image(artist) or "") if artist else ""
 
     img = photo_backdrop(source) if source else None
     if img is None:
