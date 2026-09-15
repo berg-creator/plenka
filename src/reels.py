@@ -69,10 +69,9 @@
 
 Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу
 висит метка: значок Telegram и config.CHANNEL_HANDLE. После последнего кадра —
-плашка PLATE_SECONDS: кассета ПЛЁНКИ с крутящимися катушками (узнавание канала,
-см. «Лицо канала — плёнка» в CLAUDE.md) и адрес со значком, бит на ней затухает.
-TikTok ссылки на чужие площадки режет в охвате, поэтому вторая версия — та же
-кассета без метки и адреса: тот же проход ffmpeg пишет оба файла, бот шлёт их
+плашка PLATE_SECONDS: крутящийся аватар канала (avatar-wheel) и адрес со значком,
+бит на ней затухает. TikTok ссылки на чужие площадки режет в охвате, поэтому
+вторая версия — тот же аватар без метки и адреса: тот же проход ffmpeg пишет оба файла, бот шлёт их
 подряд. Метка — в верхних 6–10% слева: ниже вкладок площадки, выше поднятого
 субтитра (22%), и не там, где у Shorts кнопки (справа внизу) и подпись (низ).
 
@@ -153,10 +152,13 @@ TODAY = "сегодня до 21:00 МСК"
 # эта нужна, чтобы и без дубля кадр было видно в превью.
 SAY_SECONDS = 1.5
 STILL_ZOOM = 0.07
-# Плашка-концовка: длина и где по высоте адрес под кассетой; метка по ходу ролика.
+# Плашка-концовка: длина, аватар и где по высоте адрес под ним; метка по ходу ролика.
 PLATE_SECONDS = 1.3
 PLATE_BG = (22, 21, 24)
-ENDING_Y = 0.70
+WHEEL = config.ROOT / "assets" / "avatar" / "avatar-wheel.mp4"
+PLATE_WHEEL = 720
+PLATE_TOP = 520
+ENDING_Y = 0.73
 BADGE_XY = (36, 118)
 TELEGRAM_BLUE = (42, 171, 238)
 NOSUB_MARK = ".nosub"
@@ -1184,7 +1186,7 @@ def badge():
 
 
 def ending():
-    """Адрес канала на плашке-концовке: крупно, со значком, под кассетой."""
+    """Адрес канала на плашке-концовке: крупно, со значком, под аватаром."""
     from PIL import Image
 
     from . import clips
@@ -1196,47 +1198,26 @@ def ending():
 
 
 def plate(work: Path) -> Path:
-    """Плашка-концовка: кассета ПЛЁНКИ (make_avatar_tape.variant_window) с крутящимися катушками.
+    """Плашка-концовка: крутящийся аватар канала (assets/avatar/avatar-wheel.mp4) крупно, круглой маской.
 
-    Катушки у аватарки — концентрические кольца, поворот их не видно, поэтому
-    втулки перерисованы с зубцами и крутятся: левая, почти пустая, быстрее.
+    Настоящий аватар канала (его же отдаёт getChat @plenka_fm), а не нарисованная
+    кассета: по нему канал узнают в Telegram, куда ролик и зовёт.
     """
-    from PIL import Image, ImageDraw
-
     from . import clips
-    from .make_avatar_tape import variant_window
-
-    size = clips.WIDTH
-    top = 380
-    base = Image.new("RGB", (clips.WIDTH, clips.HEIGHT), PLATE_BG)
-    base.paste(variant_window(size), (0, top))
-    hub = round(size * 0.035)
-
-    def spool(angle: float):
-        big = hub * 8
-        glyph = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(glyph)
-        draw.ellipse((0, 0, big - 1, big - 1), fill=(208, 204, 196, 255))
-        draw.ellipse((big * 0.29, big * 0.29, big * 0.71, big * 0.71), fill=(*PLATE_BG, 255))
-        for n in range(6):
-            a = math.radians(angle + n * 60)
-            cx, cy = big / 2 + math.cos(a) * big * 0.21, big / 2 + math.sin(a) * big * 0.21
-            draw.ellipse((cx - big * 0.05, cy - big * 0.05, cx + big * 0.05, cy + big * 0.05), fill=(208, 204, 196, 255))
-        return glyph.resize((hub * 2, hub * 2), Image.LANCZOS)
 
     out = work / "plate.mp4"
-    proc = subprocess.Popen([clips.ffmpeg(), "-v", "error", "-y", "-f", "image2pipe", "-framerate", str(clips.FPS),
-                             "-c:v", "png", "-i", "-", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(out)],
-                            stdin=subprocess.PIPE)
-    for frame_number in range(round(PLATE_SECONDS * clips.FPS)):
-        t = frame_number / clips.FPS
-        frame = base.copy()
-        for x, speed in ((0.33, 540), (0.67, 320)):
-            glyph = spool(-speed * t)
-            frame.paste(glyph, (round(size * x) - hub, top + round(size * 0.5) - hub), glyph)
-        frame.save(proc.stdin, "PNG", compress_level=1)
-    proc.stdin.close()
-    proc.wait()
+    side = PLATE_WHEEL
+    clips.run([
+        clips.ffmpeg(), "-y",
+        "-f", "lavfi", "-i", f"color=c=0x{PLATE_BG[0]:02x}{PLATE_BG[1]:02x}{PLATE_BG[2]:02x}:s={clips.WIDTH}x{clips.HEIGHT}"
+                             f":r={clips.FPS}:d={PLATE_SECONDS}",
+        "-stream_loop", "-1", "-i", str(WHEEL),
+        "-filter_complex",
+        f"[1:v]scale={side}:{side},fps={clips.FPS},format=rgba,"
+        f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='255*clip({side / 2 - 1}-hypot(X-{side / 2},Y-{side / 2}),0,1)'[w];"
+        f"[0:v][w]overlay={(clips.WIDTH - side) // 2}:{PLATE_TOP}:shortest=1,format=yuv420p",
+        "-t", f"{PLATE_SECONDS}", "-c:v", "libx264", "-crf", "20", str(out),
+    ])
     return out
 
 
@@ -1316,7 +1297,7 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         flat = [screen for line in script["lines"] for screen in screens(line)]
         from PIL import Image
 
-        # Концовка — отдельный кадр после последнего: кассета, адрес на ней вжигает burn.
+        # Концовка — отдельный кадр после последнего: аватар канала, адрес под ним вжигает burn.
         shots.append(clips.Shot(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), PLATE_SECONDS, "", "",
                                 backdrop=str(plate(work))))
         flat.append({"kind": "plate"})
@@ -1601,7 +1582,7 @@ def _selftest() -> None:
 
         from . import clips
 
-        # Ролик из двух отрезков с разным цветовым диапазоном, как склейка фото и видео, и плашки с кассетой.
+        # Ролик из двух отрезков с разным цветовым диапазоном, как склейка фото и видео, и плашки с аватаром.
         for name, fmt in (("a", "yuvj420p"), ("b", "yuv420p")):
             clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "color=c=gray:s=1080x1920:r=30:d=1.5",
                        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "1.5", "-pix_fmt", fmt,
@@ -1634,25 +1615,28 @@ def _selftest() -> None:
             r, g, b = Image.open(frame).convert("RGB").crop((x, y, x + 100, y + 80)).resize((1, 1), Image.BOX).getpixel((0, 0))
             return b > r + 40
 
-        def dark(at: float, source: Path) -> bool:
+        def wheel(at: float, source: Path) -> bool:
             frame = Path(tmp) / "d.png"
             clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(source), "-frames:v", "1", str(frame)])
-            return Image.open(frame).convert("L").getpixel((540, 1300)) < 60
+            gray = Image.open(frame).convert("L")
+            # Светлый аватар в центре плашки, тёмный фон за его кругом.
+            return gray.getpixel((540 + 180, PLATE_TOP + PLATE_WHEEL // 2 + 180)) > 140 and gray.getpixel((60, PLATE_TOP)) < 60
 
-        # Метка Telegram по ходу — только в основном; кассета на концовке — в обеих; адрес под ней — только в основном.
+        # Метка Telegram по ходу — только в основном; аватар на концовке — в обеих; адрес под ним — только в основном.
         middle = (ENDING_Y - 0.03, ENDING_Y + 0.03)
         assert blue(0.7, video) and not blue(0.7, tiktok(video)), "метка только в основном ролике"
-        assert dark(3.6, video) and dark(3.6, tiktok(video)), "кассета на концовке обеих версий"
+        assert wheel(3.6, video) and wheel(3.6, tiktok(video)), "аватар канала на концовке обеих версий"
         assert white(3.6, middle) and not white(3.6, middle, tiktok(video)), "адрес на концовке только в основном"
         assert abs(clips.probe_seconds(tiktok(video)) - clips.probe_seconds(video)) < 0.1
-        # Катушки крутятся: первый и средний кадр плашки различаются у втулки.
+        # Аватар крутится: кольцо вокруг кнопки в первом и среднем кадре плашки разное.
         frames = []
-        for at in ("0", "0.5"):
+        for at in ("0", "0.6"):
             clips.run([clips.ffmpeg(), "-y", "-ss", at, "-i", str(spin), "-frames:v", "1", str(Path(tmp) / "p.png")])
-            frames.append(Image.open(Path(tmp) / "p.png").convert("L").crop((320, 880, 400, 960)))
+            c = PLATE_TOP + PLATE_WHEEL // 2
+            frames.append(Image.open(Path(tmp) / "p.png").convert("L").crop((540 - 170, c - 170, 540 + 170, c + 170)))
         from PIL import ImageChops
 
-        assert ImageChops.difference(*frames).getextrema()[1] > 60, "катушки стоят"
+        assert ImageChops.difference(*frames).getextrema()[1] > 60, "аватар стоит"
 
     # Бит берётся с места, где вступает низ, а не с тихого начала.
     with tempfile.TemporaryDirectory() as tmp:
