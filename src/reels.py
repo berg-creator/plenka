@@ -67,11 +67,14 @@
 текст, который сам шутка или доказательство: `caption` мема, надписи
 в картинках владельца.
 
-Последний кадр — концовка: поверх него крупно адрес канала (config.CHANNEL_HANDLE),
-иначе ролик никуда не ведёт. Кадр короче ENDING_SECONDS продлевается, голос
-не трогается. TikTok ссылки на чужие площадки режет в охвате, поэтому вторая
-версия ролика — без надписи и без продления: тот же проход ffmpeg пишет оба
-файла, и бот шлёт их подряд.
+Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу
+висит метка: значок Telegram и config.CHANNEL_HANDLE. После последнего кадра —
+плашка PLATE_SECONDS: кассета ПЛЁНКИ с крутящимися катушками (узнавание канала,
+см. «Лицо канала — плёнка» в CLAUDE.md) и адрес со значком, бит на ней затухает.
+TikTok ссылки на чужие площадки режет в охвате, поэтому вторая версия — та же
+кассета без метки и адреса: тот же проход ffmpeg пишет оба файла, бот шлёт их
+подряд. Метка — в верхних 6–10% слева: ниже вкладок площадки, выше поднятого
+субтитра (22%), и не там, где у Shorts кнопки (справа внизу) и подпись (низ).
 
 Кадры делят строку поровну. Картинка с меткой `<кадр>-<n>.at` (внутри —
 секунда от начала строки) начинается ровно тогда: так короткая вставка
@@ -150,11 +153,12 @@ TODAY = "сегодня до 21:00 МСК"
 # эта нужна, чтобы и без дубля кадр было видно в превью.
 SAY_SECONDS = 1.5
 STILL_ZOOM = 0.07
-# Концовка: сколько её минимум видно и где по высоте адрес канала — над обычным
-# субтитром (68%), но ниже середины: на 45% он лёг Кифу на глаза, а лицо в кадре
-# обычно в верхней половине.
-ENDING_SECONDS = 1.5
-ENDING_Y = 0.56
+# Плашка-концовка: длина и где по высоте адрес под кассетой; метка по ходу ролика.
+PLATE_SECONDS = 1.3
+PLATE_BG = (22, 21, 24)
+ENDING_Y = 0.70
+BADGE_XY = (36, 118)
+TELEGRAM_BLUE = (42, 171, 238)
 NOSUB_MARK = ".nosub"
 AT_MARK = ".at"
 # Всё обрезается под 9:16. Шире этого — панорама, от которой в кадре осталась
@@ -1128,39 +1132,126 @@ def subtitle(text: str, up: bool):
     return frame
 
 
-def ending():
-    """Слой концовки: адрес канала крупно тем же шрифтом с обводкой, на ENDING_Y высоты."""
+def telegram_icon(size: int):
+    """Значок Telegram своим рисунком: голубой круг и белый бумажный самолётик."""
+    from PIL import Image, ImageDraw
+
+    big = size * 4
+    icon = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(icon)
+    draw.ellipse((0, 0, big - 1, big - 1), fill=(*TELEGRAM_BLUE, 255))
+
+    def at(x: float, y: float) -> tuple[float, float]:
+        return big / 2 + x * big / 2, big / 2 + y * big / 2
+
+    draw.polygon([at(-0.56, -0.02), at(0.46, -0.42), at(0.28, 0.44)], fill=(255, 255, 255, 255))
+    draw.polygon([at(-0.12, 0.14), at(0.32, -0.26), at(-0.08, 0.40)], fill=(200, 224, 242, 255))
+    draw.polygon([at(-0.56, -0.02), at(-0.12, 0.14), at(0.46, -0.42)], fill=(255, 255, 255, 255))
+    return icon.resize((size, size), Image.LANCZOS)
+
+
+def handle_mark(height: int, pill: bool):
+    """Значок Telegram и адрес канала одной строкой; `pill` — на полупрозрачной подложке."""
+    from PIL import Image, ImageDraw
+
+    from . import stories
+
+    font = stories.font(round(height * 0.62), 600)
+    draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    left, top, right, bottom = draw.textbbox((0, 0), config.CHANNEL_HANDLE, font=font)
+    icon = round(height * 0.72)
+    pad = round(height * 0.2)
+    width = pad + icon + pad + (right - left) + pad * 2
+    mark = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    ink = ImageDraw.Draw(mark)
+    if pill:
+        ink.rounded_rectangle((0, 0, width - 1, height - 1), radius=height // 2, fill=(0, 0, 0, 120))
+    mark.alpha_composite(telegram_icon(icon), (pad, (height - icon) // 2))
+    ink.text((pad * 2 + icon - left, (height - (bottom - top)) / 2 - top), config.CHANNEL_HANDLE, font=font,
+             fill=(255, 255, 255, 255), stroke_width=max(2, height // 30), stroke_fill=(0, 0, 0, 255))
+    return mark
+
+
+def badge():
+    """Метка по ходу основного ролика: небольшая, в левом верхнем углу, ниже вкладок площадки."""
     from PIL import Image
 
     from . import clips
 
-    ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), config.CHANNEL_HANDLE)
-    _, top, _, bottom = ink.getbbox()
-    frame = Image.new("RGBA", ink.size)
-    frame.alpha_composite(ink.crop((0, top, clips.WIDTH, bottom)), (0, round(clips.HEIGHT * ENDING_Y - (bottom - top) / 2)))
+    frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
+    frame.alpha_composite(handle_mark(80, pill=True), BADGE_XY)
     return frame
 
 
-def stretch_last(shots: list) -> tuple[list, float]:
-    """Последний кадр не короче ENDING_SECONDS: концовку должны успеть прочитать. Возвращает кадры и прибавку."""
-    from dataclasses import replace
+def ending():
+    """Адрес канала на плашке-концовке: крупно, со значком, под кассетой."""
+    from PIL import Image
 
-    extra = max(0.0, ENDING_SECONDS - shots[-1].seconds)
-    return shots[:-1] + [replace(shots[-1], seconds=shots[-1].seconds + extra)], extra
+    from . import clips
+
+    mark = handle_mark(150, pill=False)
+    frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
+    frame.alpha_composite(mark, ((clips.WIDTH - mark.width) // 2, round(clips.HEIGHT * ENDING_Y - mark.height / 2)))
+    return frame
+
+
+def plate(work: Path) -> Path:
+    """Плашка-концовка: кассета ПЛЁНКИ (make_avatar_tape.variant_window) с крутящимися катушками.
+
+    Катушки у аватарки — концентрические кольца, поворот их не видно, поэтому
+    втулки перерисованы с зубцами и крутятся: левая, почти пустая, быстрее.
+    """
+    from PIL import Image, ImageDraw
+
+    from . import clips
+    from .make_avatar_tape import variant_window
+
+    size = clips.WIDTH
+    top = 380
+    base = Image.new("RGB", (clips.WIDTH, clips.HEIGHT), PLATE_BG)
+    base.paste(variant_window(size), (0, top))
+    hub = round(size * 0.035)
+
+    def spool(angle: float):
+        big = hub * 8
+        glyph = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(glyph)
+        draw.ellipse((0, 0, big - 1, big - 1), fill=(208, 204, 196, 255))
+        draw.ellipse((big * 0.29, big * 0.29, big * 0.71, big * 0.71), fill=(*PLATE_BG, 255))
+        for n in range(6):
+            a = math.radians(angle + n * 60)
+            cx, cy = big / 2 + math.cos(a) * big * 0.21, big / 2 + math.sin(a) * big * 0.21
+            draw.ellipse((cx - big * 0.05, cy - big * 0.05, cx + big * 0.05, cy + big * 0.05), fill=(208, 204, 196, 255))
+        return glyph.resize((hub * 2, hub * 2), Image.LANCZOS)
+
+    out = work / "plate.mp4"
+    proc = subprocess.Popen([clips.ffmpeg(), "-v", "error", "-y", "-f", "image2pipe", "-framerate", str(clips.FPS),
+                             "-c:v", "png", "-i", "-", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(out)],
+                            stdin=subprocess.PIPE)
+    for frame_number in range(round(PLATE_SECONDS * clips.FPS)):
+        t = frame_number / clips.FPS
+        frame = base.copy()
+        for x, speed in ((0.33, 540), (0.67, 320)):
+            glyph = spool(-speed * t)
+            frame.paste(glyph, (round(size * x) - hub, top + round(size * 0.5) - hub), glyph)
+        frame.save(proc.stdin, "PNG", compress_level=1)
+    proc.stdin.close()
+    proc.wait()
+    return out
 
 
 def tiktok(video: Path) -> Path:
     return video.with_name(f"{video.stem}-tiktok.mp4")
 
 
-def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float, short: float) -> None:
-    """Вжигает субтитры и концовку одним проходом и пишет два файла: основной и для TikTok.
+def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float) -> None:
+    """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет два файла: основной и для TikTok.
 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
     один вход: список кадров с длительностями (concat), пустой прозрачный кадр
     закрывает паузы; тридцать картинок-входов ffmpeg не тянул и вставал.
-    Концовка с `ending_at` — только в основном файле; TikTok-версия обрезана
-    до `short` (без продления последнего кадра) и затухает сама.
+    Метка до `ending_at` и адрес после — только в основном файле, TikTok-версия
+    та же, но без них.
     """
     from PIL import Image
 
@@ -1168,6 +1259,7 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
 
     blank = work / "sub-0.png"
     Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)).save(blank)
+    badge().save(work / "badge.png")
     ending().save(work / "ending.png")
     entries, now = [], 0.0
     for number, (text, first, end, up) in enumerate(placed, 1):
@@ -1186,20 +1278,19 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
                        encoding="utf-8")
     raw = work / "no-subs.mp4"
     video.replace(raw)
-    fade = max(0.0, short - 0.6)
-    encode = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart"]
+    encode = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-movflags", "+faststart"]
     clips.run([
         # reinit_filter 0: отрезки ролика разные по цветовому диапазону (фото — pc, видео — tv),
         # и на каждой смене ffmpeg пересобирал граф, теряя вход субтитров до конца ролика.
         clips.ffmpeg(), "-y", "-reinit_filter", "0", "-i", str(raw), "-f", "concat", "-safe", "0", "-i", str(listing),
-        "-loop", "1", "-i", str(work / "ending.png"),
+        "-loop", "1", "-i", str(work / "badge.png"), "-loop", "1", "-i", str(work / "ending.png"),
         "-filter_complex",
         "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split[b1][b2];"
-        f"[2:v]format=rgba[e];[b1][e]overlay=0:0:shortest=1:enable='gte(t,{ending_at:.3f})',format=yuv420p[main];"
-        f"[b2]trim=0:{short:.3f},setpts=PTS-STARTPTS,format=yuv420p[tt];"
-        f"[0:a]asplit[a1][a2];[a2]atrim=0:{short:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={fade:.3f}:d=0.6[att]",
-        "-map", "[main]", "-map", "[a1]", *encode, str(video),
-        "-map", "[tt]", "-map", "[att]", *encode, str(tiktok(video)),
+        f"[2:v]format=rgba[m];[b1][m]overlay=0:0:shortest=1:enable='lt(t,{ending_at:.3f})'[marked];"
+        f"[3:v]format=rgba[e];[marked][e]overlay=0:0:shortest=1:enable='gte(t,{ending_at:.3f})',format=yuv420p[main];"
+        "[b2]format=yuv420p[tt]",
+        "-map", "[main]", "-map", "0:a", *encode, "-c:a", "copy", str(video),
+        "-map", "[tt]", "-map", "0:a", *encode, "-c:a", "copy", str(tiktok(video)),
     ])
 
 
@@ -1221,8 +1312,14 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         takes = _trimmed(script, voices, work)
         lines = [clips.Shot(None, float(line.get("pause") or SAY_SECONDS), "", "") for line in script["lines"]]
         timed, voice = clips.narrate(lines, script, work, kind="reels", voices=takes, lead=0.0, tail=TAIL)
-        shots, extra = stretch_last(storyboard(script, work, [shot.seconds for shot in timed]))
+        shots = storyboard(script, work, [shot.seconds for shot in timed])
         flat = [screen for line in script["lines"] for screen in screens(line)]
+        from PIL import Image
+
+        # Концовка — отдельный кадр после последнего: кассета, адрес на ней вжигает burn.
+        shots.append(clips.Shot(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), PLATE_SECONDS, "", "",
+                                backdrop=str(plate(work))))
+        flat.append({"kind": "plate"})
         total = sum(shot.seconds for shot in shots)
 
         parts, used = [], []
@@ -1240,9 +1337,9 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         print("  кадры:", ", ".join(used))
         print(f"  голос: {'есть' if voice else 'нет'}, длина {total:.1f} с")
 
-        if voice and extra:
-            # Голос — до конца продлённой концовки тишиной: сайдчейн кончается вместе
-            # с голосом, и -shortest срезал бы продление вместе с адресом канала.
+        if voice:
+            # Голос — до конца плашки тишиной: сайдчейн кончается вместе с голосом,
+            # и -shortest срезал бы концовку.
             padded = work / "voice-padded.wav"
             clips.run([clips.ffmpeg(), "-y", "-i", str(voice), "-af", f"apad=whole_dur={total:.3f}", str(padded)])
             voice = padded
@@ -1252,7 +1349,7 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
         placed = place(cues(script, [shot.seconds for shot in timed], lengths), flat, ends)
-        burn(video, placed, work, ending_at=total - shots[-1].seconds, short=total - extra)
+        burn(video, placed, work, ending_at=total - PLATE_SECONDS)
         print(f"  субтитры: {len(placed)} кусков, наверху {sum(p[3] for p in placed)}")
 
     # Превью вынимается из готового ролика, а не рисуется отдельно: так оно
@@ -1504,17 +1601,20 @@ def _selftest() -> None:
 
         from . import clips
 
-        # Ролик из двух отрезков с разным цветовым диапазоном, как склейка фото и видео.
+        # Ролик из двух отрезков с разным цветовым диапазоном, как склейка фото и видео, и плашки с кассетой.
         for name, fmt in (("a", "yuvj420p"), ("b", "yuv420p")):
             clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "color=c=gray:s=1080x1920:r=30:d=1.5",
                        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "1.5", "-pix_fmt", fmt,
                        "-c:v", "libx264", "-c:a", "aac", str(Path(tmp) / f"{name}.mp4")])
-        (Path(tmp) / "ab.txt").write_text(f"file '{Path(tmp) / 'a.mp4'}'\nfile '{Path(tmp) / 'b.mp4'}'\n", encoding="utf-8")
+        spin = plate(Path(tmp))
+        clips.run([clips.ffmpeg(), "-y", "-i", str(spin), "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+                   "-shortest", "-c:v", "libx264", "-c:a", "aac", str(Path(tmp) / "c.mp4")])
+        (Path(tmp) / "ab.txt").write_text("".join(f"file '{Path(tmp) / n}.mp4'\n" for n in "abc"), encoding="utf-8")
         video = Path(tmp) / "v.mp4"
         clips.run([clips.ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(Path(tmp) / "ab.txt"), "-c", "copy", str(video)])
         # Куски встык, как внутри строки: конец одного с погрешностью деления равен началу другого.
         burn(video, [("раз", 0.1, 0.3 + 1e-12, False), ("раз два", 0.3, 0.9, False), ("четыре", 0.9 - 1e-12, 1.0, False),
-                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=1.2, short=2.8)
+                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=3.0)
 
         def white(at: float, band: tuple[float, float], source: Path = video) -> bool:
             frame = Path(tmp) / "f.png"
@@ -1522,25 +1622,37 @@ def _selftest() -> None:
             crop = Image.open(frame).convert("L").crop((0, int(1920 * band[0]), 1080, int(1920 * band[1])))
             return crop.getextrema()[1] > 240
 
-        low, top = (0.6, 0.78), (0.12, 0.32)
+        low, top = (0.6, 0.78), (0.16, 0.32)
         assert white(0.6, low) and not white(0.6, top), "первый кусок внизу"
         assert not white(1.4, low) and not white(1.4, top), "пауза без субтитра"
         assert white(2.3, top) and not white(2.3, low), "второй кусок наверху"
-        # Концовка: адрес канала есть в основном файле с ending_at, в TikTok-версии нет, и она короче.
+
+        def blue(at: float, source: Path) -> bool:
+            frame = Path(tmp) / "b.png"
+            clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(source), "-frames:v", "1", str(frame)])
+            x, y = BADGE_XY
+            r, g, b = Image.open(frame).convert("RGB").crop((x, y, x + 100, y + 80)).resize((1, 1), Image.BOX).getpixel((0, 0))
+            return b > r + 40
+
+        def dark(at: float, source: Path) -> bool:
+            frame = Path(tmp) / "d.png"
+            clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(source), "-frames:v", "1", str(frame)])
+            return Image.open(frame).convert("L").getpixel((540, 1300)) < 60
+
+        # Метка Telegram по ходу — только в основном; кассета на концовке — в обеих; адрес под ней — только в основном.
         middle = (ENDING_Y - 0.03, ENDING_Y + 0.03)
-        assert not white(1.0, middle) and white(2.9, middle), "концовка в основном ролике"
-        assert not white(2.5, middle, tiktok(video)), "в TikTok-версии адреса канала нет"
-        assert abs(clips.probe_seconds(tiktok(video)) - 2.8) < 0.1 < abs(clips.probe_seconds(video) - 2.8)
+        assert blue(0.7, video) and not blue(0.7, tiktok(video)), "метка только в основном ролике"
+        assert dark(3.6, video) and dark(3.6, tiktok(video)), "кассета на концовке обеих версий"
+        assert white(3.6, middle) and not white(3.6, middle, tiktok(video)), "адрес на концовке только в основном"
+        assert abs(clips.probe_seconds(tiktok(video)) - clips.probe_seconds(video)) < 0.1
+        # Катушки крутятся: первый и средний кадр плашки различаются у втулки.
+        frames = []
+        for at in ("0", "0.5"):
+            clips.run([clips.ffmpeg(), "-y", "-ss", at, "-i", str(spin), "-frames:v", "1", str(Path(tmp) / "p.png")])
+            frames.append(Image.open(Path(tmp) / "p.png").convert("L").crop((320, 880, 400, 960)))
+        from PIL import ImageChops
 
-    # Последний кадр короче ENDING_SECONDS продлевается, длинный не трогается.
-    from dataclasses import replace
-
-    from . import clips as _clips
-
-    stub = _clips.Shot(None, 0.8, "", "")
-    stretched, extra = stretch_last([replace(stub, seconds=2.0), stub])
-    assert abs(stretched[-1].seconds - ENDING_SECONDS) < 1e-9 and abs(extra - 0.7) < 1e-9 and stretched[0].seconds == 2.0
-    assert stretch_last([replace(stub, seconds=3.0)])[1] == 0.0
+        assert ImageChops.difference(*frames).getextrema()[1] > 60, "катушки стоят"
 
     # Бит берётся с места, где вступает низ, а не с тихого начала.
     with tempfile.TemporaryDirectory() as tmp:
