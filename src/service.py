@@ -954,8 +954,11 @@ def handle_message(message: dict, data: dict) -> bool:
     if channel and not admin and not telegram.is_member(channel, user_id):
         telegram.send_message(
             chat_id,
-            "Разборы — для своих.\n\n"
-            f"Подпишись на {channel} и пришли запрос ещё раз.",
+            # Адрес из config, а не секрет канала: в секрете может стоять числовой
+            # id, и человек из ролика увидел бы «подпишись на -100…».
+            "Разборы — для подписчиков ПЛЁНКИ.\n\n"
+            f"Подпишись на канал: t.me/{config.CHANNEL_HANDLE.lstrip('@')} — "
+            "и пришли запрос ещё раз.",
         )
         return False
 

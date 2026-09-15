@@ -69,11 +69,19 @@
 
 Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу
 висит метка: значок Telegram и config.CHANNEL_HANDLE. После последнего кадра —
-плашка PLATE_SECONDS: крутящийся аватар канала (avatar-wheel) и адрес со значком,
-бит на ней затухает. TikTok ссылки на чужие площадки режет в охвате, поэтому
-вторая версия — тот же аватар без метки и адреса: тот же проход ffmpeg пишет оба файла, бот шлёт их
+плашка PLATE_SECONDS: крутящийся аватар канала (avatar-wheel), адрес со значком
+и под ним строка-приманка BAIT — зачем идти в канал (разбор вкуса в боте), бит
+на ней затухает. Ссылка на бота — в описании, её требует проверка. TikTok ссылки на чужие площадки режет в охвате, поэтому
+вторая версия — тот же аватар без метки, адреса и приманки: тот же проход ffmpeg пишет оба файла, бот шлёт их
 подряд. Метка — в верхних 6–10% слева: ниже вкладок площадки, выше поднятого
 субтитра (22%), и не там, где у Shorts кнопки (справа внизу) и подпись (низ).
+
+Звук самого трека — строка `track`: отрывок 30-секундного превью iTunes
+(его без ключа отдаёт магазин, так же берёт отрывок СЛЕПАЯ ПРОСЛУШКА),
+до TRACK_MAX секунд. Его подмешивают в бит до сведения, а бит на отрывке почти
+молчит; голос строки, если есть, сверху. Строка без голоса длится ровно отрывок.
+Ролик с чужим треком YouTube может отметить Content ID — ролик остаётся, доход
+уходит правообладателю, поэтому отрывки короткие. Трек не нашёлся — играет бит.
 
 Кадры делят строку поровну. Картинка с меткой `<кадр>-<n>.at` (внутри —
 секунда от начала строки) начинается ровно тогда: так короткая вставка
@@ -140,7 +148,20 @@ GIPHY_ID = re.compile(r"[A-Za-z0-9]+")
 TITLE_MAX = 100
 DESCRIPTION_MAX = 1024
 TAGS_MAX = 500
+# Первый комментарий — вопрос для спора, владелец закрепляет его сам. Длиннее
+# под роликом сворачивается, и спорить уже не с чем.
+COMMENT_MAX = 150
+# Приманка в Telegram — разбор вкуса в боте (владелец, 15.09.2026), поэтому
+# ссылка на бота в описании обязательна.
+BOT_LINK = f"t.me/{config.BOT_HANDLE.lstrip('@')}"
 PAUSE_MAX = 5.0
+# Отрывок чужого трека (строка `track`): кусок 30-секундного превью iTunes.
+# Короткий намеренно — трек в YouTube ловит Content ID, и доход с ролика уходит
+# правообладателю; на отрывке бит почти молчит, а трек звучит громкостью бита.
+PREVIEW_SECONDS = 30.0
+TRACK_MAX = 10.0
+TRACK_BEAT = 0.12
+TRACK_LUFS = -14.0
 
 ID_FORMAT = re.compile(r"\d{8}-[a-z0-9-]+")
 SLOT_FORMAT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[+-]\d{2}:\d{2}")
@@ -158,7 +179,10 @@ PLATE_BG = (22, 21, 24)
 WHEEL = config.ROOT / "assets" / "avatar" / "avatar-wheel.mp4"
 PLATE_WHEEL = 720
 PLATE_TOP = 520
-ENDING_Y = 0.73
+ENDING_Y = 0.715
+# Строка-приманка под адресом: зачем идти в канал. Выше нижних 20% — там интерфейс площадки.
+BAIT = "бот разберёт твой вкус"
+BAIT_Y = 0.775
 BADGE_XY = (36, 118)
 TELEGRAM_BLUE = (42, 171, 238)
 NOSUB_MARK = ".nosub"
@@ -264,8 +288,8 @@ def _screen_problems(screen, where: str, sources: list) -> list[str]:
     if kind not in KINDS:
         return [f"{where}: screen.kind «{kind}» — бывает только {', '.join(KINDS)}"]
     if any(field in screen and not isinstance(screen[field], str)
-           for field in ("label", "text", "query", "id", "template", "url", "caption")):
-        return [f"{where}: label, text, caption, query, id, template и url — строки"]
+           for field in ("label", "text", "query", "id", "template", "url", "caption", "video")):
+        return [f"{where}: label, text, caption, query, id, template, url и video — строки"]
     focus = screen.get("focus", 0.5)
     if isinstance(focus, bool) or not isinstance(focus, (int, float)) or not 0 <= focus <= 1:
         return [f"{where}: focus — где по ширине главное, число от 0 (левый край) до 1 (правый)"]
@@ -333,6 +357,12 @@ def problems(script, name: str = "") -> list[str]:
             errors.append(f"description: {len(description)} знаков, предел {DESCRIPTION_MAX}")
         if not HASHTAGS_AT_END.search(description.strip()):
             errors.append("description: в конце нужны хэштеги, например «… #фонк #рэп»")
+        if BOT_LINK not in description:
+            errors.append(f"description: нет приманки со ссылкой {BOT_LINK} — строка из «Тянуть в Telegram» в брифе")
+
+    comment = script.get("comment")
+    if "comment" in script and not (_filled(comment) and len(comment) <= COMMENT_MAX):
+        errors.append(f"comment: первый комментарий — непустая строка до {COMMENT_MAX} знаков")
 
     tags = script.get("tags")
     if not isinstance(tags, list) or not tags or not all(_filled(tag) for tag in tags):
@@ -355,22 +385,45 @@ def problems(script, name: str = "") -> list[str]:
         if not isinstance(line, dict):
             errors.append(f"{where}: строка — это объект")
             continue
-        if ("say" in line) == ("pause" in line):
-            errors.append(f"{where}: нужно ровно одно из say и pause")
+        if "pause" in line and ("say" in line or "track" in line) or not {"say", "pause", "track"} & line.keys():
+            errors.append(f"{where}: нужно say, track или pause — пауза без say и track")
         elif "say" in line and not _filled(line["say"]):
             errors.append(f"{where}: пустая фраза")
-        elif "pause" in line and not (
-            isinstance(line["pause"], (int, float))
-            and not isinstance(line["pause"], bool)
-            and 0 < line["pause"] <= PAUSE_MAX
-        ):
+        elif "pause" in line and not (_number(line["pause"]) and 0 < line["pause"] <= PAUSE_MAX):
             errors.append(f"{where}: pause — секунды, больше нуля и не больше {PAUSE_MAX:g}")
+        if "track" in line:
+            errors += _track_problems(line["track"], where)
         if not isinstance(line.get("hint", ""), str):
             errors.append(f"{where}: hint — строка")
         if "subtitle" in line and not ("say" in line and _filled(line["subtitle"])):
             errors.append(f"{where}: subtitle — непустая строка у фразы: её текст в субтитрах, числа цифрами")
         errors += _screens_problems(line.get("screen"), where, sources if isinstance(sources, list) else [])
     return errors
+
+
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _track_problems(track, where: str) -> list[str]:
+    if not isinstance(track, dict) or not (
+        isinstance(track.get("id"), int) and not isinstance(track["id"], bool) and track["id"] > 0
+        or _filled(track.get("query"))
+    ):
+        return [f"{where}: track — объект с id трека iTunes (число) или query «артист — трек»"]
+    start, length = track.get("start", 0), track.get("length")
+    if not (_number(start) and _number(length) and start >= 0 and 0 < length <= TRACK_MAX
+            and start + length <= PREVIEW_SECONDS):
+        return [f"{where}: у track length до {TRACK_MAX:g} с, start от 0, start + length не больше {PREVIEW_SECONDS:g}"]
+    return []
+
+
+def line_seconds(line: dict) -> float:
+    """Длина строки до дублей: пауза, отрывок трека или нижняя граница фразы."""
+    if "pause" in line:
+        return float(line["pause"])
+    length = float(line.get("track", {}).get("length", 0))
+    return max(SAY_SECONDS, length) if "say" in line else length
 
 
 def load(path: Path) -> tuple[dict, list[str]]:
@@ -427,6 +480,8 @@ def header(script: dict) -> str:
 
 def line_text(number: int, total: int, line: dict) -> str:
     text = f"<b>{number}/{total}</b> — {html.escape(line['say'], quote=False)}"
+    if "track" in line:
+        text += "\n<i>поверх отрывка трека</i>"
     if _filled(line.get("hint")):
         text += f"\n<i>{html.escape(line['hint'], quote=False)}</i>"
     return text
@@ -853,7 +908,7 @@ def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> 
 
     from . import clips
 
-    lengths = seconds or [float(line.get("pause") or SAY_SECONDS) for line in script["lines"]]
+    lengths = seconds or [line_seconds(line) for line in script["lines"]]
     ends = [splits(screens(line), length) for line, length in zip(script["lines"], lengths)]
     plan = [
         (index, part, len(screens(line)), screen)
@@ -1022,6 +1077,55 @@ def _beat(script: dict, total: float, work: Path) -> Path:
     return music
 
 
+def _excerpt(track: dict, dest: Path) -> Path | None:
+    """Отрывок трека из превью iTunes: кусок start…start+length громкостью TRACK_LUFS. None — трек не нашёлся.
+
+    Превью, а не сам трек: его магазин отдаёт всем без ключа (тот же путь,
+    что у СЛЕПОЙ ПРОСЛУШКИ, src/quiz.py), а длиннее отрывку и не надо.
+    """
+    from . import clips
+    from .sources import itunes
+
+    url = itunes.song_preview(track.get("id") or track["query"])
+    if not url or not _download(url, dest, 10_000):
+        log.warning("Отрывок трека %s не нашёлся — на его месте бит", track.get("id") or track["query"])
+        return None
+    start, length, cut = float(track.get("start", 0)), float(track["length"]), dest.with_suffix(".wav")
+    # Края — короткой наплывкой: отрывок, обрезанный посреди волны, щёлкает.
+    clips.run([clips.ffmpeg(), "-y", "-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", str(dest),
+               "-af", f"afade=t=in:d=0.02,afade=t=out:st={max(length - 0.05, 0):.3f}:d=0.05",
+               "-ar", "48000", "-ac", "2", str(cut)])
+    # Громкость меряется окном 0,4 с: у секундного отрывка другой не будет, а тишина дала бы -70.
+    gain = min(TRACK_LUFS - _meter(cut)[0], 12.0)
+    out = dest.with_name(f"{dest.stem}-level.wav")
+    clips.run([clips.ffmpeg(), "-y", "-i", str(cut), "-af", f"volume={gain:.1f}dB", str(out)])
+    return out
+
+
+def _under_tracks(beat: Path, pieces: list[tuple[Path, float, float]], work: Path) -> Path:
+    """Бит с отрывками треков: (файл, секунда начала, длина). На отрывке бит почти молчит.
+
+    Сведение до assemble, а не в нём: там голос сайдчейном проседает подложку,
+    и отрывок под голосом строки проседает так же — голос остаётся сверху.
+    """
+    if not pieces:
+        return beat
+    from . import clips
+
+    windows = "+".join(f"between(t,{at:.3f},{at + length:.3f})" for _, at, length in pieces)
+    delays = "".join(f"[{n}:a]adelay={at * 1000:.0f}|{at * 1000:.0f}[t{n}];" for n, (_, at, _) in enumerate(pieces, 1))
+    out = work / "beat-tracks.wav"
+    clips.run([
+        clips.ffmpeg(), "-y", "-i", str(beat), *[arg for path, _, _ in pieces for arg in ("-i", str(path))],
+        "-filter_complex",
+        f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+        f"volume='if({windows},{TRACK_BEAT},1)':eval=frame[b];{delays}"
+        f"[b]{''.join(f'[t{n}]' for n in range(1, len(pieces) + 1))}amix=inputs={len(pieces) + 1}:duration=first:normalize=0",
+        str(out),
+    ])
+    return out
+
+
 def aspect(path: str) -> float:
     """Ширина к высоте картинки или видео. 0 — не узнать, и тогда кадр обрезается."""
     import shutil
@@ -1186,14 +1290,16 @@ def badge():
 
 
 def ending():
-    """Адрес канала на плашке-концовке: крупно, со значком, под аватаром."""
-    from PIL import Image
+    """Адрес канала на плашке-концовке: крупно, со значком, под аватаром, и под ним приманка."""
+    from PIL import Image, ImageDraw
 
-    from . import clips
+    from . import clips, stories
 
     mark = handle_mark(150, pill=False)
     frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
     frame.alpha_composite(mark, ((clips.WIDTH - mark.width) // 2, round(clips.HEIGHT * ENDING_Y - mark.height / 2)))
+    ImageDraw.Draw(frame).text((clips.WIDTH / 2, clips.HEIGHT * BAIT_Y), BAIT, font=stories.font(64, 600), anchor="mm",
+                               fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
     return frame
 
 
@@ -1291,7 +1397,7 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         work = Path(tmp)
         # Сперва голос: длина строки — это длина её дубля, а кадры делят её потом.
         takes = _trimmed(script, voices, work)
-        lines = [clips.Shot(None, float(line.get("pause") or SAY_SECONDS), "", "") for line in script["lines"]]
+        lines = [clips.Shot(None, line_seconds(line), "", "") for line in script["lines"]]
         timed, voice = clips.narrate(lines, script, work, kind="reels", voices=takes, lead=0.0, tail=TAIL)
         shots = storyboard(script, work, [shot.seconds for shot in timed])
         flat = [screen for line in script["lines"] for screen in screens(line)]
@@ -1324,8 +1430,12 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
             padded = work / "voice-padded.wav"
             clips.run([clips.ffmpeg(), "-y", "-i", str(voice), "-af", f"apad=whole_dur={total:.3f}", str(padded)])
             voice = padded
+        starts = [sum(shot.seconds for shot in timed[:index]) for index in range(len(timed))]
+        pieces = [(piece, at, line["track"]["length"]) for index, (line, at) in enumerate(zip(script["lines"], starts))
+                  if "track" in line and (piece := _excerpt(line["track"], work / f"track-{index}.m4a"))]
         clips.assemble(
-            parts, _beat(script, total, work), total, video, work, voice, 0.0, voice_grade=VOICE_CHAIN, duck=DUCK
+            parts, _under_tracks(_beat(script, total, work), pieces, work), total, video, work, voice, 0.0,
+            voice_grade=VOICE_CHAIN, duck=DUCK,
         )
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
@@ -1348,11 +1458,12 @@ def package(script: dict) -> str:
     def field(value: str) -> str:
         return f"<code>{html.escape(value, quote=False)}</code>"
 
+    comment = f"Закрепи первым комментарием: {field(script['comment'])}\n\n" if script.get("comment") else ""
     return (
         f"<b>Название</b>\n{field(script['title'])}\n\n"
         f"<b>Описание</b>\n{field(script['description'])}\n\n"
         f"<b>Теги</b>\n{field(', '.join(script['tags']))}\n\n"
-        f"Выложить: <b>{when(script)}</b>"
+        f"{comment}Выложить: <b>{when(script)}</b>"
     )
 
 
@@ -1392,8 +1503,9 @@ def _selftest() -> None:
         "publish": "today",
         "sources": ["https://example.com/news"],
         "title": "Проверка формата",
-        "description": "Строка описания. #фонк #плёнка",
+        "description": f"Строка описания. Разбор вкуса: {BOT_LINK} #фонк #плёнка",
         "tags": ["фонк", "плёнка"],
+        "comment": "Кто прав: артист или пилот?",
         "music": BEAT,
         "lines": [
             {"say": "Первая фраза", "hint": "ровно", "screen": {"kind": "face", "name": "Bones"}},
@@ -1415,11 +1527,28 @@ def _selftest() -> None:
     broken("sources", sources=[])
     broken("title", title="х" * 101)
     broken("хэштеги", description="Описание без хэштегов в конце")
+    broken(BOT_LINK, description="Описание без приманки #фонк")
+    broken("comment", comment="х" * (COMMENT_MAX + 1))
+    broken("comment", comment="")
+    assert problems({k: v for k, v in good.items() if k != "comment"}, good["id"]) == []
+    assert f"Закрепи первым комментарием: <code>{good['comment']}</code>" in package(good)
+    assert "Закрепи" not in package({k: v for k, v in good.items() if k != "comment"})
+    # Отрывок трека: строка без голоса длится ровно length, с голосом — не меньше фразы.
+    clip = {"track": {"id": 1440818839, "start": 12, "length": 2}, "screen": {"kind": "stock", "query": "crowd"}}
+    assert problems({**good, "lines": [*good["lines"], clip, {**clip, "say": "Поверх", "track": {"query": "a — b", "length": 1}}]},
+                    good["id"]) == []
+    assert line_seconds(clip) == 2 and line_seconds({**clip, "say": "ф", "track": {"length": 1}}) == SAY_SECONDS
+    assert spoken_frames({"lines": [clip, {"say": "ф"}]}) == [2] and "поверх отрывка" in line_text(1, 1, {**clip, "say": "ф"})
+    for track, word in (({"id": 5, "length": 11}, "length"), ({"id": 5, "start": 25, "length": 6}, "start + length"),
+                        ({"length": 2}, "id трека"), ({"id": 5.0, "length": 2}, "id трека"), ({"query": "a"}, "length")):
+        broken(word, lines=[{**clip, "track": track}])
+    broken("пауза без", lines=[{"pause": 1.0, "track": clip["track"], "screen": clip["screen"]}])
+    broken("строки", lines=[{"say": "Фраза", "screen": {"kind": "photo", "url": good["sources"][0], "video": 5}}])
     broken("именем файла", id="20260915-other")
     broken("publish", publish="завтра")
     broken("tags", tags=["фонк, рэп"])
     broken("фразы", lines=[{"pause": 1.0, "screen": {"kind": "card", "text": "тишина"}}])
-    broken("ровно одно", lines=[{"say": "Фраза", "pause": 1.0, "screen": {"kind": "card", "text": "т"}}])
+    broken("пауза без", lines=[{"say": "Фраза", "pause": 1.0, "screen": {"kind": "card", "text": "т"}}])
     broken("music", music="../beat.mp3")
     broken("music", music="beat.ogg")
     broken("subtitle", lines=[{"say": "Фраза", "subtitle": "", "screen": {"kind": "card", "text": "т"}}])
@@ -1627,6 +1756,9 @@ def _selftest() -> None:
         assert blue(0.7, video) and not blue(0.7, tiktok(video)), "метка только в основном ролике"
         assert wheel(3.6, video) and wheel(3.6, tiktok(video)), "аватар канала на концовке обеих версий"
         assert white(3.6, middle) and not white(3.6, middle, tiktok(video)), "адрес на концовке только в основном"
+        bait = (BAIT_Y - 0.015, BAIT_Y + 0.015)
+        assert white(3.6, bait) and not white(3.6, bait, tiktok(video)), "приманка на концовке только в основном"
+        assert not white(0.6, (0.8, 1.0)) and not white(3.6, (0.8, 1.0)), "в нижние 20% — интерфейс площадки"
         assert abs(clips.probe_seconds(tiktok(video)) - clips.probe_seconds(video)) < 0.1
         # Аватар крутится: кольцо вокруг кнопки в первом и среднем кадре плашки разное.
         frames = []
@@ -1646,6 +1778,37 @@ def _selftest() -> None:
         clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=60:d=30",
                    "-af", "volume='if(lt(t,7),0.01,0.8)':eval=frame", str(track)])
         assert abs(beat_start(track) - 7.0) < 0.5, beat_start(track)
+
+        # Отрывок трека: из превью вырезан свой кусок, в бите звучит в своё время, бит под ним тише.
+        def tone(at: float, path: Path, window: tuple[float, float], hz: int) -> float:
+            mono = Path(tmp) / "mono.wav"
+            clips.run([clips.ffmpeg(), "-y", "-i", str(path), "-ac", "1", "-ar", "8000", "-c:a", "pcm_s16le", str(mono)])
+            with wave.open(str(mono)) as sound:
+                data = array.array("h", sound.readframes(sound.getnframes()))[int(window[0] * 8000):int(window[1] * 8000)]
+            angle = 2 * math.pi * hz / 8000
+            return math.hypot(sum(x * math.cos(angle * n) for n, x in enumerate(data)),
+                              sum(x * math.sin(angle * n) for n, x in enumerate(data))) / len(data)
+
+        preview = Path(tmp) / "preview.m4a"
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=1000:d=30",
+                   "-af", "volume='if(between(t,12,14),0.5,0.001)':eval=frame", "-c:a", "aac", str(preview)])
+        from .sources import itunes
+
+        real = itunes.song_preview, globals()["_download"]
+        itunes.song_preview = lambda track: "https://example.com/preview.m4a"
+        globals()["_download"] = lambda url, dest, smallest: dest.write_bytes(preview.read_bytes()) and dest
+        try:
+            piece = _excerpt({"id": 1, "start": 12, "length": 2}, Path(tmp) / "track-0.m4a")
+        finally:
+            itunes.song_preview, globals()["_download"] = real
+        assert abs(clips.probe_seconds(piece) - 2.0) < 0.1 and tone(0, piece, (0.2, 1.8), 1000) > 1000, "вырезан не тот кусок"
+        beat = Path(tmp) / "beat-bed.wav"
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=200:d=6", "-ac", "2", "-ar", "44100", str(beat)])
+        mixed = _under_tracks(beat, [(piece, 2.0, 2.0)], Path(tmp))
+        assert _under_tracks(beat, [], Path(tmp)) == beat
+        before, during = tone(0, mixed, (0.5, 1.5), 200), tone(0, mixed, (2.3, 3.7), 200)
+        assert tone(0, mixed, (2.3, 3.7), 1000) > 1000 and tone(0, mixed, (0.5, 1.5), 1000) < 100, "отрывок не на месте"
+        assert during < before * 0.2 and tone(0, mixed, (4.5, 5.5), 200) > before * 0.8, (before, during)
 
         # Кадр обрезается вокруг focus: у картинки «слева красное, справа
         # синее» кадр с focus 0 красный, с focus 1 синий.

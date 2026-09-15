@@ -207,6 +207,20 @@ def album_tracks(collection_id: str | int) -> dict:
     }
 
 
+def song_preview(track: int | str) -> str:
+    """30-секундное превью трека: по trackId или по запросу «артист — трек». Пусто — не нашлось.
+
+    Нужно роликам (src/reels.py, строка `track`). По запросу берётся первый
+    трек с превью — может оказаться кавер, поэтому сценарию лучше давать id.
+    """
+    if isinstance(track, int):
+        data = get_json(LOOKUP_URL, params={"id": track}, min_interval=MIN_INTERVAL)
+    else:
+        data = get_json(SEARCH_URL, params={"term": track.replace("—", " "), "entity": "song", "limit": 5},
+                        min_interval=MIN_INTERVAL)
+    return next((item["previewUrl"] for item in (data or {}).get("results", []) if item.get("previewUrl")), "")
+
+
 def _parse_date(raw: str | None) -> datetime | None:
     if not raw:
         return None

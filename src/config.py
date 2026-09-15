@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 # Адрес канала для концовок роликов и надписей: одно место на весь проект.
 CHANNEL_HANDLE = "@plenka_fm"
+# Бот канала (getMe, 15.09.2026): приманка роликов — разбор вкуса в нём, ссылка в описании.
+BOT_HANDLE = "@plenka_fm_bot"
 PROMPTS = ROOT / "prompts"
 QUEUE = ROOT / "content" / "queue"
 # Срочные новости живут отдельно от очереди: их пишут и показывают в тот же
