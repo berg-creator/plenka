@@ -337,24 +337,27 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     comments.seed(message, refresh=push_state)
                 continue
 
-            # Дубль фразы ролика (src/reels.py): голосовое или аудио владельца
-            # в ответ на фразу сценария. Раньше трека — аудиофайл ответом на фразу
-            # иначе пошёл бы искать пост. Кадр ищется по message_id, как пост
-            # у трека; не нашёлся — сообщение идёт дальше прежним путём.
+            # Ответ владельца на фразу ролика (src/reels.py): голосовое или аудио —
+            # дубль, фото или картинка файлом — кадр, «собери» — сборка. Раньше
+            # трека — аудиофайл ответом на фразу иначе пошёл бы искать пост,
+            # и раньше сервиса — фото и текст ушли бы в разборы. Кадр ищется
+            # по message_id, как пост у трека; не нашёлся — сообщение идёт дальше
+            # прежним путём.
             if (
                 message.get("reply_to_message")
-                and reels.take_file(message)
+                and (reel_reply := reels.reply_kind(message))
                 and str(admin) == str(message.get("from", {}).get("id")) == str(
                     message.get("chat", {}).get("id")
                 )
                 and (reel := reels.line_of(message["reply_to_message"]["message_id"]))
             ):
-                print(f"  дубль ролика {reel[0]}, кадр {reel[1]}")
+                what = {"voice": "дубль", "picture": "картинка", "build": "«собери»"}[reel_reply]
+                print(f"  {what} ролика {reel[0]}, кадр {reel[1]}")
                 if not args.dry_run:
                     try:
                         reels.accept(message, reel, admin, push_state)
                     except Exception as exc:  # noqa: BLE001 — сбой приёма не роняет дежурство
-                        log.error("Дубль ролика не принят: %s", exc)
+                        log.error("Ответ на фразу ролика не принят: %s", exc)
                 continue
 
             # Полный трек в ответ на запрос (compose.do_ask_tracks). Разбирается
