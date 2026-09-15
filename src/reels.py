@@ -51,12 +51,28 @@
 переделать; она ложится рядом файлом .txt. Сборка по картинке не запускается:
 владелец шлёт их пачкой и говорит «собери», когда закончил.
 
-Субтитры ставятся сами: многие смотрят ролик без звука. Текст — `say` как есть,
-кусками по 2–4 слова, время кусков — по буквам внутри речи строки, найденной
-по дублю. Распознавание речи отвергнуто: оно тянет тяжёлую зависимость, а текст
-и так известен дословно. Субтитр стоит на 68% высоты, над интерфейсом Shorts
-и TikTok; где внизу кадра своя надпись (`text` сценария или картинка с пустым
-файлом-меткой `<кадр>-<n>.top` рядом), он уходит наверх, под вкладки площадки.
+Субтитры ставятся сами: многие смотрят ролик без звука. Текст — `subtitle` строки,
+а без него `say` как есть (в `subtitle` числа цифрами: «14 лет», голосу нужны
+слова), кусками по 2–4 слова, время кусков — по буквам внутри речи строки,
+найденной по дублю. Распознавание речи отвергнуто: оно тянет тяжёлую
+зависимость, а текст и так известен дословно. Субтитр стоит на 68% высоты, над
+интерфейсом Shorts и TikTok; где внизу картинки своя надпись (пустой файл-метка
+`<кадр>-<n>.top` рядом), он уходит наверх, под вкладки площадки. Метка
+`<кадр>-<n>.nosub` у картинки выключает субтитры, пока она на экране: кадр сам
+говорит текст (вырезки поста, заголовок статьи).
+
+Поэтому ярлыков `text` и `label` в кадре больше нет, хотя сценарий их ещё
+пишет: они повторяли речь, и текста в кадре было втрое больше, чем читается
+(владелец, 15.09.2026). Карточка без надписи — просто соседний кадр. Остаётся
+текст, который сам шутка или доказательство: `caption` мема, надписи
+в картинках владельца.
+
+Кадры делят строку поровну. Картинка с меткой `<кадр>-<n>.at` (внутри —
+секунда от начала строки) начинается ровно тогда: так короткая вставка
+попадает на своё слово, а кадры до неё делят время до метки.
+
+Статичная картинка не стоит мёртвой: наезд на 7% за кадр (больше — надписи
+у края картинки уезжают за кадр), направление чередуется от кадра к кадру.
 
 Кадры меняются каждые две-три секунды: у одной фразы их может быть до трёх.
 Видео-мемы берутся с GIPHY по запросу при сборке — просьба владельца. Чистой
@@ -127,12 +143,9 @@ TODAY = "сегодня до 21:00 МСК"
 # Нижняя граница кадра под фразой. Настоящую длину задаёт дубль (clips.narrate),
 # эта нужна, чтобы и без дубля кадр было видно в превью.
 SAY_SECONDS = 1.5
-# До скольких знаков надпись идёт крупным кеглем.
-BIG_TEXT = 20
-
-# Карточка стоит на размытом соседнем кадре: чёрный прямоугольник в ленте
-# выглядел провалом, а размытие оставляет цвет и не спорит с надписью.
-CARD_BLUR = "gblur=sigma=30"
+STILL_ZOOM = 0.07
+NOSUB_MARK = ".nosub"
+AT_MARK = ".at"
 # Всё обрезается под 9:16. Шире этого — панорама, от которой в кадре осталась
 # бы пятая часть, и только она встаёт целиком на размытую копию.
 BLUR_WIDER = 2.4
@@ -257,8 +270,6 @@ def _screen_problems(screen, where: str, sources: list) -> list[str]:
         return [f"{where}: id — код GIPHY из латиницы и цифр, как в конце ссылки на гифку"]
     elif kind in ("meme", "gif") and (kind == "meme" or "template" in screen) and not _template_ok(screen.get("template")):
         return [f"{where}: шаблона мема «{screen.get('template')}» нет в assets/meme/templates/"]
-    elif kind == "card" and not _filled(screen.get("text")):
-        return [f"{where}: у card нет text — надпись и есть кадр"]
     return []
 
 
@@ -339,6 +350,8 @@ def problems(script, name: str = "") -> list[str]:
             errors.append(f"{where}: pause — секунды, больше нуля и не больше {PAUSE_MAX:g}")
         if not isinstance(line.get("hint", ""), str):
             errors.append(f"{where}: hint — строка")
+        if "subtitle" in line and not ("say" in line and _filled(line["subtitle"])):
+            errors.append(f"{where}: subtitle — непустая строка у фразы: её текст в субтитрах, числа цифрами")
         errors += _screens_problems(line.get("screen"), where, sources if isinstance(sources, list) else [])
     return errors
 
@@ -564,8 +577,14 @@ def with_pictures(script: dict, folder: Path | None) -> dict:
     """
     if folder is None:
         return script
+
+    def pic(path: Path) -> dict:
+        at = path.with_suffix(AT_MARK)
+        return {"kind": PIC, "path": str(path), **({"at": float(at.read_text().strip())} if at.exists() else {}),
+                **({"nosub": True} if path.with_suffix(NOSUB_MARK).exists() else {})}
+
     return {**script, "lines": [
-        {**line, "screen": [{"kind": PIC, "path": str(p)} for p in found]} if (found := pictures(folder, number)) else line
+        {**line, "screen": [pic(p) for p in found]} if (found := pictures(folder, number)) else line
         for number, line in enumerate(script["lines"], 1)
     ]}
 
@@ -779,6 +798,25 @@ def caption(layer, text: str):
     return Image.alpha_composite(Image.alpha_composite(layer, shade), ink)
 
 
+def splits(line_screens: list[dict], length: float) -> list[float]:
+    """Где кончается каждый кадр строки, секунды от её начала.
+
+    Поровну, но кадр с `at` начинается в свою секунду: кадры перед ним делят
+    время до неё. У первого кадра `at` не действует — строка с него и начинается.
+    """
+    out: list[float] = []
+    start = 0
+    for number in range(1, len(line_screens) + 1):
+        at = line_screens[number]["at"] if number < len(line_screens) and "at" in line_screens[number] else None
+        if number < len(line_screens) and at is None:
+            continue
+        begin = out[-1] if out else 0.0
+        stop = length if at is None else min(max(at, begin), length)
+        out += [begin + (stop - begin) * k / (number - start) for k in range(1, number - start + 1)]
+        start = number
+    return out
+
+
 def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> list:
     """Кадры ролика по порядку: у строки их от одного до трёх.
 
@@ -787,18 +825,19 @@ def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> 
     пролистывают, и повтор по кругу начинался бы с неё, а не с крючка.
 
     `seconds` — длины строк, когда они уже известны по дублям. Строка делится
-    между своими кадрами поровну. Границы округляются до кадра видео от начала
+    между своими кадрами по splits. Границы округляются до кадра видео от начала
     ролика, а не у каждого кадра отдельно: на двух десятках склеек погрешность
     иначе копилась бы, и голос к концу уезжал от картинки.
 
-    Карточка стоит на размытом соседнем кадре — прежнем, а у первой строки
-    на следующем.
+    Карточка берёт соседний кадр — прежний, а у первой строки следующий.
+    Надписей `text` и `label` нет: их заменили субтитры.
     """
     from PIL import Image
 
     from . import clips
 
     lengths = seconds or [float(line.get("pause") or SAY_SECONDS) for line in script["lines"]]
+    ends = [splits(screens(line), length) for line, length in zip(script["lines"], lengths)]
     plan = [
         (index, part, len(screens(line)), screen)
         for index, line in enumerate(script["lines"])
@@ -810,18 +849,10 @@ def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> 
     for number, (index, part, count, screen) in enumerate(plan):
         if part == 0 and index:
             line_start += lengths[index - 1]
-        end = round((line_start + lengths[index] * (part + 1) / count) * clips.FPS) / clips.FPS
+        end = round((line_start + ends[index][part]) * clips.FPS) / clips.FPS
         nearest = list(range(number - 1, -1, -1)) + list(range(number + 1, len(plan)))
         fill = fills[number] or next((fills[i] for i in nearest if fills[i]), {})
-        # У лица надпись по умолчанию — имя: холодная лента не обязана узнавать
-        # человека в лицо. Пустой text убирает надпись совсем.
-        body = screen.get("text", screen.get("name", ""))
-        label = screen.get("label", "")
-        layer = (
-            clips.overlay(label, body, big=len(body) <= BIG_TEXT, clean=True)
-            if label or body
-            else Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
-        )
+        layer = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
         if _filled(screen.get("caption")):
             layer = caption(layer, screen["caption"])
         shots.append(clips.Shot(
@@ -1042,7 +1073,7 @@ def cues(script: dict, seconds: list[float], takes: dict[int, float]) -> list[tu
         take = takes.get(number, 0.0)
         if "say" in line and take > BEFORE_SPEECH + AFTER_SPEECH:
             begin, end = start + BEFORE_SPEECH, start + take - AFTER_SPEECH
-            parts = chunks(line["say"])
+            parts = chunks(line.get("subtitle") or line["say"])
             # Плюс четыре буквы на кусок: «не я.» по голосу короче четверти секунды, не прочитать.
             weights = [sum(ch.isalnum() for ch in part) + 4 for part in parts]
             done = 0
@@ -1054,11 +1085,22 @@ def cues(script: dict, seconds: list[float], takes: dict[int, float]) -> list[tu
     return out
 
 
+def place(timing: list[tuple[str, float, float]], flat: list[dict], ends: list[float]) -> list[tuple[str, float, float, bool]]:
+    """Куски субтитров с высотой: наверх, если хоть один кадр под куском с надписью внизу
+    (кусок переходит через склейку — на пилоте «14 лет концерт» лёг бы на его книжку).
+    Под кадром с nosub в начале куска — без субтитра."""
+    placed = []
+    for text, first, end in timing:
+        starts = [0.0, *ends[:-1]]
+        under = [screen for screen, a, b in zip(flat, starts, ends) if a < end and first < b] or flat[-1:]
+        if not under[0].get("nosub"):
+            placed.append((text, first, end, any(map(high, under))))
+    return placed
+
+
 def high(screen: dict) -> bool:
-    """Субтитр наверх: внизу кадра своя надпись — ярлык сценария или метка у картинки."""
-    if screen["kind"] == PIC:
-        return Path(screen["path"]).with_suffix(TOP_MARK).exists()
-    return bool(screen.get("label") or screen.get("text", screen.get("name", "")))
+    """Субтитр наверх: внизу картинки своя надпись, у неё метка .top. Ярлыков сценария в кадре нет."""
+    return screen["kind"] == PIC and Path(screen["path"]).with_suffix(TOP_MARK).exists()
 
 
 def subtitle(text: str, up: bool):
@@ -1147,9 +1189,10 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
             # две-три секунды он мигал бы темнотой.
             used.append(f"{screen['kind']}→" + clips.segment(
                 shot, parts[-1], work, fade_in=False,
-                grade=CARD_BLUR if screen["kind"] == "card" else "",
+                grade="",
                 fit=fit(screen, shot.backdrop),
                 focus=float(screen.get("focus", 0.5)),
+                zoom_out=bool(index % 2), zoom=STILL_ZOOM,
             ))
         print("  кадры:", ", ".join(used))
         print(f"  голос: {'есть' if voice else 'нет'}, длина {total:.1f} с")
@@ -1157,13 +1200,9 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         clips.assemble(
             parts, _beat(script, total, work), total, video, work, voice, 0.0, voice_grade=VOICE_CHAIN, duck=DUCK
         )
-        # Субтитр встаёт по кадру, который виден в начале куска.
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
-        placed = [
-            (text, first, end, high(flat[next((i for i, e in enumerate(ends) if first < e), len(flat) - 1)]))
-            for text, first, end in cues(script, [shot.seconds for shot in timed], lengths)
-        ]
+        placed = place(cues(script, [shot.seconds for shot in timed], lengths), flat, ends)
         burn(video, placed, work)
         print(f"  субтитры: {len(placed)} кусков, наверху {sum(p[3] for p in placed)}")
 
@@ -1253,13 +1292,15 @@ def _selftest() -> None:
     broken("ровно одно", lines=[{"say": "Фраза", "pause": 1.0, "screen": {"kind": "card", "text": "т"}}])
     broken("music", music="../beat.mp3")
     broken("music", music="beat.ogg")
+    broken("subtitle", lines=[{"say": "Фраза", "subtitle": "", "screen": {"kind": "card", "text": "т"}}])
+    assert problems({**good, "lines": [{"say": "Четырнадцать лет", "subtitle": "14 лет",
+                                        "screen": {"kind": "card"}}]}, good["id"]) == []
     photo = {"kind": "photo", "url": good["sources"][0], "query": "concert crowd"}
     assert problems({**good, "lines": [{"say": "Фраза", "screen": [photo, {"kind": "gif", "query": "bye"}]}]}) == []
     for screen, word in (
         ({"kind": "video"}, "kind"),
         ({"kind": "meme", "template": "нет-такого"}, "шаблона"),
         ({"kind": "face", "name": "Канье"}, "artists.json"),
-        ({"kind": "card"}, "text"),
         ({"kind": "stock"}, "query"),
         ({"kind": "gif"}, "query"),
         ({"kind": "gif", "query": "bye", "id": "../x"}, "GIPHY"),
@@ -1290,6 +1331,13 @@ def _selftest() -> None:
         band = (0, CAPTION_TOP, 1080, CAPTION_TOP + 100)
         assert shots[4].layer.crop(band).getchannel("A").getextrema()[1] > 0
         assert shots[3].layer.crop(band).getchannel("A").getextrema()[1] == 0
+        # Ярлыков сценария нет: у лица с именем, стока и карточки с text слой пустой.
+        assert all(shot.layer.getchannel("A").getextrema()[1] == 0 for shot in shots[:4])
+
+        # Кадр с at начинается в свою секунду, кадры до него делят время до неё.
+        assert splits([{}, {}], 4.0) == [2.0, 4.0] and splits([{"at": 1.0}, {}], 4.0) == [2.0, 4.0]
+        assert splits([{}, {}, {"at": 3.0}], 4.0) == [1.5, 3.0, 4.0]
+        assert splits([{}, {"at": 9.0}], 4.0) == [4.0, 4.0]
 
         # Картинки владельца заменяют кадры строки по порядку прихода (7-2 раньше
         # 7-10), время строки делится поровну, надписей поверх нет — ни ярлыка
@@ -1305,7 +1353,14 @@ def _selftest() -> None:
         (pics / "1-3.mp4").write_bytes(b"")
         mine = with_pictures(good, Path(tmp))
         assert [Path(s["path"]).name for s in screens(mine["lines"][0])] == ["1-2.jpg", "1-3.mp4", "1-10.jpg"]
+        # Метка .at несёт секунду начала, .nosub выключает субтитры строки.
+        (pics / "1-3.at").write_text("0.7\n", encoding="utf-8")
+        (pics / "1-10.nosub").touch()
+        mine = with_pictures(good, Path(tmp))
+        assert [s.get("at") for s in screens(mine["lines"][0])] == [None, 0.7, None]
+        assert [bool(s.get("nosub")) for s in screens(mine["lines"][0])] == [False, False, True]
         (pics / "1-3.mp4").unlink()
+        (pics / "1-10.nosub").unlink()
         mine = with_pictures(good, Path(tmp))
         assert mine["lines"][1] == good["lines"][1] and "path" in screens(mine["lines"][2])[0]
         assert "path" not in screens(good["lines"][0])[0] and with_pictures(good, None) is good
@@ -1365,11 +1420,22 @@ def _selftest() -> None:
         begin, end = starts[number] + BEFORE_SPEECH, starts[number] + {1: 4.3, 3: 3.6, 4: 2.7}[number] - AFTER_SPEECH
         assert abs(mine[0][0] - begin) < 1e-9 and abs(mine[-1][1] - end) < 1e-9, (mine, begin, end)
     assert all(a < b <= c for (_, a, b), (_, c, _) in zip(timing, timing[1:])), timing
+    # subtitle подменяет say; под кадром с nosub куска нет, под кадром с .top он наверху.
+    numbers = {"lines": [{"say": "После четырнадцати лет", "subtitle": "После 14 лет"}]}
+    assert [text for text, *_ in cues(numbers, [2.0], {1: 1.8})] == ["После 14 лет"]
+    shown = place([("а", 0.1, 0.9), ("б", 1.2, 1.8), ("в", 2.1, 2.9)],
+                  [{"kind": "stock"}, {"kind": PIC, "path": "нет.jpg", "nosub": True}, {"kind": "stock"}], [1.0, 2.0, 3.0])
+    assert [(text, up) for text, _, _, up in shown] == [("а", False), ("в", False)], shown
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "2.top").touch()
+        marked = {"kind": PIC, "path": str(Path(tmp) / "2.jpg")}
+        shown = place([("через склейку", 0.8, 1.3), ("до", 0.1, 0.5)], [{"kind": "stock"}, marked], [1.0, 2.0])
+        assert [up for *_, up in shown] == [True, False], shown
     assert chunks("Пишет: это был не я.") == ["Пишет: это был", "не я."] and chunks("Одно") == ["Одно"]
     assert chunks("Её включили в соседнем городе — полиция остановила шоу почти сразу.")[1] == "соседнем городе —"
-    # Наверх — только над своей надписью внизу; мемная подпись сверху субтитр не поднимает.
-    assert high({"kind": "face", "name": "Bones"}) and high({"kind": "card", "text": "т"})
-    assert not high({"kind": "gif", "query": "bye", "caption": "я боюсь"}) and not high({"kind": "face", "name": "B", "text": ""})
+    # Наверх — только над надписью внизу картинки (метка .top); ярлыки сценария больше не рисуются.
+    assert not high({"kind": "face", "name": "Bones"}) and not high({"kind": "card", "text": "т"})
+    assert not high({"kind": "gif", "query": "bye", "caption": "я боюсь"})
     with tempfile.TemporaryDirectory() as tmp:
         pic = Path(tmp) / "1-2.jpg"
         assert not high({"kind": PIC, "path": str(pic)})
@@ -1426,6 +1492,18 @@ def _selftest() -> None:
         half.paste((0, 0, 255), (800, 0, 1600, 900))
         half.save(Path(tmp) / "half.png")
         empty = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
+        # Статичная картинка движется: первый и последний кадр отрезка разные, в обе стороны.
+        ramp = Image.linear_gradient("L").resize((1080, 1920)).convert("RGB")
+        ramp.save(Path(tmp) / "ramp.png")
+        for out in (False, True):
+            part = Path(tmp) / f"zoom-{out}.mp4"
+            clips.segment(clips.Shot(empty, 0.5, "", "", backdrop=str(Path(tmp) / "ramp.png")), part, Path(tmp),
+                          fade_in=False, grade="", zoom_out=out, zoom=STILL_ZOOM)
+            edges = []
+            for at in ("0", "0.45"):
+                clips.run([clips.ffmpeg(), "-y", "-ss", at, "-i", str(part), "-frames:v", "1", str(Path(tmp) / "z.png")])
+                edges.append(Image.open(Path(tmp) / "z.png").convert("L").getpixel((540, 5)))
+            assert abs(edges[0] - edges[1]) > 4 and (edges[0] < edges[1]) == (not out), (out, edges)
         for focus, channel in ((0.0, 0), (1.0, 2)):
             part = Path(tmp) / f"focus-{focus}.mp4"
             clips.segment(clips.Shot(empty, 0.2, "", "", backdrop=str(Path(tmp) / "half.png")), part, Path(tmp),
