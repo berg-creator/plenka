@@ -522,7 +522,7 @@ def _save_picture(data: bytes, folder: Path, frame: int, comment: str) -> Path:
     image.thumbnail((2160, 2160))
     pics = folder / "pics"
     pics.mkdir(parents=True, exist_ok=True)
-    count = max((int(p.stem.split("-")[1]) for p in pics.glob(f"{frame}-*.jpg")), default=0) + 1
+    count = max((int(p.stem.split("-")[1]) for p in pictures(folder, frame)), default=0) + 1
     dest = pics / f"{frame}-{count}.jpg"
     image.save(dest, "JPEG", quality=92)
     if comment.strip():
@@ -531,8 +531,14 @@ def _save_picture(data: bytes, folder: Path, frame: int, comment: str) -> Path:
 
 
 def pictures(folder: Path, frame: int) -> list[Path]:
-    """Картинки владельца к кадру по порядку прихода: 7-2 раньше 7-10."""
-    return sorted((folder / "pics").glob(f"{frame}-*.jpg"), key=lambda p: int(p.stem.split("-")[1]))
+    """Картинки и видео к кадру по порядку: 7-2 раньше 7-10.
+
+    Видео (<кадр>-<n>.mp4) бот от владельца не принимает — его кладёт Claude,
+    переделывая присланное: «Киф выходит, машет и уходит перемоткой» картинкой
+    не сделать. Сборка режет его под 9:16, как гифку, и крутит по кругу.
+    """
+    found = [p for p in (folder / "pics").glob(f"{frame}-*") if p.suffix in (".jpg", ".mp4")]
+    return sorted(found, key=lambda p: int(p.stem.split("-")[1]))
 
 
 def with_pictures(script: dict, folder: Path | None) -> dict:
@@ -1153,8 +1159,12 @@ def _selftest() -> None:
         for name in ("1-10", "1-2", "3-1"):
             Image.new("RGB", (800, 800)).save(pics / f"{name}.jpg")
         (pics / "1-2.txt").write_text("обрежь пониже", encoding="utf-8")
+        # Видео встаёт в тот же ряд по номеру, .txt кадром не считается.
+        (pics / "1-3.mp4").write_bytes(b"")
         mine = with_pictures(good, Path(tmp))
-        assert [Path(s["path"]).stem for s in screens(mine["lines"][0])] == ["1-2", "1-10"]
+        assert [Path(s["path"]).name for s in screens(mine["lines"][0])] == ["1-2.jpg", "1-3.mp4", "1-10.jpg"]
+        (pics / "1-3.mp4").unlink()
+        mine = with_pictures(good, Path(tmp))
         assert mine["lines"][1] == good["lines"][1] and "path" in screens(mine["lines"][2])[0]
         assert "path" not in screens(good["lines"][0])[0] and with_pictures(good, None) is good
         shots = storyboard(mine, Path(tmp), [2.0, 1.5, 1.0, 2.5])
