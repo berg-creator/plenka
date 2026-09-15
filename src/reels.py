@@ -67,6 +67,12 @@
 текст, который сам шутка или доказательство: `caption` мема, надписи
 в картинках владельца.
 
+Последний кадр — концовка: поверх него крупно адрес канала (config.CHANNEL_HANDLE),
+иначе ролик никуда не ведёт. Кадр короче ENDING_SECONDS продлевается, голос
+не трогается. TikTok ссылки на чужие площадки режет в охвате, поэтому вторая
+версия ролика — без надписи и без продления: тот же проход ffmpeg пишет оба
+файла, и бот шлёт их подряд.
+
 Кадры делят строку поровну. Картинка с меткой `<кадр>-<n>.at` (внутри —
 секунда от начала строки) начинается ровно тогда: так короткая вставка
 попадает на своё слово, а кадры до неё делят время до метки.
@@ -144,6 +150,11 @@ TODAY = "сегодня до 21:00 МСК"
 # эта нужна, чтобы и без дубля кадр было видно в превью.
 SAY_SECONDS = 1.5
 STILL_ZOOM = 0.07
+# Концовка: сколько её минимум видно и где по высоте адрес канала — над обычным
+# субтитром (68%), но ниже середины: на 45% он лёг Кифу на глаза, а лицо в кадре
+# обычно в верхней половине.
+ENDING_SECONDS = 1.5
+ENDING_Y = 0.56
 NOSUB_MARK = ".nosub"
 AT_MARK = ".at"
 # Всё обрезается под 9:16. Шире этого — панорама, от которой в кадре осталась
@@ -1117,21 +1128,47 @@ def subtitle(text: str, up: bool):
     return frame
 
 
-def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path) -> None:
-    """Вжигает субтитры в готовый ролик одним проходом.
+def ending():
+    """Слой концовки: адрес канала крупно тем же шрифтом с обводкой, на ENDING_Y высоты."""
+    from PIL import Image
+
+    from . import clips
+
+    ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), config.CHANNEL_HANDLE)
+    _, top, _, bottom = ink.getbbox()
+    frame = Image.new("RGBA", ink.size)
+    frame.alpha_composite(ink.crop((0, top, clips.WIDTH, bottom)), (0, round(clips.HEIGHT * ENDING_Y - (bottom - top) / 2)))
+    return frame
+
+
+def stretch_last(shots: list) -> tuple[list, float]:
+    """Последний кадр не короче ENDING_SECONDS: концовку должны успеть прочитать. Возвращает кадры и прибавку."""
+    from dataclasses import replace
+
+    extra = max(0.0, ENDING_SECONDS - shots[-1].seconds)
+    return shots[:-1] + [replace(shots[-1], seconds=shots[-1].seconds + extra)], extra
+
+
+def tiktok(video: Path) -> Path:
+    return video.with_name(f"{video.stem}-tiktok.mp4")
+
+
+def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float, short: float) -> None:
+    """Вжигает субтитры и концовку одним проходом и пишет два файла: основной и для TikTok.
 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
     один вход: список кадров с длительностями (concat), пустой прозрачный кадр
     закрывает паузы; тридцать картинок-входов ffmpeg не тянул и вставал.
+    Концовка с `ending_at` — только в основном файле; TikTok-версия обрезана
+    до `short` (без продления последнего кадра) и затухает сама.
     """
     from PIL import Image
 
     from . import clips
 
-    if not placed:
-        return
     blank = work / "sub-0.png"
     Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)).save(blank)
+    ending().save(work / "ending.png")
     entries, now = [], 0.0
     for number, (text, first, end, up) in enumerate(placed, 1):
         # Щель короче кадра — не пауза, а погрешность деления строки: пустой
@@ -1149,14 +1186,20 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path) 
                        encoding="utf-8")
     raw = work / "no-subs.mp4"
     video.replace(raw)
+    fade = max(0.0, short - 0.6)
+    encode = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart"]
     clips.run([
         # reinit_filter 0: отрезки ролика разные по цветовому диапазону (фото — pc, видео — tv),
         # и на каждой смене ffmpeg пересобирал граф, теряя вход субтитров до конца ролика.
         clips.ffmpeg(), "-y", "-reinit_filter", "0", "-i", str(raw), "-f", "concat", "-safe", "0", "-i", str(listing),
-        "-filter_complex", "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,format=yuv420p[v]",
-        "-map", "[v]", "-map", "0:a", "-c:a", "copy",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-movflags", "+faststart",
-        str(video),
+        "-loop", "1", "-i", str(work / "ending.png"),
+        "-filter_complex",
+        "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split[b1][b2];"
+        f"[2:v]format=rgba[e];[b1][e]overlay=0:0:shortest=1:enable='gte(t,{ending_at:.3f})',format=yuv420p[main];"
+        f"[b2]trim=0:{short:.3f},setpts=PTS-STARTPTS,format=yuv420p[tt];"
+        f"[0:a]asplit[a1][a2];[a2]atrim=0:{short:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={fade:.3f}:d=0.6[att]",
+        "-map", "[main]", "-map", "[a1]", *encode, str(video),
+        "-map", "[tt]", "-map", "[att]", *encode, str(tiktok(video)),
     ])
 
 
@@ -1178,7 +1221,7 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         takes = _trimmed(script, voices, work)
         lines = [clips.Shot(None, float(line.get("pause") or SAY_SECONDS), "", "") for line in script["lines"]]
         timed, voice = clips.narrate(lines, script, work, kind="reels", voices=takes, lead=0.0, tail=TAIL)
-        shots = storyboard(script, work, [shot.seconds for shot in timed])
+        shots, extra = stretch_last(storyboard(script, work, [shot.seconds for shot in timed]))
         flat = [screen for line in script["lines"] for screen in screens(line)]
         total = sum(shot.seconds for shot in shots)
 
@@ -1197,13 +1240,19 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         print("  кадры:", ", ".join(used))
         print(f"  голос: {'есть' if voice else 'нет'}, длина {total:.1f} с")
 
+        if voice and extra:
+            # Голос — до конца продлённой концовки тишиной: сайдчейн кончается вместе
+            # с голосом, и -shortest срезал бы продление вместе с адресом канала.
+            padded = work / "voice-padded.wav"
+            clips.run([clips.ffmpeg(), "-y", "-i", str(voice), "-af", f"apad=whole_dur={total:.3f}", str(padded)])
+            voice = padded
         clips.assemble(
             parts, _beat(script, total, work), total, video, work, voice, 0.0, voice_grade=VOICE_CHAIN, duck=DUCK
         )
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
         placed = place(cues(script, [shot.seconds for shot in timed], lengths), flat, ends)
-        burn(video, placed, work)
+        burn(video, placed, work, ending_at=total - shots[-1].seconds, short=total - extra)
         print(f"  субтитры: {len(placed)} кусков, наверху {sum(p[3] for p in placed)}")
 
     # Превью вынимается из готового ролика, а не рисуется отдельно: так оно
@@ -1234,7 +1283,10 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
     from . import telegram
 
     admin = config.secret("TELEGRAM_ADMIN_ID")
-    telegram.send_video_file(admin, video, f"<b>{html.escape(script['topic'], quote=False)}</b>")
+    topic = f"<b>{html.escape(script['topic'], quote=False)}</b>"
+    telegram.send_video_file(admin, video, f"{topic}\nдля YouTube и VK")
+    if tiktok(video).exists():
+        telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — без адреса канала")
     # Превью документом, а не фото: фото Telegram пережимает до 1280 точек
     # по длинной стороне, а обложке нужен кадр 1080×1920 как есть. Отправки
     # документа в telegram.py нет — метод API зовётся напрямую.
@@ -1462,11 +1514,11 @@ def _selftest() -> None:
         clips.run([clips.ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(Path(tmp) / "ab.txt"), "-c", "copy", str(video)])
         # Куски встык, как внутри строки: конец одного с погрешностью деления равен началу другого.
         burn(video, [("раз", 0.1, 0.3 + 1e-12, False), ("раз два", 0.3, 0.9, False), ("четыре", 0.9 - 1e-12, 1.0, False),
-                     ("три", 2.0, 2.6, True)], Path(tmp))
+                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=1.2, short=2.8)
 
-        def white(at: float, band: tuple[float, float]) -> bool:
+        def white(at: float, band: tuple[float, float], source: Path = video) -> bool:
             frame = Path(tmp) / "f.png"
-            clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(video), "-frames:v", "1", str(frame)])
+            clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(source), "-frames:v", "1", str(frame)])
             crop = Image.open(frame).convert("L").crop((0, int(1920 * band[0]), 1080, int(1920 * band[1])))
             return crop.getextrema()[1] > 240
 
@@ -1474,6 +1526,21 @@ def _selftest() -> None:
         assert white(0.6, low) and not white(0.6, top), "первый кусок внизу"
         assert not white(1.4, low) and not white(1.4, top), "пауза без субтитра"
         assert white(2.3, top) and not white(2.3, low), "второй кусок наверху"
+        # Концовка: адрес канала есть в основном файле с ending_at, в TikTok-версии нет, и она короче.
+        middle = (ENDING_Y - 0.03, ENDING_Y + 0.03)
+        assert not white(1.0, middle) and white(2.9, middle), "концовка в основном ролике"
+        assert not white(2.5, middle, tiktok(video)), "в TikTok-версии адреса канала нет"
+        assert abs(clips.probe_seconds(tiktok(video)) - 2.8) < 0.1 < abs(clips.probe_seconds(video) - 2.8)
+
+    # Последний кадр короче ENDING_SECONDS продлевается, длинный не трогается.
+    from dataclasses import replace
+
+    from . import clips as _clips
+
+    stub = _clips.Shot(None, 0.8, "", "")
+    stretched, extra = stretch_last([replace(stub, seconds=2.0), stub])
+    assert abs(stretched[-1].seconds - ENDING_SECONDS) < 1e-9 and abs(extra - 0.7) < 1e-9 and stretched[0].seconds == 2.0
+    assert stretch_last([replace(stub, seconds=3.0)])[1] == 0.0
 
     # Бит берётся с места, где вступает низ, а не с тихого начала.
     with tempfile.TemporaryDirectory() as tmp:

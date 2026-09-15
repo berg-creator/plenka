@@ -9,6 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 DATA = ROOT / "data"
+# Адрес канала для концовок роликов и надписей: одно место на весь проект.
+CHANNEL_HANDLE = "@plenka_fm"
 PROMPTS = ROOT / "prompts"
 QUEUE = ROOT / "content" / "queue"
 # Срочные новости живут отдельно от очереди: их пишут и показывают в тот же
