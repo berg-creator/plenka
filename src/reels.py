@@ -51,6 +51,13 @@
 переделать; она ложится рядом файлом .txt. Сборка по картинке не запускается:
 владелец шлёт их пачкой и говорит «собери», когда закончил.
 
+Субтитры ставятся сами: многие смотрят ролик без звука. Текст — `say` как есть,
+кусками по 2–4 слова, время кусков — по буквам внутри речи строки, найденной
+по дублю. Распознавание речи отвергнуто: оно тянет тяжёлую зависимость, а текст
+и так известен дословно. Субтитр стоит на 68% высоты, над интерфейсом Shorts
+и TikTok; где внизу кадра своя надпись (`text` сценария или картинка с пустым
+файлом-меткой `<кадр>-<n>.top` рядом), он уходит наверх, под вкладки площадки.
+
 Кадры меняются каждые две-три секунды: у одной фразы их может быть до трёх.
 Видео-мемы берутся с GIPHY по запросу при сборке — просьба владельца. Чистой
 лицензии, как у стока (src/footage.py), у них нет, поэтому они живут только
@@ -134,6 +141,14 @@ BLUR_WIDER = 2.4
 CAPTION_TOP = 260
 CAPTION_PAD = 60
 CAPTION_SIZES = ((150, 1), (128, 1), (112, 1), (96, 1), (88, 1), (112, 2), (96, 2), (80, 3))
+
+# Субтитры: слов в куске, центр по высоте кадра — обычно и когда внизу своя
+# надпись. Нижние 20% кадра — интерфейс площадок, верхние ~12% — их вкладки.
+SUB_WORDS = 4
+SUB_LETTERS = 20
+SUB_LOW = 0.68
+SUB_HIGH = 0.22
+TOP_MARK = ".top"
 
 GIPHY_SEARCH = "https://api.giphy.com/v1/gifs/search"
 # Видео по id отдаётся без ключа: автор может закрепить конкретный мем.
@@ -985,6 +1000,124 @@ def fit(screen: dict, backdrop: str) -> str:
     return "blur" if screen["kind"] != PIC and backdrop and aspect(backdrop) > BLUR_WIDER else "crop"
 
 
+def chunks(say: str) -> list[str]:
+    """Фраза кусками по 2–4 слова. Режется после трёх слов или на знаке
+    препинания после двух, но одинокое последнее слово не остаётся — оно
+    прирастает к куску. Тире отдельным «словом» не считается."""
+    words: list[str] = []
+    for word in say.split():
+        if words and not any(ch.isalnum() for ch in word):
+            words[-1] += f" {word}"
+        else:
+            words.append(word)
+    out, current = [], []
+    for index, word in enumerate(words):
+        current.append(word)
+        left = len(words) - index - 1
+        # Длинные слова режутся раньше: «общественной безопасности» четырьмя
+        # словами в строку крупно не влезают, и кегль мельчал.
+        # Конец предложения держит кусок при себе: «сентября. После» — два разных смысла.
+        ends = word.rstrip("»")[-1:] in ".!?"
+        after = words[index + 1] if left else ""
+        longer = left and len(current) >= 2 and sum(map(len, current + [after])) > SUB_LETTERS \
+            and not after.rstrip("»")[-1:] in ".!?"
+        if not left or len(current) == SUB_WORDS or (
+            left != 1 and (ends or longer or len(current) == 3 or (len(current) == 2 and word[-1] in ",:;—"))
+        ):
+            out.append(" ".join(current))
+            current = []
+    return out
+
+
+def cues(script: dict, seconds: list[float], takes: dict[int, float]) -> list[tuple[str, float, float]]:
+    """Куски субтитров с временем: (текст, начало, конец) от начала ролика.
+
+    `seconds` — длины строк, `takes` — длина обрезанного дубля по номеру кадра.
+    Речь в дубле начинается через BEFORE_SPEECH и кончается за AFTER_SPEECH
+    до конца (_trimmed), между ними время делится по буквам (и немного поровну):
+    «по-расистски» говорится дольше, чем «и не».
+    """
+    out, start = [], 0.0
+    for number, (line, length) in enumerate(zip(script["lines"], seconds), 1):
+        take = takes.get(number, 0.0)
+        if "say" in line and take > BEFORE_SPEECH + AFTER_SPEECH:
+            begin, end = start + BEFORE_SPEECH, start + take - AFTER_SPEECH
+            parts = chunks(line["say"])
+            # Плюс четыре буквы на кусок: «не я.» по голосу короче четверти секунды, не прочитать.
+            weights = [sum(ch.isalnum() for ch in part) + 4 for part in parts]
+            done = 0
+            for part, weight in zip(parts, weights):
+                first = begin + (end - begin) * done / sum(weights)
+                done += weight
+                out.append((part, first, begin + (end - begin) * done / sum(weights)))
+        start += length
+    return out
+
+
+def high(screen: dict) -> bool:
+    """Субтитр наверх: внизу кадра своя надпись — ярлык сценария или метка у картинки."""
+    if screen["kind"] == PIC:
+        return Path(screen["path"]).with_suffix(TOP_MARK).exists()
+    return bool(screen.get("label") or screen.get("text", screen.get("name", "")))
+
+
+def subtitle(text: str, up: bool):
+    """Кадр субтитра: прозрачный 1080×1920, кусок стоит на своей высоте."""
+    from PIL import Image
+
+    from . import clips
+
+    ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), text)
+    left, top, right, bottom = ink.getbbox()
+    frame = Image.new("RGBA", ink.size)
+    frame.alpha_composite(ink.crop((0, top, clips.WIDTH, bottom)),
+                          (0, round(clips.HEIGHT * (SUB_HIGH if up else SUB_LOW) - (bottom - top) / 2)))
+    return frame
+
+
+def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path) -> None:
+    """Вжигает субтитры в готовый ролик одним проходом.
+
+    Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
+    один вход: список кадров с длительностями (concat), пустой прозрачный кадр
+    закрывает паузы; тридцать картинок-входов ffmpeg не тянул и вставал.
+    """
+    from PIL import Image
+
+    from . import clips
+
+    if not placed:
+        return
+    blank = work / "sub-0.png"
+    Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)).save(blank)
+    entries, now = [], 0.0
+    for number, (text, first, end, up) in enumerate(placed, 1):
+        # Щель короче кадра — не пауза, а погрешность деления строки: пустой
+        # кадр нулевой длины сбивал concat, и субтитры до конца ролика пропадали.
+        if first - now > 0.02:
+            entries.append((blank, first - now))
+        path = work / f"sub-{number}.png"
+        subtitle(text, up).save(path)
+        entries.append((path, end - max(first, now)))
+        now = end
+    entries.append((blank, 1.0))
+    listing = work / "subs.txt"
+    # Последний файл повторён без длительности — так concat учитывает длительность предпоследнего.
+    listing.write_text("".join(f"file '{p}'\nduration {d:.3f}\n" for p, d in entries) + f"file '{blank}'\n",
+                       encoding="utf-8")
+    raw = work / "no-subs.mp4"
+    video.replace(raw)
+    clips.run([
+        # reinit_filter 0: отрезки ролика разные по цветовому диапазону (фото — pc, видео — tv),
+        # и на каждой смене ffmpeg пересобирал граф, теряя вход субтитров до конца ролика.
+        clips.ffmpeg(), "-y", "-reinit_filter", "0", "-i", str(raw), "-f", "concat", "-safe", "0", "-i", str(listing),
+        "-filter_complex", "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,format=yuv420p[v]",
+        "-map", "[v]", "-map", "0:a", "-c:a", "copy",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-movflags", "+faststart",
+        str(video),
+    ])
+
+
 def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
     """Собирает ролик и превью. Возвращает (ролик, превью).
 
@@ -1024,6 +1157,15 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         clips.assemble(
             parts, _beat(script, total, work), total, video, work, voice, 0.0, voice_grade=VOICE_CHAIN, duck=DUCK
         )
+        # Субтитр встаёт по кадру, который виден в начале куска.
+        ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
+        lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
+        placed = [
+            (text, first, end, high(flat[next((i for i, e in enumerate(ends) if first < e), len(flat) - 1)]))
+            for text, first, end in cues(script, [shot.seconds for shot in timed], lengths)
+        ]
+        burn(video, placed, work)
+        print(f"  субтитры: {len(placed)} кусков, наверху {sum(p[3] for p in placed)}")
 
     # Превью вынимается из готового ролика, а не рисуется отдельно: так оно
     # по построению совпадает с первым кадром, который площадка возьмёт обложкой.
@@ -1201,6 +1343,71 @@ def _selftest() -> None:
             take.writeframes(array.array("h", samples).tobytes())
         start, end = _speech(path)
         assert abs(start - 0.51) < 0.02 and abs(end - 1.51) < 0.02, (start, end)
+
+    # Субтитры: куски до четырёх слов покрывают фразу целиком, идут внутри
+    # речи строки по порядку без наложений; одинокое слово в конце не остаётся.
+    said = {"lines": [
+        {"say": "Пишет: это был не я. И не город. Пилот повёл себя очень по-расистски."},
+        {"pause": 1.0},
+        {"say": "Идеальный концерт: сразу «спасибо, Чикаго, всем пока»."},
+        {"say": "Как угрозу общественной безопасности."},
+    ]}
+    timing = cues(said, [4.5, 1.0, 3.8, 2.9], {1: 4.3, 3: 3.6, 4: 2.7})
+    starts = {1: 0.0, 3: 5.5, 4: 9.3}
+    for number, line in enumerate(said["lines"], 1):
+        if "say" not in line:
+            continue
+        parts = chunks(line["say"])
+        assert all(1 <= len(part.split()) <= SUB_WORDS for part in parts), parts
+        assert " ".join(parts).split() == line["say"].split() and len(parts[-1].split()) > 1, parts
+        mine = [(a, b) for text, a, b in timing if text in parts and starts[number] <= a < starts[number] + 4.5]
+        assert len(mine) == len(parts), (mine, parts)
+        begin, end = starts[number] + BEFORE_SPEECH, starts[number] + {1: 4.3, 3: 3.6, 4: 2.7}[number] - AFTER_SPEECH
+        assert abs(mine[0][0] - begin) < 1e-9 and abs(mine[-1][1] - end) < 1e-9, (mine, begin, end)
+    assert all(a < b <= c for (_, a, b), (_, c, _) in zip(timing, timing[1:])), timing
+    assert chunks("Пишет: это был не я.") == ["Пишет: это был", "не я."] and chunks("Одно") == ["Одно"]
+    assert chunks("Её включили в соседнем городе — полиция остановила шоу почти сразу.")[1] == "соседнем городе —"
+    # Наверх — только над своей надписью внизу; мемная подпись сверху субтитр не поднимает.
+    assert high({"kind": "face", "name": "Bones"}) and high({"kind": "card", "text": "т"})
+    assert not high({"kind": "gif", "query": "bye", "caption": "я боюсь"}) and not high({"kind": "face", "name": "B", "text": ""})
+    with tempfile.TemporaryDirectory() as tmp:
+        pic = Path(tmp) / "1-2.jpg"
+        assert not high({"kind": PIC, "path": str(pic)})
+        pic.with_suffix(TOP_MARK).touch()
+        assert high({"kind": PIC, "path": str(pic)})
+    # Самый длинный кусок не заходит в нижние 20% кадра и не лезет под вкладки сверху.
+    box = subtitle("четырнадцать лет концерт почти", False).getbbox()
+    assert box[3] <= 0.8 * 1920 and box[1] > 0.5 * 1920, box
+    assert subtitle("четырнадцать лет концерт почти", True).getbbox()[1] >= 0.1 * 1920
+
+    # Вжигание: кусок виден в своё время и на своей высоте, в паузе кадр чистый.
+    with tempfile.TemporaryDirectory() as tmp:
+        from PIL import Image
+
+        from . import clips
+
+        # Ролик из двух отрезков с разным цветовым диапазоном, как склейка фото и видео.
+        for name, fmt in (("a", "yuvj420p"), ("b", "yuv420p")):
+            clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "color=c=gray:s=1080x1920:r=30:d=1.5",
+                       "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "1.5", "-pix_fmt", fmt,
+                       "-c:v", "libx264", "-c:a", "aac", str(Path(tmp) / f"{name}.mp4")])
+        (Path(tmp) / "ab.txt").write_text(f"file '{Path(tmp) / 'a.mp4'}'\nfile '{Path(tmp) / 'b.mp4'}'\n", encoding="utf-8")
+        video = Path(tmp) / "v.mp4"
+        clips.run([clips.ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(Path(tmp) / "ab.txt"), "-c", "copy", str(video)])
+        # Куски встык, как внутри строки: конец одного с погрешностью деления равен началу другого.
+        burn(video, [("раз", 0.1, 0.3 + 1e-12, False), ("раз два", 0.3, 0.9, False), ("четыре", 0.9 - 1e-12, 1.0, False),
+                     ("три", 2.0, 2.6, True)], Path(tmp))
+
+        def white(at: float, band: tuple[float, float]) -> bool:
+            frame = Path(tmp) / "f.png"
+            clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(video), "-frames:v", "1", str(frame)])
+            crop = Image.open(frame).convert("L").crop((0, int(1920 * band[0]), 1080, int(1920 * band[1])))
+            return crop.getextrema()[1] > 240
+
+        low, top = (0.6, 0.78), (0.12, 0.32)
+        assert white(0.6, low) and not white(0.6, top), "первый кусок внизу"
+        assert not white(1.4, low) and not white(1.4, top), "пауза без субтитра"
+        assert white(2.3, top) and not white(2.3, low), "второй кусок наверху"
 
     # Бит берётся с места, где вступает низ, а не с тихого начала.
     with tempfile.TemporaryDirectory() as tmp:
