@@ -39,7 +39,7 @@ import pathlib
 from pathlib import Path
 
 from . import card, collect, config, llm, otbor, quality, state, stories, telegram
-from .sources import deezer, itunes, lastfm
+from .sources import afisha, deezer, itunes, lastfm
 
 log = logging.getLogger("service")
 
@@ -71,6 +71,7 @@ COMMANDS = {
     "novoe": "new", "новое": "new",
     "slezhu": "watchlist", "слежу": "watchlist",
     "stop": "watchstop", "стоп": "watchstop",
+    "gorod": "city", "город": "city",
     "otbor": "otbor", "отбор": "otbor",
     "proyavka": "proyavka", "проявка": "proyavka",
 }
@@ -759,10 +760,17 @@ def watch_add(chat_id: str, artist: str) -> str:
                 "\n\nПроверь, как пишется имя, и пришли /slezhu Имя ещё раз.")
         return f"В магазинах <b>{artist}</b> не нашёл — следить не за чем.{tail}"
 
+    page = afisha.find_artist(found["name"])
+    if page:
+        found["afisha"] = page
     names.append(found)
     state.write_json(WATCH_FILE, data)
+    city = data.get("cities", {}).get(str(chat_id))
+    concerts = (f"Объявит концерт в городе {city} — тоже напишу." if city and page else
+                "Концерты тоже могу — пришли /gorod Город." if page else
+                "В Яндекс Афише его нет — о концертах не узнаю.")
     return (
-        f"Слежу за <b>{found['name']}</b>. Выйдет релиз — напишу.\n\n"
+        f"Слежу за <b>{found['name']}</b>. Выйдет релиз — напишу. {concerts}\n\n"
         f"Сейчас в списке: {len(names)}. Список и отписка — /slezhu."
     )
 
@@ -791,7 +799,9 @@ def watch_remove(chat_id: str, subject: str) -> str:
 
 def watch_clear(chat_id: str) -> str:
     data = state.read_json(WATCH_FILE, {"watchers": {}})
-    if data["watchers"].pop(str(chat_id), None) is None:
+    # Город без артистов ни к чему, а стереть «всё» значит всё.
+    city = data.get("cities", {}).pop(str(chat_id), None)
+    if data["watchers"].pop(str(chat_id), None) is None and city is None:
         return "Список и так пуст."
     state.write_json(WATCH_FILE, data)
     return "Больше ни за кем не слежу."
@@ -937,6 +947,106 @@ def notify_releases() -> int:
     if delivered:
         # Список отправленного подрезаем: он нужен только чтобы не повториться.
         data["sent"] = sorted(sent)[-2000:]
+        state.write_json(WATCH_FILE, data)
+    return delivered
+
+
+# ─────────────────────────── концерты в городе ───────────────────────────
+
+# Как город пишут люди → как его пишет Афиша. Остальные сверяются без регистра,
+# пробелов и дефисов (afisha.same_name), так что «нижний новгород» сойдётся и так.
+CITY_ALIASES = {
+    "питер": "Санкт-Петербург", "спб": "Санкт-Петербург", "петербург": "Санкт-Петербург",
+    "санкт петербург": "Санкт-Петербург", "ленинград": "Санкт-Петербург",
+    "мск": "Москва", "екб": "Екатеринбург", "екат": "Екатеринбург",
+    "нск": "Новосибирск", "новосиб": "Новосибирск", "крд": "Краснодар",
+    "нижний": "Нижний Новгород", "нн": "Нижний Новгород",
+    "ростов": "Ростов-на-Дону", "ростов на дону": "Ростов-на-Дону",
+}
+
+
+def normalize_city(text: str) -> str:
+    text = re.sub(r"^г\.?\s+", "", text.strip(" .,!"), flags=re.IGNORECASE)
+    key = re.sub(r"[\s-]+", " ", text.casefold().replace("ё", "е"))
+    return CITY_ALIASES.get(key) or " ".join(w[:1].upper() + w[1:] for w in text.split())
+
+
+def city_set(chat_id: str, text: str) -> str:
+    """/gorod Город. Город лежит в приватном списке слежения рядом с артистами."""
+    data = state.read_json(WATCH_FILE, {"watchers": {}})
+    cities = data.setdefault("cities", {})
+    names = data["watchers"].get(str(chat_id), [])
+    if not text.strip():
+        city = cities.get(str(chat_id))
+        return (f"Город — <b>{city}</b>. Сменить — /gorod Город." if city else
+                "Пришли город: <i>/gorod Казань</i> — напишу, когда кто-то из тех, "
+                "за кем ты следишь, объявит там концерт.")
+    city = normalize_city(text[:MAX_QUERY])
+    cities[str(chat_id)] = city
+    state.write_json(WATCH_FILE, data)
+    if not names:
+        return (f"Город — <b>{city}</b>. Теперь добавь артистов: <i>/slezhu Имя</i> — "
+                "напишу, когда кто-то из них объявит здесь концерт.")
+    # Адрес в Афише ищется при подписке; у старых подписок его нет до первого прохода.
+    missing = [n["name"] for n in _entries(data, chat_id) if isinstance(n, dict) and not n.get("afisha")]
+    tail = f"\n\nВ Яндекс Афише пока не нашёл: {', '.join(missing)}." if missing else ""
+    return (f"Город — <b>{city}</b>. Объявит кто-то из твоего списка концерт здесь — напишу. "
+            f"Концерты смотрю в Яндекс Афише раз в день.{tail}")
+
+
+def notify_concerts(dry_run: bool = False) -> int:
+    """Вести о концертах в городе подписчика — раз в день, одна на концерт.
+
+    Проход здесь же, после рассылки релизов: там уже подключено приватное
+    хранилище, а город и артисты человека живут только в нём. Одна страница
+    Афиши на артиста, сколько бы человек за ним ни следило. Концерт помечается
+    ссылкой и днём: у тура в одном городе ссылка бывает общей на все даты.
+    """
+    data = state.read_json(WATCH_FILE, {"watchers": {}, "sent": []})
+    today = _today()
+    cities = data.get("cities", {})
+    if data.get("concerts_day") == today and not dry_run:
+        return 0
+    wanted = {chat: _entries(data, chat) for chat in cities if data["watchers"].get(chat)}
+
+    pages: dict[str, str | None] = {}
+    schedule: dict[str, list[dict]] = {}
+    for entries in wanted.values():
+        for n in entries:
+            key = n["name"].casefold()
+            if key not in pages:
+                pages[key] = n.get("afisha") or afisha.find_artist(n["name"])
+                schedule[key] = afisha.concerts(pages[key]) if pages[key] else []
+            if pages[key]:
+                n["afisha"] = pages[key]
+
+    sent = set(data.get("sent", []))
+    delivered = 0
+    for chat_id, entries in wanted.items():
+        for n in entries:
+            for concert in schedule[n["name"].casefold()]:
+                mark = f"{chat_id}:concert:{concert['url']}:{concert['day']}"
+                if mark in sent or not afisha.same_name(concert["city"], cities[chat_id]):
+                    continue
+                place = f", {concert['place']}" if concert["place"] else ""
+                # Только то, что сказала Афиша, и ссылка на неё: билеты и подробности там.
+                text = (f"🎫 <b>{n['name']}</b>: {concert['city']}{place} — {concert['when']}.\n\n"
+                        f'<a href="{concert["url"]}">Билеты и подробности — Яндекс Афиша</a>')
+                if dry_run:
+                    print(f"  → {chat_id}: {text}")
+                    delivered += 1
+                    continue
+                try:
+                    telegram.send_message(chat_id, text, buttons=unwatch_button(n["name"]))
+                except telegram.TelegramError as exc:
+                    log.info("Не доставлено про концерт %s: %s", n["name"], exc)
+                    continue
+                sent.add(mark)
+                delivered += 1
+
+    if not dry_run:
+        data["sent"] = sorted(sent)[-2000:]
+        data["concerts_day"] = today
         state.write_json(WATCH_FILE, data)
     return delivered
 
@@ -1092,6 +1202,9 @@ def handle_message(message: dict, data: dict) -> bool:
     if kind == "watchstop":
         telegram.send_message(chat_id, watch_clear(chat_id))
         return False
+    if kind == "city":
+        telegram.send_message(chat_id, city_set(chat_id, body))
+        return False
     if not kind:
         # Ссылку на трек и «Артист — Трек» разбор понимает тем же поиском, что отбор:
         # в разбор уходит имя артиста. Человеку не надо знать, в каком виде что слать.
@@ -1139,7 +1252,7 @@ def handle_message(message: dict, data: dict) -> bool:
 
 # Что из ответов проходит через модель. Остальное — выборка из магазина
 # или работа со списком слежения: они бесплатны и лимит не трогают.
-COSTS_TOKENS = {"new": False, "watchlist": False, "watchstop": False, "watch": False}
+COSTS_TOKENS = {"new": False, "watchlist": False, "watchstop": False, "watch": False, "city": False}
 
 
 def _subject(kind: str, body: str) -> str:
@@ -1254,6 +1367,9 @@ def _selftest() -> None:
 
     Запуск: python -m src.service --selftest
     """
+    import contextlib
+    import datetime
+    import io
     import tempfile
 
     sent_to: list[str] = []
@@ -1304,8 +1420,9 @@ def _selftest() -> None:
     real = (telegram.send_message, telegram.send_audio, _preview, state.read_jsonl,
             globals()["WATCH_FILE"], collect.load_artists, itunes.find_artist_id,
             itunes.resolve_name, itunes.recent_releases, deezer.find_artist_id,
-            deezer.recent_releases, deezer.album_credit, config.INBOX_FILE)
+            deezer.recent_releases, deezer.album_credit, config.INBOX_FILE, afisha.find_artist)
     messages: list[tuple[str, list | None]] = []
+    afisha.find_artist = lambda name: None
     telegram.send_message = lambda chat, text, buttons=None, **_: messages.append((text, buttons)) or {"message_id": 1}
     telegram.send_audio = lambda chat, audio, caption, buttons=None, **_: messages.append((caption, buttons)) or {"message_id": 1}
     globals()["_preview"] = lambda url: None
@@ -1345,9 +1462,63 @@ def _selftest() -> None:
         (telegram.send_message, telegram.send_audio, globals()["_preview"], state.read_jsonl,
          globals()["WATCH_FILE"], collect.load_artists, itunes.find_artist_id,
          itunes.resolve_name, itunes.recent_releases, deezer.find_artist_id,
-         deezer.recent_releases, deezer.album_credit, config.INBOX_FILE) = real
+         deezer.recent_releases, deezer.album_credit, config.INBOX_FILE, afisha.find_artist) = real
         tmp.cleanup()
     print("слежение: вне списка сбора — поиск в магазинах, одна весть на релиз, inbox не тронут, отписка кнопкой")
+
+    # Концерты: разбор страницы Афиши без сети, город словами, одна весть на концерт.
+    today = datetime.date(2026, 9, 16)
+    item = ('<div data-test-id="personSchedule.item"><a href="/{city}/concert/{slug}?source=artist">'
+            '<div data-test-id="scheduleDate.month">{when}</div>'
+            '<div class="person-schedule-place__city">{name}</div>'
+            '<span data-test-id="personSchedule.placeName">Клуб</span>{passed}</div>')
+    page = "".join(item.format(**row) for row in (
+        {"city": "moscow", "slug": "x-tour", "when": "4 и 5 октября", "name": "Москва", "passed": ""},
+        {"city": "moscow", "slug": "x-tour", "when": "28 ноября", "name": "Москва", "passed": ""},
+        {"city": "kazan", "slug": "x-2019", "when": "24 ноября 2019", "name": "Казань",
+         "passed": '<div class="person-schedule-item__passed">Событие прошло</div>'},
+        {"city": "kazan", "slug": "x-old", "when": "1 сентября", "name": "Казань", "passed": ""},
+        {"city": "kazan", "slug": "x-jan", "when": "29 января", "name": "Казань", "passed": ""},
+    ))
+    shows = afisha.parse(page, today)
+    assert [(c["day"], c["city"]) for c in shows] == [
+        ("2026-10-04", "Москва"), ("2026-11-28", "Москва"), ("2027-01-29", "Казань")], shows
+    assert afisha.slug("Три дня дождя") == "tri-dnia-dozhdia" and afisha.slug("SODA LUV") == "soda-luv"
+    assert [normalize_city(c) for c in ("питер", "г. Москва", "нижний новгород", "Ростов-на-Дону")] == [
+        "Санкт-Петербург", "Москва", "Нижний Новгород", "Ростов-на-Дону"]
+    assert parse_command("/gorod Питер") == ("city", "Питер")
+
+    real = (telegram.send_message, globals()["WATCH_FILE"], afisha.find_artist, afisha.concerts, globals()["_today"])
+    notes: list[tuple[str, str]] = []
+    telegram.send_message = lambda chat, text, **_: notes.append((chat, text)) or {"message_id": 1}
+    afisha.find_artist = lambda name: "x" if name == "Баста" else None
+    afisha.concerts = lambda slug, today=None: shows
+    tmp = tempfile.TemporaryDirectory()
+    globals()["WATCH_FILE"] = pathlib.Path(tmp.name) / "watch.json"
+    try:
+        assert "/gorod" in city_set("1", "") and "/slezhu" in city_set("1", "мск")
+        state.write_json(WATCH_FILE, {"watchers": {"1": [{"name": "Баста"}, {"name": "Nobody X"}],
+                                                   "2": [{"name": "Баста"}]},
+                                      "cities": {"1": "Москва"}, "sent": []})
+        assert "не нашёл: Баста, Nobody X" in city_set("1", "мск")
+        assert "Санкт-Петербург" in city_set("2", "спб")
+        globals()["_today"] = lambda: "2026-09-16"
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert notify_concerts(dry_run=True) == 2 and not notes, "сухой прогон отправил"
+        assert notify_concerts() == 2, notes
+        assert {chat for chat, _ in notes} == {"1"}, "чужой город получил весть"
+        assert "4 и 5 октября" in notes[0][1] and "afisha.yandex.ru/moscow/concert/x-tour" in notes[0][1]
+        assert notify_concerts() == 0, "второй проход за день"
+        globals()["_today"] = lambda: "2026-09-17"
+        assert notify_concerts() == 0, "весть о концерте ушла второй раз"
+        saved = state.read_json(WATCH_FILE, {})
+        assert saved["watchers"]["1"][0]["afisha"] == "x" and "afisha" not in saved["watchers"]["1"][1]
+        assert watch_clear("1") and "1" not in state.read_json(WATCH_FILE, {})["cities"]
+    finally:
+        (telegram.send_message, globals()["WATCH_FILE"], afisha.find_artist, afisha.concerts,
+         globals()["_today"]) = real
+        tmp.cleanup()
+    print("концерты: весть одна на концерт и раз в день, чужой город молчит, прошедшая дата отсеяна")
 
     opened: list[str] = []
     real = otbor.start, telegram.send_message, globals()["SOURCES_FILE"]
@@ -1387,6 +1558,9 @@ def main() -> int:
         action="store_true",
         help="разослать вести о новых релизах тем, кто следит",
     )
+    parser.add_argument("--concerts", action="store_true",
+                        help="разослать вести о концертах в городе подписчика (раз в день)")
+    parser.add_argument("--dry-run", action="store_true", help="с --concerts: показать вести, не отправляя")
     args = parser.parse_args()
 
     if args.selftest:
@@ -1399,6 +1573,11 @@ def main() -> int:
     if args.notify:
         sent = notify_releases()
         print(f"Разослано вестей о релизах: {sent}.")
+        return 0
+
+    if args.concerts:
+        sent = notify_concerts(dry_run=args.dry_run)
+        print(f"{'Ушло бы' if args.dry_run else 'Разослано'} вестей о концертах: {sent}.")
         return 0
 
     if args.stats:

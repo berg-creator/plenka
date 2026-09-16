@@ -80,12 +80,22 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: python -m src.service --notify
 
+      # Сбор идёт каждые шесть часов, а концерты объявляют за месяцы — проход
+      # раз в день, дату последнего сам помнит в списке слежения (notify_concerts).
+      - name: Разослать вести о концертах
+        if: env.STATE_DIR != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python -m src.service --concerts
+
       - name: Сохранить списки слежения
         if: env.STATE_DIR != ''
         run: |
           cd private-state
           git add -A
           git diff --cached --quiet || git commit -m "слежение: отправленное отмечено"
+          # Бот пишет сюда же посреди дежурства (подписки, города) — подтягиваем его коммиты.
+          git pull --rebase --autostash
           git push
 
       - name: Сохранить состояние
