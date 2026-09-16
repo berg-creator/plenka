@@ -54,7 +54,8 @@ python -m src.review --check ФАЙЛ      правки автопилота т�
 python -m src.review --selftest        правка, снятие, отказ на битом тексте — без сети
 python -m src.review --apply ФАЙЛ --dry-run  что применилось бы из файла правок, без записи и канала
 python -m src.service --match "Bones"  что нашлось в базе, без обращения к модели
-python -m src.service --selftest       рассылка вестей: один релиз — одна весть
+python -m src.service --selftest       рассылка вестей: один релиз — одна весть, метка /start открывает отбор
+python -m src.service --sources        откуда пришли в бота: метки ссылок ?start= по дням
 python -m src.otbor --selftest         отбор: три способа прислать трек, отказы, пост шаблоном — без сети
 python -m src.otbor --dry-run          какой пост отбора выйдет следующим
 python -m src.otbor --find "ССЫЛКА"    что бот найдёт по ссылке или «Артист — Трек» и пустит ли в отбор

@@ -48,6 +48,11 @@ STATE_FILE = config.DATA / "service.json"
 REQUESTS_FILE = config.DATA / "lineage_requests.jsonl"
 # Все выданные разборы — материал для постов «разбор подписчика №N».
 LOG_FILE = config.DATA / "service_log.jsonl"
+# Откуда приходят в бота: метка ссылки t.me/plenka_fm_bot?start=yt из ролика или чата.
+# Только числа по дню и метке — файл открытый, id человека сюда не попадает.
+# Метки известные наперёд: любая нагрузка /start в счёт забила бы файл мусором.
+SOURCES_FILE = config.DATA / "bot_sources.json"
+SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов"}
 
 CARD_DIR = config.ROOT / "assets" / "cards"
 
@@ -392,6 +397,13 @@ def _resolve(name: str) -> str:
 
 def _today() -> str:
     return state.now().strftime("%Y-%m-%d")
+
+
+def count_source(label: str) -> None:
+    data = state.read_json(SOURCES_FILE, {})
+    day = data.setdefault(_today(), {})
+    day[label] = day.get(label, 0) + 1
+    state.write_json(SOURCES_FILE, data)
 
 
 def user_key(user_id: str | int) -> str:
@@ -940,6 +952,11 @@ def handle_message(message: dict, data: dict) -> bool:
             otbor.handle(message, admin=admin)
             return False
         otbor.cancel(chat_id)
+    if kind == "menu" and body in SOURCES:
+        # Из ролика и чатов зовут прислать трек — меню между ссылкой и заявкой лишнее.
+        count_source(body)
+        otbor.start(chat_id, user_id, admin=admin)
+        return False
     if kind == "menu":
         # Пришёл по ссылке с готовым разбором — не показываем меню, а сразу
         # объясняем, что слать: лишний экран между кнопкой и делом только мешает.
@@ -1169,6 +1186,24 @@ def _selftest() -> None:
         tmp.cleanup()
     print("рассылка релизов: один релиз — одна весть, старые отметки помнятся")
 
+    opened: list[str] = []
+    real = otbor.start, telegram.send_message, globals()["SOURCES_FILE"]
+    otbor.start = lambda chat, user, **_: opened.append(chat)
+    telegram.send_message = lambda chat, text, **_: {"message_id": 1}
+    tmp = tempfile.TemporaryDirectory()
+    globals()["SOURCES_FILE"] = pathlib.Path(tmp.name) / "sources.json"
+    try:
+        for text in ("/start yt", "/start yt", "/start tt", "/start taste"):
+            handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "text": text}, {})
+        saved = SOURCES_FILE.read_text()
+        assert state.read_json(SOURCES_FILE, {}) == {_today(): {"yt": 2, "tt": 1}}, saved
+        assert opened == ["55501"] * 3, opened
+        assert "555" not in saved and "777" not in saved, "id человека в открытом файле"
+    finally:
+        otbor.start, telegram.send_message, globals()["SOURCES_FILE"] = real
+        tmp.cleanup()
+    print("метка /start: считается по дню без id и сразу открывает отбор")
+
 
 # ─────────────────────────── командная строка ───────────────────────────
 
@@ -1179,6 +1214,7 @@ def main() -> int:
     parser.add_argument("--kind", default="", help="taste | roots | lyrics")
     parser.add_argument("--match", help="показать, что нашлось в базе, без затрат на модель")
     parser.add_argument("--stats", action="store_true", help="расход лимитов")
+    parser.add_argument("--sources", action="store_true", help="откуда пришли в бота: метки ссылок по дням")
     parser.add_argument("--selftest", action="store_true", help="проверить рассылку вестей, без сети")
     parser.add_argument(
         "--notify",
@@ -1204,6 +1240,16 @@ def main() -> int:
         print(f"День: {data['day']}. Выдано разборов: {data['total']}/{config.SERVICE_DAILY_TOTAL}")
         for user, info in sorted(data.get("users", {}).items()):
             print(f"  {user}: сегодня {info.get('count', 0)}, всего {info.get('total', 0)}")
+        return 0
+
+    if args.sources:
+        counts = state.read_json(SOURCES_FILE, {})
+        total: dict[str, int] = {}
+        for day, labels in sorted(counts.items()):
+            print(day, "  ".join(f"{SOURCES.get(k, k)}: {v}" for k, v in sorted(labels.items())))
+            for k, v in labels.items():
+                total[k] = total.get(k, 0) + v
+        print("Всего:", "  ".join(f"{SOURCES.get(k, k)}: {v}" for k, v in sorted(total.items())) or "никто")
         return 0
 
     if args.match:

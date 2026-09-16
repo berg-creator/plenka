@@ -404,7 +404,7 @@ def refusal(data: dict, chat_id: str, user_id: str, *, admin: bool) -> str:
 
 
 def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> None:
-    """Открывает заявку. Сюда же придёт /start с меткой из ролика (задача 38)."""
+    """Открывает заявку: /otbor, кнопка меню и ссылка с меткой из ролика (service.SOURCES)."""
     chat_id, user_id = str(chat_id), str(user_id)
     data = load()
     denied = refusal(data, chat_id, user_id, admin=admin)
@@ -616,6 +616,9 @@ def build_post(application: dict) -> dict:
         "track": title,
         "cover": application.get("cover", ""),
         "full_track_file_id": application.get("track_file_id", ""),
+        # Согласие на ролик — в открытый архив: по нему бриф роликов собирает
+        # «ТРИ ТРЕКА ИЗ БОТА», а к приватной заявке облачный сценарист доступа не имеет.
+        "reel": bool(application.get("reel")),
         "created_at": state.iso(),
     }
 

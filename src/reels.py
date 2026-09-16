@@ -71,8 +71,10 @@
 Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу
 висит метка: значок Telegram и config.CHANNEL_HANDLE. После последнего кадра —
 плашка PLATE_SECONDS: крутящийся аватар канала (avatar-wheel), адрес со значком
-и под ним строка-приманка BAIT — зачем идти в канал (разбор вкуса в боте), бит
-на ней затухает. Ссылка на бота — в описании, её требует проверка. TikTok ссылки
+и под ним строка-приманка BAIT — зачем идти в бота (прислать свой трек в ОТБОР),
+бит на ней затухает. Ссылка на бота — в описании, её требует проверка; метку
+площадки (?start=yt, tt, vk) в каждое описание ставит `package`, и бот считает,
+откуда пришли. TikTok ссылки
 на чужие площадки режет в охвате, поэтому вторая версия — без метки и без
 концовки вовсе: аватар без адреса никуда не зовёт (владелец, 16.09.2026). Она
 кончается с последней строкой, звук гаснет за TIKTOK_FADE. Оба файла пишет
@@ -157,8 +159,8 @@ TAGS_MAX = 500
 # Первый комментарий — вопрос для спора, владелец закрепляет его сам. Длиннее
 # под роликом сворачивается, и спорить уже не с чем.
 COMMENT_MAX = 150
-# Приманка в Telegram — разбор вкуса в боте (владелец, 15.09.2026), поэтому
-# ссылка на бота в описании обязательна.
+# Приманка — прислать свой трек в ОТБОР (GROWTH.md, «Третий актив», 16.09.2026),
+# поэтому ссылка на бота в описании обязательна.
 BOT_LINK = f"t.me/{config.BOT_HANDLE.lstrip('@')}"
 PAUSE_MAX = 5.0
 # Отрывок чужого трека (строка `track`): кусок 30-секундного превью iTunes.
@@ -204,7 +206,7 @@ PLATE_WHEEL = 640
 PLATE_TOP = 530
 ENDING_Y = 0.675
 # Строка-приманка под адресом: зачем идти в канал. Низ — выше SAFE_BOTTOM с запасом.
-BAIT = "бот разберёт твой вкус"
+BAIT = "пришли свой трек в бота"
 BAIT_Y = 0.735
 # Метка — левый верхний угол безопасной зоны: правее среза и ниже панели.
 BADGE_XY = (round(SAFE_LEFT * 1080), round(SAFE_TOP * 1920))
@@ -1553,10 +1555,17 @@ def package(script: dict) -> str:
     def field(value: str) -> str:
         return f"<code>{html.escape(value, quote=False)}</code>"
 
+    def described(label: str) -> str:
+        # Сценарий пишет одну ссылку, а по метке бот считает приходы с каждой площадки.
+        text = re.sub(re.escape(BOT_LINK) + r"(\?start=\w+)?", f"{BOT_LINK}?start={label}", script["description"])
+        return field(text)
+
     comment = f"Закрепи первым комментарием: {field(script['comment'])}\n\n" if script.get("comment") else ""
     return (
         f"<b>Название</b>\n{field(script['title'])}\n\n"
-        f"<b>Описание</b>\n{field(script['description'])}\n\n"
+        f"<b>Описание YouTube</b>\n{described('yt')}\n\n"
+        f"<b>ВКонтакте</b>\n{described('vk')}\n\n"
+        f"<b>TikTok</b>\n{described('tt')}\n\n"
         f"<b>Теги</b>\n{field(', '.join(script['tags']))}\n\n"
         f"{comment}Выложить: <b>{when(script)}</b>"
     )
@@ -1605,7 +1614,7 @@ def _selftest() -> None:
         "publish": "today",
         "sources": ["https://example.com/news"],
         "title": "Проверка формата",
-        "description": f"Строка описания. Разбор вкуса: {BOT_LINK} #фонк #плёнка",
+        "description": f"Строка описания. Пришли свой трек в бота: {BOT_LINK}?start=yt #фонк #плёнка",
         "tags": ["фонк", "плёнка"],
         "comment": "Кто прав: артист или пилот?",
         "music": BEAT,
@@ -1635,6 +1644,7 @@ def _selftest() -> None:
     assert problems({k: v for k, v in good.items() if k != "comment"}, good["id"]) == []
     assert f"Закрепи первым комментарием: <code>{good['comment']}</code>" in package(good)
     assert "Закрепи" not in package({k: v for k, v in good.items() if k != "comment"})
+    assert all(f"{BOT_LINK}?start={label} #фонк" in package(good) for label in ("yt", "vk", "tt")), "метки площадок"
     # Отрывок трека: строка без голоса длится ровно length, с голосом — не меньше фразы.
     clip = {"track": {"id": 1440818839, "start": 12, "length": 2}, "screen": {"kind": "stock", "query": "crowd"}}
     assert problems({**good, "lines": [*good["lines"], clip, {**clip, "say": "Поверх", "track": {"query": "a — b", "length": 1}}]},
