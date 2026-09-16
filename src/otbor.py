@@ -88,8 +88,7 @@ HINT = (
     "Условия:\n"
     "· трек твой и уже на площадках\n"
     "· один трек в неделю\n"
-    "· в канал — один трек в сутки, по очереди\n\n"
-    "Передумал — напиши «отмена»."
+    "· в канал — один трек в сутки, по очереди"
 )
 FORMAT = "Не понял, какой трек. Пришли ссылку или напиши <i>Артист — Трек</i>."
 NO_LINK = ("Эту ссылку не разобрал — VK и Звук без входа ничего не отдают. "
@@ -134,6 +133,8 @@ def _cb(choice: str) -> str:
 
 
 QUIET_BUTTONS = [[{"text": "Без слов", "callback_data": _cb("quiet")}]]
+# Кнопкой, а не «напиши отмена» (владелец, 16.09.2026); слово по-прежнему работает.
+CANCEL_BUTTONS = [[{"text": "Отмена", "callback_data": _cb("cancel")}]]
 CONSENT_BUTTONS = [[{"text": "Можно", "callback_data": _cb("yes")},
                     {"text": "Нет", "callback_data": _cb("no")}]]
 
@@ -423,7 +424,7 @@ def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> Non
     else:
         data["drafts"][chat_id] = {"stage": "track", "user": user_id}
     save(data)
-    telegram.send_message(chat_id, denied or HINT)
+    telegram.send_message(chat_id, denied or HINT, buttons=None if denied else CANCEL_BUTTONS)
 
 
 def handle(message: dict, *, admin: bool = False) -> None:
@@ -567,10 +568,14 @@ def take_words(draft: dict, text: str) -> tuple[str, list[list[dict]]]:
 
 
 def callback(chat_id: str | int, user_id: str | int, choice: str, *, admin: bool = False) -> None:
-    """Кнопки отбора: пустой выбор — открыть заявку, quiet — без слов, yes/no — ролик."""
+    """Кнопки отбора: пустой выбор — открыть заявку, cancel — закрыть, quiet — без слов, yes/no — ролик."""
     chat_id = str(chat_id)
     if not choice:
         start(chat_id, user_id, admin=admin)
+        return
+    if choice == "cancel":
+        telegram.send_message(chat_id, CANCELLED if active(chat_id) else CLOSED)
+        cancel(chat_id)
         return
     data = load()
     draft = data["drafts"].get(chat_id)
@@ -809,8 +814,8 @@ def _selftest() -> None:
         start(4, 4)
         handle(msg(4, "Nobody Else — Lost"))
         assert last("4").startswith("Не нашёл") and active(4), "невыложенный трек прошёл"
-        handle(msg(4, "отмена"))
-        assert not active(4)
+        callback(4, 4, "cancel")
+        assert last("4") == CANCELLED and not active(4)
         start(5, 5)
         assert last("5").startswith("ОТБОР бесплатный") and 'href="https://t.me/' in last("5") and not active(5)
         start(1, 1)
