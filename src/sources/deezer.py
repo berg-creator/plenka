@@ -35,24 +35,33 @@ def stored_id(name: str) -> int | None:
 
 
 def find_artist_id(name: str) -> int | None:
-    """Id артиста: точное совпадение имени, иначе то, что стоит в базе.
+    """Id артиста: то, что стоит в базе, иначе точное совпадение имени.
 
     «Самого похожего из выдачи» здесь больше нет намеренно. По запросу «Guf»
     Deezer первым отдаёт GUFI — другого артиста из другой страны, и раньше
     его id уходил в data/artists.json (см. src/resolve_ids.py), а оттуда
     чужая обложка попадала в ролик под именем Гуфа. Пустой ответ честнее:
     кадр останется без лица, но не соврёт.
+
+    База — первой: тёзок там разобрали по альбомам (16.09.2026), а поиску
+    остаётся число фанатов, и у Salem оно выбирает поп-певицу вместо witch house.
     """
+    known = stored_id(name)
+    if known:
+        return known
     data = get_json(
         f"{BASE}/search/artist",
-        params={"q": name, "limit": 5},
+        params={"q": name, "limit": 10},
         min_interval=MIN_INTERVAL,
     )
     target = name.casefold().strip()
-    for item in (data or {}).get("data") or []:
-        if item.get("name", "").casefold().strip() == target:
-            return item.get("id")
-    return stored_id(name)
+    # Тёзок Deezer отдаёт вперемешку: первым на «Drake» идёт Drake со 155 фанатами,
+    # настоящий — третьим. Из точных совпадений берём самого слушаемого.
+    same = [item for item in (data or {}).get("data") or []
+            if item.get("name", "").casefold().strip() == target]
+    if same:
+        return max(same, key=lambda item: item.get("nb_fan") or 0).get("id")
+    return None
 
 
 def artist_picture(name: str) -> str:

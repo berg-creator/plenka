@@ -34,10 +34,11 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+from datetime import timedelta
 import pathlib
 from pathlib import Path
 
-from . import card, config, llm, otbor, quality, state, stories, telegram
+from . import card, collect, config, llm, otbor, quality, state, stories, telegram
 from .sources import deezer, itunes, lastfm
 
 log = logging.getLogger("service")
@@ -689,6 +690,39 @@ def _plural(count: int, one: str, few: str, many: str) -> str:
 
 WATCH_FILE = config.WATCH_FILE
 WATCH_LIMIT = 20
+# Сколько дней релиз считается новым для вести по артисту вне списка сбора.
+# Проход идёт каждые шесть часов; трое суток переживут и пару сорванных сборов,
+# а подписавшемуся сегодня не придёт «вышло новое» про прошлый месяц.
+WATCH_FRESH_DAYS = 3
+
+
+def _entries(data: dict, chat_id: str) -> list[dict]:
+    # Записи до 16.09.2026 — голые имена без id: по ним молчит только проход
+    # по магазинам, находки сбора узнаются по имени, как раньше.
+    names = data["watchers"].setdefault(str(chat_id), [])
+    names[:] = [n if isinstance(n, dict) else {"name": n} for n in names]
+    return names
+
+
+def find_watch_artist(name: str) -> dict | None:
+    """Артист для слежения: имя и id в магазинах, или None, если его там нет.
+
+    Сначала data/artists.json — там id сверены руками, и такие релизы находит
+    сбор. Иначе магазины, и только точное совпадение имени: по «Guf» Deezer
+    первым отдаёт GUFI, и подписчик получал бы вести о чужом артисте.
+    """
+    folded = name.casefold()
+    for artist in collect.load_artists():
+        if artist.get("name", "").casefold() == folded:
+            return {k: artist[k] for k in ("name", "itunes_id", "deezer_id") if artist.get(k)}
+    found = {"name": name}
+    try:
+        found["itunes_id"] = itunes.find_artist_id(name, exact=True)
+        found["deezer_id"] = deezer.find_artist_id(name)
+    except Exception as exc:  # noqa: BLE001 — магазин не ответил, значит, не нашли
+        log.info("Магазины молчат про «%s»: %s", name, exc)
+    found = {k: v for k, v in found.items() if v}
+    return found if len(found) > 1 else None
 
 
 def watch_add(chat_id: str, artist: str) -> str:
@@ -698,24 +732,61 @@ def watch_add(chat_id: str, artist: str) -> str:
     от кода. Прятать его шифром в открытом файле было бы самообманом: чтобы
     прислать весть о релизе, адрес всё равно нужно восстановить, а значит,
     ключ лежит рядом с замком.
-    """
-    data = state.read_json(WATCH_FILE, {"watchers": {}})
-    names = data["watchers"].setdefault(str(chat_id), [])
 
-    if any(n.casefold() == artist.casefold() for n in names):
+    Артист без id в магазинах в список не попадает. До 16.09.2026 бот обещал
+    «выйдет релиз — напишу» любому имени, а вести шли только по 156 артистам
+    сбора: подписка на остальных не срабатывала никогда.
+    """
+    artist = artist.strip()[:MAX_QUERY]
+    data = state.read_json(WATCH_FILE, {"watchers": {}})
+    names = _entries(data, chat_id)
+
+    if any(n["name"].casefold() == artist.casefold() for n in names):
         return f"За <b>{artist}</b> уже слежу. Выйдет что-нибудь — напишу."
     if len(names) >= WATCH_LIMIT:
         return (
             f"Больше {WATCH_LIMIT} артистов не потяну — это уже не слежение, "
-            "а лента новостей.\n\nПришли /stop, чтобы очистить список."
+            "а лента новостей.\n\nОтписаться — /slezhu, очистить всё — /stop."
         )
 
-    names.append(artist)
+    found = find_watch_artist(artist)
+    if not found:
+        # Подсказка — нечёткий поиск iTunes: «ASAP rocky» он переводит в «A$AP Rocky».
+        # Подписывать по ней сразу нельзя: угадал он или нет, проверит только человек.
+        hint = itunes.resolve_name(artist)
+        tail = (f"\n\nМожет, <b>{hint}</b>? Тогда пришли /slezhu {hint}"
+                if hint and hint.casefold() != artist.casefold() else
+                "\n\nПроверь, как пишется имя, и пришли /slezhu Имя ещё раз.")
+        return f"В магазинах <b>{artist}</b> не нашёл — следить не за чем.{tail}"
+
+    names.append(found)
     state.write_json(WATCH_FILE, data)
     return (
-        f"Слежу за <b>{artist}</b>. Выйдет релиз — напишу первым.\n\n"
-        f"Сейчас в списке: {len(names)}."
+        f"Слежу за <b>{found['name']}</b>. Выйдет релиз — напишу.\n\n"
+        f"Сейчас в списке: {len(names)}. Список и отписка — /slezhu."
     )
+
+
+def unwatch_button(name: str) -> list[list[dict]]:
+    return [[{"text": f"🔕 Не следить за {name}", "callback_data": _cb("unwatch", name)}]]
+
+
+def watch_remove(chat_id: str, subject: str) -> str:
+    """Снимает одного артиста. subject — имя из кнопки, обрезанное до 64 байт
+    callback_data, поэтому сверяется так же обрезанным."""
+    data = state.read_json(WATCH_FILE, {"watchers": {}})
+    names = _entries(data, chat_id)
+    key = _cb("unwatch", subject)
+    left = [n for n in names if _cb("unwatch", n["name"]) != key]
+    if len(left) == len(names):
+        return "Уже не слежу."
+    if left:
+        data["watchers"][str(chat_id)] = left
+    else:
+        data["watchers"].pop(str(chat_id))
+    state.write_json(WATCH_FILE, data)
+    gone = next(n["name"] for n in names if n not in left)
+    return f"Больше не слежу за <b>{gone}</b>. В списке: {len(left)}."
 
 
 def watch_clear(chat_id: str) -> str:
@@ -726,18 +797,70 @@ def watch_clear(chat_id: str) -> str:
     return "Больше ни за кем не слежу."
 
 
-def watch_list(chat_id: str) -> str:
-    names = state.read_json(WATCH_FILE, {"watchers": {}})["watchers"].get(str(chat_id), [])
+def watch_list(chat_id: str) -> tuple[str, list[list[dict]] | None]:
+    """Список с кнопкой отписки под каждым артистом: набирать имя, чтобы
+    отписаться, никто не станет, а /stop стирает всё разом."""
+    data = state.read_json(WATCH_FILE, {"watchers": {}})
+    names = _entries(data, chat_id) if str(chat_id) in data["watchers"] else []
     if not names:
-        return "Список пуст. Разбери артиста и нажми «Следить» под ответом."
-    return "Слежу за:\n" + "\n".join(f"· {n}" for n in names)
+        return ("Список пуст. Пришли /slezhu Имя или нажми «Следить» под разбором артиста.",
+                None)
+    text = ("Слежу за:\n" + "\n".join(f"· {n['name']}" for n in names)
+            + "\n\nОтписаться — кнопкой ниже, очистить всё — /stop.")
+    return text, [row for n in names for row in unwatch_button(n["name"])]
+
+
+def watched_releases(watchers: dict) -> list[dict]:
+    """Свежие релизы артистов, которых нет в списке сбора, — прямо из магазинов.
+
+    Сбор смотрит только data/artists.json, и подписка на остальных молчала.
+    Проход здесь, в рассылке, а не в collect намеренно: всё, что лежит в inbox,
+    читают compose --fresh и urgent, и чужой любимец подписчика стал бы постом
+    канала. Эти находки живут только в памяти одного запуска, а помнятся
+    отметками в приватном списке слежения — в открытом репозитории их нет вовсе.
+    Имя и id берутся из подписки (watch_add), поэтому проход — два запроса
+    на артиста, без поиска.
+    """
+    covered = {a["name"].casefold() for a in collect.load_artists() if a.get("tier") != "ru_pop"}
+    wanted: dict[str, dict] = {}
+    for names in watchers.values():
+        for n in names:
+            if isinstance(n, dict) and n["name"].casefold() not in covered:
+                wanted.setdefault(n["name"].casefold(), n)
+
+    now = state.now()
+    cutoff = now - timedelta(days=WATCH_FRESH_DAYS)
+    found: list[dict] = []
+    for artist in wanted.values():
+        raw: list[dict] = []
+        try:
+            if artist.get("itunes_id"):
+                raw += itunes.recent_releases(artist["itunes_id"])
+            if artist.get("deezer_id"):
+                raw += deezer.recent_releases(artist["deezer_id"])
+        except Exception as exc:  # noqa: BLE001 — магазин отвалился, сверим в следующий раз
+            log.info("%s: релизы не получены (%s)", artist["name"], exc)
+            continue
+        for item in raw:
+            released = collect._parse(item.get("released_at"))
+            # Предзаказ магазин отдаёт за недели до выхода, а весть скажет «вышло».
+            if released is None or not cutoff <= released <= now:
+                continue
+            credit, credit_ids = collect.store_credit(item)
+            # Фит у чужого артиста — не его релиз (collect.own_release).
+            if not credit or not collect.own_release(
+                    artist["name"], artist.get(f"{item.get('source')}_id"), credit, credit_ids):
+                continue
+            found.append({**item, "kind": "release", "artist": credit, "tracked": artist["name"]})
+    return found
 
 
 def notify_releases() -> int:
     """Рассылает вести о новых релизах тем, кто на них подписан.
 
-    Сборщик новинок уже наполняет inbox каждые шесть часов — здесь мы только
-    сверяем свежие находки со списками слежения. Отправленное помечаем, чтобы
+    Сборщик новинок уже наполняет inbox каждые шесть часов — здесь мы
+    сверяем свежие находки со списками слежения, а артистов вне списка сбора
+    смотрим в магазинах сами (watched_releases). Отправленное помечаем, чтобы
     одна и та же новость не пришла человеку дважды.
     """
     data = state.read_json(WATCH_FILE, {"watchers": {}, "sent": []})
@@ -753,7 +876,7 @@ def notify_releases() -> int:
         # по кому нашёлся: там чужие фиты и сольники участников под именем
         # группы. Весть «у X вышло новое» по таким не шлём.
         if (item.get("kind") == "video" or item.get("tracked")) and item.get("artist")
-    ]
+    ] + watched_releases(watchers)
     if not releases:
         return 0
 
@@ -767,7 +890,7 @@ def notify_releases() -> int:
 
     delivered = 0
     for chat_id, names in watchers.items():
-        wanted = {n.casefold() for n in names}
+        wanted = {n["name"].casefold(): n["name"] for n in _entries(data, chat_id)}
         # Отметки, записанные до 12.09.2026, стоят по отпечатку. Переносим их
         # на ключ, иначе смена ключа разослала бы весь inbox заново.
         for item in releases:
@@ -777,14 +900,16 @@ def notify_releases() -> int:
         for item in releases:
             # Подпись совместного релиза полная («HNTR & Juicy J»), а следят
             # за одним именем — поэтому сверяем с тем, по кому релиз нашёлся.
-            if mark_of(chat_id, item) in sent or (
-                    item.get("tracked") or item["artist"]).casefold() not in wanted:
+            watched = wanted.get((item.get("tracked") or item["artist"]).casefold())
+            if mark_of(chat_id, item) in sent or not watched:
                 continue
 
             title = item.get("title", "")
             url = item.get("url", "")
             head = f'<a href="{url}">{title}</a>' if url else title
             caption = f"🔔 У <b>{item['artist']}</b> вышло новое: {head}"
+            # Отписка — там, где о ней вспоминают: под самой вестью.
+            buttons = unwatch_button(watched)
 
             # Отрывок важнее текста: про релиз можно рассказать, а можно дать
             # услышать. Тридцать секунд магазин отдаёт всем для прослушивания.
@@ -798,9 +923,10 @@ def notify_releases() -> int:
                         title=snippet["title"],
                         performer=item["artist"],
                         cover_url=item.get("cover", ""),
+                        buttons=buttons,
                     )
                 else:
-                    telegram.send_message(chat_id, caption, preview=bool(url))
+                    telegram.send_message(chat_id, caption, preview=bool(url), buttons=buttons)
             except telegram.TelegramError as exc:
                 log.info("Не доставлено про %s: %s", item["artist"], exc)
                 continue
@@ -956,10 +1082,15 @@ def handle_message(message: dict, data: dict) -> bool:
 
     # Списками слежения человек распоряжается сам, и это не стоит ни токенов,
     # ни лимита — поэтому разбирается до всех проверок, кроме подписки.
-    if kind in ("watchlist", "watchstop"):
-        telegram.send_message(
-            chat_id, watch_list(chat_id) if kind == "watchlist" else watch_clear(chat_id)
-        )
+    if kind == "watchlist" and body:
+        telegram.send_message(chat_id, watch_add(chat_id, body))
+        return False
+    if kind == "watchlist":
+        answer, buttons = watch_list(chat_id)
+        telegram.send_message(chat_id, answer, buttons=buttons)
+        return False
+    if kind == "watchstop":
+        telegram.send_message(chat_id, watch_clear(chat_id))
         return False
     if not kind:
         # Ссылку на трек и «Артист — Трек» разбор понимает тем же поиском, что отбор:
@@ -1089,6 +1220,10 @@ def handle_callback(query: dict, data: dict) -> None:
         telegram.send_message(chat_id, watch_add(chat_id, subject))
         return
 
+    if action == "unwatch" and subject:
+        telegram.send_message(chat_id, watch_remove(chat_id, subject))
+        return
+
     if action in ("rec", "new") and subject:
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
         kind = "recommend" if action == "rec" else "new"
@@ -1150,6 +1285,69 @@ def _selftest() -> None:
          state.read_jsonl, globals()["WATCH_FILE"]) = real
         tmp.cleanup()
     print("рассылка релизов: один релиз — одна весть, старые отметки помнятся")
+
+    # Слежение за артистом вне списка сбора: поиск при подписке, свой проход
+    # по магазинам и ни строчки в inbox, откуда пишутся посты канала.
+    today = state.iso()
+    shops = {"itunes": [
+        {"source": "itunes", "artist": "Nobody X", "artist_ids": [5], "title": "Tape - Single",
+         "url": "", "released_at": today, "external_id": "i1"},
+        # Фит у чужого артиста и предзаказ — не вести.
+        {"source": "itunes", "artist": "Other (feat. Nobody X)", "artist_ids": [9], "title": "Guest",
+         "url": "", "released_at": today, "external_id": "i2"},
+        {"source": "itunes", "artist": "Nobody X", "artist_ids": [5], "title": "Later",
+         "url": "", "released_at": state.iso(state.now() + timedelta(days=20)), "external_id": "i3"},
+    ], "deezer": [
+        {"source": "deezer", "artist": "", "title": "Tape", "url": "", "released_at": today,
+         "external_id": "d1"},
+    ]}
+    real = (telegram.send_message, telegram.send_audio, _preview, state.read_jsonl,
+            globals()["WATCH_FILE"], collect.load_artists, itunes.find_artist_id,
+            itunes.resolve_name, itunes.recent_releases, deezer.find_artist_id,
+            deezer.recent_releases, deezer.album_credit, config.INBOX_FILE)
+    messages: list[tuple[str, list | None]] = []
+    telegram.send_message = lambda chat, text, buttons=None, **_: messages.append((text, buttons)) or {"message_id": 1}
+    telegram.send_audio = lambda chat, audio, caption, buttons=None, **_: messages.append((caption, buttons)) or {"message_id": 1}
+    globals()["_preview"] = lambda url: None
+    collect.load_artists = lambda: [{"name": "Slipknot", "itunes_id": 1, "deezer_id": 2, "tier": "scene"}]
+    itunes.find_artist_id = lambda name, exact=False: 5 if name == "Nobody X" else None
+    deezer.find_artist_id = lambda name: 6 if name == "Nobody X" else None
+    itunes.resolve_name = lambda name: "A$AP Rocky"
+    itunes.recent_releases = lambda artist_id, **_: shops["itunes"] if artist_id == 5 else []
+    deezer.recent_releases = lambda artist_id, **_: shops["deezer"] if artist_id == 6 else []
+    deezer.album_credit = lambda album: ("Nobody X", [6])
+    state.read_jsonl = lambda path: [release("aaa", "Arsenal - Single", "itunes")]
+    tmp = tempfile.TemporaryDirectory()
+    globals()["WATCH_FILE"] = pathlib.Path(tmp.name) / "watch.json"
+    config.INBOX_FILE = pathlib.Path(tmp.name) / "inbox.jsonl"
+    try:
+        assert parse_command("/slezhu Nobody X") == ("watchlist", "Nobody X")
+        assert "не нашёл" in watch_add("77", "ASAP rocky") and "A$AP Rocky" in watch_add("77", "ASAP rocky")
+        assert "Слежу" in watch_add("77", "slipknot")
+        assert "Слежу" in watch_add("77", "Nobody X")
+        stored = state.read_json(WATCH_FILE, {})["watchers"]["77"]
+        assert stored == [{"name": "Slipknot", "itunes_id": 1, "deezer_id": 2},
+                          {"name": "Nobody X", "itunes_id": 5, "deezer_id": 6}], stored
+
+        assert notify_releases() == 2, messages
+        texts = sorted(t for t, _ in messages)
+        assert "Nobody X" in texts[0] and "Slipknot" in texts[1], texts
+        assert all(b and "unwatch" in b[0][0]["callback_data"] for _, b in messages)
+        assert notify_releases() == 0, "весть ушла второй раз"
+        assert not config.INBOX_FILE.exists(), "находка слежения попала в inbox"
+
+        answer, buttons = watch_list("77")
+        assert len(buttons) == 2 and "Nobody X" in answer
+        subject = buttons[1][0]["callback_data"][len(CALLBACK_PREFIX):].partition(":")[2]
+        assert "Больше не слежу" in watch_remove("77", subject)
+        assert [n["name"] for n in state.read_json(WATCH_FILE, {})["watchers"]["77"]] == ["Slipknot"]
+    finally:
+        (telegram.send_message, telegram.send_audio, globals()["_preview"], state.read_jsonl,
+         globals()["WATCH_FILE"], collect.load_artists, itunes.find_artist_id,
+         itunes.resolve_name, itunes.recent_releases, deezer.find_artist_id,
+         deezer.recent_releases, deezer.album_credit, config.INBOX_FILE) = real
+        tmp.cleanup()
+    print("слежение: вне списка сбора — поиск в магазинах, одна весть на релиз, inbox не тронут, отписка кнопкой")
 
     opened: list[str] = []
     real = otbor.start, telegram.send_message, globals()["SOURCES_FILE"]

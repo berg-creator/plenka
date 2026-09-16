@@ -18,8 +18,12 @@ LOOKUP_URL = "https://itunes.apple.com/lookup"
 MIN_INTERVAL = 3.0
 
 
-def find_artist_id(name: str) -> int | None:
-    """Ищет id артиста по имени. Используется один раз при заполнении базы."""
+def find_artist_id(name: str, *, exact: bool = False) -> int | None:
+    """Ищет id артиста по имени. Используется один раз при заполнении базы.
+
+    exact — только точное совпадение: подписке бота первый результат выдачи
+    не годится, глаз его не проверит, и весть пришла бы о чужом артисте.
+    """
     data = get_json(
         SEARCH_URL,
         params={"term": name, "entity": "musicArtist", "limit": 5},
@@ -33,7 +37,7 @@ def find_artist_id(name: str) -> int | None:
         if item.get("artistName", "").casefold().strip() == target:
             return item.get("artistId")
     # Точного совпадения нет — берём первый результат, но он требует проверки глазами.
-    return data["results"][0].get("artistId")
+    return None if exact else data["results"][0].get("artistId")
 
 
 def resolve_name(name: str) -> str:
