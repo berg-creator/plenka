@@ -102,7 +102,7 @@ NEED_FILE = ("Нашёл «{name}», но площадка не отдаёт д�
 TOO_BIG = "Файл больше 20 МБ — Telegram не отдаёт такие ботам. Пришли mp3 полегче."
 BAD_FILE = "Файл не прочитался ({reason}). Пришли другой — mp3 или m4a."
 
-NOT_SUBSCRIBED = ('ОТБОР бесплатный — достаточно подписаться на <a href="https://t.me/{handle}">канал</a>.\n\n'
+NOT_SUBSCRIBED = ('ОТБОР <b>бесплатный</b> — достаточно подписаться на <a href="https://t.me/{handle}">канал</a>.\n\n'
                   "Подпишись и пришли /otbor ещё раз.")
 WEEKLY = "Один трек в неделю от человека: следующий можно прислать {date}."
 KNOWN_BASE = "{artist} канал уже знает — отбор для тех, о ком ещё не слышали."
@@ -817,7 +817,7 @@ def _selftest() -> None:
         callback(4, 4, "cancel")
         assert last("4") == CANCELLED and not active(4)
         start(5, 5)
-        assert last("5").startswith("ОТБОР бесплатный") and 'href="https://t.me/' in last("5") and not active(5)
+        assert last("5").startswith("ОТБОР <b>бесплатный</b>") and 'href="https://t.me/' in last("5") and not active(5)
         start(1, 1)
         assert last("1") == WEEKLY.format(date="24.09") and not active(1)
 
