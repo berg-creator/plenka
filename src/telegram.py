@@ -148,6 +148,7 @@ def send_message(
     buttons: list[list[dict]] | None = None,
     reply_to: int | None = None,
     quiet: bool = False,
+    ask: str = "",
 ) -> dict:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
@@ -157,6 +158,11 @@ def send_message(
     }
     if buttons:
         payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    elif ask:
+        # Вопрос с ответом: приложение само открывает ответ на это сообщение,
+        # в поле ввода — подсказка ask. Бот узнаёт ответ по reply_to_message,
+        # и помнить, о чём спросил, ему не нужно.
+        payload["reply_markup"] = json.dumps({"force_reply": True, "input_field_placeholder": ask})
     if quiet:
         payload["disable_notification"] = True
     if reply_to is not None:
@@ -164,6 +170,11 @@ def send_message(
         # под постом. Без reply_to сообщение повиснет отдельной репликой в чате.
         payload["reply_parameters"] = json.dumps({"message_id": reply_to})
     return _call("sendMessage", payload)
+
+
+def delete_message(chat_id: str | int, message_id: int) -> None:
+    """В личке бот удаляет и входящие сообщения — не старше 48 часов."""
+    _call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
 
 
 def get_chat(chat_id: str) -> dict:

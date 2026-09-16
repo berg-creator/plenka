@@ -76,8 +76,10 @@ COMMANDS = {
     "proyavka": "proyavka", "проявка": "proyavka",
 }
 
-# У бота два раздела, и называются они везде одинаково — в меню «/», на экране
-# до «Начать», здесь и на кнопках: 🎙 ОТБОР и 🎞 ПРОЯВКА. Раньше разбор был
+# У бота три раздела, и называются они везде одинаково — в меню «/», на экране
+# до «Начать», здесь и на кнопках: 🎙 ОТБОР, 🎞 ПРОЯВКА и 🔔 СЛЕЖУ. Слежение
+# за релизами и концертами жило только кнопкой под разбором артиста и командами,
+# которых никто не знает, — о нём не узнавали вовсе (владелец, 16.09.2026). Раньше разбор был
 # расколот на «Что разобрать?» и «Разобрать текст песни», в меню «/» его не было
 # вовсе, и человек не понимал, что тут есть (владелец, 16.09.2026). Вид разбора
 # бот по-прежнему угадывает по форме сообщения, выбирать его не нужно.
@@ -86,6 +88,7 @@ MENU = (
     f'Бот канала — <b><a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">ПЛЁНКА</a></b>\n\n'
     "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
     "🎞 <b>ПРОЯВКА</b>\nПришли артиста, песню или строки из текста — расскажу, откуда это взялось.\n\n"
+    "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
     # «Нужна подписка» читалась как платная подписка (владелец, 16.09.2026).
     f'Всё <b>бесплатно</b> — достаточно подписаться на <a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.'
 )
@@ -110,6 +113,7 @@ def menu_buttons() -> list[list[dict]]:
     return [
         [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
         [{"text": "🎞 ПРОЯВКА — разобрать музыку", "callback_data": f"{CALLBACK_PREFIX}proyavka"}],
+        [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
     ]
 
 
@@ -726,6 +730,40 @@ def find_watch_artist(name: str) -> dict | None:
     return found if len(found) > 1 else None
 
 
+# Артиста и город бот спрашивает вопросом с ответом (telegram.send_message, ask):
+# набрать «/slezhu Имя» человек из ролика не догадается. Ответ узнаётся по фразе
+# в сообщении, на которое отвечают, — поэтому фразы стоят в каждом таком вопросе.
+WATCH_MARK = "Пришли имя артиста ответом на это сообщение"
+CITY_MARK = "Пришли город ответом на это сообщение"
+WATCH_ASK = ("🔔 <b>СЛЕЖУ</b>\n\nЗа кем следить? " + WATCH_MARK + " — напишу, когда у него "
+             "выйдет релиз или он объявит концерт в твоём городе.")
+CITY_ASK = ("В каком ты городе? " + CITY_MARK + " — напишу, когда кто-то из твоего списка "
+            "объявит там концерт.")
+
+
+def watch_buttons() -> list[list[dict]]:
+    return [[{"text": "➕ Ещё артист", "callback_data": _cb("slezhu")},
+             {"text": "📋 Мой список", "callback_data": _cb("mylist")}]]
+
+
+def ask_artist(chat_id: str) -> None:
+    telegram.send_message(chat_id, WATCH_ASK, ask="Имя артиста")
+
+
+def watch_reply(chat_id: str, artist: str) -> None:
+    """Подписка из любого входа — команда, кнопка под разбором, ответ на вопрос.
+    Не нашёл — переспрашивает; нашёл и город не известен — спрашивает город."""
+    answer = watch_add(chat_id, artist)
+    if WATCH_MARK in answer:
+        telegram.send_message(chat_id, answer, ask="Имя артиста")
+        return
+    telegram.send_message(chat_id, answer, buttons=watch_buttons())
+    data = state.read_json(WATCH_FILE, {"watchers": {}})
+    if str(chat_id) not in data.get("cities", {}) and any(
+            isinstance(n, dict) and n.get("afisha") for n in data["watchers"].get(str(chat_id), [])):
+        telegram.send_message(chat_id, CITY_ASK, ask="Город")
+
+
 def watch_add(chat_id: str, artist: str) -> str:
     """Подписывает на артиста. Возвращает ответ для человека.
 
@@ -747,7 +785,7 @@ def watch_add(chat_id: str, artist: str) -> str:
     if len(names) >= WATCH_LIMIT:
         return (
             f"Больше {WATCH_LIMIT} артистов не потяну — это уже не слежение, "
-            "а лента новостей.\n\nОтписаться — /slezhu, очистить всё — /stop."
+            "а лента новостей.\n\nОтписаться — в «Мой список»."
         )
 
     found = find_watch_artist(artist)
@@ -755,9 +793,9 @@ def watch_add(chat_id: str, artist: str) -> str:
         # Подсказка — нечёткий поиск iTunes: «ASAP rocky» он переводит в «A$AP Rocky».
         # Подписывать по ней сразу нельзя: угадал он или нет, проверит только человек.
         hint = itunes.resolve_name(artist)
-        tail = (f"\n\nМожет, <b>{hint}</b>? Тогда пришли /slezhu {hint}"
+        tail = (f"\n\nМожет, <b>{hint}</b>? {WATCH_MARK}."
                 if hint and hint.casefold() != artist.casefold() else
-                "\n\nПроверь, как пишется имя, и пришли /slezhu Имя ещё раз.")
+                f"\n\nПроверь, как пишется имя. {WATCH_MARK}.")
         return f"В магазинах <b>{artist}</b> не нашёл — следить не за чем.{tail}"
 
     page = afisha.find_artist(found["name"])
@@ -767,11 +805,11 @@ def watch_add(chat_id: str, artist: str) -> str:
     state.write_json(WATCH_FILE, data)
     city = data.get("cities", {}).get(str(chat_id))
     concerts = (f"Объявит концерт в городе {city} — тоже напишу." if city and page else
-                "Концерты тоже могу — пришли /gorod Город." if page else
+                "" if page else
                 "В Яндекс Афише его нет — о концертах не узнаю.")
     return (
         f"Слежу за <b>{found['name']}</b>. Выйдет релиз — напишу. {concerts}\n\n"
-        f"Сейчас в списке: {len(names)}. Список и отписка — /slezhu."
+        f"Сейчас в списке: {len(names)}."
     )
 
 
@@ -807,17 +845,20 @@ def watch_clear(chat_id: str) -> str:
     return "Больше ни за кем не слежу."
 
 
-def watch_list(chat_id: str) -> tuple[str, list[list[dict]] | None]:
+def watch_list(chat_id: str) -> None:
     """Список с кнопкой отписки под каждым артистом: набирать имя, чтобы
-    отписаться, никто не станет, а /stop стирает всё разом."""
+    отписаться, никто не станет, а /stop стирает всё разом. Пустой — сразу вопрос."""
     data = state.read_json(WATCH_FILE, {"watchers": {}})
     names = _entries(data, chat_id) if str(chat_id) in data["watchers"] else []
     if not names:
-        return ("Список пуст. Пришли /slezhu Имя или нажми «Следить» под разбором артиста.",
-                None)
+        ask_artist(chat_id)
+        return
+    city = data.get("cities", {}).get(str(chat_id))
     text = ("Слежу за:\n" + "\n".join(f"· {n['name']}" for n in names)
+            + (f"\n\nГород — <b>{city}</b>. Сменить — /gorod." if city else "")
             + "\n\nОтписаться — кнопкой ниже, очистить всё — /stop.")
-    return text, [row for n in names for row in unwatch_button(n["name"])]
+    buttons = [row for n in names for row in unwatch_button(n["name"])]
+    telegram.send_message(chat_id, text, buttons=buttons + [watch_buttons()[0][:1]])
 
 
 def watched_releases(watchers: dict) -> list[dict]:
@@ -978,14 +1019,12 @@ def city_set(chat_id: str, text: str) -> str:
     names = data["watchers"].get(str(chat_id), [])
     if not text.strip():
         city = cities.get(str(chat_id))
-        return (f"Город — <b>{city}</b>. Сменить — /gorod Город." if city else
-                "Пришли город: <i>/gorod Казань</i> — напишу, когда кто-то из тех, "
-                "за кем ты следишь, объявит там концерт.")
+        return (f"Сейчас город — <b>{city}</b>. " if city else "") + CITY_ASK
     city = normalize_city(text[:MAX_QUERY])
     cities[str(chat_id)] = city
     state.write_json(WATCH_FILE, data)
     if not names:
-        return (f"Город — <b>{city}</b>. Теперь добавь артистов: <i>/slezhu Имя</i> — "
+        return (f"Город — <b>{city}</b>. Теперь добавь артистов — кнопкой ниже: "
                 "напишу, когда кто-то из них объявит здесь концерт.")
     # Адрес в Афише ищется при подписке; у старых подписок его нет до первого прохода.
     missing = [n["name"] for n in _entries(data, chat_id) if isinstance(n, dict) and not n.get("afisha")]
@@ -1142,6 +1181,11 @@ def _remember(query: str, kind: str, *, matched: bool, verdict: str = "") -> Non
 # ─────────────────────────── приём сообщений ───────────────────────────
 
 
+# Последний /start по чату: (текст, время). Повтор в пределах START_REPEAT секунд — дубль.
+_STARTS: dict[str, tuple[str, int]] = {}
+START_REPEAT = 30
+
+
 def handle_message(message: dict, data: dict) -> bool:
     """Обрабатывает одно сообщение. True — разбор был выдан (потрачен токен).
 
@@ -1161,6 +1205,29 @@ def handle_message(message: dict, data: dict) -> bool:
     admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
     # Дальше человек живёт под отпечатком: в файл лимитов его id не попадает.
     key = user_key(user_id)
+
+    # Приложение Telegram порой шлёт /start дважды подряд — в чате два /start
+    # и два приветствия (владелец, 16.09.2026). Повтор удаляем и не отвечаем.
+    # ponytail: память одной смены; повтор ровно на стыке смен пройдёт.
+    if text.startswith("/start"):
+        previous = _STARTS.get(chat_id)
+        _STARTS[chat_id] = (text, message.get("date", 0))
+        if previous and previous[0] == text and message.get("date", 0) - previous[1] <= START_REPEAT:
+            try:
+                telegram.delete_message(chat_id, message["message_id"])
+            except telegram.TelegramError as exc:
+                log.info("Повтор /start не удалён: %s", exc)
+            return False
+
+    # Ответ на вопрос слежения — намерение явное, заявку отбора он закрывает.
+    asked = (message.get("reply_to_message") or {}).get("text", "")
+    if not text.startswith("/") and (WATCH_MARK in asked or CITY_MARK in asked):
+        otbor.cancel(chat_id)
+        if WATCH_MARK in asked:
+            watch_reply(chat_id, text)
+        else:
+            telegram.send_message(chat_id, city_set(chat_id, text), buttons=watch_buttons())
+        return False
 
     kind, body = parse_command(text)
     # Отбор ведёт разговор в несколько сообщений (src/otbor.py): пока заявка
@@ -1186,6 +1253,9 @@ def handle_message(message: dict, data: dict) -> bool:
         # кнопкой и делом только мешает.
         telegram.send_message(chat_id, PROYAVKA)
         return False
+    if kind == "menu" and body == "slezhu":
+        ask_artist(chat_id)
+        return False
     if kind == "menu":
         telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return False
@@ -1193,17 +1263,20 @@ def handle_message(message: dict, data: dict) -> bool:
     # Списками слежения человек распоряжается сам, и это не стоит ни токенов,
     # ни лимита — поэтому разбирается до всех проверок, кроме подписки.
     if kind == "watchlist" and body:
-        telegram.send_message(chat_id, watch_add(chat_id, body))
+        watch_reply(chat_id, body)
         return False
     if kind == "watchlist":
-        answer, buttons = watch_list(chat_id)
-        telegram.send_message(chat_id, answer, buttons=buttons)
+        watch_list(chat_id)
         return False
     if kind == "watchstop":
         telegram.send_message(chat_id, watch_clear(chat_id))
         return False
     if kind == "city":
-        telegram.send_message(chat_id, city_set(chat_id, body))
+        answer = city_set(chat_id, body)
+        if CITY_MARK in answer:
+            telegram.send_message(chat_id, answer, ask="Город")
+        else:
+            telegram.send_message(chat_id, answer, buttons=watch_buttons())
         return False
     if not kind:
         # Ссылку на трек и «Артист — Трек» разбор понимает тем же поиском, что отбор:
@@ -1330,7 +1403,16 @@ def handle_callback(query: dict, data: dict) -> None:
         return
 
     if action == "watch" and subject:
-        telegram.send_message(chat_id, watch_add(chat_id, subject))
+        watch_reply(chat_id, subject)
+        return
+
+    if action == "slezhu":
+        otbor.cancel(chat_id)
+        ask_artist(chat_id)
+        return
+
+    if action == "mylist":
+        watch_list(chat_id)
         return
 
     if action == "unwatch" and subject:
@@ -1453,8 +1535,9 @@ def _selftest() -> None:
         assert notify_releases() == 0, "весть ушла второй раз"
         assert not config.INBOX_FILE.exists(), "находка слежения попала в inbox"
 
-        answer, buttons = watch_list("77")
-        assert len(buttons) == 2 and "Nobody X" in answer
+        watch_list("77")
+        answer, buttons = messages[-1]
+        assert len(buttons) == 3 and "Nobody X" in answer, buttons  # два артиста и «Ещё артист»
         subject = buttons[1][0]["callback_data"][len(CALLBACK_PREFIX):].partition(":")[2]
         assert "Больше не слежу" in watch_remove("77", subject)
         assert [n["name"] for n in state.read_json(WATCH_FILE, {})["watchers"]["77"]] == ["Slipknot"]
@@ -1465,6 +1548,47 @@ def _selftest() -> None:
          deezer.recent_releases, deezer.album_credit, config.INBOX_FILE, afisha.find_artist) = real
         tmp.cleanup()
     print("слежение: вне списка сбора — поиск в магазинах, одна весть на релиз, inbox не тронут, отписка кнопкой")
+
+    # Слежение без команд: кнопка в меню → вопрос → имя ответом → вопрос о городе.
+    # И повтор /start от приложения удаляется без второго приветствия.
+    said: list[tuple[str, list | None, str]] = []
+    deleted: list[int] = []
+    real = (telegram.send_message, telegram.delete_message, globals()["WATCH_FILE"], otbor.cancel,
+            otbor.active, globals()["find_watch_artist"], afisha.find_artist, itunes.resolve_name)
+    telegram.send_message = lambda chat, text, buttons=None, ask="", **_: said.append((text, buttons, ask)) or {"message_id": 1}
+    telegram.delete_message = lambda chat, message_id: deleted.append(message_id)
+    otbor.cancel = lambda chat: None
+    otbor.active = lambda chat: False
+    globals()["find_watch_artist"] = lambda name: {"name": "Баста", "deezer_id": 1} if name.casefold() == "баста" else None
+    afisha.find_artist = lambda name: "basta"
+    itunes.resolve_name = lambda name: ""
+    tmp = tempfile.TemporaryDirectory()
+    globals()["WATCH_FILE"] = pathlib.Path(tmp.name) / "watch.json"
+
+    def incoming(text: str, message_id: int, date: int = 100, reply: str = "") -> dict:
+        message = {"chat": {"type": "private", "id": 5}, "from": {"id": 5}, "message_id": message_id,
+                   "date": date, "text": text}
+        return {**message, "reply_to_message": {"text": reply}} if reply else message
+
+    try:
+        handle_message(incoming("/start", 1), {})
+        handle_message(incoming("/start", 2, date=101), {})
+        assert deleted == [2] and len(said) == 1, (deleted, said)
+        assert "СЛЕЖУ" in said[0][0] and said[0][1][2][0]["callback_data"] == f"{CALLBACK_PREFIX}slezhu"
+        handle_message(incoming("/start", 3, date=200), {})
+        assert len(said) == 2, "осознанный /start позже — снова приветствие"
+
+        handle_message(incoming("Бастаа", 4, reply=f"За кем следить? {WATCH_MARK} — напишу"), {})
+        assert said[-1][2] == "Имя артиста" and WATCH_MARK in said[-1][0], "не нашёл — переспросить"
+        handle_message(incoming("Баста", 5, reply=said[-1][0]), {})
+        assert "Слежу за" in said[-2][0] and said[-1][2] == "Город", said[-2:]
+        handle_message(incoming("питер", 6, reply=said[-1][0]), {})
+        assert "Санкт-Петербург" in said[-1][0] and state.read_json(WATCH_FILE, {})["cities"]["5"] == "Санкт-Петербург"
+    finally:
+        (telegram.send_message, telegram.delete_message, globals()["WATCH_FILE"], otbor.cancel,
+         otbor.active, globals()["find_watch_artist"], afisha.find_artist, itunes.resolve_name) = real
+        tmp.cleanup()
+    print("СЛЕЖУ: кнопка, имя и город ответом, без команд; повтор /start удалён без второго приветствия")
 
     # Концерты: разбор страницы Афиши без сети, город словами, одна весть на концерт.
     today = datetime.date(2026, 9, 16)
@@ -1496,7 +1620,7 @@ def _selftest() -> None:
     tmp = tempfile.TemporaryDirectory()
     globals()["WATCH_FILE"] = pathlib.Path(tmp.name) / "watch.json"
     try:
-        assert "/gorod" in city_set("1", "") and "/slezhu" in city_set("1", "мск")
+        assert CITY_MARK in city_set("1", "") and "добавь артистов" in city_set("1", "мск")
         state.write_json(WATCH_FILE, {"watchers": {"1": [{"name": "Баста"}, {"name": "Nobody X"}],
                                                    "2": [{"name": "Баста"}]},
                                       "cities": {"1": "Москва"}, "sent": []})
@@ -1528,18 +1652,20 @@ def _selftest() -> None:
     tmp = tempfile.TemporaryDirectory()
     globals()["SOURCES_FILE"] = pathlib.Path(tmp.name) / "sources.json"
     try:
-        for text in ("/start yt", "/start yt", "/start tt", "/start taste", "/proyavka", "/start"):
-            handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "text": text}, {})
+        # Минута между сообщениями: одинаковые /start подряд иначе сочтутся повтором приложения.
+        for minute, text in enumerate(("/start yt", "/start yt", "/start tt", "/start taste", "/proyavka", "/start")):
+            handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
+                            "message_id": minute, "date": minute * 60, "text": text}, {})
         saved = SOURCES_FILE.read_text()
         assert state.read_json(SOURCES_FILE, {}) == {_today(): {"yt": 2, "tt": 1}}, saved
         assert opened == ["55501"] * 3, opened
         assert "555" not in saved and "777" not in saved, "id человека в открытом файле"
         assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU], "старая ссылка и /proyavka — в ПРОЯВКУ"
-        assert [row[0]["text"][:1] for row in replies[-1][1]] == ["🎙", "🎞"], "в меню два раздела"
+        assert [row[0]["text"][:1] for row in replies[-1][1]] == ["🎙", "🎞", "🔔"], "в меню три раздела"
     finally:
         otbor.start, telegram.send_message, globals()["SOURCES_FILE"] = real
         tmp.cleanup()
-    print("метка /start: считается по дню без id и сразу открывает отбор; в меню два раздела")
+    print("метка /start: считается по дню без id и сразу открывает отбор; в меню три раздела")
 
 
 # ─────────────────────────── командная строка ───────────────────────────
