@@ -1340,8 +1340,8 @@ def telegram_icon(size: int):
     return icon.resize((size, size), Image.LANCZOS)
 
 
-def handle_mark(height: int, pill: bool):
-    """Значок Telegram и адрес канала одной строкой; `pill` — на полупрозрачной подложке."""
+def handle_mark(height: int, pill: bool, icon: bool = True):
+    """Значок Telegram и адрес канала одной строкой; `pill` — на полупрозрачной подложке, `icon` — со значком."""
     from PIL import Image, ImageDraw
 
     from . import stories
@@ -1349,37 +1349,38 @@ def handle_mark(height: int, pill: bool):
     font = stories.font(round(height * 0.62), 600)
     draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     left, top, right, bottom = draw.textbbox((0, 0), config.CHANNEL_HANDLE, font=font)
-    icon = round(height * 0.72)
+    side = round(height * 0.72) if icon else 0
     pad = round(height * 0.2)
-    width = pad + icon + pad + (right - left) + pad * 2
+    width = pad + (side + pad if icon else 0) + (right - left) + pad * 2
     mark = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     ink = ImageDraw.Draw(mark)
     if pill:
         ink.rounded_rectangle((0, 0, width - 1, height - 1), radius=height // 2, fill=(0, 0, 0, 120))
-    mark.alpha_composite(telegram_icon(icon), (pad, (height - icon) // 2))
-    ink.text((pad * 2 + icon - left, (height - (bottom - top)) / 2 - top), config.CHANNEL_HANDLE, font=font,
+    if icon:
+        mark.alpha_composite(telegram_icon(side), (pad, (height - side) // 2))
+    ink.text((pad + (side + pad if icon else pad) - left, (height - (bottom - top)) / 2 - top), config.CHANNEL_HANDLE, font=font,
              fill=(255, 255, 255, 255), stroke_width=max(2, height // 30), stroke_fill=(0, 0, 0, 255))
     return mark
 
 
-def badge():
+def badge(icon: bool = True):
     """Метка по ходу основного ролика: небольшая, в левом верхнем углу безопасной зоны."""
     from PIL import Image
 
     from . import clips
 
     frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
-    frame.alpha_composite(handle_mark(BADGE_HEIGHT, pill=True), BADGE_XY)
+    frame.alpha_composite(handle_mark(BADGE_HEIGHT, pill=True, icon=icon), BADGE_XY)
     return frame
 
 
-def ending():
+def ending(icon: bool = True):
     """Адрес канала на плашке-концовке: крупно, со значком, под аватаром, и под ним приманка."""
     from PIL import Image, ImageDraw
 
     from . import clips, stories
 
-    mark = handle_mark(150, pill=False)
+    mark = handle_mark(150, pill=False, icon=icon)
     frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
     frame.alpha_composite(mark, ((clips.WIDTH - mark.width) // 2, round(clips.HEIGHT * ENDING_Y - mark.height / 2)))
     ImageDraw.Draw(frame).text((clips.WIDTH / 2, clips.HEIGHT * BAIT_Y), BAIT, font=stories.font(64, 600), anchor="mm",
@@ -1415,8 +1416,12 @@ def tiktok(video: Path) -> Path:
     return video.with_name(f"{video.stem}-tiktok.mp4")
 
 
+def vk(video: Path) -> Path:
+    return video.with_name(f"{video.stem}-vk.mp4")
+
+
 def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float) -> None:
-    """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет два файла: основной и для TikTok.
+    """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет три файла: YouTube, TikTok и ВКонтакте.
 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
     один вход: список кадров с длительностями (concat), пустой прозрачный кадр
@@ -1424,7 +1429,9 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     Метка до `ending_at` и концовка после — только в основном файле. TikTok-версия
     кончается на `ending_at`, со звуком, гаснущим за TIKTOK_FADE: аватар без
     адреса никуда не зовёт (владелец, 16.09.2026), а оборванный на полудоле бит
-    звучит поломкой.
+    звучит поломкой. Версия для ВКонтакте — как основная, но адрес без значка
+    Telegram: VK с ним конкурирует и может хуже показывать ролик со значком
+    соперника (владелец, 16.09.2026).
     """
     from PIL import Image
 
@@ -1434,6 +1441,8 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)).save(blank)
     badge().save(work / "badge.png")
     ending().save(work / "ending.png")
+    badge(icon=False).save(work / "badge-vk.png")
+    ending(icon=False).save(work / "ending-vk.png")
     entries, now = [], 0.0
     for number, (text, first, end, up) in enumerate(placed, 1):
         # Щель короче кадра — не пауза, а погрешность деления строки: пустой
@@ -1466,14 +1475,19 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
         clips.ffmpeg(), "-y", "-reinit_filter", "0", "-i", str(raw), "-f", "concat", "-safe", "0", "-i", str(listing),
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "badge.png"),
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "ending.png"),
+        "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "badge-vk.png"),
+        "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "ending-vk.png"),
         "-filter_complex",
-        "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split[b1][b2];"
+        "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split=3[b1][b2][b3];"
         f"[2:v]format=rgba[m];[b1][m]overlay=0:0:shortest=1:enable='lt(t,{edge:.4f})'[marked];"
         f"[3:v]format=rgba[e];[marked][e]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[main];"
+        f"[4:v]format=rgba[mv];[b3][mv]overlay=0:0:shortest=1:enable='lt(t,{edge:.4f})'[markedvk];"
+        f"[5:v]format=rgba[ev];[markedvk][ev]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[vk];"
         f"[b2]trim=end_frame={plate_frame},format=yuv420p[tt];"
         f"[0:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ta]",
         "-map", "[main]", "-map", "0:a", *encode, "-c:a", "copy", str(video),
         "-map", "[tt]", "-map", "[ta]", *encode, "-c:a", "aac", "-b:a", "160k", str(tiktok(video)),
+        "-map", "[vk]", "-map", "0:a", *encode, "-c:a", "copy", str(vk(video)),
     ])
 
 
@@ -1580,7 +1594,9 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
 
     admin = config.secret("TELEGRAM_ADMIN_ID")
     topic = f"<b>{html.escape(script['topic'], quote=False)}</b>"
-    telegram.send_video_file(admin, video, f"{topic}\nдля YouTube и VK")
+    telegram.send_video_file(admin, video, f"{topic}\nдля YouTube")
+    if vk(video).exists():
+        telegram.send_video_file(admin, vk(video), f"{topic}\nдля ВКонтакте — адрес канала без значка Telegram")
     if tiktok(video).exists():
         telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — без концовки и адреса канала")
     # Превью документом, а не фото: фото Telegram пережимает до 1280 точек
@@ -1907,6 +1923,16 @@ def _selftest() -> None:
         # и всё белое — в безопасной зоне: не ниже её и не правее, под колонкой кнопок.
         middle = (ENDING_Y - 0.03, ENDING_Y + 0.03)
         assert blue(0.7, video) and not blue(0.7, tiktok(video)), "метка только в основном ролике"
+        # ВКонтакте: метка и концовка на месте, но значка Telegram нет ни там, ни там.
+        assert not blue(0.7, vk(video)) and white(0.7, (0.12, 0.18), vk(video), (0.0, 0.4)), "метка VK без значка"
+        assert wheel(3.6, vk(video)) and white(3.6, middle, vk(video)), "концовка VK с адресом"
+
+        def icon_blue(source: Path) -> bool:
+            band = still(3.6, source).convert("RGB").crop((0, int(1920 * middle[0]), 1080, int(1920 * middle[1])))
+            return any(b > r + 80 and b > 150 for r, _, b in band.getdata())
+
+        assert icon_blue(video) and not icon_blue(vk(video)), "значок Telegram на концовке только в основном ролике"
+        assert abs(clips.probe_seconds(vk(video)) - clips.probe_seconds(video)) < 0.1
         assert wheel(3.6, video) and white(3.6, middle), "аватар и адрес на концовке"
         assert white(3.6, (BAIT_Y - 0.015, BAIT_Y + 0.015)), "приманка на концовке"
         # Кадр за кадром с первого кадра плашки: адрес мигал, горя на одном кадре из шести.
