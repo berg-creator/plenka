@@ -333,20 +333,36 @@ def fresh_releases(inbox: Iterable[dict], used: set[str]) -> list[dict]:
 
     Дубль из второго магазина отсеивается и тогда, когда пост написан по первому:
     inbox объявлен merge=union и не переписывается, поэтому сверяем при чтении.
+
+    Совместный релиз сборщик находит по каждому из наших соавторов: 16.09.2026
+    сингл «Pouya, comehelpglo, Ramirez & Fat Nick» лёг в inbox трижды, вышли
+    РЕЛИЗ и ВЕРДИКТ, и владельца дважды попросили один трек. Поэтому дубль —
+    то же название, у которого хоть одно имя из подписи или слежения общее.
     """
     now = state.now()
     rows = list(inbox)
-    taken = {release_key(i) for i in rows if i["fingerprint"] in used}
+    taken: dict[str, set[str]] = {}
+
+    def names(item: dict) -> set[str]:
+        credit = {collect._fold(n) for n in re.split(r", | & ", item.get("artist", ""))}
+        return (credit | {release_key(item)[0]}) - {""}
+
+    def take(item: dict) -> None:
+        taken.setdefault(release_key(item)[1], set()).update(names(item))
+
+    for item in rows:
+        if item["fingerprint"] in used:
+            take(item)
     fresh: list[dict] = []
     for item in sorted(rows, key=lambda i: i.get("score", 0), reverse=True):
         if item["kind"] not in ("release", "video") or item["fingerprint"] in used:
             continue
         released = state._parse(item.get("released_at") or "")
-        if released is None or released.date() > now.date() or release_key(item) in taken:
+        if released is None or released.date() > now.date() or names(item) & taken.get(release_key(item)[1], set()):
             continue
         if now - released > timedelta(hours=config.RELEASE_MAX_AGE_HOURS):
             continue
-        taken.add(release_key(item))
+        take(item)
         fresh.append(item)
     return fresh
 
@@ -757,13 +773,19 @@ def release_jobs(
     рубрика одна, жребием по весам release и verdict из config.RUBRICS.
     Сторона вердикта — тоже жребий: разнос или респект, без вежливой середины.
     inbox и artists — для истории артиста в данных (previous_releases).
+
+    ВЕРДИКТ — только при чужом голосе (outside): мнение о звуке без него
+    не на чем держать, и 16.09.2026 модель написала синглу Pouya «шум,
+    а не композиция», а SKAI ISYOURGOD — «скучным задолго до первой трети».
+    Список слов в quality.py такое не ловит и ловить не будет: оборотов
+    оценки больше, чем корней. Без цитаты релиз уходит РЕЛИЗОМ.
     """
     weights = [config.RUBRIC_BY_KEY[key].weight for key in config.RELEASE_RUBRICS]
     rows = list(inbox)
     jobs = []
     for item in items:
-        rubric = random.choices(config.RELEASE_RUBRICS, weights)[0]
         payload = _release_payload(item, rows, artists)
+        rubric = random.choices(config.RELEASE_RUBRICS, weights)[0] if payload.get("outside") else "release"
         if rubric == "verdict":
             payload["stance"] = random.choice(["respect", "roast"])
             payload["subject"] = f"{item.get('artist', '')} — {item.get('title', '')}"
@@ -1116,11 +1138,24 @@ def _selftest() -> int:
     assert [i["fingerprint"] for i in fresh] == ["today", "single"], fresh
     # Пост по «Arsenal - Single» уже написан — Deezer-двойник назад не вернётся.
     assert [i["fingerprint"] for i in fresh_releases(inbox, {"single"})] == ["today"]
+    # Совместный сингл, найденный по двум соавторам, — один пост, а чужой одноимённый — свой.
+    joint = [{**found(f"joint-{n}", "Then You Die - Single", now - timedelta(hours=2)),
+              "artist": "Pouya, Ramirez & Fat Nick", "tracked": n} for n in ("Pouya", "Ramirez")]
+    other = {**found("other", "Then You Die", now - timedelta(hours=2), source="deezer"),
+             "artist": "Korn", "tracked": "Korn"}
+    assert [i["fingerprint"] for i in fresh_releases(joint + [other], set())] == ["joint-Pouya", "other"]
+    assert [i["fingerprint"] for i in fresh_releases(joint, {"joint-Ramirez"})] == []
 
     # Один пост на релиз: РЕЛИЗ или ВЕРДИКТ по весам, у вердикта — сторона.
+    # Без чужого голоса ВЕРДИКТа нет: мнение о звуке держать не на чем.
+    real_voice = outside_voice
+    globals()["outside_voice"] = lambda *_: {"who": "The Flow", "text": "лучший альбом года"}
     jobs = release_jobs(fresh * 20)
     assert len(jobs) == 40 and {rubric for _, rubric, _, _ in jobs} == set(config.RELEASE_RUBRICS), jobs
     assert all(p["stance"] in ("respect", "roast") for _, rubric, p, _ in jobs if rubric == "verdict")
+    globals()["outside_voice"] = lambda *_: {}
+    assert {rubric for _, rubric, _, _ in release_jobs(fresh * 20)} == {"release"}
+    globals()["outside_voice"] = real_voice
     # Ночной plan о релизах не пишет вовсе — ни свежих, ни старых.
     assert not [rubric for _, rubric, _, _ in plan(config.QUEUE_TARGET) if rubric in config.RELEASE_RUBRICS]
 
