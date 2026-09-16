@@ -168,6 +168,8 @@ PREVIEW_SECONDS = 30.0
 TRACK_MAX = 10.0
 TRACK_BEAT = 0.12
 TRACK_LUFS = -14.0
+# За сколько секунд бит стихает под наложенным звуком (overlay с beat меньше 1).
+OVERLAY_EASE = 0.6
 
 ID_FORMAT = re.compile(r"\d{8}-[a-z0-9-]+")
 SLOT_FORMAT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[+-]\d{2}:\d{2}")
@@ -443,9 +445,10 @@ def _number(value) -> bool:
 def _overlay_problems(overlay, where: str) -> list[str]:
     if not (isinstance(overlay, dict) and isinstance(overlay.get("file"), str) and MUSIC_FORMAT.fullmatch(overlay["file"])
             and not overlay["file"][:1].isdigit() and _number(overlay.get("at")) and _number(overlay.get("length"))
-            and overlay["at"] >= 0 and 0 < overlay["length"] <= TRACK_MAX):
+            and overlay["at"] >= 0 and 0 < overlay["length"] <= TRACK_MAX
+            and (_number(overlay.get("beat", 1)) and 0 <= overlay.get("beat", 1) <= 1)):
         return [f"{where}: overlay — {{file: звук в папке ролика, имя не с цифры, at: секунда строки, "
-                f"length: до {TRACK_MAX:g} с}}"]
+                f"length: до {TRACK_MAX:g} с, beat: громкость бита под ним от 0 до 1, по умолчанию 1}}"]
     return []
 
 
@@ -1159,10 +1162,12 @@ def _excerpt(track: dict, dest: Path) -> Path | None:
 
 
 def _under_tracks(beat: Path, pieces: list[tuple[Path, float, float]], work: Path,
-                  overlays: list[tuple[Path, float, float]] = ()) -> Path:
+                  overlays: list[tuple[Path, float, float, float]] = ()) -> Path:
     """Бит с отрывками треков: (файл, секунда начала, длина). На отрывке бит почти молчит.
 
-    `overlays` — звук поверх бита (поле строки `overlay`), бит под ним играет как есть.
+    `overlays` — звук поверх бита (поле строки `overlay`): (файл, начало, длина, бит).
+    Бит под ним стихает до своей доли плавно, за OVERLAY_EASE, — песня вступает
+    «перед дропом», а не выключает подложку (владелец, gta6).
     Кусок песни в такт слову («…да под Шамана» — и сразу «Я ру…») нельзя вклеить
     в дубль: дубль длиннее — и субтитры фразы растягиваются на весь кусок, отставая
     от голоса (gta6, 16.09.2026). В бите он ещё и проседает под голосом владельца,
@@ -1176,7 +1181,12 @@ def _under_tracks(beat: Path, pieces: list[tuple[Path, float, float]], work: Pat
     from . import clips
 
     windows = "+".join(f"between(t,{at:.3f},{at + length:.3f})" for _, at, length in pieces) or "0"
-    inputs = [*pieces, *overlays]
+    level = "*".join(
+        [f"if({windows},{TRACK_BEAT},1)"]
+        + [f"if(between(t,{at:.3f},{at + length:.3f}),1-{1 - share:.3f}*min(1,(t-{at:.3f})/{OVERLAY_EASE}),1)"
+           for _, at, length, share in overlays if share < 1]
+    )
+    inputs = [*pieces, *[(path, at, length) for path, at, length, _ in overlays]]
     delays = "".join(
         f"[{n}:a]atrim=0:{length:.3f},aformat=sample_rates=48000:channel_layouts=stereo,"
         f"adelay={at * 1000:.0f}|{at * 1000:.0f}[t{n}];"
@@ -1187,7 +1197,7 @@ def _under_tracks(beat: Path, pieces: list[tuple[Path, float, float]], work: Pat
         clips.ffmpeg(), "-y", "-i", str(beat), *[arg for path, _, _ in inputs for arg in ("-i", str(path))],
         "-filter_complex",
         f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,"
-        f"volume='if({windows},{TRACK_BEAT},1)':eval=frame[b];{delays}"
+        f"volume='{level}':eval=frame[b];{delays}"
         f"[b]{''.join(f'[t{n}]' for n in range(1, len(inputs) + 1))}amix=inputs={len(inputs) + 1}:duration=first:normalize=0",
         str(out),
     ])
@@ -1514,7 +1524,8 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         starts = [sum(shot.seconds for shot in timed[:index]) for index in range(len(timed))]
         pieces = [(piece, at, line["track"]["length"]) for index, (line, at) in enumerate(zip(script["lines"], starts))
                   if "track" in line and (piece := _excerpt(line["track"], work / f"track-{index}.m4a"))]
-        overlays = [(voices / line["overlay"]["file"], at + line["overlay"]["at"], line["overlay"]["length"])
+        overlays = [(voices / line["overlay"]["file"], at + line["overlay"]["at"], line["overlay"]["length"],
+                     float(line["overlay"].get("beat", 1)))
                     for line, at in zip(script["lines"], starts)
                     if "overlay" in line and voices and (voices / line["overlay"]["file"]).is_file()]
         clips.assemble(
@@ -1634,7 +1645,8 @@ def _selftest() -> None:
     assert problems({**good, "lines": [*good["lines"], over]}, good["id"]) == []
     assert abs(line_seconds(over) - 5.8) < 1e-9 and line_seconds({"say": "ф"}) == SAY_SECONDS
     for overlay in ({"file": "4.wav", "at": 1, "length": 1}, {"file": "a.txt", "at": 1, "length": 1},
-                    {"file": "a.wav", "at": -1, "length": 1}, {"file": "a.wav", "at": 1, "length": 11}):
+                    {"file": "a.wav", "at": -1, "length": 1}, {"file": "a.wav", "at": 1, "length": 11},
+                    {"file": "a.wav", "at": 1, "length": 1, "beat": 2}):
         broken("overlay", lines=[{**over, "overlay": overlay}])
     assert spoken_frames({"lines": [clip, {"say": "ф"}]}) == [2] and "поверх отрывка" in line_text(1, 1, {**clip, "say": "ф"})
     for track, word in (({"id": 5, "length": 11}, "length"), ({"id": 5, "start": 25, "length": 6}, "start + length"),
@@ -1952,9 +1964,15 @@ def _selftest() -> None:
         # Наложенный звук — на своём месте, а бит под ним не глохнет.
         over_dir = Path(tmp) / "over"
         over_dir.mkdir()
-        layered = _under_tracks(beat, [], over_dir, [(piece, 2.0, 2.0)])
+        layered = _under_tracks(beat, [], over_dir, [(piece, 2.0, 2.0, 1.0)])
         assert tone(0, layered, (2.3, 3.7), 1000) > 1000 and tone(0, layered, (0.5, 1.5), 1000) < 100, "наложение не на месте"
         assert tone(0, layered, (2.3, 3.7), 200) > tone(0, layered, (0.5, 1.5), 200) * 0.8, "бит под наложением заглох"
+        # beat 0,5: к концу наложения бит вдвое тише, но не молчит, а после — снова целиком.
+        halved_dir = Path(tmp) / "halved"
+        halved_dir.mkdir()
+        halved = _under_tracks(beat, [], halved_dir, [(piece, 2.0, 2.0, 0.5)])
+        full, low = tone(0, halved, (0.5, 1.5), 200), tone(0, halved, (3.0, 3.9), 200)
+        assert full * 0.35 < low < full * 0.65 and tone(0, halved, (4.5, 5.5), 200) > full * 0.8, (full, low)
         before, during = tone(0, mixed, (0.5, 1.5), 200), tone(0, mixed, (2.3, 3.7), 200)
         assert tone(0, mixed, (2.3, 3.7), 1000) > 1000 and tone(0, mixed, (0.5, 1.5), 1000) < 100, "отрывок не на месте"
         assert during < before * 0.2 and tone(0, mixed, (4.5, 5.5), 200) > before * 0.8, (before, during)
