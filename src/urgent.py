@@ -106,15 +106,75 @@ def with_portrait(item: dict) -> dict:
 
 
 def priority(item: dict) -> tuple:
-    """Порядок срочного: сниппет, потом русская сцена из Telegram-каналов изданий,
-    потом остальное; внутри — свежее раньше.
+    """Порядок срочного: сниппет, потом новость о своём артисте, потом русская
+    сцена из Telegram-каналов изданий, потом остальное; внутри — свежее раньше.
 
     Одна свежесть отдавала места западной эстраде: 11–13.09.2026 в канал ушли
     Slipknot, Mastodon и Turnstile, а сниппет ICEGERGERT трижды проиграл новостям
     посвежее (Charli XCX, Lady Gaga) и протух. Русские RSS (Интермедиа) — это
     эстрада, модель их отбрасывает, поэтому сцена здесь — именно Telegram.
+
+    Но и одна Telegram-лента вперёд всех хоронила западную сцену целиком:
+    13–15.09.2026 вышли «Королевский XVII выпустил трек» и ещё четыре новости
+    без знакомого имени (score 30), а «Chief Keef перенёс концерт в Чикаго» (100)
+    и артисты в GTA 6 (90) не дошли до модели ни разу. Score от 90 — в новости
+    назван артист ядра, русской сцены или сцены (collect.TIER_SCORE + 10);
+    легенды вроде Slipknot (80) остаются за Telegram.
     """
-    return bool(item.get("snippet")), item.get("source") == "telegram", item.get("released_at") or ""
+    return (bool(item.get("snippet")), item.get("score", 0) >= 90,
+            item.get("source") == "telegram", item.get("released_at") or "")
+
+
+def due(runs: list[dict]) -> bool:
+    """Пора ли срочному заходу: час из config.URGENT_HOURS_MSK прошёл,
+    а запуска urgent.yml после него нет.
+
+    Отменённый запуск не в счёт — его вытеснил из очереди state-write другой.
+    Упавший в счёт: повтор каждые 10 минут жёг бы генерацию на той же поломке,
+    а о красном запуске и так скажет health.
+    """
+    from .compose import MSK
+
+    now = state.now().astimezone(MSK)
+    hours = [hour for hour in config.URGENT_HOURS_MSK if hour <= now.hour]
+    if not hours:
+        return False
+    slot = now.replace(hour=hours[-1], minute=0, second=0, microsecond=0)
+    return not any(
+        run.get("conclusion") != "cancelled"
+        and (created := state._parse(run.get("created_at", ""))) and created >= slot
+        for run in runs
+    )
+
+
+def shift() -> None:
+    """Срочный заход — из дежурства, а не по крону (см. config.URGENT_HOURS_MSK).
+
+    Дежурство идёт почти без дыр, поэтому оно раз в 10 минут спрашивает GitHub
+    о последних запусках urgent.yml и, когда пора, запускает его через
+    workflow_dispatch — как сборку ролика (reels.start_build). Сам заход
+    в дежурстве не идёт: обход лент и генерация занимают минут восемь,
+    и всё это время бот молчал бы. Локально, без GITHUB_TOKEN, ничего не делает.
+    """
+    import requests
+
+    token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
+    if not (token and repo):
+        return
+    api = f"https://api.github.com/repos/{repo}/actions/workflows/urgent.yml"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    try:
+        response = requests.get(f"{api}/runs", params={"per_page": 5}, headers=headers, timeout=30)
+        response.raise_for_status()
+        if not due(response.json().get("workflow_runs", [])):
+            return
+        requests.post(f"{api}/dispatches", headers=headers, timeout=30,
+                      json={"ref": os.environ.get("GITHUB_REF_NAME", "main")}).raise_for_status()
+    except requests.RequestException as exc:
+        # Смену не роняем: следующий заход через 10 минут попробует снова.
+        log.error("Срочный заход не запущен: %s", exc)
+        return
+    print("Срочный заход: urgent.yml запущен")
 
 
 def run(limit: int, dry_run: bool, target: str) -> int:
@@ -189,13 +249,24 @@ def _selftest() -> int:
     from unittest import mock
 
     items = [
-        {"fingerprint": "west", "source": "rss", "released_at": "2026-09-12T19:00"},
-        {"fingerprint": "scene", "source": "telegram", "released_at": "2026-09-12T10:00"},
+        {"fingerprint": "west", "source": "rss", "released_at": "2026-09-12T19:00", "score": 80},
+        {"fingerprint": "scene", "source": "telegram", "released_at": "2026-09-12T10:00", "score": 30},
         {"fingerprint": "snippet", "source": "telegram", "snippet": True, "released_at": "2026-09-11T21:00"},
         {"fingerprint": "west-old", "source": "rss", "released_at": "2026-09-12T08:00"},
+        {"fingerprint": "keef", "source": "rss", "released_at": "2026-09-11T08:00", "score": 100},
     ]
     assert [i["fingerprint"] for i in sorted(items, key=priority, reverse=True)] == \
-        ["snippet", "scene", "west", "west-old"]
+        ["snippet", "keef", "scene", "west", "west-old"]
+    items.pop()
+
+    # Заход: утренний час прошёл, а запуска после него нет — пора; отменённый не в счёт.
+    from datetime import datetime, timezone
+    with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 9, 5, tzinfo=timezone.utc)):  # 12:05 МСК
+        assert due([]) and due([{"created_at": "2026-09-16T08:00:00Z", "conclusion": "cancelled"}])
+        assert not due([{"created_at": "2026-09-16T06:10:00Z", "conclusion": None}])
+        assert due([{"created_at": "2026-09-16T05:59:00Z", "conclusion": "success"}])
+    with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 5, 0, tzinfo=timezone.utc)):  # 08:00 МСК
+        assert not due([])
 
     asked, used = [], []
     def generate(rubric: str, payload: dict) -> dict:
@@ -213,7 +284,7 @@ def _selftest() -> int:
           mock.patch.dict(globals(), {"fresh_news": lambda hours: items, "with_portrait": lambda item: item})):
         run(1, False, "admin")
     assert asked == ["snippet", "scene"] and used == ["snippet", "scene"], (asked, used)
-    print("срочное: сниппет и сцена первыми, отброшенная уступает место следующей")
+    print("срочное: сниппет, свой артист и сцена первыми, отброшенная уступает место, заход по часам")
     return 0
 
 

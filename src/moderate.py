@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from . import comments, config, publish, quiz, reels, service, state, telegram
+from . import comments, config, publish, quiz, reels, service, state, telegram, urgent
 
 log = logging.getLogger("moderate")
 
@@ -554,6 +554,7 @@ def serve(minutes: int) -> int:
 
         if time.monotonic() >= next_push:
             publish_shift()
+            urgent.shift()
             push_state()
             next_push = time.monotonic() + PUSH_EVERY
             if code_changed():

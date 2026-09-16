@@ -52,7 +52,8 @@ jobs:
     timeout-minutes: 360
     permissions:
       contents: write
-      # Последний дубль фразы ролика запускает сборку в reels.yml (src/reels.py):
+      # Последний дубль фразы ролика запускает сборку в reels.yml (src/reels.py),
+      # а смена по часам — срочные новости в urgent.yml (src/urgent.py, shift):
       # workflow_dispatch — единственное, что GITHUB_TOKEN запускать разрешено.
       actions: write
     steps:
