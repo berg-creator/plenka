@@ -101,7 +101,7 @@ def lines(link: dict, *, kind: str = "lineage") -> list[str]:
         f"{modern}. Откуда это вообще взялось?",
         f"Началось здесь. {ancestor}.",
         f"{connection}.",
-        "Плёнка. Откуда взялся весь тёмный звук.",
+        "Плёнка. Откуда взялся звук.",
     ]
 
 
@@ -118,7 +118,7 @@ def fact_lines(item: dict) -> list[str]:
     artist = _clean(item.get("artist", item.get("modern", "")))
     said = [f"{artist}. Что ты о нём не знал."]
     said += [f"{_clean(fact)}." for fact in item.get("facts", []) if fact]
-    return said + ["Плёнка. Откуда взялся весь тёмный звук."]
+    return said + ["Плёнка. Откуда взялся звук."]
 
 
 def news_lines(item: dict) -> list[str]:
@@ -139,7 +139,7 @@ def news_lines(item: dict) -> list[str]:
     # Реакция под кадром-врезкой (см. clips.CUT_IMAGE). Ничего не утверждает
     # и потому зашита: оценка новости — единственное, что каналу можно
     # сказать от себя, и говорится она в два слова.
-    return said + ["Ну ок.", "Плёнка. Откуда взялся весь тёмный звук."]
+    return said + ["Ну ок.", "Плёнка. Откуда взялся звук."]
 
 
 def _credentials() -> str:

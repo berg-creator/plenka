@@ -401,7 +401,7 @@ def outro_overlay(at: float = 0.0) -> Image.Image:
     name = stories.font(200, 700)
     top = MARK_Y - 330
 
-    stories.kicker(draw, (MARGIN, top - 80), "откуда взялся тёмный звук", 40, LIGHT)
+    stories.kicker(draw, (MARGIN, top - 80), "откуда взялся звук", 40, LIGHT)
     draw.text((MARGIN + 5, top + 6), "ПЛЁНКА", font=name, fill=(0, 0, 0, 170))
     stories.tracked(draw, (MARGIN, top), "ПЛЁНКА", name, LIGHT, 6)
 
