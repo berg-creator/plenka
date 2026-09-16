@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from . import comments, config, publish, quiz, reels, service, state, telegram, urgent
+from . import comments, config, otbor, publish, quiz, reels, service, state, telegram, urgent
 
 log = logging.getLogger("moderate")
 
@@ -52,11 +52,10 @@ PUSH_EVERY = 600
 
 def handle(action: str, post_id: str) -> str:
     """Выполняет действие над постом. Возвращает текст ответа для всплывашки."""
-    # Пост лежит либо в очереди, либо в срочных новостях (src/urgent.py):
-    # кнопки под ними одинаковые, а папки разные.
-    path = config.QUEUE / post_id
-    if not path.exists():
-        path = config.URGENT / post_id
+    # Пост лежит в очереди, в срочных новостях (src/urgent.py) или ждёт выхода
+    # в отборе (src/otbor.py): кнопки под ними одинаковые, а папки разные.
+    path = next((folder / post_id for folder in (config.QUEUE, config.URGENT, config.OTBOR_POSTS)
+                 if (folder / post_id).exists()), config.QUEUE / post_id)
 
     if action == "skip":
         return "Оставил в очереди"
@@ -365,12 +364,27 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
             # Файл не ответом — тоже сюда: сервис молча пропустил бы его,
             # а владелец должен услышать, почему трек не принят.
             if track_file(message):
+                owner = str(admin) == str(message.get("from", {}).get("id")) == str(
+                    message.get("chat", {}).get("id")
+                )
+                # Файл в личке от кого угодно, кроме владельца с ответом на запрос
+                # трека, — это трек в ОТБОР (src/otbor.py): файл открывает заявку
+                # сам, а владелец может проверить отбор на себе.
+                chat = message.get("chat", {})
+                if chat.get("type") == "private" and (
+                    not owner or (not message.get("reply_to_message") and otbor.active(chat.get("id")))
+                ):
+                    print("  файл в отбор")
+                    if not args.dry_run:
+                        try:
+                            otbor.handle(message, admin=owner)
+                        except Exception as exc:  # noqa: BLE001 — чужой файл не роняет дежурство
+                            log.error("Отбор не принял файл: %s", exc)
+                    continue
                 # Прикладывать треки к постам может только владелец и только
                 # у себя в личке: message_id в разных чатах совпадают, и ответ
                 # из группы нашёл бы чужой пост. Чужой файл пропускаем молча.
-                if not str(admin) == str(message.get("from", {}).get("id")) == str(
-                    message.get("chat", {}).get("id")
-                ):
+                if not owner:
                     continue
                 if args.dry_run:
                     print(f"  трек в ответ на {(message.get('reply_to_message') or {}).get('message_id')}")
@@ -493,6 +507,10 @@ def publish_shift() -> None:
     через PUSH_EVERY попробует снова.
     """
     target = os.environ.get("PUBLISH_TARGET", "admin")
+    try:
+        otbor.shift(target)
+    except Exception as exc:  # noqa: BLE001 — отбор не держит выход остальных постов
+        log.error("Выход отбора не удался: %s", exc)
     path = publish.next_post(releases=True, skip_sent=target == "admin") if publish.release_due() else None
     label = "Выход релиза"
     if path is None and target == "channel":
@@ -702,6 +720,19 @@ def _selftest() -> int:
     assert taken(reply(1, video=video))
     assert not taken(reply(2, video=video))
     assert not taken(reply(1, chat=-100, video=video))
+
+    # Чужой файл в личке — трек в отбор; в группе — мимо, как и был.
+    def routed(message: dict) -> str:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            process([{"update_id": 1, "message": message}], {}, "1", True, 0)
+        return out.getvalue()
+
+    private = {"id": 2, "type": "private"}
+    assert "файл в отбор" in routed({**reply(2, video=video), "chat": private})
+    assert "файл в отбор" not in routed(reply(2, chat=-100, video=video))
+    # Владелец с ответом на запрос — приём трека к посту, а не отбор.
+    assert "трек в ответ на 562" in routed({**reply(1, video=video), "chat": {"id": 1, "type": "private"}})
 
     # Файл не ответом на запрос — тоже в приём: сервис пропустил бы его молча.
     alone = {"message_id": 8, "from": {"id": 1}, "chat": {"id": 1}, "video": video}

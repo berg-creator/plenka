@@ -48,6 +48,10 @@ MEME_TEMPLATES = ROOT / "assets" / "meme" / "templates"
 # просто папка рядом, которую не берёт git (см. .gitignore).
 PRIVATE = Path(os.environ.get("STATE_DIR", "")) if os.environ.get("STATE_DIR") else DATA / "private"
 WATCH_FILE = PRIVATE / "watches.json"
+# ОТБОР (src/otbor.py): заявки с chat_id артистов и посты, ждущие выхода, —
+# до выхода имя и трек в открытый репозиторий не попадают.
+OTBOR_FILE = PRIVATE / "otbor.json"
+OTBOR_POSTS = PRIVATE / "otbor"
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (anthropic — платный Claude, по умолчанию; gigachat — Сбер; gemini — Google).
@@ -145,6 +149,15 @@ LISTEN_SERVICES: tuple[tuple[str, str], ...] = (
 SERVICE_DAILY_USER = 1  # разборов на человека в сутки
 SERVICE_DAILY_TOTAL = 40  # разборов на всех в сутки
 SERVICE_PER_RUN = 6  # сколько разборов делаем за один запуск поллера
+
+# ОТБОР берёт артистов, которых ещё не знают: с этого числа фанатов на Deezer
+# артист считается известным. Deezer в России слушают мало, поэтому числа
+# у всех скромные — замерено 16.09.2026: Kizaru 123 тыс., SODA LUV 45 тыс.,
+# Kaito Shoma 6 тыс., Молчат Дома 5,6 тыс., 9mice 2,2 тыс., Yung Trappa 2 тыс.,
+# Heronwater 1,7 тыс.; у андеграунда с поиска «фонк demo» — от 0 до 135.
+# Порог в 1000 отсекает всю сцену, которую знают, и оставляет тех, у кого
+# слушатели — друзья и знакомые.
+OTBOR_MAX_FANS = 1000
 
 
 @dataclass(frozen=True)
@@ -245,6 +258,16 @@ RUBRICS: tuple[Rubric, ...] = (
         weight=6,
         feeds_on="poll",
         description="Нативный опрос Telegram: кто круче, какой альбом лучше.",
+    ),
+    Rubric(
+        key="otbor",
+        title="ОТБОР",
+        weight=0,
+        feeds_on="otbor",
+        description=(
+            "Трек, который прислал в бота сам артист, ещё не известный. Пишется "
+            "шаблоном в момент выхода, раз в день — см. src/otbor.py."
+        ),
     ),
 )
 

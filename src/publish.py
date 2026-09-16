@@ -123,7 +123,8 @@ def due(post: dict) -> bool:
             return False
         regular = sum(
             1 for item in items
-            if item.get("rubric") not in (*config.RELEASE_RUBRICS, "news")
+            # Отбор (src/otbor.py) выходит мимо слотов и обычному посту место не занимает.
+            if item.get("rubric") not in (*config.RELEASE_RUBRICS, "news", "otbor")
             and (moment := state._parse(item.get("published_at", "")))
             and moment.astimezone(MSK).date() == now.date()
         )
@@ -225,7 +226,7 @@ def edit(post: dict) -> None:
 # Последняя строка поста о релизе («▸ Слушать в Apple Music», см. compose.name_button).
 # В Telegram она разворачивается в ссылки на площадки, а в сохранённом тексте
 # остаётся как есть: во ВКонтакте уходит запись целиком, и ссылку несёт она.
-_LISTEN_LINE = re.compile(r'^▸\s*<a\s+href="([^"]+)"[^>]*>\s*Слушать[^<]*</a>\s*$', re.MULTILINE)
+_LISTEN_LINE = re.compile(r'^▸\s*<a\s+href="([^"]+)"[^>]*>\s*Слушать[^<]*</a>[^\S\n]*$', re.MULTILINE)
 
 
 def _host(url: str) -> str:

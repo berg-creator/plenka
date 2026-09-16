@@ -37,7 +37,7 @@ import re
 import pathlib
 from pathlib import Path
 
-from . import card, config, llm, quality, state, stories, telegram
+from . import card, config, llm, otbor, quality, state, stories, telegram
 from .sources import deezer, itunes, lastfm
 
 log = logging.getLogger("service")
@@ -65,6 +65,7 @@ COMMANDS = {
     "novoe": "new", "новое": "new",
     "slezhu": "watchlist", "слежу": "watchlist",
     "stop": "watchstop", "стоп": "watchstop",
+    "otbor": "otbor", "отбор": "otbor",
 }
 
 # Меню объясняет все три разбора сразу и показывает пример на каждый.
@@ -74,7 +75,10 @@ COMMANDS = {
 # Одно правило вместо трёх режимов: напиши что угодно. Раньше здесь висело
 # меню из трёх разборов с порогом в три артиста — человек читал условия
 # и уходил, так и не спросив ничего.
+# Отбор — первой строкой: это единственный повод, ради которого из ролика
+# переходят в бота (раздел «Третий актив» в GROWTH.md).
 MENU = (
+    "🎙 <b>Пишешь сам?</b> Пришли свой трек — выйдет в канале: /otbor\n\n"
     "<b>ПРОЯВКА</b> — разбираю, откуда что взялось.\n\n"
     "Напиши что угодно:\n"
     "· артиста — <i>Bones</i>\n"
@@ -108,6 +112,7 @@ CALLBACK_PREFIX = "s:"
 
 def menu_buttons() -> list[list[dict]]:
     return [
+        [{"text": "🎙 Прислать свой трек в канал", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
         [{"text": "🎧 Что разобрать?", "callback_data": f"{CALLBACK_PREFIX}taste"}],
         [{"text": "📝 Разобрать текст песни", "callback_data": f"{CALLBACK_PREFIX}lyrics"}],
     ]
@@ -924,6 +929,17 @@ def handle_message(message: dict, data: dict) -> bool:
     key = user_key(user_id)
 
     kind, body = parse_command(text)
+    # Отбор ведёт разговор в несколько сообщений (src/otbor.py): пока заявка
+    # открыта, всё присланное идёт туда. Другая команда заявку закрывает —
+    # человек передумал и ушёл в разборы, а не прислал трек.
+    if kind == "otbor" or text.casefold() in ("отбор", "otbor"):
+        otbor.start(chat_id, user_id, admin=admin)
+        return False
+    if otbor.active(chat_id):
+        if not text.startswith("/"):
+            otbor.handle(message, admin=admin)
+            return False
+        otbor.cancel(chat_id)
     if kind == "menu":
         # Пришёл по ссылке с готовым разбором — не показываем меню, а сразу
         # объясняем, что слать: лишний экран между кнопкой и делом только мешает.
@@ -942,10 +958,15 @@ def handle_message(message: dict, data: dict) -> bool:
         )
         return False
     if not kind:
+        # Ссылку на трек и «Артист — Трек» разбор понимает тем же поиском, что отбор:
+        # в разбор уходит имя артиста. Человеку не надо знать, в каком виде что слать.
+        body = otbor.subject(text)
+        if not body:
+            telegram.send_message(chat_id, "Эту ссылку не разобрал — напиши артиста или <i>Артист — Трек</i>.")
+            return False
         # Разбор, выбранный кнопкой, старше догадки по форме сообщения:
         # человек уже сказал, чего хочет, и переспрашивать его глупо.
-        kind = peek_mode(data, key) or guess_kind(text)
-        body = text
+        kind = peek_mode(data, key) or guess_kind(body)
     if not kind:
         telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return False
@@ -1060,6 +1081,11 @@ def handle_callback(query: dict, data: dict) -> None:
     if action in HINTS:
         set_mode(data, key, action)
         telegram.send_message(chat_id, HINTS[action])
+        return
+
+    if action == "otbor":
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        otbor.callback(chat_id, user_id, subject, admin=admin)
         return
 
     if action == "watch" and subject:
