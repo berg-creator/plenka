@@ -6,8 +6,14 @@
 а «0 комментариев» под каждым постом читается как «здесь никого нет».
 
 Поэтому первым пишет сам канал — одной репликой с конкретным вопросом.
-Вопрос берётся из готового набора по рубрике, а не сочиняется моделью:
-токены он бы тратил как полноценный пост, а работы делает на одну строку.
+Вопрос пишет модель по тексту вышедшего поста (prompts/rubrics/comment.md).
+Раньше он брался из готового набора по рубрике, чтобы не тратить токены
+на одну строку, и набор себя не оправдал: три вопроса на рубрику повторялись
+через пост, а общий вопрос не подходил к частному посту — под синглом Pouya
+спросили, «какой трек оттуда» оставить (владелец, 16.09.2026). Вопрос пишется
+в момент выхода, а не вместе с постом: так он есть и у постов, написанных
+до этого решения, и у срочных. Набор остался запасным — на случай, когда
+генератор не ответил или не нашёл вопроса про этот пост.
 
 Под постом о релизе этой репликой идёт сам трек, присланный владельцем: вопрос
 уходит ему в подпись. В ленте плеер занимал вторую плитку и делал вид поста
@@ -32,7 +38,7 @@ import time
 from collections.abc import Callable
 from datetime import timedelta
 
-from . import config, state, telegram
+from . import config, llm, state, telegram
 from .sources import telegram_web
 
 log = logging.getLogger("comments")
@@ -108,8 +114,29 @@ WAIT_STEP = timedelta(seconds=15)
 WAIT_TRIES = 4
 
 
+# Длиннее вопрос не нужен: он стоит подписью под плеером, а не абзацем.
+MAX_QUESTION = 120
+
+
 def question(rubric: str) -> str:
     return random.choice(QUESTIONS.get(rubric, DEFAULT_QUESTIONS))
+
+
+def ask(post: dict, rubric: str, attached: str = "") -> str:
+    """Вопрос по тексту поста, а если не вышло — из готового набора рубрики."""
+    try:
+        answer = llm.generate_comment({
+            "rubric": rubric, "text": post.get("text", ""), "artist": post.get("artist", ""),
+            "release": post.get("release", ""), "attached": attached,
+        })
+    except Exception as exc:  # noqa: BLE001 — без вопроса модели остаётся набор
+        log.warning("Вопрос под постом не написан: %s", exc)
+        answer = {"skip": True}
+    text = " ".join((answer.get("text") or "").split())
+    # Разметка и простыня в подписи — брак ответа, а не вопрос.
+    if answer.get("skip") or not text or "<" in text or len(text) > MAX_QUESTION:
+        return question(rubric)
+    return text
 
 
 def origin_id(message: dict) -> int | None:
@@ -202,11 +229,11 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
     snippet = telegram_web.snippet_video(post.get("source_url", "")) if post.get("snippet") else ""
     try:
         if track:
-            telegram.send_audio(chat_id, track, question(rubric), reply_to=message_id)
+            telegram.send_audio(chat_id, track, ask(post, rubric, "трек"), reply_to=message_id)
         elif snippet:
-            telegram.send_video_url(chat_id, snippet, question("snippet"), reply_to=message_id)
+            telegram.send_video_url(chat_id, snippet, ask(post, "snippet", "сниппет"), reply_to=message_id)
         else:
-            telegram.send_message(chat_id, question(rubric), reply_to=message_id)
+            telegram.send_message(chat_id, ask(post, rubric), reply_to=message_id)
     except telegram.TelegramError as exc:
         # Бота могли не пустить в чат или разжаловать — пост от этого не страдает.
         log.warning("Первый комментарий не ушёл: %s", exc)
@@ -248,6 +275,8 @@ def _selftest() -> None:
         {"items": posted} if path == real_posted else snippet)
     real_video, real_url, real_msg = (
         telegram_web.snippet_video, telegram.send_video_url, telegram.send_message)
+    real_comment = llm.generate_comment
+    llm.generate_comment = lambda payload: {"skip": True}
     telegram_web.snippet_video = lambda url: "https://cdn.telesco.pe/x.mp4?token=k"
     telegram.send_video_url = lambda chat, url, caption, reply_to=None: sent.append(("видео", url))
     telegram.send_message = lambda chat, text, reply_to=None, **_: sent.append(("вопрос", text))
@@ -263,8 +292,29 @@ def _selftest() -> None:
         state.read_json = real_read
         telegram_web.snippet_video, telegram.send_video_url = real_video, real_url
         telegram.send_message = real_msg
+        llm.generate_comment = real_comment
 
-    print("первый комментарий: пост находится по номеру пересылки, сниппет уходит роликом")
+    # Вопрос пишет модель по посту; брак ответа и отказ сети уводят в набор рубрики.
+    post = {"text": "<b>POUYA ЗАПИСАЛ ТРЕК</b>", "artist": "Pouya"}
+    for answer, expected in (
+        ({"skip": False, "text": " кого из пятерых\nвы знали? "}, "кого из пятерых вы знали?"),
+        ({"skip": True, "text": "что думаете?"}, None),
+        ({"skip": False, "text": "<b>вопрос</b>"}, None),
+        ({"skip": False, "text": "а" * (MAX_QUESTION + 1)}, None),
+        (RuntimeError("сеть"), None),
+    ):
+        def fake(payload, answer=answer):
+            assert payload["attached"] == "трек" and payload["artist"] == "Pouya"
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        llm.generate_comment = fake
+        got = ask(post, "release", "трек")
+        assert got == expected if expected else got in QUESTIONS["release"], (answer, got)
+    llm.generate_comment = real_comment
+
+    print("первый комментарий: пост находится по номеру пересылки, сниппет уходит роликом, "
+          "вопрос пишется по посту, а брак ответа уводит в запасной набор")
 
 
 if __name__ == "__main__":

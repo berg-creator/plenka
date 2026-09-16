@@ -212,6 +212,21 @@ def generate_clip(payload: dict) -> dict:
     )
 
 
+def generate_comment(payload: dict) -> dict:
+    """Первый комментарий под вышедшим постом: вопрос по его тексту (src/comments.py).
+
+    Схема та же, что у постов: вопрос уходит в поле text, а skip значит
+    «кроме общего вопроса ничего не выходит» — тогда берётся готовый набор.
+    """
+    return _generate(
+        f"{rubric_prompt('comment')}\n\n"
+        f"## Пост\n\n"
+        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"Напиши вопрос по правилам выше. Не выходит вопроса про этот пост — "
+        f"верни skip=true и причину одной строкой."
+    )
+
+
 def build_user_prompt(rubric_key: str, payload: dict) -> str:
     return (
         f"{rubric_prompt(rubric_key)}\n\n"
