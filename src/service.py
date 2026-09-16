@@ -1,16 +1,16 @@
 """ПРОЯВКА — разборы по запросу в личке бота.
 
 Канал публикует сам по себе, но подписчиков это не приносит: пост не пересылают,
-пересылают результат про себя. Поэтому у бота есть три разбора, и главный из них
-отдаёт картинку, которую человек показывает друзьям.
+пересылают результат про себя. Поэтому разбор бывает трёх видов, и главный из них
+отдаёт картинку, которую человек показывает друзьям:
 
-    /vkus   список артистов        → откуда растёт твой вкус + карточка
-    /nogi   артист, трек или жанр  → к какому предку сходится ниточка
-    /tekst  строки из песни        → что в этих строках на самом деле происходит
+    список артистов        → откуда растёт твой вкус + карточка
+    артист, трек или жанр  → к какому предку сходится ниточка
+    строки из песни        → что в этих строках на самом деле происходит
 
-Команду можно не писать: бот различает список имён, одно имя и куплет по форме
-сообщения. Кириллические синонимы (/вкус, /ноги, /текст) тоже работают, но
-в меню Telegram их не показать — там разрешена только латиница.
+Для человека это один раздел — ПРОЯВКА (/proyavka): вид бот различает по форме
+сообщения. Старые команды /vkus, /nogi, /tekst и кириллица (/вкус, /проявка)
+работают при наборе, но в меню Telegram не показаны — там только латиница.
 
 Два ограничения, из которых следует всё устройство модуля:
 
@@ -71,44 +71,32 @@ COMMANDS = {
     "slezhu": "watchlist", "слежу": "watchlist",
     "stop": "watchstop", "стоп": "watchstop",
     "otbor": "otbor", "отбор": "otbor",
+    "proyavka": "proyavka", "проявка": "proyavka",
 }
 
-# Меню объясняет все три разбора сразу и показывает пример на каждый.
-# Так человеку не нужен лишний круг ожидания: он может ответить прямо на это
-# сообщение и получить разбор, ни на что не нажимая. Кнопки — для тех,
-# кто читать не станет.
-# Одно правило вместо трёх режимов: напиши что угодно. Раньше здесь висело
-# меню из трёх разборов с порогом в три артиста — человек читал условия
-# и уходил, так и не спросив ничего.
-# Отбор — первой строкой: это единственный повод, ради которого из ролика
-# переходят в бота (раздел «Третий актив» в GROWTH.md).
+# У бота два раздела, и называются они везде одинаково — в меню «/», на экране
+# до «Начать», здесь и на кнопках: 🎙 ОТБОР и 🎞 ПРОЯВКА. Раньше разбор был
+# расколот на «Что разобрать?» и «Разобрать текст песни», в меню «/» его не было
+# вовсе, и человек не понимал, что тут есть (владелец, 16.09.2026). Вид разбора
+# бот по-прежнему угадывает по форме сообщения, выбирать его не нужно.
+# Отбор — первым: ради него из ролика переходят в бота (GROWTH.md, «Третий актив»).
 MENU = (
-    "🎙 <b>Пишешь сам?</b> Пришли свой трек — выйдет в канале: /otbor\n\n"
-    "<b>ПРОЯВКА</b> — разбираю, откуда что взялось.\n\n"
-    "Напиши что угодно:\n"
-    "· артиста — <i>Bones</i>\n"
-    "· жанр — <i>фонк</i>\n"
-    "· песню — <i>Molchat Doma — Судно</i>\n"
-    "· или сразу список, кого слушаешь\n\n"
-    "В ответ придёт разбор и карточка, которую не стыдно кинуть друзьям.\n\n"
-    "Ещё умею разбирать тексты: пришли несколько строк из песни."
+    f"<b>ПЛЁНКА</b> — бот канала {config.CHANNEL_HANDLE}\n\n"
+    "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
+    "🎞 <b>ПРОЯВКА</b>\nПришли артиста, песню или строки из текста — расскажу, откуда это взялось.\n\n"
+    "Нужна подписка на канал."
 )
 
-# Что бот отвечает на нажатие кнопки: коротко, что прислать, и пример.
-HINTS = {
-    "taste": (
-        "🎧 <b>Что разобрать?</b>\n\n"
-        "Напиши артиста, жанр или песню — по одному имени тоже работает.\n\n"
-        "<i>Bones</i>  ·  <i>фонк</i>  ·  <i>Молчат Дома</i>\n\n"
-        "Или сразу список, кого слушаешь, — тогда покажу, что у них общего."
-    ),
-    "lyrics": (
-        "📝 <b>Разбор текста</b>\n\n"
-        "Пришли несколько строк из песни — своих или чужих.\n\n"
-        "Разберу приём, двойные смыслы и отсылки. Автора не угадываю: "
-        "если хочешь, чтобы учёл — напиши его сам."
-    ),
-}
+# Что прислать в ПРОЯВКУ — на кнопку и /proyavka без текста.
+PROYAVKA = (
+    "🎞 <b>ПРОЯВКА</b>\n\n"
+    "Пришли одним сообщением:\n"
+    "· артиста или песню — <i>Bones</i>, <i>Молчат Дома — Судно</i> или ссылку\n"
+    "· список, кого слушаешь, — покажу, что у них общего, и сделаю карточку\n"
+    "· несколько строк из песни — разберу, что в них происходит"
+)
+# Старые кнопки в переписке и ссылки ?start=taste из вышедших постов ведут туда же.
+PROYAVKA_KEYS = ("proyavka", "taste", "lyrics", "roots")
 
 # Префикс отличает кнопки сервиса от кнопок модерации: у тех callback_data
 # вида «pub:имя-файла», и обработчики не должны пересекаться.
@@ -117,9 +105,8 @@ CALLBACK_PREFIX = "s:"
 
 def menu_buttons() -> list[list[dict]]:
     return [
-        [{"text": "🎙 Прислать свой трек в канал", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
-        [{"text": "🎧 Что разобрать?", "callback_data": f"{CALLBACK_PREFIX}taste"}],
-        [{"text": "📝 Разобрать текст песни", "callback_data": f"{CALLBACK_PREFIX}lyrics"}],
+        [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
+        [{"text": "🎞 ПРОЯВКА — разобрать музыку", "callback_data": f"{CALLBACK_PREFIX}proyavka"}],
     ]
 
 
@@ -957,14 +944,15 @@ def handle_message(message: dict, data: dict) -> bool:
         count_source(body)
         otbor.start(chat_id, user_id, admin=admin)
         return False
+    if kind == "proyavka" and body:
+        kind, text = "", body
+    if kind == "proyavka" or kind == "menu" and body in PROYAVKA_KEYS:
+        # Пришёл за разбором — сразу объясняем, что слать: лишний экран между
+        # кнопкой и делом только мешает.
+        telegram.send_message(chat_id, PROYAVKA)
+        return False
     if kind == "menu":
-        # Пришёл по ссылке с готовым разбором — не показываем меню, а сразу
-        # объясняем, что слать: лишний экран между кнопкой и делом только мешает.
-        if body in HINTS:
-            set_mode(data, key, body)
-            telegram.send_message(chat_id, HINTS[body])
-        else:
-            telegram.send_message(chat_id, MENU, buttons=menu_buttons())
+        telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return False
 
     # Списками слежения человек распоряжается сам, и это не стоит ни токенов,
@@ -981,9 +969,7 @@ def handle_message(message: dict, data: dict) -> bool:
         if not body:
             telegram.send_message(chat_id, "Эту ссылку не разобрал — напиши артиста или <i>Артист — Трек</i>.")
             return False
-        # Разбор, выбранный кнопкой, старше догадки по форме сообщения:
-        # человек уже сказал, чего хочет, и переспрашивать его глупо.
-        kind = peek_mode(data, key) or guess_kind(body)
+        kind = guess_kind(body)
     if not kind:
         telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return False
@@ -1007,10 +993,6 @@ def handle_message(message: dict, data: dict) -> bool:
         if denied:
             telegram.send_message(chat_id, denied)
             return False
-
-    # Выбор кнопкой гасим только здесь: если человека развернули на подписке
-    # или лимите, он не должен нажимать кнопку заново.
-    clear_mode(data, key)
 
     telegram.send_chat_action(chat_id)
     try:
@@ -1095,9 +1077,8 @@ def handle_callback(query: dict, data: dict) -> None:
     if not chat_id:
         return
 
-    if action in HINTS:
-        set_mode(data, key, action)
-        telegram.send_message(chat_id, HINTS[action])
+    if action in PROYAVKA_KEYS:
+        telegram.send_message(chat_id, PROYAVKA)
         return
 
     if action == "otbor":
@@ -1132,21 +1113,6 @@ def handle_callback(query: dict, data: dict) -> None:
         return
 
     telegram.send_message(chat_id, MENU, buttons=menu_buttons())
-
-
-def set_mode(data: dict, user_id: str, kind: str) -> None:
-    user = data.setdefault("users", {}).setdefault(user_id, {"day": "", "count": 0, "total": 0})
-    user["mode"] = kind
-
-
-def peek_mode(data: dict, user_id: str) -> str:
-    return data.get("users", {}).get(user_id, {}).get("mode", "")
-
-
-def clear_mode(data: dict, user_id: str) -> None:
-    """Кнопка отвечает за одно следующее сообщение, дальше человек снова
-    волен слать что угодно."""
-    data.get("users", {}).get(user_id, {}).pop("mode", None)
 
 
 def _selftest() -> None:
@@ -1189,20 +1155,23 @@ def _selftest() -> None:
     opened: list[str] = []
     real = otbor.start, telegram.send_message, globals()["SOURCES_FILE"]
     otbor.start = lambda chat, user, **_: opened.append(chat)
-    telegram.send_message = lambda chat, text, **_: {"message_id": 1}
+    replies: list[tuple[str, list]] = []
+    telegram.send_message = lambda chat, text, buttons=None, **_: replies.append((text, buttons)) or {"message_id": 1}
     tmp = tempfile.TemporaryDirectory()
     globals()["SOURCES_FILE"] = pathlib.Path(tmp.name) / "sources.json"
     try:
-        for text in ("/start yt", "/start yt", "/start tt", "/start taste"):
+        for text in ("/start yt", "/start yt", "/start tt", "/start taste", "/proyavka", "/start"):
             handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "text": text}, {})
         saved = SOURCES_FILE.read_text()
         assert state.read_json(SOURCES_FILE, {}) == {_today(): {"yt": 2, "tt": 1}}, saved
         assert opened == ["55501"] * 3, opened
         assert "555" not in saved and "777" not in saved, "id человека в открытом файле"
+        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU], "старая ссылка и /proyavka — в ПРОЯВКУ"
+        assert [row[0]["text"][:1] for row in replies[-1][1]] == ["🎙", "🎞"], "в меню два раздела"
     finally:
         otbor.start, telegram.send_message, globals()["SOURCES_FILE"] = real
         tmp.cleanup()
-    print("метка /start: считается по дню без id и сразу открывает отбор")
+    print("метка /start: считается по дню без id и сразу открывает отбор; в меню два раздела")
 
 
 # ─────────────────────────── командная строка ───────────────────────────

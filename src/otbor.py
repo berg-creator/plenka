@@ -66,20 +66,24 @@ WEEK = timedelta(days=7)
 DAY_HOURS_MSK = range(12, 21)
 
 URL = re.compile(r"https?://\S+")
+# Где найти артиста: страница ВКонтакте или свой канал в Telegram — читатель поста
+# подписывается там одним касанием. Instagram не берём: в России он запрещён.
+# Схема необязательна — «t.me/имя» пишут без неё; «+» после t.me — приглашение в чат.
+PAGES = {
+    "vk": ("ВКонтакте", re.compile(r"(?:https?://)?(?:m\.)?vk\.(?:com|ru)/[\w.]+")),
+    "tg": ("Telegram", re.compile(r"(?:https?://)?t\.me/[A-Za-z]\w{3,}")),
+}
 # Тире с пробелами: «ню-метал» и «Jay-Z» — не «Артист — Трек».
 DASH = re.compile(r"\s+[—–-]\s+")
 CANCEL = ("отмена", "стоп", "cancel")
 
 HINT = (
-    "🎙 <b>ОТБОР</b> — пришли свой трек, и он выйдет в канале ПЛЁНКИ: "
-    "с твоим именем, ссылкой и самим треком под постом.\n\n"
-    "Как удобно:\n"
-    "· ссылкой — Apple Music, Spotify, Яндекс, Deezer, YouTube, SoundCloud\n"
-    "· текстом — <i>Артист — Трек</i>\n"
-    "· файлом — и к нему ссылку, где трек уже выложен\n\n"
-    "Условия: трек твой и уже вышел хоть на одной площадке, один трек в неделю, "
-    "в канал — один в день, по очереди. Имя и трек выйдут в канале публично.\n\n"
-    "Передумаешь — напиши «отмена»."
+    "🎙 <b>ОТБОР</b>\n\n"
+    "Пришли свой трек — он выйдет в канале отдельным постом с твоим именем, "
+    "а сам трек встанет под постом.\n\n"
+    "Как удобно: ссылкой на любую площадку, текстом <i>Артист — Трек</i> или файлом.\n\n"
+    "Условия: трек твой и уже выложен, один в неделю. В канал — один трек в сутки, по очереди.\n\n"
+    "Передумал — напиши «отмена»."
 )
 FORMAT = "Не понял, какой трек. Пришли ссылку или напиши <i>Артист — Трек</i>."
 NO_LINK = ("Эту ссылку не разобрал — VK и Звук без входа ничего не отдают. "
@@ -105,14 +109,14 @@ LENGTH = "В треке {length}, а в отбор берём от 1 до 8 ми
 WORDS = (
     "Беру: <b>{artist} — {title}</b>. Так он прозвучит под постом.\n\n"
     "Напиши одну-две фразы о треке — встанут в пост цитатой со слов артиста. "
-    "Тем же сообщением можно дать ссылку на свою страницу ВКонтакте.\n\n"
+    "Тем же сообщением можно дать ссылку на свой Telegram-канал или страницу ВКонтакте.\n\n"
     "Нечего сказать — жми кнопку."
 )
 BAD_WORDS = ("Так в пост не поставить: нужно 25–160 знаков, без мата, ссылок, @ников "
              "и капса. Перепиши или жми «Без слов».")
 CONSENT = ("Последнее: можно взять трек в ролик канала на YouTube и в TikTok? "
            "На выход в канал ответ не влияет.")
-ACCEPTED = ("Принято ✅ Ты {place}-й в очереди. В канал выходит один трек в день, днём. "
+ACCEPTED = ("Принято ✅ Ты {place}-й в очереди. В канал выходит один трек в сутки, днём. "
             "Выйдет — пришлю ссылку.")
 CANCELLED = "Отменил. Захочешь вернуться — /otbor."
 CLOSED = "Эта заявка уже закрыта. Новая — /otbor."
@@ -542,12 +546,14 @@ def _audio(draft: dict, work: Path) -> tuple[bytes | str, int, bytes | None]:
 
 def take_words(draft: dict, text: str) -> tuple[str, list[list[dict]]]:
     """Слова артиста о треке — через тот же фильтр, что отзывы YouTube под постом."""
-    vk = re.search(r"https?://(?:m\.)?vk\.(?:com|ru)/[\w.]+", text)
+    pages = {field: found.group(0) for field, (_, pattern) in PAGES.items() if (found := pattern.search(text))}
+    for _, pattern in PAGES.values():
+        text = pattern.sub("", text)
     words = " ".join(URL.sub("", text).split())
-    if words and not suitable(words, MIN_LIKES) or not (words or vk):
+    if words and not suitable(words, MIN_LIKES) or not (words or pages):
         return BAD_WORDS, QUIET_BUTTONS
-    if vk:
-        draft["vk"] = vk.group(0)
+    for field, link in pages.items():
+        draft[field] = link if link.startswith("http") else f"https://{link}"
     if words:
         draft["quote"] = words
     draft["stage"] = "consent"
@@ -572,7 +578,7 @@ def callback(chat_id: str | int, user_id: str | int, choice: str, *, admin: bool
         telegram.send_message(chat_id, CLOSED)
 
 
-FIELDS = ("artist", "title", "url", "cover", "track_file_id", "seconds", "quote", "vk")
+FIELDS = ("artist", "title", "url", "cover", "track_file_id", "seconds", "quote", *PAGES)
 
 
 def submit(data: dict, chat_id: str, user_id: str, *, reel: bool, admin: bool) -> None:
@@ -601,8 +607,11 @@ def build_post(application: dict) -> dict:
     if application.get("quote"):
         parts.append(f"Со слов артиста:\n<blockquote>{esc(application['quote'])}</blockquote>")
     links = []
-    if application.get("vk"):
-        links.append(f'▸ <a href="{esc(application["vk"])}">Артист во ВКонтакте</a>')
+    # Короткими словами, как площадки в строке «Слушать», а не фразой-ссылкой.
+    pages = [f'<a href="{esc(application[field])}">{label}</a>' for field, (label, _) in PAGES.items()
+             if application.get(field)]
+    if pages:
+        links.append("▸ Артист — " + " · ".join(pages))
     if application.get("url"):
         # Строку разворачивает в площадки publish.listen — как у поста о релизе.
         links.append(f'▸ <a href="{esc(application["url"])}">Слушать</a>')
@@ -755,13 +764,14 @@ def _selftest() -> None:
         assert played[-1]["audio"] == "https://audio/p.m4a" and "Беру" in last("1"), said[-3:]
         handle(msg(1, "КАПСОМ ОРУ ПРО СВОЙ ТРЕК ЦЕЛЫХ ТРИДЦАТЬ ЗНАКОВ"))
         assert last("1") == BAD_WORDS
-        handle(msg(1, "Записал за одну ночь в гараже у друга https://vk.com/nobodyhome"))
+        handle(msg(1, "Записал за одну ночь в гараже у друга https://vk.com/nobodyhome t.me/nobodyhome_music"))
         assert last("1") == CONSENT
         callback(1, 1, "yes")
         assert last("1").startswith("Принято") and "1-й" in last("1")
         queued = load()["queue"][0]
         assert queued["vk"] == "https://vk.com/nobodyhome" and queued["track_file_id"] == "PLAYER-1"
-        assert queued["quote"].startswith("Записал") and "https" not in queued["quote"]
+        assert queued["tg"] == "https://t.me/nobodyhome_music"
+        assert queued["quote"] == "Записал за одну ночь в гараже у друга", queued["quote"]
 
         # 2. Ссылкой, которой нет в магазинах: нужен файл — перезаливается и становится плеером.
         start(2, 2)
@@ -804,7 +814,8 @@ def _selftest() -> None:
         text = build_post(queued)["text"]
         assert text.startswith("<b>NOBODY HOME — «NIGHT DRIVE»</b>")
         assert "Со слов артиста:\n<blockquote>Записал" in text and text.endswith(f"Пришли свой — {config.BOT_HANDLE}")
-        assert '▸ <a href="https://vk.com/nobodyhome">' in text and publish._LISTEN_LINE.search(text)
+        assert ('▸ Артист — <a href="https://vk.com/nobodyhome">ВКонтакте</a> · '
+                '<a href="https://t.me/nobodyhome_music">Telegram</a>') in text and publish._LISTEN_LINE.search(text)
         # Площадки разворачиваются, а зов в бота остаётся отдельным абзацем.
         assert "</a>\n\nПришли свой" in publish.listen(text, "Nobody Home", "Night Drive")
         assert build_post({"artist": "A&B", "title": "<x>"})["text"].startswith("<b>A&amp;B — «&lt;X&gt;»</b>")
