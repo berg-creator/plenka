@@ -426,6 +426,8 @@ def problems(script, name: str = "") -> list[str]:
             errors.append(f"{where}: pause — секунды, больше нуля и не больше {PAUSE_MAX:g}")
         if "track" in line:
             errors += _track_problems(line["track"], where)
+        if "overlay" in line:
+            errors += _overlay_problems(line["overlay"], where)
         if not isinstance(line.get("hint", ""), str):
             errors.append(f"{where}: hint — строка")
         if "subtitle" in line and not ("say" in line and _filled(line["subtitle"])):
@@ -436,6 +438,15 @@ def problems(script, name: str = "") -> list[str]:
 
 def _number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _overlay_problems(overlay, where: str) -> list[str]:
+    if not (isinstance(overlay, dict) and isinstance(overlay.get("file"), str) and MUSIC_FORMAT.fullmatch(overlay["file"])
+            and not overlay["file"][:1].isdigit() and _number(overlay.get("at")) and _number(overlay.get("length"))
+            and overlay["at"] >= 0 and 0 < overlay["length"] <= TRACK_MAX):
+        return [f"{where}: overlay — {{file: звук в папке ролика, имя не с цифры, at: секунда строки, "
+                f"length: до {TRACK_MAX:g} с}}"]
+    return []
 
 
 def _track_problems(track, where: str) -> list[str]:
@@ -456,7 +467,10 @@ def line_seconds(line: dict) -> float:
     if "pause" in line:
         return float(line["pause"])
     length = float(line.get("track", {}).get("length", 0))
-    return max(SAY_SECONDS, length) if "say" in line else length
+    base = max(SAY_SECONDS, length) if "say" in line else length
+    # Строка дотягивается до конца наложенного звука: следующая фраза — сразу за его обрывом.
+    over = line.get("overlay")
+    return max(base, float(over["at"]) + float(over["length"])) if isinstance(over, dict) else base
 
 
 def load(path: Path) -> tuple[dict, list[str]]:
@@ -1144,25 +1158,37 @@ def _excerpt(track: dict, dest: Path) -> Path | None:
     return out
 
 
-def _under_tracks(beat: Path, pieces: list[tuple[Path, float, float]], work: Path) -> Path:
+def _under_tracks(beat: Path, pieces: list[tuple[Path, float, float]], work: Path,
+                  overlays: list[tuple[Path, float, float]] = ()) -> Path:
     """Бит с отрывками треков: (файл, секунда начала, длина). На отрывке бит почти молчит.
+
+    `overlays` — звук поверх бита (поле строки `overlay`), бит под ним играет как есть.
+    Кусок песни в такт слову («…да под Шамана» — и сразу «Я ру…») нельзя вклеить
+    в дубль: дубль длиннее — и субтитры фразы растягиваются на весь кусок, отставая
+    от голоса (gta6, 16.09.2026). В бите он ещё и проседает под голосом владельца,
+    как подложка, и остаётся стерео.
 
     Сведение до assemble, а не в нём: там голос сайдчейном проседает подложку,
     и отрывок под голосом строки проседает так же — голос остаётся сверху.
     """
-    if not pieces:
+    if not pieces and not overlays:
         return beat
     from . import clips
 
-    windows = "+".join(f"between(t,{at:.3f},{at + length:.3f})" for _, at, length in pieces)
-    delays = "".join(f"[{n}:a]adelay={at * 1000:.0f}|{at * 1000:.0f}[t{n}];" for n, (_, at, _) in enumerate(pieces, 1))
+    windows = "+".join(f"between(t,{at:.3f},{at + length:.3f})" for _, at, length in pieces) or "0"
+    inputs = [*pieces, *overlays]
+    delays = "".join(
+        f"[{n}:a]atrim=0:{length:.3f},aformat=sample_rates=48000:channel_layouts=stereo,"
+        f"adelay={at * 1000:.0f}|{at * 1000:.0f}[t{n}];"
+        for n, (_, at, length) in enumerate(inputs, 1)
+    )
     out = work / "beat-tracks.wav"
     clips.run([
-        clips.ffmpeg(), "-y", "-i", str(beat), *[arg for path, _, _ in pieces for arg in ("-i", str(path))],
+        clips.ffmpeg(), "-y", "-i", str(beat), *[arg for path, _, _ in inputs for arg in ("-i", str(path))],
         "-filter_complex",
         f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,"
         f"volume='if({windows},{TRACK_BEAT},1)':eval=frame[b];{delays}"
-        f"[b]{''.join(f'[t{n}]' for n in range(1, len(pieces) + 1))}amix=inputs={len(pieces) + 1}:duration=first:normalize=0",
+        f"[b]{''.join(f'[t{n}]' for n in range(1, len(inputs) + 1))}amix=inputs={len(inputs) + 1}:duration=first:normalize=0",
         str(out),
     ])
     return out
@@ -1488,8 +1514,11 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         starts = [sum(shot.seconds for shot in timed[:index]) for index in range(len(timed))]
         pieces = [(piece, at, line["track"]["length"]) for index, (line, at) in enumerate(zip(script["lines"], starts))
                   if "track" in line and (piece := _excerpt(line["track"], work / f"track-{index}.m4a"))]
+        overlays = [(voices / line["overlay"]["file"], at + line["overlay"]["at"], line["overlay"]["length"])
+                    for line, at in zip(script["lines"], starts)
+                    if "overlay" in line and voices and (voices / line["overlay"]["file"]).is_file()]
         clips.assemble(
-            parts, _under_tracks(_beat(script, total, work), pieces, work), total, video, work, voice, 0.0,
+            parts, _under_tracks(_beat(script, total, work), pieces, work, overlays), total, video, work, voice, 0.0,
             voice_grade=VOICE_CHAIN, duck=DUCK,
         )
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
@@ -1600,6 +1629,13 @@ def _selftest() -> None:
     assert problems({**good, "lines": [*good["lines"], clip, {**clip, "say": "Поверх", "track": {"query": "a — b", "length": 1}}]},
                     good["id"]) == []
     assert line_seconds(clip) == 2 and line_seconds({**clip, "say": "ф", "track": {"length": 1}}) == SAY_SECONDS
+    # Наложенный звук: строка тянется до его конца; имя с цифры сборка приняла бы за дубль.
+    over = {"say": "Фраза", "overlay": {"file": "shaman.wav", "at": 2.2, "length": 3.6}, "screen": clip["screen"]}
+    assert problems({**good, "lines": [*good["lines"], over]}, good["id"]) == []
+    assert abs(line_seconds(over) - 5.8) < 1e-9 and line_seconds({"say": "ф"}) == SAY_SECONDS
+    for overlay in ({"file": "4.wav", "at": 1, "length": 1}, {"file": "a.txt", "at": 1, "length": 1},
+                    {"file": "a.wav", "at": -1, "length": 1}, {"file": "a.wav", "at": 1, "length": 11}):
+        broken("overlay", lines=[{**over, "overlay": overlay}])
     assert spoken_frames({"lines": [clip, {"say": "ф"}]}) == [2] and "поверх отрывка" in line_text(1, 1, {**clip, "say": "ф"})
     for track, word in (({"id": 5, "length": 11}, "length"), ({"id": 5, "start": 25, "length": 6}, "start + length"),
                         ({"length": 2}, "id трека"), ({"id": 5.0, "length": 2}, "id трека"), ({"query": "a"}, "length")):
@@ -1913,6 +1949,12 @@ def _selftest() -> None:
         clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=200:d=6", "-ac", "2", "-ar", "44100", str(beat)])
         mixed = _under_tracks(beat, [(piece, 2.0, 2.0)], Path(tmp))
         assert _under_tracks(beat, [], Path(tmp)) == beat
+        # Наложенный звук — на своём месте, а бит под ним не глохнет.
+        over_dir = Path(tmp) / "over"
+        over_dir.mkdir()
+        layered = _under_tracks(beat, [], over_dir, [(piece, 2.0, 2.0)])
+        assert tone(0, layered, (2.3, 3.7), 1000) > 1000 and tone(0, layered, (0.5, 1.5), 1000) < 100, "наложение не на месте"
+        assert tone(0, layered, (2.3, 3.7), 200) > tone(0, layered, (0.5, 1.5), 200) * 0.8, "бит под наложением заглох"
         before, during = tone(0, mixed, (0.5, 1.5), 200), tone(0, mixed, (2.3, 3.7), 200)
         assert tone(0, mixed, (2.3, 3.7), 1000) > 1000 and tone(0, mixed, (0.5, 1.5), 1000) < 100, "отрывок не на месте"
         assert during < before * 0.2 and tone(0, mixed, (4.5, 5.5), 200) > before * 0.8, (before, during)
