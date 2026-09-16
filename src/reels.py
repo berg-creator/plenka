@@ -1413,16 +1413,22 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     encode = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-movflags", "+faststart"]
     # Граница концовки — номером кадра, а не секундой: секунда в три знака округляется
     # вверх мимо кадра (34,967 > 34,9667), и первый кадр плашки мелькал в конце TikTok-версии.
+    # В overlay граница — временем посередине между кадрами, а не `n`, и картинки идут
+    # с частотой ролика: по умолчанию -loop даёт 25 кадров против 30, и ffmpeg в Actions
+    # считал `n` не по тем кадрам — адрес на концовке горел на одном кадре из шести,
+    # мигал (gta6, 16.09.2026). Локальный ffmpeg новее и этого не показывал.
     plate_frame = round(ending_at * clips.FPS)
+    edge = (plate_frame - 0.5) / clips.FPS
     clips.run([
         # reinit_filter 0: отрезки ролика разные по цветовому диапазону (фото — pc, видео — tv),
         # и на каждой смене ffmpeg пересобирал граф, теряя вход субтитров до конца ролика.
         clips.ffmpeg(), "-y", "-reinit_filter", "0", "-i", str(raw), "-f", "concat", "-safe", "0", "-i", str(listing),
-        "-loop", "1", "-i", str(work / "badge.png"), "-loop", "1", "-i", str(work / "ending.png"),
+        "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "badge.png"),
+        "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "ending.png"),
         "-filter_complex",
         "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split[b1][b2];"
-        f"[2:v]format=rgba[m];[b1][m]overlay=0:0:shortest=1:enable='lt(n,{plate_frame})'[marked];"
-        f"[3:v]format=rgba[e];[marked][e]overlay=0:0:shortest=1:enable='gte(n,{plate_frame})',format=yuv420p[main];"
+        f"[2:v]format=rgba[m];[b1][m]overlay=0:0:shortest=1:enable='lt(t,{edge:.4f})'[marked];"
+        f"[3:v]format=rgba[e];[marked][e]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[main];"
         f"[b2]trim=end_frame={plate_frame},format=yuv420p[tt];"
         f"[0:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ta]",
         "-map", "[main]", "-map", "0:a", *encode, "-c:a", "copy", str(video),
@@ -1842,6 +1848,9 @@ def _selftest() -> None:
         assert blue(0.7, video) and not blue(0.7, tiktok(video)), "метка только в основном ролике"
         assert wheel(3.6, video) and white(3.6, middle), "аватар и адрес на концовке"
         assert white(3.6, (BAIT_Y - 0.015, BAIT_Y + 0.015)), "приманка на концовке"
+        # Кадр за кадром с первого кадра плашки: адрес мигал, горя на одном кадре из шести.
+        for frame in range(89, 96):
+            assert white(frame / 30 + 0.01, middle), (frame, "адрес мигает на концовке")
         for at in (0.6, 3.6):
             assert not white(at, (SAFE_BOTTOM, 1.0)), (at, "внизу — интерфейс площадки")
             assert not white(at, (0.0, 1.0), columns=(SAFE_RIGHT, 1.0)), (at, "справа — колонка кнопок")
