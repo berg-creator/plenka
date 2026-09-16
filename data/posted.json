@@ -569,6 +569,12 @@
       "file": "20260916-092615-3418-news.json",
       "published_at": "2026-09-16T09:26:24+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260916-110918-3707-news.json",
+      "published_at": "2026-09-16T11:09:25+00:00",
+      "rubric": "news"
     }
   ]
 }
