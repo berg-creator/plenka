@@ -55,9 +55,10 @@
 а без него `say` как есть (в `subtitle` числа цифрами: «14 лет», голосу нужны
 слова), кусками по 2–4 слова, время кусков — по буквам внутри речи строки,
 найденной по дублю. Распознавание речи отвергнуто: оно тянет тяжёлую
-зависимость, а текст и так известен дословно. Субтитр стоит на 68% высоты, над
-интерфейсом Shorts и TikTok; где внизу картинки своя надпись (пустой файл-метка
-`<кадр>-<n>.top` рядом), он уходит наверх, под вкладки площадки. Метка
+зависимость, а текст и так известен дословно. Субтитр стоит на 68% высоты,
+кеглем одним на весь ролик, толстой обводкой и мягким тёмным ореолом —
+белое на белом иначе не читалось; где внизу картинки своя надпись (пустой файл-метка
+`<кадр>-<n>.top` рядом), он уходит наверх, под метку канала. Метка
 `<кадр>-<n>.nosub` у картинки выключает субтитры, пока она на экране: кадр сам
 говорит текст (вырезки поста, заголовок статьи).
 
@@ -71,10 +72,15 @@
 висит метка: значок Telegram и config.CHANNEL_HANDLE. После последнего кадра —
 плашка PLATE_SECONDS: крутящийся аватар канала (avatar-wheel), адрес со значком
 и под ним строка-приманка BAIT — зачем идти в канал (разбор вкуса в боте), бит
-на ней затухает. Ссылка на бота — в описании, её требует проверка. TikTok ссылки на чужие площадки режет в охвате, поэтому
-вторая версия — тот же аватар без метки, адреса и приманки: тот же проход ffmpeg пишет оба файла, бот шлёт их
-подряд. Метка — в верхних 6–10% слева: ниже вкладок площадки, выше поднятого
-субтитра (22%), и не там, где у Shorts кнопки (справа внизу) и подпись (низ).
+на ней затухает. Ссылка на бота — в описании, её требует проверка. TikTok ссылки
+на чужие площадки режет в охвате, поэтому вторая версия — без метки и без
+концовки вовсе: аватар без адреса никуда не зовёт (владелец, 16.09.2026). Она
+кончается с последней строкой, звук гаснет за TIKTOK_FADE. Оба файла пишет
+один проход ffmpeg, бот шлёт их подряд.
+
+Всё своё в кадре — субтитры, мемная надпись, метка, концовка — внутри безопасной
+зоны SAFE_*: её сняли 16.09.2026 с записи экрана, где Shorts срезал края
+и закрывал метку стрелкой «назад», а субтитр во всю ширину — колонкой кнопок.
 
 Звук самого трека — строка `track`: отрывок 30-секундного превью iTunes
 (его без ключа отдаёт магазин, так же берёт отрывок СЛЕПАЯ ПРОСЛУШКА),
@@ -173,35 +179,62 @@ TODAY = "сегодня до 21:00 МСК"
 # эта нужна, чтобы и без дубля кадр было видно в превью.
 SAY_SECONDS = 1.5
 STILL_ZOOM = 0.07
+
+# Безопасная зона кадра, доли ширины и высоты: всё своё текстовое и метка — внутри.
+# Замер по записи экрана iPhone с опубликованным keef3 в Shorts, 16.09.2026:
+# на высоком экране Shorts растягивает ролик и срезает по 4,5% ширины с боков;
+# сверху до 12% высоты — панель со стрелкой «назад» и поиском (метка в углу
+# сидела под стрелкой, значок срезан краем); справа от 81% ширины на 52–91%
+# высоты — колонка лайка, комментариев и «поделиться»; снизу от 80% — канал,
+# название и просмотры. У TikTok и VK Клипов так же: колонка справа, подпись
+# снизу, — поэтому зона одна на все площадки, с запасом от каждой границы.
+SAFE_LEFT, SAFE_RIGHT = 0.07, 0.80
+SAFE_TOP, SAFE_BOTTOM = 0.13, 0.78
+# Надпись по центру кадра не шире этой доли: правый край упирается в колонку кнопок.
+SAFE_TEXT = 2 * min(0.5 - SAFE_LEFT, SAFE_RIGHT - 0.5)
+
 # Плашка-концовка: длина, аватар и где по высоте адрес под ним; метка по ходу ролика.
 PLATE_SECONDS = 1.3
 PLATE_BG = (22, 21, 24)
 WHEEL = config.ROOT / "assets" / "avatar" / "avatar-wheel.mp4"
-PLATE_WHEEL = 720
-PLATE_TOP = 520
-ENDING_Y = 0.715
-# Строка-приманка под адресом: зачем идти в канал. Выше нижних 20% — там интерфейс площадки.
+# Аватар по ширине в SAFE_TEXT: шире — его правый бок уходит под кнопки.
+PLATE_WHEEL = 640
+PLATE_TOP = 530
+ENDING_Y = 0.675
+# Строка-приманка под адресом: зачем идти в канал. Низ — выше SAFE_BOTTOM с запасом.
 BAIT = "бот разберёт твой вкус"
-BAIT_Y = 0.775
-BADGE_XY = (36, 118)
+BAIT_Y = 0.735
+# Метка — левый верхний угол безопасной зоны: правее среза и ниже панели.
+BADGE_XY = (round(SAFE_LEFT * 1080), round(SAFE_TOP * 1920))
+BADGE_HEIGHT = 80
+# Звук TikTok-версии гаснет, а не обрывается на последнем слове.
+TIKTOK_FADE = 0.3
 TELEGRAM_BLUE = (42, 171, 238)
 NOSUB_MARK = ".nosub"
 AT_MARK = ".at"
 # Всё обрезается под 9:16. Шире этого — панорама, от которой в кадре осталась
 # бы пятая часть, и только она встаёт целиком на размытую копию.
 BLUR_WIDER = 2.4
-# Мемная надпись (`caption`) — сверху, как в пересылаемых мемах, но ниже вкладок
-# Shorts и TikTok: верхние двести с лишним точек занимает их интерфейс.
-CAPTION_TOP = 260
-CAPTION_PAD = 60
+# Мемная надпись (`caption`) — сверху, как в пересылаемых мемах, но под меткой.
+CAPTION_TOP = 350
 CAPTION_SIZES = ((150, 1), (128, 1), (112, 1), (96, 1), (88, 1), (112, 2), (96, 2), (80, 3))
 
 # Субтитры: слов в куске, центр по высоте кадра — обычно и когда внизу своя
-# надпись. Нижние 20% кадра — интерфейс площадок, верхние ~12% — их вкладки.
+# надпись (тогда ниже метки). Кегль один на весь ролик: на keef3 кегль под
+# длину куска скакал от куска к куску. Ширина — SAFE_TEXT, и кусок, который
+# в две строки не лезет, режет chunks (SUB_LETTERS), а не мельчит шрифт:
+# 88 точек и 18 букв — ни одного куска в три строки на всех сценариях 16.09.2026.
 SUB_WORDS = 4
-SUB_LETTERS = 20
+SUB_LETTERS = 18
+SUB_SIZE = 88
+# Белые буквы на белом (логотип GTA, футболка) сливались: обводка вдвое толще мемной
+# и мягкий тёмный ореол под буквами, ~60% черноты. Кадр целиком не темнеет —
+# картинка по решению владельца чистая.
+SUB_STROKE = 9
+SUB_HALO = 24
+SUB_HALO_ALPHA = 150
 SUB_LOW = 0.68
-SUB_HIGH = 0.22
+SUB_HIGH = 0.25
 TOP_MARK = ".top"
 
 GIPHY_SEARCH = "https://api.giphy.com/v1/gifs/search"
@@ -837,7 +870,7 @@ def _fill(screen: dict, work: Path) -> dict:
     return {"query": screen.get("query", "")}
 
 
-def caption(layer, text: str):
+def caption(layer, text: str, sizes=CAPTION_SIZES, stroke: int = 0, halo: int = 0):
     """Мемная надпись сверху кадра: белые буквы с чёрной обводкой и тенью.
 
     Узкий жирный Oswald, а не Arimo мемов канала (card.render_meme): поверх
@@ -846,7 +879,9 @@ def caption(layer, text: str):
     из пересылки: белые буквы, чёрная обводка. Отдельно от `text`: та надпись —
     ярлык фразы в нижней трети, а эта — реплика самого мема, её место сверху.
     Верх кадра под неё свободен не всегда: фото выбирай, где голова героя
-    ниже верхней пятой части.
+    ниже верхней пятой части. Ширина — SAFE_TEXT вместе с обводкой.
+    `sizes` — кегли по очереди с числом строк; у субтитров он один. `stroke` —
+    обводка в точках (0 — по кеглю), `halo` — радиус широкого тёмного ореола (0 — без него).
     """
     from PIL import Image, ImageDraw, ImageFilter
 
@@ -854,19 +889,26 @@ def caption(layer, text: str):
 
     ink = Image.new("RGBA", layer.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(ink)
-    # Одна строка крупно лучше двух, две — лучше мелкой одной.
-    for size, most in CAPTION_SIZES:
-        font = stories.font(size, 600)
-        lines = card._wrap(draw, text.strip(), font, layer.width - 2 * CAPTION_PAD)
+    # Одна строка крупно лучше двух, две — лучше мелкой одной. Тире не уезжает
+    # на строку одно: на время переноса оно приклеено к слову знаком из личной
+    # области Юникода — он не пробел и шире пробела, так что строка не вылезет.
+    glued = text.strip().replace(" —", "\ue000—")
+    for size, most in sizes:
+        font, outline = stories.font(size, 600), stroke or max(4, size // 16)
+        lines = [line.replace("\ue000", " ") for line in card._wrap(draw, glued, font, layer.width * SAFE_TEXT - 2 * outline)]
         if len(lines) <= most:
             break
     for number, line in enumerate(lines):
         draw.text(
             (layer.width / 2, CAPTION_TOP + number * size * 1.1), line, font=font, fill=(255, 255, 255, 255),
-            anchor="ma", stroke_width=max(4, size // 16), stroke_fill=(0, 0, 0, 255),
+            anchor="ma", stroke_width=outline, stroke_fill=(0, 0, 0, 255),
         )
     shade = Image.new("RGBA", layer.size, (0, 0, 0, 0))
     shade.putalpha(ink.getchannel("A").filter(ImageFilter.GaussianBlur(10)).point(lambda a: min(255, a * 2)))
+    if halo:
+        glow = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+        glow.putalpha(ink.getchannel("A").filter(ImageFilter.GaussianBlur(halo)).point(lambda a: min(SUB_HALO_ALPHA, a * 3)))
+        layer = Image.alpha_composite(layer, glow)
     return Image.alpha_composite(Image.alpha_composite(layer, shade), ink)
 
 
@@ -1167,7 +1209,7 @@ def chunks(say: str) -> list[str]:
         current.append(word)
         left = len(words) - index - 1
         # Длинные слова режутся раньше: «общественной безопасности» четырьмя
-        # словами в строку крупно не влезают, и кегль мельчал.
+        # словами не влезают и в две строки SUB_SIZE, а кегль не мельчает.
         # Конец предложения держит кусок при себе: «сентября. После» — два разных смысла.
         ends = word.rstrip("»")[-1:] in ".!?"
         after = words[index + 1] if left else ""
@@ -1225,12 +1267,13 @@ def high(screen: dict) -> bool:
 
 
 def subtitle(text: str, up: bool):
-    """Кадр субтитра: прозрачный 1080×1920, кусок стоит на своей высоте."""
+    """Кадр субтитра: прозрачный 1080×1920, кусок стоит на своей высоте, кегль SUB_SIZE до двух строк."""
     from PIL import Image
 
     from . import clips
 
-    ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), text)
+    ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), text, sizes=((SUB_SIZE, 2),),
+                  stroke=SUB_STROKE, halo=SUB_HALO)
     left, top, right, bottom = ink.getbbox()
     frame = Image.new("RGBA", ink.size)
     frame.alpha_composite(ink.crop((0, top, clips.WIDTH, bottom)),
@@ -1279,13 +1322,13 @@ def handle_mark(height: int, pill: bool):
 
 
 def badge():
-    """Метка по ходу основного ролика: небольшая, в левом верхнем углу, ниже вкладок площадки."""
+    """Метка по ходу основного ролика: небольшая, в левом верхнем углу безопасной зоны."""
     from PIL import Image
 
     from . import clips
 
     frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
-    frame.alpha_composite(handle_mark(80, pill=True), BADGE_XY)
+    frame.alpha_composite(handle_mark(BADGE_HEIGHT, pill=True), BADGE_XY)
     return frame
 
 
@@ -1337,8 +1380,10 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
     один вход: список кадров с длительностями (concat), пустой прозрачный кадр
     закрывает паузы; тридцать картинок-входов ffmpeg не тянул и вставал.
-    Метка до `ending_at` и адрес после — только в основном файле, TikTok-версия
-    та же, но без них.
+    Метка до `ending_at` и концовка после — только в основном файле. TikTok-версия
+    кончается на `ending_at`, со звуком, гаснущим за TIKTOK_FADE: аватар без
+    адреса никуда не зовёт (владелец, 16.09.2026), а оборванный на полудоле бит
+    звучит поломкой.
     """
     from PIL import Image
 
@@ -1366,6 +1411,9 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     raw = work / "no-subs.mp4"
     video.replace(raw)
     encode = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-movflags", "+faststart"]
+    # Граница концовки — номером кадра, а не секундой: секунда в три знака округляется
+    # вверх мимо кадра (34,967 > 34,9667), и первый кадр плашки мелькал в конце TikTok-версии.
+    plate_frame = round(ending_at * clips.FPS)
     clips.run([
         # reinit_filter 0: отрезки ролика разные по цветовому диапазону (фото — pc, видео — tv),
         # и на каждой смене ffmpeg пересобирал граф, теряя вход субтитров до конца ролика.
@@ -1373,11 +1421,12 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
         "-loop", "1", "-i", str(work / "badge.png"), "-loop", "1", "-i", str(work / "ending.png"),
         "-filter_complex",
         "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split[b1][b2];"
-        f"[2:v]format=rgba[m];[b1][m]overlay=0:0:shortest=1:enable='lt(t,{ending_at:.3f})'[marked];"
-        f"[3:v]format=rgba[e];[marked][e]overlay=0:0:shortest=1:enable='gte(t,{ending_at:.3f})',format=yuv420p[main];"
-        "[b2]format=yuv420p[tt]",
+        f"[2:v]format=rgba[m];[b1][m]overlay=0:0:shortest=1:enable='lt(n,{plate_frame})'[marked];"
+        f"[3:v]format=rgba[e];[marked][e]overlay=0:0:shortest=1:enable='gte(n,{plate_frame})',format=yuv420p[main];"
+        f"[b2]trim=end_frame={plate_frame},format=yuv420p[tt];"
+        f"[0:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ta]",
         "-map", "[main]", "-map", "0:a", *encode, "-c:a", "copy", str(video),
-        "-map", "[tt]", "-map", "0:a", *encode, "-c:a", "copy", str(tiktok(video)),
+        "-map", "[tt]", "-map", "[ta]", *encode, "-c:a", "aac", "-b:a", "160k", str(tiktok(video)),
     ])
 
 
@@ -1475,7 +1524,7 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
     topic = f"<b>{html.escape(script['topic'], quote=False)}</b>"
     telegram.send_video_file(admin, video, f"{topic}\nдля YouTube и VK")
     if tiktok(video).exists():
-        telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — без адреса канала")
+        telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — без концовки и адреса канала")
     # Превью документом, а не фото: фото Telegram пережимает до 1280 точек
     # по длинной стороне, а обложке нужен кадр 1080×1920 как есть. Отправки
     # документа в telegram.py нет — метод API зовётся напрямую.
@@ -1496,6 +1545,13 @@ def _selftest() -> None:
     import io
 
     from . import host, moderate
+
+    def inked(layer) -> tuple[int, int, int, int]:
+        """Рамка белых букв надписи — без чёрной обводки и тени."""
+        from PIL import Image
+
+        ground = Image.new("RGBA", layer.size, (0, 0, 0, 255))
+        return Image.alpha_composite(ground, layer).convert("L").point(lambda v: 255 if v > 240 else 0).getbbox()
 
     good = {
         "id": "20260914-test",
@@ -1586,9 +1642,12 @@ def _selftest() -> None:
         assert abs(shots[3].seconds - 1.25) < 0.04 and shots[1].subject == "Bones"
         assert shots[4].backdrop.endswith("this-is-fine.jpg"), shots[4]
         assert shots[0].layer.size == (1080, 1920)
-        # Мемная надпись ложится сверху, ниже вкладок площадки.
+        # Мемная надпись ложится сверху, под меткой и в безопасной зоне по ширине.
         band = (0, CAPTION_TOP, 1080, CAPTION_TOP + 100)
         assert shots[4].layer.crop(band).getchannel("A").getextrema()[1] > 0
+        box = inked(caption(shots[4].layer.copy(), "мемная подпись длиной почти во всю ширину кадра"))
+        assert box[0] >= SAFE_LEFT * 1080 and box[2] <= SAFE_RIGHT * 1080, box
+        assert box[1] > BADGE_XY[1] + BADGE_HEIGHT and box[3] <= SAFE_BOTTOM * 1920, box
         assert shots[3].layer.crop(band).getchannel("A").getextrema()[1] == 0
         # Ярлыков сценария нет: у лица с именем, стока и карточки с text слой пустой.
         assert all(shot.layer.getchannel("A").getextrema()[1] == 0 for shot in shots[:4])
@@ -1700,10 +1759,27 @@ def _selftest() -> None:
         assert not high({"kind": PIC, "path": str(pic)})
         pic.with_suffix(TOP_MARK).touch()
         assert high({"kind": PIC, "path": str(pic)})
-    # Самый длинный кусок не заходит в нижние 20% кадра и не лезет под вкладки сверху.
-    box = subtitle("четырнадцать лет концерт почти", False).getbbox()
-    assert box[3] <= 0.8 * 1920 and box[1] > 0.5 * 1920, box
-    assert subtitle("четырнадцать лет концерт почти", True).getbbox()[1] >= 0.1 * 1920
+    # Куски keef3 и keef2 одного кегля (кегль не подбирается) и не выше двух строк; буквы не заходят
+    # ни под интерфейс внизу, ни под колонку кнопок справа, а поднятые — под метку. Ореол может.
+    for say in [line["say"] for line in said["lines"] if "say" in line] + ["Концерт перенесли на двадцать третье сентября."]:
+        for part in chunks(say):
+            low, up = inked(subtitle(part, False)), inked(subtitle(part, True))
+            assert low[3] - low[1] < 2.5 * SUB_SIZE, part
+            assert 0.5 * 1920 < low[1] and low[3] <= SAFE_BOTTOM * 1920 and up[1] > BADGE_XY[1] + BADGE_HEIGHT, (part, low, up)
+            assert SAFE_LEFT * 1080 <= low[0] and low[2] <= SAFE_RIGHT * 1080, (part, low)
+    # Тире не висит одно на второй строке: переносится вместе со словом.
+    dash = subtitle("соседнем городе —", False)
+    bottom = inked(dash)[3]
+    last = inked(dash.crop((0, bottom - SUB_SIZE // 2, 1080, bottom)))
+    assert last[2] - last[0] > 2 * SUB_SIZE, last
+    # Белое на белом читается: вокруг букв на белом кадре тёмный ореол, а не только тонкая обводка.
+    from PIL import Image
+
+    sub = subtitle("Как угрозу", False)
+    box, on_white = inked(sub), Image.alpha_composite(Image.new("RGBA", sub.size, (255, 255, 255, 255)), sub).convert("L")
+    # В 20–28 точках от белых букв: у обводки в 4 точки или без ореола там уже светлее 100.
+    assert on_white.crop((box[0], box[1] - 28, box[2], box[1] - 20)).getextrema()[0] < 100, "ореола над буквами нет"
+    assert on_white.crop((box[2] + 20, box[1], box[2] + 28, box[3])).getextrema()[0] < 100, "ореола справа от букв нет"
 
     # Вжигание: кусок виден в своё время и на своей высоте, в паузе кадр чистый.
     with tempfile.TemporaryDirectory() as tmp:
@@ -1712,54 +1788,76 @@ def _selftest() -> None:
         from . import clips
 
         # Ролик из двух отрезков с разным цветовым диапазоном, как склейка фото и видео, и плашки с аватаром.
-        for name, fmt in (("a", "yuvj420p"), ("b", "yuv420p")):
+        # Второй отрезок на кадр короче: плашка встаёт на 89-й кадр (2,9667 с), а не на круглую секунду,
+        # как в сборке. Звук — тон на весь ролик, отдельной дорожкой, как в clips.assemble: так
+        # кадры начинаются с нуля, и слышно, как гаснет конец TikTok-версии.
+        for name, fmt, seconds in (("a", "yuvj420p", "1.5"), ("b", "yuv420p", f"{44 / 30}")):
             clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "color=c=gray:s=1080x1920:r=30:d=1.5",
-                       "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-t", "1.5", "-pix_fmt", fmt,
-                       "-c:v", "libx264", "-c:a", "aac", str(Path(tmp) / f"{name}.mp4")])
+                       "-t", seconds, "-pix_fmt", fmt, "-c:v", "libx264", str(Path(tmp) / f"{name}.mp4")])
         spin = plate(Path(tmp))
-        clips.run([clips.ffmpeg(), "-y", "-i", str(spin), "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
-                   "-shortest", "-c:v", "libx264", "-c:a", "aac", str(Path(tmp) / "c.mp4")])
-        (Path(tmp) / "ab.txt").write_text("".join(f"file '{Path(tmp) / n}.mp4'\n" for n in "abc"), encoding="utf-8")
+        (Path(tmp) / "ab.txt").write_text("".join(f"file '{p}'\n" for p in (Path(tmp) / "a.mp4", Path(tmp) / "b.mp4", spin)),
+                                          encoding="utf-8")
         video = Path(tmp) / "v.mp4"
-        clips.run([clips.ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(Path(tmp) / "ab.txt"), "-c", "copy", str(video)])
+        clips.run([clips.ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(Path(tmp) / "ab.txt"),
+                   "-f", "lavfi", "-i", "sine=f=440:r=48000", "-map", "0:v", "-map", "1:a", "-shortest",
+                   "-c:v", "copy", "-c:a", "aac", str(video)])
         # Куски встык, как внутри строки: конец одного с погрешностью деления равен началу другого.
-        burn(video, [("раз", 0.1, 0.3 + 1e-12, False), ("раз два", 0.3, 0.9, False), ("четыре", 0.9 - 1e-12, 1.0, False),
-                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=3.0)
+        burn(video, [("раз", 0.1, 0.3 + 1e-12, False), ("общественной безопасности.", 0.3, 0.9, False),
+                     ("четыре", 0.9 - 1e-12, 1.0, False),
+                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=89 / 30)
 
-        def white(at: float, band: tuple[float, float], source: Path = video) -> bool:
-            frame = Path(tmp) / "f.png"
-            clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(source), "-frames:v", "1", str(frame)])
-            crop = Image.open(frame).convert("L").crop((0, int(1920 * band[0]), 1080, int(1920 * band[1])))
+        def still(at: float, source: Path):
+            """Кадр ролика на секунде `at`; отрицательная — последний кадр файла, ищется от конца."""
+            frame = Path(tmp) / "still.png"
+            # Кадр за концом файла ffmpeg не пишет — прежний снимок не должен пройти за новый.
+            frame.unlink(missing_ok=True)
+            clips.run([clips.ffmpeg(), "-y", "-sseof" if at < 0 else "-ss", f"{at}", "-i", str(source),
+                       *(("-update", "1") if at < 0 else ("-frames:v", "1")), str(frame)])
+            return Image.open(frame)
+
+        def white(at: float, band: tuple[float, float], source: Path = video, columns=(0.0, 1.0)) -> bool:
+            crop = still(at, source).convert("L").crop(
+                (int(1080 * columns[0]), int(1920 * band[0]), int(1080 * columns[1]), int(1920 * band[1])))
             return crop.getextrema()[1] > 240
 
-        low, top = (0.6, 0.78), (0.16, 0.32)
+        # Верхняя полоса — ниже метки: белые буквы адреса в ней не должны считаться субтитром.
+        low, top = (0.6, SAFE_BOTTOM), (0.2, 0.32)
         assert white(0.6, low) and not white(0.6, top), "первый кусок внизу"
         assert not white(1.4, low) and not white(1.4, top), "пауза без субтитра"
         assert white(2.3, top) and not white(2.3, low), "второй кусок наверху"
 
         def blue(at: float, source: Path) -> bool:
-            frame = Path(tmp) / "b.png"
-            clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(source), "-frames:v", "1", str(frame)])
             x, y = BADGE_XY
-            r, g, b = Image.open(frame).convert("RGB").crop((x, y, x + 100, y + 80)).resize((1, 1), Image.BOX).getpixel((0, 0))
+            r, g, b = still(at, source).convert("RGB").crop((x, y, x + 100, y + 80)).resize((1, 1), Image.BOX).getpixel((0, 0))
             return b > r + 40
 
         def wheel(at: float, source: Path) -> bool:
-            frame = Path(tmp) / "d.png"
-            clips.run([clips.ffmpeg(), "-y", "-ss", f"{at}", "-i", str(source), "-frames:v", "1", str(frame)])
-            gray = Image.open(frame).convert("L")
+            gray = still(at, source).convert("L")
             # Светлый аватар в центре плашки, тёмный фон за его кругом.
             return gray.getpixel((540 + 180, PLATE_TOP + PLATE_WHEEL // 2 + 180)) > 140 and gray.getpixel((60, PLATE_TOP)) < 60
 
-        # Метка Telegram по ходу — только в основном; аватар на концовке — в обеих; адрес под ним — только в основном.
+        # Метка Telegram по ходу и концовка — аватар, адрес, приманка — только в основном,
+        # и всё белое — в безопасной зоне: не ниже её и не правее, под колонкой кнопок.
         middle = (ENDING_Y - 0.03, ENDING_Y + 0.03)
         assert blue(0.7, video) and not blue(0.7, tiktok(video)), "метка только в основном ролике"
-        assert wheel(3.6, video) and wheel(3.6, tiktok(video)), "аватар канала на концовке обеих версий"
-        assert white(3.6, middle) and not white(3.6, middle, tiktok(video)), "адрес на концовке только в основном"
-        bait = (BAIT_Y - 0.015, BAIT_Y + 0.015)
-        assert white(3.6, bait) and not white(3.6, bait, tiktok(video)), "приманка на концовке только в основном"
-        assert not white(0.6, (0.8, 1.0)) and not white(3.6, (0.8, 1.0)), "в нижние 20% — интерфейс площадки"
-        assert abs(clips.probe_seconds(tiktok(video)) - clips.probe_seconds(video)) < 0.1
+        assert wheel(3.6, video) and white(3.6, middle), "аватар и адрес на концовке"
+        assert white(3.6, (BAIT_Y - 0.015, BAIT_Y + 0.015)), "приманка на концовке"
+        for at in (0.6, 3.6):
+            assert not white(at, (SAFE_BOTTOM, 1.0)), (at, "внизу — интерфейс площадки")
+            assert not white(at, (0.0, 1.0), columns=(SAFE_RIGHT, 1.0)), (at, "справа — колонка кнопок")
+        # TikTok-версия кончается с последней строкой: без плашки, звук гаснет, а не обрывается.
+        assert abs(clips.probe_seconds(tiktok(video)) - (clips.probe_seconds(video) - PLATE_SECONDS)) < 0.1
+        assert not wheel(-0.3, tiktok(video)) and wheel(3.0, video), "первый кадр плашки в TikTok-версии"
+        sound = Path(tmp) / "tiktok.wav"
+        clips.run([clips.ffmpeg(), "-y", "-i", str(tiktok(video)), "-ac", "1", "-ar", "8000", "-c:a", "pcm_s16le", str(sound)])
+        with wave.open(str(sound)) as take:
+            samples = array.array("h", take.readframes(take.getnframes()))
+
+        def loudness(a: float, b: float) -> float:
+            piece = samples[int(a * 8000):int(b * 8000)]
+            return math.sqrt(sum(x * x for x in piece) / len(piece))
+
+        assert loudness(2.92, 2.98) < loudness(2.0, 2.5) * 0.5, "звук TikTok-версии обрывается"
         # Аватар крутится: кольцо вокруг кнопки в первом и среднем кадре плашки разное.
         frames = []
         for at in ("0", "0.6"):
