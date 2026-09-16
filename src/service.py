@@ -52,7 +52,7 @@ LOG_FILE = config.DATA / "service_log.jsonl"
 # Только числа по дню и метке — файл открытый, id человека сюда не попадает.
 # Метки известные наперёд: любая нагрузка /start в счёт забила бы файл мусором.
 SOURCES_FILE = config.DATA / "bot_sources.json"
-SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов"}
+SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов", "pin": "закреп канала"}
 
 CARD_DIR = config.ROOT / "assets" / "cards"
 
