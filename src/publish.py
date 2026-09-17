@@ -237,6 +237,9 @@ def _host(url: str) -> str:
     return urlparse(url).netloc.casefold().removeprefix("www.")
 
 
+LISTEN_HEAD = "▸ Слушать:"
+
+
 def listen(text: str, artist: str, title: str) -> str:
     """Разворачивает строку «▸ Слушать…» в ссылки на площадки прямо в тексте.
 
@@ -256,19 +259,20 @@ def listen(text: str, artist: str, title: str) -> str:
         return text
 
     link = match.group(1)
-    # Четыре площадки — строка, которая на телефоне ещё не переносится. Магазин
-    # находки прибавляется пятым, если в четвёрку не попал: там лежит сам релиз,
-    # а не догадка поиска, и терять такую ссылку жалко.
+    # Магазин находки прибавляется к четвёрке пятым, если в неё не попал: там лежит
+    # сам релиз, а не догадка поиска, и терять такую ссылку жалко. Площадки стоят
+    # отдельной строкой под «Слушать:» — с приставкой «▸ Слушать — » пятая
+    # на телефоне уезжала одна на новую строку, а без неё пять влезают.
     services = list(config.LISTEN_SERVICES[:4])
     services += [s for s in config.LISTEN_SERVICES[4:] if _host(s[1]) == _host(link)]
-    line = "▸ Слушать — " + " · ".join(
+    line = f"{LISTEN_HEAD}\n" + " · ".join(
         f'<a href="{link if _host(search) == _host(link) else search.format(q=query)}">{label}</a>'
         for label, search in services
     )
     return re.sub(r"\n{3,}", "\n\n", _LISTEN_LINE.sub(lambda _: line, text)).strip()
 
 
-TRACK_NOTE = "▸ Или в комментариях ↓"
+TRACK_NOTE = "Или в комментариях ↓"
 # Площадок в посте нет — «или» не к чему, трек называется сам.
 TRACK_ALONE = "▸ Полный трек — в комментариях ↓"
 
@@ -283,16 +287,16 @@ def track_note(text: str, post: dict) -> str:
     строку при правке поста (edit). Во ВКонтакте её нет: туда уходит сохранённый
     текст, а трека под записью там нет.
 
-    Строка «Слушать» остаётся первой, а трек — вторым способом под ней:
-    «▸ Или в комментариях ↓», маркер — в столбик с площадками, стрелка — на кнопку
-    комментариев под постом (владелец).
+    Вид выбрал владелец: под «▸ Слушать:» площадки строкой, под ними
+    «Или в комментариях ↓» — ещё одно место, где послушать; стрелка — на кнопку
+    комментариев под постом.
     """
     if not post.get("full_track_file_id") or TRACK_NOTE in text or TRACK_ALONE in text:
         return text
-    at = text.find("▸ Слушать — ")
+    at = text.find(f"{LISTEN_HEAD}\n")
     if at < 0:
         return f"{text}\n\n{TRACK_ALONE}"
-    end = text.find("\n", at)
+    end = text.find("\n", at + len(LISTEN_HEAD) + 1)
     end = len(text) if end < 0 else end
     return f"{text[:end]}\n{TRACK_NOTE}{text[end:]}"
 
@@ -528,7 +532,7 @@ def _selftest() -> None:
                 "full_track_file_id": "ID"}
         # Строка «Слушать» в подпись сырой не уезжает: она развёрнута в площадки.
         send({**post, "text": 'Текст.\n\n▸ <a href="https://zvuk.com/release/1">Слушать</a>'}, "0")
-        assert sent[0][1].startswith("Текст.\n\n▸ Слушать — <a href=") and sent[0][1].endswith(f"</a>\n{TRACK_NOTE}"), sent[0][1]
+        assert sent[0][1].startswith(f"Текст.\n\n{LISTEN_HEAD}\n<a href=") and sent[0][1].endswith(f"</a>\n{TRACK_NOTE}"), sent[0][1]
         sent.clear()
         # Пост — одна плитка, даже когда трек есть: он уйдёт в комментарии, о чём скажет строка.
         # Возвращается сообщение с текстом поста: по нему правит автопилот точности.
@@ -706,7 +710,7 @@ def _selftest() -> None:
     apple = "https://music.apple.com/us/album/fuel-the-fire-single/6802784931?uo=4"
     post = f'<b>ЗАГОЛОВОК</b>\n\nТекст.\n\n▸ <a href="{apple}">Слушать в Apple Music</a>'
     text = listen(post, "Ghostface Playa", "Fuel the Fire")
-    assert text.startswith("<b>ЗАГОЛОВОК</b>\n\nТекст.\n\n▸ Слушать — "), text
+    assert text.startswith(f"<b>ЗАГОЛОВОК</b>\n\nТекст.\n\n{LISTEN_HEAD}\n<a href="), text
     urls = links(text)
     # Четыре площадки строкой плюс пятый — магазин находки с точной ссылкой.
     assert list(urls) == ["Яндекс", "VK", "Звук", "Spotify", "Apple"], urls

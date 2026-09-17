@@ -356,7 +356,7 @@ def _selftest() -> None:
             assert len(edited) == 1 and edited[0][0::3] == (-100, {"buttons": message["buttons"]}), edited
             caption = edited[0][2]
             assert caption.startswith(new.replace("\n\n" + button, "")) and button not in caption, caption
-            assert "\n\n▸ Слушать — <a href=" in caption, caption
+            assert "\n\n▸ Слушать:\n<a href=" in caption, caption
             assert post_of(config.ARCHIVE / "e-verdict.json") == {**released, "text": new}
 
             # Канал не принял — запуск красный, архив прежний. Тот же текст уже в канале
