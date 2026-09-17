@@ -32,9 +32,12 @@ data/artists.json собран руками в августе 2026-го, и но
 
 Новые идут уровнем auto: оценка ниже ядра и сцены, выше ru_pop
 (collect.TIER_SCORE). Кого рэп-пресса за 30 дней назвала в PROMOTE_NEWS
-новостях, переходит в scene. Кого полгода нет ни в новостях, ни в релизах, выпадает
-из сбора (collect.in_collect), но остаётся в файле — по нему ищутся фото
-и ссылки. Поле seen_at — день, когда о новеньком писали последний раз.
+новостях, переходит в scene, а кого она 90 дней не называет — обратно в auto.
+Поле seen_at — день, когда о новеньком писали последний раз или вышел его
+релиз. Полгода тишины — выпадает из сбора (collect.in_collect), но ещё
+в файле: по нему ищутся фото и ссылки роликов. Год тишины — уходит и из файла:
+ссылка старого ролика тогда просто спросит имя, а фото найдётся поиском.
+Собранных руками всё это не касается — их список решает владелец.
 
 Потолок: сбор спрашивает iTunes раз в 3 секунды на артиста, и тысяча имён
 растянула бы его с девяти минут до часа. Пока рост держат само правило
@@ -60,6 +63,8 @@ SCENE_OUTLETS = frozenset({"The Flow", "RAP.RU", "РЭП СМИ", "HipHopDX", "�
 WINDOW_DAYS = 14
 PROMOTE_DAYS = 30
 PROMOTE_NEWS = 4
+DEMOTE_DAYS = 90
+FORGET_DAYS = 365
 
 RU_VERB = (r"(?:выпус|выпуск|представ|показа|анонс|дропн|записа|перен[её]с|отмени|объяви|сня|"
            r"поеха|верну|возвращ|готов|рассказа|откры|объедин|удали|пожертв|тизер|призна|стал|"
@@ -155,8 +160,13 @@ def store(name: str) -> dict | None:
             "deezer_id": deezer.find_artist_id(same[0]["artistName"])}
 
 
+def forgotten(artist: dict, now: datetime) -> bool:
+    """Год тишины у найденного сами: из базы он уходит совсем."""
+    return "seen_at" in artist and artist["seen_at"] < since(FORGET_DAYS, now)[:10]
+
+
 def refresh(artists: list[dict], rows: list[dict], now: datetime) -> list[str]:
-    """seen_at и переход в scene у тех, кого база нашла сама."""
+    """seen_at, переход между auto и scene и тишина у тех, кого база нашла сама."""
     notes = []
     news = [r for r in rows if r.get("kind") == "news"]
     for artist in artists:
@@ -170,12 +180,18 @@ def refresh(artists: list[dict], rows: list[dict], now: datetime) -> list[str]:
             artist["seen_at"] = max(artist["seen_at"], max(dates)[:10])
         # В scene переводит рэп-пресса, а не шум: Macklemore за сентябрь 2026-го
         # попал в 22 новости, и все — про тур Эда Ширана и Палестину.
-        loud = sum(1 for r in news if r.get("outlet") in SCENE_OUTLETS
-                   and r.get("collected_at", "") >= since(PROMOTE_DAYS, now) and said(name, r.get("title", "")))
+        press = [r.get("collected_at", "") for r in news
+                 if r.get("outlet") in SCENE_OUTLETS and said(name, r.get("title", ""))]
+        loud = sum(1 for d in press if d >= since(PROMOTE_DAYS, now))
         if artist.get("tier") == "auto" and loud >= PROMOTE_NEWS:
             artist["tier"] = "scene"
             notes.append(f"  ↑ {name}: рэп-пресса за {PROMOTE_DAYS} дней — {loud} раз, теперь scene")
-        if not collect.in_collect(artist):
+        elif artist.get("tier") == "scene" and not any(d >= since(DEMOTE_DAYS, now) for d in press):
+            artist["tier"] = "auto"
+            notes.append(f"  ↓ {name}: рэп-пресса молчит {DEMOTE_DAYS} дней — снова auto")
+        if forgotten(artist, now):
+            notes.append(f"  − {name}: тишина с {artist['seen_at']} — убран из базы")
+        elif not collect.in_collect(artist):
             notes.append(f"  · {name}: тишина с {artist['seen_at']} — вне сбора")
     return notes
 
@@ -205,17 +221,18 @@ def run(dry_run: bool) -> int:
     notes = refresh(artists + added, rows, now)
     if notes:
         print("\n".join(notes))
-    print(f"Новых: {len(added)}. В базе станет: {len(artists) + len(added)}.")
+    kept = [a for a in artists + added if not forgotten(a, now)]
+    print(f"Новых: {len(added)}, убрано: {len(artists) + len(added) - len(kept)}. В базе станет: {len(kept)}.")
     if dry_run:
         return 0
-    payload["artists"] = artists + added
+    payload["artists"] = kept
     payload["grown_at"] = today
     state.write_json(config.ARTISTS_FILE, payload)
     return 0
 
 
 def _selftest() -> int:
-    """Без сети: извлечение имён, два издания и рэп-пресса, обычные слова, переход и тишина."""
+    """Без сети: извлечение имён, два издания и рэп-пресса, обычные слова, переходы, тишина и забвение."""
     from datetime import timezone
     from unittest import mock
 
@@ -273,6 +290,15 @@ def _selftest() -> int:
         assert not collect.in_collect(quiet) and collect.in_collect(fresh), notes
         assert collect.in_collect({"name": "Bones", "tier": "core"})
         assert not collect.in_collect({"name": "Баста", "tier": "ru_pop"})
+
+        # Рэп-пресса замолчала на 90 дней — обратно в auto; год тишины — вон из базы,
+        # собранных руками это не касается.
+        later = now + timedelta(days=DEMOTE_DAYS + 1)
+        refresh([fresh], loud, later)
+        assert fresh["tier"] == "auto", "молчание рэп-прессы не вернуло в auto"
+        old = {"name": "Old Name", "tier": "auto", "seen_at": "2025-09-01"}
+        assert forgotten(old, now) and not forgotten(quiet, now) and not forgotten({"name": "Bones"}, now)
+        assert "убран из базы" in "".join(refresh([old], [], now))
     print("newcomers: самопроверка пройдена")
     return 0
 
