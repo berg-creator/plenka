@@ -406,7 +406,7 @@ def problems(script, name: str = "") -> list[str]:
             errors.append(f"description: нет приманки со ссылкой {BOT_LINK} — строка из «Тянуть в Telegram» в брифе")
         elif (gorod := re.search(re.escape(GOROD_LINK) + r"([\w-]*)", description)) and not artist_by_slug(gorod.group(1)):
             errors.append(f"description: в ссылке {GOROD_LINK}{gorod.group(1)} нет артиста из data/artists.json — "
-                          "адрес пишется как в Яндекс Афише: Баста → basta, Три дня дождя → tri-dnia-dozhdia")
+                          "адрес пишется как в Яндекс Афише: Toxi$ → toxi, Три дня дождя → tri-dnia-dozhdia")
 
     comment = script.get("comment")
     if "comment" in script and not (_filled(comment) and len(comment) <= COMMENT_MAX):
