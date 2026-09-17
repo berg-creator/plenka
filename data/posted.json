@@ -605,6 +605,12 @@
       "file": "20260912-080844-9079-lineage.json",
       "published_at": "2026-09-17T08:27:03+00:00",
       "rubric": "lineage"
+    },
+    {
+      "chat": "channel",
+      "file": "20260917-111746-8673-news.json",
+      "published_at": "2026-09-17T11:17:52+00:00",
+      "rubric": "news"
     }
   ]
 }
