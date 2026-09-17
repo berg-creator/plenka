@@ -599,6 +599,12 @@
       "file": "20260917-050152-7245-release.json",
       "published_at": "2026-09-17T05:22:25+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20260912-080844-9079-lineage.json",
+      "published_at": "2026-09-17T08:27:03+00:00",
+      "rubric": "lineage"
     }
   ]
 }
