@@ -272,7 +272,7 @@ def listen(text: str, artist: str, title: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", _LISTEN_LINE.sub(lambda _: line, text)).strip()
 
 
-TRACK_NOTE = "Или в комментариях ↓"
+TRACK_NOTE = "▸ Или в комментариях ↓"
 # Площадок в посте нет — «или» не к чему, трек называется сам.
 TRACK_ALONE = "▸ Полный трек — в комментариях ↓"
 
@@ -288,7 +288,7 @@ def track_note(text: str, post: dict) -> str:
     текст, а трека под записью там нет.
 
     Вид выбрал владелец: под «▸ Слушать:» площадки строкой, под ними
-    «Или в комментариях ↓» — ещё одно место, где послушать; стрелка — на кнопку
+    «▸ Или в комментариях ↓» — второй способ наравне со «Слушать»; стрелка — на кнопку
     комментариев под постом.
     """
     if not post.get("full_track_file_id") or TRACK_NOTE in text or TRACK_ALONE in text:
