@@ -23,7 +23,7 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
-from . import card, collect, config, footage, llm, quality, state, telegram
+from . import card, collect, config, footage, llm, quality, state, telegram, tracks
 from .sources import deezer, itunes, youtube_comments
 
 log = logging.getLogger("compose")
@@ -89,6 +89,8 @@ def save_post(
         "artist": (source or {}).get("artist", ""),
         "preview": lead.get("preview", ""),
         "track": lead.get("title", ""),
+        # Длина из магазина: по ней запрос трека узнаёт то самое видео на YouTube.
+        "seconds": lead.get("seconds") or 0,
         # Название самого релиза: на обложке в рамке подписан он, а не ведущий
         # трек — иначе картинка сообщает, что альбом называется «Филлеры».
         "release": release_name((source or {}).get("title", "")),
@@ -893,7 +895,7 @@ def needs_track(post: dict) -> bool:
     )
 
 
-def where_to_find(post: dict) -> list[list[dict]]:
+def where_to_find(post: dict, video: dict | None = None) -> list[list[dict]]:
     """Кнопки под запросом трека: где трек лежит, чтобы владелец не искал руками.
 
     Только площадки, где музыка живёт законно: страница релиза в магазине,
@@ -901,6 +903,9 @@ def where_to_find(post: dict) -> list[list[dict]]:
     у части андеграунда там бесплатная загрузка от самого автора. Ссылок
     на файлообменники и конвертеры здесь нет намеренно: скачивает владелец сам,
     и выбор источника — его, а не бота.
+
+    video — найденное видео трека (tracks.find): тогда кнопка YouTube ведёт
+    прямо на него, с длиной на кнопке, чтобы было видно, что сверено.
     """
     query = quote_plus(f"{post.get('artist', '')} {post.get('track', '')}".strip())
     rows = []
@@ -914,6 +919,8 @@ def where_to_find(post: dict) -> list[list[dict]]:
         )
         rows.append([{"text": name, "url": store}])
     rows.append([
+        {"text": "YouTube · {}:{:02d}".format(*divmod(int(video["duration"]), 60)), "url": video["url"]}
+        if video else
         {"text": "YouTube", "url": f"https://www.youtube.com/results?search_query={query}"},
         {"text": "SoundCloud", "url": f"https://soundcloud.com/search?q={query}"},
         {"text": "Bandcamp", "url": f"https://bandcamp.com/search?q={query}"},
@@ -924,9 +931,11 @@ def where_to_find(post: dict) -> list[list[dict]]:
 def do_ask_tracks() -> int:
     """Просит владельца прислать полные треки к музыкальным постам очереди.
 
-    Отрывок в тридцать секунд — это витрина магазина, а не музыка. Искать
-    и скачивать треки сами мы не стали: легального источника нет, поэтому файл
-    присылает владелец — ответом на это сообщение, а принимает его src/moderate.py.
+    Отрывок в тридцать секунд — это витрина магазина, а не музыка. Скачать трек
+    здесь нельзя: YouTube сервер GitHub качать не пускает, только искать. Поэтому
+    здесь видео находится (tracks.find), а файл ответом на запрос присылает
+    помощник на Mac владельца (src/tracks.py) или сам владелец; принимает его
+    src/moderate.py.
 
     Отдельный шаг после генерации, а не вызов из save_post: один проход покрывает
     и свежие посты, и лежавшие в очереди до появления запросов, а сорвавшийся
@@ -952,7 +961,8 @@ def do_ask_tracks() -> int:
             "а mp3 в 320 kbps длиннее 8 минут уже не пройдёт — такой пришли в 192 kbps. "
             "Где трек лежит — кнопками ниже."
         )
-        buttons = where_to_find(post)
+        video = tracks.find(post["artist"], post["track"], post.get("seconds") or 0)
+        buttons = where_to_find(post, video)
         sent = None
         preview = fresh_preview(post) or post.get("preview", "")
         if preview:
@@ -973,9 +983,11 @@ def do_ask_tracks() -> int:
         # уже спрошенное второй раз не спросится. По message_id дежурство
         # найдёт пост, когда придёт ответ.
         post["track_request"] = {"message_id": sent["message_id"], "sent_at": state.iso()}
+        if video:
+            post["track_request"]["youtube"] = video["url"]
         state.write_json(path, post)
         asked += 1
-        print(f"  ? {post['artist']} — {post['track']}  ({path.name})")
+        print(f"  ? {post['artist']} — {post['track']}  ({path.name}){'  YouTube найден' if video else ''}")
 
     print(f"Запрошено полных треков: {asked}.")
     return 0
@@ -1023,6 +1035,9 @@ def _selftest() -> int:
     assert "&" not in found[1][0]["url"].split("?", 1)[1], found[1][0]["url"]
     assert [b["text"] for b in found[1]] == ["YouTube", "SoundCloud", "Bandcamp"]
     assert where_to_find({"artist": "A", "track": "B"})[0][0]["text"] == "YouTube"
+    # Найденное видео — прямо на кнопке, с длиной: YouTube отдаёт её дробной.
+    exact = where_to_find({"artist": "A", "track": "B"}, {"url": "https://youtu.be/v", "duration": 163.0})
+    assert exact[0][0] == {"text": "YouTube · 2:43", "url": "https://youtu.be/v"}, exact[0][0]
 
     # Издание в новости трогать нельзя: имя там стоит своё, не выводимое из домена.
     assert name_button(button("https://the-flow.ru/news/1", "Источник — The Flow")).endswith(

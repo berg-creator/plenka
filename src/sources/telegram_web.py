@@ -23,6 +23,7 @@ RSS по русскому рэпу вымер: The Flow, Rap.ru, SRSLY и Hip-Ho
 
     python -m src.sources.telegram_web --check   какие каналы живы
     python -m src.sources.telegram_web --login   войти в аккаунт, ключ — в .env
+    python -m src.sources.telegram_web --login-mac   свой ключ Mac для src/tracks.py
 """
 
 from __future__ import annotations
@@ -64,6 +65,9 @@ POST_URL_RE = re.compile(r"https://t\.me/(\w+)/(\d+)")
 # Больше боту не залить: sendVideo принимает файл до 50 МБ.
 BOT_UPLOAD_LIMIT = 50 * 1024 * 1024
 ACCOUNT_KEYS = ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_SESSION")
+# Свой ключ входа у Mac владельца (src/tracks.py): ключ дежурства, открытый
+# одновременно с двух машин, Telegram гасит насовсем.
+MAC_SESSION = "TELEGRAM_SESSION_MAC"
 
 log = logging.getLogger("telegram_web")
 
@@ -216,9 +220,10 @@ def account_video(post_url: str, folder: Path) -> dict:
             client.disconnect()
 
 
-def login() -> None:
+def login(key: str = "TELEGRAM_SESSION") -> None:
     """Один раз на компьютере владельца: коды приложения с my.telegram.org,
-    телефон, код из Telegram. Ключ входа ложится в .env и на экран не выводится."""
+    телефон, код из Telegram. Ключ входа ложится в .env под именем key
+    и на экран не выводится."""
     for key, prompt in (("TELEGRAM_API_ID", "api_id"), ("TELEGRAM_API_HASH", "api_hash")):
         os.environ[key] = os.environ.get(key) or input(f"{prompt} с my.telegram.org: ").strip()
     from getpass import getpass
@@ -235,9 +240,10 @@ def login() -> None:
         client.disconnect()
     env = config.ROOT / ".env"
     lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
-    lines = [line for line in lines if line.partition("=")[0].strip() not in ACCOUNT_KEYS]
+    replaced = ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", key)
+    lines = [line for line in lines if line.partition("=")[0].strip() not in replaced]
     lines += [f"TELEGRAM_API_ID={os.environ['TELEGRAM_API_ID']}",
-              f"TELEGRAM_API_HASH={os.environ['TELEGRAM_API_HASH']}", f"TELEGRAM_SESSION={session}"]
+              f"TELEGRAM_API_HASH={os.environ['TELEGRAM_API_HASH']}", f"{key}={session}"]
     env.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nВошёл как {name}. Ключ входа сохранён в .env — скажите Claude «готово».")
 
@@ -314,6 +320,9 @@ def _selftest() -> None:
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         _selftest()
+    elif "--login-mac" in sys.argv:
+        config.load_dotenv()
+        login(MAC_SESSION)
     elif "--login" in sys.argv:
         config.load_dotenv()
         login()
