@@ -165,9 +165,41 @@ def album_credit(album_id: str | int) -> tuple[str, list[int]]:
     data = get_json(f"{BASE}/album/{album_id}", min_interval=MIN_INTERVAL)
     if not data or data.get("error"):
         return "", []
-    main = [c for c in data.get("contributors") or [] if c.get("role") == "Main"]
-    main = main or [data.get("artist") or {}]
+    return _credit(data)
+
+
+def _credit(card: dict) -> tuple[str, list[int]]:
+    main = [c for c in card.get("contributors") or [] if c.get("role") == "Main"]
+    main = main or [card.get("artist") or {}]
     return " & ".join(c.get("name", "") for c in main), [c.get("id") for c in main]
+
+
+def search_albums(title: str, limit: int = 25) -> list[dict]:
+    """Альбомы по названию, как их отдаёт поиск: id, title, artist. Даты выхода
+    поиск не отдаёт — её и подпись с соавторами даёт album_release."""
+    data = get_json(f"{BASE}/search/album", params={"q": title, "limit": limit}, min_interval=MIN_INTERVAL)
+    return (data or {}).get("data") or []
+
+
+def album_release(album_id: str | int) -> dict:
+    """Релиз по id альбома в том же виде, что recent_releases, но с подписью:
+    здесь исполнитель неизвестен заранее, и взять его неоткуда, кроме карточки."""
+    card = get_json(f"{BASE}/album/{album_id}", min_interval=MIN_INTERVAL)
+    released = _parse_date((card or {}).get("release_date"))
+    if not card or card.get("error") or released is None:
+        return {}
+    credit, credit_ids = _credit(card)
+    return {
+        "source": "deezer",
+        "artist": credit,
+        "artist_ids": credit_ids,
+        "title": card.get("title", ""),
+        "url": card.get("link", ""),
+        "cover": card.get("cover_big") or card.get("cover_medium") or "",
+        "track_count": card.get("nb_tracks"),
+        "released_at": released.isoformat(),
+        "external_id": str(card.get("id", "")),
+    }
 
 
 # Ссылка на релиз несёт его идентификатор: deezer.com/ru/album/123456

@@ -1128,6 +1128,51 @@ def _selftest() -> int:
 
     print("релиз: гости и сольники участников под чужим именем не проходят")
 
+    # Релиз из новости издания: 17.09.2026 микстейп «Ежемесячных» вышел срочной
+    # новостью, потому что в базе есть Слава КПСС, а в Deezer релиз записан на них.
+    from unittest import mock
+
+    babangida = {"kind": "news", "source": "telegram", "outlet": "The Flow", "artists": ["Слава КПСС"],
+                 "title": "Ежемесячные “Rich Flex Babangida”",
+                 "summary": "Слава КПСС и Максим Плакин выпустили микстейп “Rich Flex Babangida”.",
+                 "released_at": state.iso()}
+    kpss = [{"name": "Слава КПСС", "tier": "ru", "tags": ["ru-rap"], "deezer_id": 11052818}]
+
+    def news_release(albums: dict[int, tuple[str, str]], rows: list[dict], seen: set) -> list[dict]:
+        """Сбор по подменённому Deezer: albums — id → (название, подпись)."""
+        cards = {i: {"source": "deezer", "artist": who, "artist_ids": [i], "title": title,
+                     "url": f"https://www.deezer.com/album/{i}", "cover": "", "track_count": 6,
+                     "released_at": state.iso(), "external_id": str(i)} for i, (title, who) in albums.items()}
+        hits = [{"id": i, "title": title} for i, (title, _) in albums.items()]
+        with (mock.patch.object(deezer, "search_albums", lambda q: hits),
+              mock.patch.object(deezer, "album_release", cards.__getitem__),
+              mock.patch.object(deezer, "album_tracks", lambda i: {})):
+            return collect.releases_from_news(rows, kpss, seen)
+
+    seen: set = set()
+    got = news_release({1074609442: ("RICH FLEX BABANGIDA", "Ежемесячные"), 7: ("Rich Flex", "Ежемесячные")},
+                       [babangida], seen)
+    assert [(r["kind"], r["artist"], r["tracked"], r["external_id"], r["score"]) for r in got] == [
+        ("release", "Ежемесячные", "Ежемесячные", "1074609442", 95)], got
+    # Та же сверка, по которой urgent.fresh_news пропустит новость как дубль.
+    assert press_row(got[0], [babangida], {}) == babangida
+    assert news_release({1074609442: ("RICH FLEX BABANGIDA", "Ежемесячные")}, [babangida], seen) == []  # уже виден
+    # Название в магазине другое или исполнитель в новости не назван — ничего.
+    assert news_release({8: ("Rich Flex Babangida 2", "Ежемесячные")}, [babangida], set()) == []
+    assert news_release({9: ("Rich Flex Babangida", "Бабангида Бэнд")}, [babangida], set()) == []
+    # Чужой для базы исполнитель назван только в пересказе, не в заголовке — ничего.
+    retold = {**babangida, "title": "Слава КПСС о “Rich Flex Babangida”",
+              "summary": "Ежемесячные выпустили “Rich Flex Babangida”."}
+    assert news_release({1074609442: ("RICH FLEX BABANGIDA", "Ежемесячные")}, [retold], set()) == []
+    # Новость без артиста из сбора или не из Telegram — магазин не спрашиваем.
+    assert news_release({1: ("RICH FLEX BABANGIDA", "Ежемесячные")}, [{**babangida, "artists": []}], set()) == []
+    assert news_release({1: ("RICH FLEX BABANGIDA", "Ежемесячные")}, [{**babangida, "source": "rss"}], set()) == []
+    # Собственный релиз артиста из базы — tracked он, отпечаток как у collect_releases.
+    own_got = news_release({5: ("Rich Flex Babangida", "Слава КПСС")}, [babangida], set())
+    assert own_got[0]["tracked"] == "Слава КПСС", own_got
+    assert own_got[0]["fingerprint"] == state.fingerprint("release", "Слава КПСС", "Rich Flex Babangida")
+    print("релиз из новости: точное название и исполнитель в тексте — релиз, иначе ничего")
+
     # Свежесть и дубли — на синтетическом inbox, без сети; пост пишется во временную папку.
     import tempfile
 

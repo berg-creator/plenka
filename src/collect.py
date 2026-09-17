@@ -171,6 +171,93 @@ def collect_releases(artists: list[dict], seen: state.Seen) -> list[dict]:
     return found
 
 
+# Название релиза издание ставит в кавычки: «…», “…” или "…".
+_QUOTED = re.compile(r"«([^»]+)»|“([^”]+)”|\"([^\"]+)\"")
+
+
+def releases_from_news(news: list[dict], artists: list[dict], seen: state.Seen) -> list[dict]:
+    """Релизы, которые назвала новость издания, а сбор по базе не нашёл.
+
+    17.09.2026 The Flow написал «Ежемесячные “Rich Flex Babangida”» — микстейп
+    Славы КПСС и Максима Плакина. В Deezer он записан на отдельного артиста
+    «Ежемесячные», которого в data/artists.json нет, и collect_releases, идущий
+    по id из базы, его не увидел. Релиза в inbox не было, urgent.fresh_news
+    не узнала в новости релиз, и она вышла срочной новостью — без площадок
+    и без запроса трека. Дописывать каждого такого артиста в базу руками —
+    догонять уже вышедший пост, поэтому релиз ищется по самой новости:
+    название из кавычек в заголовке — в поиск Deezer (iTunes RU этот микстейп
+    не находит вовсе). Дальше релиз идёт обычным путём: compose --fresh пишет
+    пост, новость встаёт в него цитатой, а срочной не выходит.
+
+    Берётся только точное совпадение: название альбома равно названию
+    из кавычек, а новость называет исполнителя из магазина — это решает
+    compose.press_row, та же сверка, по которой срочные новости узнают дубль.
+    Похожий альбом хуже никакого: на «Поцелуи» Nkeeei и Yanix поиск Deezer отдаёт
+    пять одноимённых альбомов ВИА ГРА, «Небраски» и других, а их самих — нет.
+    Пропущенный релиз обойдётся срочной новостью, а чужой — постом под чужим
+    именем с чужим треклистом.
+
+    Только новости с артистом из сбора (in_collect): его вес ставит релизу
+    приоритет, а релизы ru_pop канал не анонсирует. Подпись и tracked —
+    магазинные: история и подписчики Славы КПСС к «Ежемесячным» не относятся.
+    Если же релиз его собственный (own_release), tracked — он, и отпечаток
+    совпадает с тем, что дал бы collect_releases: seen дубль не пропустит.
+    """
+    from .compose import press_row  # compose сам импортирует collect
+
+    cutoff = state.now() - timedelta(days=RELEASE_MAX_AGE_DAYS)
+    by_name = {a["name"]: a for a in artists}
+    found: list[dict] = []
+    for row in news:
+        named = [by_name[n] for n in row.get("artists", []) if n in by_name and in_collect(by_name[n])]
+        if row.get("source") != "telegram" or not named:
+            continue
+        for match in _QUOTED.finditer(row.get("title", "")):
+            quoted = next(group for group in match.groups() if group)
+            try:
+                hits = deezer.search_albums(quoted)
+                # ponytail: карточка на каждый альбом с тем же названием — на частом названии
+                # до 25 запросов за новость; сверять имя ещё по поиску, если сбор начнёт тормозить.
+                items = [deezer.album_release(h["id"]) for h in hits
+                         if itunes._norm(h.get("title", "")) == itunes._norm(quoted)]
+            except Exception as exc:  # магазин отвалился — новость выйдет как раньше
+                log.warning("«%s»: поиск релиза не удался (%s)", quoted, exc)
+                continue
+            for item in items:
+                released = _parse(item.get("released_at"))
+                if released is None or released < cutoff:
+                    continue
+                credit = item["artist"]
+                owner = next((a for a in named if own_release(
+                    a["name"], a.get("deezer_id"), credit, item["artist_ids"], a.get("aliases"))), None)
+                # Исполнитель не из базы должен стоять в заголовке: в новости «Слава КПСС
+                # разобрал «X»» автор чужого альбома назван только в пересказе, и канал
+                # анонсировал бы чужой релиз с весом Славы КПСС.
+                if not owner and not re.search(rf"(?<!\w){re.escape(credit)}(?!\w)", row.get("title", ""), re.IGNORECASE):
+                    continue
+                tracked = owner["name"] if owner else credit
+                best = max(named, key=lambda a: TIER_SCORE.get(a.get("tier", "scene"), 50))
+                record = {
+                    "kind": "release",
+                    "fingerprint": state.fingerprint("release", tracked, item["title"]),
+                    "score": TIER_SCORE.get(best.get("tier", "scene"), 50),
+                    "artist": credit,
+                    "tracked": tracked,
+                    "tier": best.get("tier"),
+                    "tags": best.get("tags", []),
+                    **{k: item[k] for k in
+                       ("title", "url", "cover", "track_count", "released_at", "source", "external_id")},
+                    "collected_at": state.iso(),
+                }
+                if record["fingerprint"] in seen or not press_row(record, [row], by_name):
+                    continue
+                seen.add(record["fingerprint"])
+                record.update(fetch_tracks(item))
+                log.info("%s: «%s» — релиз из новости %s", credit, item["title"], row.get("outlet", ""))
+                found.append(record)
+    return found
+
+
 def store_credit(item: dict) -> tuple[str, list]:
     """Исполнитель релиза, как он значится в магазине, и id основных артистов.
 
@@ -520,7 +607,10 @@ def main() -> int:
         batch += collect_releases(artists, seen)
         batch += collect_videos(artists, seen)
     if not args.skip_news:
-        batch += collect_news(artists, seen)
+        news = collect_news(artists, seen)
+        batch += news
+        if not args.skip_releases:
+            batch += releases_from_news(news, artists, seen)
 
     batch.sort(key=lambda item: item["score"], reverse=True)
 

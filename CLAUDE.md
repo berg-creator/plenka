@@ -100,7 +100,9 @@ python -m src.clips --selftest         кадров в раскадровке с
 
 1. **[src/collect.py](src/collect.py)** — раз в 6 часов обходит iTunes, Deezer,
    YouTube, RSS и Telegram-каналы изданий (`src/sources/`), складывает находки
-   в `data/inbox.jsonl`. Релизы ищутся по `data/artists.json`, и база
+   в `data/inbox.jsonl`. Релизы ищутся по `data/artists.json`, а релиз, записанный
+   на другого артиста, — по названию в кавычках из новости издания о своём
+   артисте (`collect.releases_from_news`, только точное совпадение в Deezer). База
    пополняется и сокращается сама: раз в сутки `src/newcomers.py` добавляет
    уровнем `auto` тех, кого за две недели назвали два издания, одно из них —
    рэп-пресса, а iTunes знает под этим именем рэпера; полгода тишины выводит
