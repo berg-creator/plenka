@@ -621,6 +621,9 @@ def storyboard_news(item: dict) -> list[Shot]:
 
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mov"}
 STOCK_SKIP = 2.0
+# Во сколько раз можно замедлить короткое видео, прежде чем встать стоп-кадром:
+# вдвое медленнее реакция ещё читается живой.
+SLOWEST = 2.0
 
 
 def segment(
@@ -679,6 +682,7 @@ def segment(
             kind = "фон"
             source = footage.procedural(work / f"{out.stem}-bg.mp4", shot.seconds, ffmpeg())
 
+    speed = hold = ""
     if still is not None:
         feed = ["-loop", "1", "-framerate", str(FPS), "-i", str(source)]
         # Наезд от 1.0 к 1.12 за отрезок: медленно, чтобы не отвлекать
@@ -698,10 +702,17 @@ def segment(
         # Ролики стока часто начинаются с выхода из чёрного: без отступа
         # кадр первые полторы секунды стоял тёмным, а карточка на его
         # размытии — чёрной. Отступ только когда ролик длиннее кадра, иначе
-        # петля вернула бы то же чёрное начало.
-        skip = min(STOCK_SKIP, max(0.0, probe_seconds(source) - shot.seconds)) if kind == "сток" else 0.0
-        feed = ["-stream_loop", "-1", "-ss", f"{skip:.2f}", "-i", str(source)]
+        # его на кадр не хватило бы.
+        length = probe_seconds(source)
+        skip = min(STOCK_SKIP, max(0.0, length - shot.seconds)) if kind == "сток" else 0.0
+        feed = ["-ss", f"{skip:.2f}", "-i", str(source)]
         motion = ""
+        # Короткое видео не крутится по кругу: тот же кусок дважды владелец
+        # заметил в ролике rhyno 17.09.2026. Оно замедляется до SLOWEST раз,
+        # а остаток кадра держит последний кадр.
+        if 0 < length - skip < shot.seconds:
+            speed = f"setpts=PTS*{min(SLOWEST, shot.seconds / (length - skip)):.3f},"
+        hold = f"tpad=stop_mode=clone:stop_duration={shot.seconds:.2f}"
 
     # Выход из чёрного — мягкая склейка между кадрами. Первому кадру ролика
     # с превью (src/reels.py) он вредит: обложка, взятая площадкой из первого
@@ -715,13 +726,13 @@ def segment(
     if fit == "blur":
         # Кадр чуть выше середины: снизу надпись, ей нужно место.
         base = (
-            f"[0:v]split[front][back];[back]{cover},gblur=sigma=40[blurred];"
+            f"[0:v]{speed}split[front][back];[back]{cover},gblur=sigma=40[blurred];"
             f"[front]scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease:force_divisible_by=2[fitted];"
             f"[blurred][fitted]overlay=(W-w)/2:(H-h)*0.4"
         )
     else:
-        base = f"[0:v]{cover}"
-    look = ",".join(step for step in (f"setsar=1,fps={FPS}", motion.rstrip(","), grade) if step)
+        base = f"[0:v]{speed}{cover}"
+    look = ",".join(step for step in (f"setsar=1,fps={FPS}", motion.rstrip(","), grade, hold) if step)
 
     run([
         ffmpeg(), "-y", *feed,

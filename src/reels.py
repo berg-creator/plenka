@@ -704,7 +704,7 @@ def pictures(folder: Path, frame: int) -> list[Path]:
 
     Видео (<кадр>-<n>.mp4) бот от владельца не принимает — его кладёт Claude,
     переделывая присланное: «Киф выходит, машет и уходит перемоткой» картинкой
-    не сделать. Сборка режет его под 9:16, как гифку, и крутит по кругу.
+    не сделать. Сборка режет его под 9:16, как гифку, и по кругу не крутит.
     """
     found = [p for p in (folder / "pics").glob(f"{frame}-*") if p.suffix in (".jpg", ".mp4")]
     return sorted(found, key=lambda p: int(p.stem.split("-")[1]))
@@ -872,6 +872,10 @@ def _photo(url: str, work: Path) -> Path | None:
     if dest.exists():
         return dest
     picture = feeds.page_image(url)
+    if picture and "mzstatic.com" in picture:
+        # Apple Music кладёт в og:image обложку квадратиком на сером поле 1200×630,
+        # и под 9:16 кадр съезжал на поле (rhyno, 17.09.2026). Размер — в адресе.
+        picture = re.sub(r"/[^/]+$", "/3000x3000bb.jpg", picture)
     raw = _download(picture, work / "photo.raw", PHOTO_MIN_BYTES) if picture else None
     try:
         image = Image.open(raw).convert("RGB") if raw else None
@@ -1605,6 +1609,11 @@ def package(script: dict) -> str:
         # Сценарий пишет одну ссылку, а по метке бот считает приходы с каждой площадки.
         text = re.sub(re.escape(BOT_LINK) + r"(?:\?start=(?:yt|tt|vk)(?![\w-]))?(?!\?start=)",
                       f"{BOT_LINK}?start={label}", script["description"])
+        if label != "vk":
+            # В Shorts и TikTok ссылка в описании не нажимается (владелец, 17.09.2026):
+            # имя набирают в поиске Telegram. Ссылка на пост остаётся — её не набрать.
+            text = re.sub(re.escape(BOT_LINK) + r"(?:\?start=[\w-]+)?", config.BOT_HANDLE, text)
+            text = re.sub(r"t\.me/" + config.CHANNEL_HANDLE.lstrip("@") + r"(?![\w/])", config.CHANNEL_HANDLE, text)
         return field(text)
 
     comment = f"Закрепи первым комментарием: {field(script['comment'])}\n\n" if script.get("comment") else ""
@@ -1693,9 +1702,11 @@ def _selftest() -> None:
     assert problems({k: v for k, v in good.items() if k != "comment"}, good["id"]) == []
     assert f"Закрепи первым комментарием: <code>{good['comment']}</code>" in package(good)
     assert "Закрепи" not in package({k: v for k, v in good.items() if k != "comment"})
-    assert all(f"{BOT_LINK}?start={label} #фонк" in package(good) for label in ("yt", "vk", "tt")), "метки площадок"
-    gorod = {**good, "description": f"Приедет к тебе? Кидай боту город: {GOROD_LINK}basta Канал: t.me/plenka_fm #рэп"}
+    assert f"{BOT_LINK}?start=vk #фонк" in package(good), "метка ВКонтакте"
+    assert package(good).count(f"{config.BOT_HANDLE} #фонк") == 2, "YouTube и TikTok — имя бота, ссылка там не нажимается"
+    gorod = {**good, "description": f"Приедет к тебе? Кидай боту город: {GOROD_LINK}basta Канал: t.me/plenka_fm/144 t.me/plenka_fm #рэп"}
     assert problems(gorod, good["id"]) == [] and f"{GOROD_LINK}basta Канал" in package(gorod), "концертная ссылка как есть"
+    assert package(gorod).count(f"{config.BOT_HANDLE} Канал: t.me/plenka_fm/144 {config.CHANNEL_HANDLE} #рэп") == 2, "пост — ссылкой"
     assert bait(gorod) == BAIT_GOROD and bait(good) == BAIT
     assert bait({**good, "description": f"Не пропусти: {SLEZHU_LINK}bones #рэп"}) == BAIT_SLEZHU
     broken("artists.json", description=f"Строка {GOROD_LINK}nobody #фонк")
