@@ -180,6 +180,10 @@ def record(post: dict, path: Path, chat: str) -> None:
     )
     # Храним последние 500 записей — этого хватает для аналитики и не раздувает файл.
     posted["items"] = posted["items"][-500:]
+    # Отпечатки вышедших фото не обрезаются: повтор через год — тоже повтор,
+    # а строка на пост за год не набирает и мегабайта (card.cover).
+    if post.get("photo"):
+        posted.setdefault("photos", []).append(post["photo"])
     state.write_json(config.POSTED_FILE, posted)
 
 
@@ -354,8 +358,10 @@ def send(post: dict, chat_id: str) -> dict | None:
         # Рамка канала: рубрика сверху, подпись снизу. Не нарисовалась
         # (нет сети, не нашли артиста) — обложка уходит как была, а без неё
         # пост идёт текстом.
-        framed = card.cover(post) if rubric != "meme" else None
-        if framed or cover:
+        framed = card.cover(post, state.read_json(config.POSTED_FILE, {}).get("photos", [])) \
+            if rubric != "meme" else None
+        # Пустое photo — все кадры уже выходили в канале, и сырая обложка стала бы повтором.
+        if framed or (cover and "photo" not in post):
             try:
                 if framed:
                     photo = telegram.send_photo_file(chat_id, framed, text, quiet=quiet)
@@ -365,6 +371,7 @@ def send(post: dict, chat_id: str) -> dict | None:
             except telegram.TelegramError as exc:
                 # Обложка могла протухнуть — текст уходит обычным сообщением.
                 log.warning("Фото не ушло (%s), текст уходит сообщением", exc)
+                post.pop("photo", None)
 
     return _where(telegram.send_message(chat_id, text, quiet=quiet), "text")
 
@@ -453,7 +460,7 @@ def _selftest() -> None:
     sent: list[tuple] = []
     real = (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
             telegram.send_message, state.now, config.QUEUE, config.ARCHIVE, config.POSTED_FILE)
-    card.cover = lambda post: None
+    card.cover = lambda post, seen=(): None
 
     # Запись: что ушло, подпись, без звука ли, есть ли кнопки. id сообщения — его номер.
     def message(*entry) -> dict:
@@ -517,7 +524,7 @@ def _selftest() -> None:
 
         # Разбор приходит без обложки, но кадр ему находит card.cover по тексту:
         # пост без картинки в ленте проматывают.
-        card.cover = lambda post: Path("кадр.jpg") if post.get("rubric") != "meme" else None
+        card.cover = lambda post, seen=(): Path("кадр.jpg") if post.get("rubric") != "meme" else None
         where = send({"text": "Текст.", "rubric": "lineage"}, "0")
         assert sent == [("кадр", "Текст.", False, False)], sent
         assert where["kind"] == "caption", where
@@ -525,7 +532,28 @@ def _selftest() -> None:
         # А мему чужое лицо не клеим: своя картинка не нарисовалась — уходит текстом.
         send({"text": "Текст.", "rubric": "meme", "top": "ВЕРХ", "bottom": "НИЗ"}, "0")
         assert sent == [("текст", "ВЕРХ\nНИЗ\n\nТекст.", False, False)], sent
-        card.cover = lambda post: None
+        sent.clear()
+        # Все кадры поста уже выходили в канале — идёт текст, а не сырая обложка.
+        card.cover = lambda post, seen=(): post.update(photo="")
+        send({**post}, "0")
+        assert sent == [("текст", "Текст.", False, False)], sent
+
+        # Настоящая карточка: вышедший портрет узнаётся и уменьшенным и пережатым,
+        # пост берёт следующий кадр артиста, а его отпечаток по выходе ложится в журнал.
+        from PIL import Image
+
+        face, album, reposted = (Path(tmp.name) / f"{n}.jpg" for n in ("face", "album", "reposted"))
+        Image.radial_gradient("L").convert("RGB").resize((600, 600)).save(face)
+        Image.linear_gradient("L").rotate(90).convert("RGB").resize((600, 600)).save(album)
+        Image.open(face).resize((300, 300)).save(reposted, quality=40)
+        seen = [card.fingerprint(Image.open(reposted))]
+        with mock.patch.object(footage, "artist_images", lambda name: iter([album])):
+            lineage = {"text": "Текст.", "rubric": "lineage", "artist": "Bones", "cover": face}
+            assert real[0](lineage, seen) and lineage["photo"] == card.fingerprint(Image.open(album)), lineage
+            record(lineage, Path("0-lineage.json"), "channel")
+            seen += state.read_json(config.POSTED_FILE, {})["photos"]
+            assert real[0](lineage, seen) is None and lineage["photo"] == "", lineage
+        card.cover = lambda post, seen=(): None
 
         # В канал: сообщение с текстом ложится в архивный JSON, текст — как был.
         state.write_json(config.QUEUE / "0-release.json", post)

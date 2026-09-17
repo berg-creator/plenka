@@ -105,27 +105,25 @@ def _picture_by_id(artist_id: int) -> str:
     return "" if EMPTY_PICTURE in url else url
 
 
-def artist_cover(name: str) -> str:
-    """Обложка собственного альбома артиста — запасной вариант для портрета.
+def artist_covers(name: str) -> list[str]:
+    """Обложки собственных альбомов артиста — запасные варианты для портрета.
 
-    Именно собственного: у iTunes в свежих релизах попадаются гостевые куплеты,
+    Именно собственных: у iTunes в свежих релизах попадаются гостевые куплеты,
     и на карточке про артиста оказывается чужая обложка. Deezer по артисту
-    отдаёт только его релизы.
+    отдаёт только его релизы. Список, а не одна: портрет у артиста один,
+    и второму посту о нём нужен другой кадр (card.cover).
     """
     artist_id = find_artist_id(name)
     if not artist_id:
-        return ""
+        return []
 
     data = get_json(
         f"{BASE}/artist/{artist_id}/albums",
         params={"limit": 5},
         min_interval=MIN_INTERVAL,
     )
-    for album in (data or {}).get("data") or []:
-        url = album.get("cover_xl") or album.get("cover_big") or ""
-        if url and EMPTY_PICTURE not in url:
-            return url
-    return ""
+    urls = [album.get("cover_xl") or album.get("cover_big") or "" for album in (data or {}).get("data") or []]
+    return [url for url in urls if url and EMPTY_PICTURE not in url]
 
 
 def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:

@@ -278,28 +278,35 @@ def artist_image(text: str) -> Path | None:
     if cached is not None and cached.exists():
         return cached
 
+    path = next(artist_images(name), None)
+    if path:
+        _FETCHED[f"artist:{name}"] = path
+    return path
+
+
+def artist_images(name: str):
+    """Все фотографии артиста по порядку: портрет, потом обложки его альбомов.
+
+    Качаются по одной и только когда предыдущая не подошла: клипу хватает
+    первой, а посту нужна следующая, если первая уже выходила в канале (card.cover).
+    """
     from .sources import deezer
 
-    for getter in (deezer.artist_picture, deezer.artist_cover):
+    for getter in (lambda: [deezer.artist_picture(name)], lambda: deezer.artist_covers(name)):
         try:
-            url = getter(name)
+            urls = getter()
         except Exception:
             continue
-        if not url:
-            continue
-        try:
-            response = requests.get(url, timeout=60)
-        except requests.RequestException:
-            continue
-        if response.status_code != 200 or len(response.content) < 10_000:
-            continue
-
-        path = _run_dir() / f"artist-{abs(hash(name)) % 10**8}.jpg"
-        path.write_bytes(response.content)
-        _FETCHED[f"artist:{name}"] = path
-        return path
-
-    return None
+        for url in filter(None, urls):
+            try:
+                response = requests.get(url, timeout=60)
+            except requests.RequestException:
+                continue
+            if response.status_code != 200 or len(response.content) < 10_000:
+                continue
+            path = _run_dir() / f"artist-{abs(hash(url)) % 10**8}.jpg"
+            path.write_bytes(response.content)
+            yield path
 
 
 # --- терминал ------------------------------------------------------------

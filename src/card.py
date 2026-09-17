@@ -101,14 +101,8 @@ def render(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА") -
     return img
 
 
-def photo_backdrop(source: str | Path) -> Image.Image | None:
-    """Фотография во весь кадр 4:5 с уводом низа в чёрное.
-
-    Общая для разбора бота (render_on_photo) и обложки поста (cover): скачать,
-    обрезать и затемнить — одно действие, и в двух копиях они со временем разошлись бы.
-    Ссылка приходит от магазина, готовый файл — от footage (портрет артиста уже
-    скачан), поэтому берутся оба вида.
-    """
+def _open(source: str | Path) -> Image.Image | None:
+    """Фото по ссылке магазина или готовым файлом от footage. None — не открылось."""
     try:
         if isinstance(source, Path):
             data = source.read_bytes()
@@ -117,8 +111,41 @@ def photo_backdrop(source: str | Path) -> Image.Image | None:
             if response.status_code != 200:
                 return None
             data = response.content
-        photo = Image.open(BytesIO(data)).convert("RGB")
+        return Image.open(BytesIO(data)).convert("RGB")
     except Exception:  # noqa: BLE001 — без картинки вызывающий уйдёт запасным путём
+        return None
+
+
+# Два фото — одно и то же, если отпечатки расходятся не больше чем в стольких
+# признаках из 256. Замер 17.09.2026 на обложках архива: та же обложка, уменьшенная
+# и пережатая, — 7, разные картинки — от 70. Обрезанную копию отпечаток не узнаёт.
+SAME_PHOTO = 24
+
+
+def fingerprint(photo: Image.Image) -> str:
+    """Отпечаток фото: где кадр 17×16 в сером светлеет слева направо.
+
+    Ссылки и байты сравнивать мало: одна обложка приходит из iTunes и Deezer
+    разного размера и сжатия, а картинка новости — перепостом из другого канала.
+    """
+    px = photo.convert("L").resize((17, 16), Image.LANCZOS).tobytes()
+    return f"{sum(1 << i for i in range(256) if px[i + i // 16 + 1] > px[i + i // 16]):064x}"
+
+
+def seen_before(mark: str, seen) -> bool:
+    return any(bin(int(mark, 16) ^ int(old, 16)).count("1") <= SAME_PHOTO for old in seen)
+
+
+def photo_backdrop(source: str | Path | Image.Image) -> Image.Image | None:
+    """Фотография во весь кадр 4:5 с уводом низа в чёрное.
+
+    Общая для разбора бота (render_on_photo) и обложки поста (cover): скачать,
+    обрезать и затемнить — одно действие, и в двух копиях они со временем разошлись бы.
+    Ссылка приходит от магазина, готовый файл — от footage (портрет артиста уже
+    скачан), открытое фото — от cover, которая сперва сверила его отпечаток.
+    """
+    photo = source if isinstance(source, Image.Image) else _open(source)
+    if photo is None:
         return None
 
     # Кадрируем по центру: портреты приходят квадратными, а карточка вытянутая.
@@ -141,7 +168,7 @@ def photo_backdrop(source: str | Path) -> Image.Image | None:
     return Image.composite(Image.new("RGB", (WIDTH, HEIGHT), (12, 10, 9)), img, shade)
 
 
-def cover(post: dict) -> Path | None:
+def cover(post: dict, seen=()) -> Path | None:
     """Обложка поста для ленты: та же фотография, но в рамке канала.
 
     Квадрат 600×600 из магазина одинаково выглядит у всех, кто пересказывает
@@ -160,16 +187,33 @@ def cover(post: dict) -> Path | None:
     в ленте проматывают — поэтому кадром становится фотография артиста,
     упомянутого в тексте (footage.artist_image, тот же поиск, что у клипов).
     Внизу тогда стоит его имя: лицо без подписи ленте ничего не говорит.
+
+    Одно фото в канале дважды не выходит (владелец, 17.09.2026): у Deezer
+    на артиста один портрет, и второй разбор о Bones вышел с тем же лицом, что
+    первый. Кадр, похожий на уже вышедший (seen — отпечатки из журнала
+    публикаций), уступает следующему: обложка — фото артиста, портрет — обложкам
+    его альбомов. Отпечаток выбранного пост уносит полем photo, в журнал его
+    кладёт publish.record. Все кадры уже выходили — photo пустое, и пост идёт
+    текстом: повтор хуже поста без картинки.
     """
+    post.pop("photo", None)
     source: str | Path = post.get("cover", "")
     artist, name = post.get("artist", ""), post.get("release") or post.get("track", "")
     if not source:
         # Имя из текста важнее: подпись должна совпасть с тем, о ком пост.
         # Не назвал никого — лицом становится артист из данных поста.
         artist, name = footage.find_artist(post.get("text", "")) or artist, ""
-        source = (footage.artist_image(artist) or "") if artist else ""
 
-    img = photo_backdrop(source) if source else None
+    img = None
+    for candidate in _candidates(source, artist or footage.find_artist(post.get("text", ""))):
+        photo = _open(candidate)
+        if photo is None:
+            continue
+        post["photo"] = fingerprint(photo)
+        if not seen_before(post["photo"], seen):
+            img = photo_backdrop(photo)
+            break
+        post["photo"] = ""
     if img is None:
         return None
 
@@ -197,6 +241,15 @@ def cover(post: dict) -> Path | None:
     path = OUT_DIR / "cover.jpg"
     img.save(path, "JPEG", quality=90)
     return path
+
+
+def _candidates(source: str | Path, artist: str):
+    """Кадры поста по порядку: своя картинка, потом фотографии артиста.
+    Генератор: Deezer спрашиваем, только когда своя уже выходила."""
+    if source:
+        yield source
+    if artist:
+        yield from footage.artist_images(artist)
 
 
 def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВКА") -> Image.Image | None:
