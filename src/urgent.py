@@ -199,13 +199,9 @@ def run(limit: int, dry_run: bool, target: str) -> int:
     for item in news:
         if sent >= limit:
             break
-        # Пост «показал сниппет» без самого сниппета пуст. Большой ролик превью
-        # Telegram не отдаёт («Media is too big»), а бот чужой канал не читает
-        # и скопировать пост не может — 17.09.2026 так вышел сниппет Avenuepluggg
-        # (0:51) голым текстом. Проверяем до модели: и пустой пост не выходит,
-        # и генерация не тратится. Ключ ссылки временный, поэтому сам ролик
-        # comments.seed возьмёт заново, но «слишком большой» — это навсегда.
-        if item.get("snippet") and not telegram_web.snippet_video(item.get("url", "")):
+        # Пост «показал сниппет» без самого сниппета пуст — проверяем до модели,
+        # чтобы и генерация не тратилась. Сам ролик возьмёт comments.seed.
+        if item.get("snippet") and not telegram_web.snippet_reachable(item.get("url", "")):
             used.append(item["fingerprint"])
             print(f"  — пропущено (сниппет не достаётся): {item.get('title', '')[:50]}")
             continue
@@ -290,7 +286,7 @@ def _selftest() -> int:
           mock.patch.object(compose, "_news_payload", lambda item: item),
           mock.patch.object(compose, "save_post", lambda *a, **k: Path("post.json")),
           mock.patch.object(compose, "mark_used", used.extend),
-          mock.patch.object(telegram_web, "snippet_video", lambda url: "" if "big" in url else "x.mp4"),
+          mock.patch.object(telegram_web, "snippet_reachable", lambda url: "big" not in url),
           mock.patch.object(state, "read_json", lambda path, default: {}),
           mock.patch.object(publish, "send_for_approval", lambda *a, **k: None),
           # globals(), а не «src.urgent»: под -m модуль живёт как __main__.

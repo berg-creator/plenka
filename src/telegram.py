@@ -297,7 +297,8 @@ def send_photo_file(
 
 
 def send_video_file(
-    chat_id: str, path: Path, caption: str, *, seconds: int = 0, width: int = 1080, height: int = 1920
+    chat_id: str, path: Path, caption: str, *, seconds: int = 0, width: int = 1080, height: int = 1920,
+    reply_to: int | None = None,
 ) -> dict:
     """Отправляет готовый ролик с диска.
 
@@ -322,6 +323,8 @@ def send_video_file(
         }
         if seconds:
             payload["duration"] = seconds
+        if reply_to is not None:
+            payload["reply_parameters"] = json.dumps({"message_id": reply_to})
         return _call("sendVideo", payload, files={"video": (path.name, handle, "video/mp4")})
 
 

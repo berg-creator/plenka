@@ -16,19 +16,27 @@ RSS по русскому рэпу вымер: The Flow, Rap.ru, SRSLY и Hip-Ho
 
 Отсюда же берутся сниппеты: паблик сужается полем `only` в data/feeds.json до
 постов со своим словом, а `snippet_video` достаёт приложенный ролик, который
-ложится под пост канала первым комментарием.
+ложится под пост канала первым комментарием. Тяжёлого ролика превью не отдаёт,
+и его качает `account_video` — входом в аккаунт владельца (решение от 17.09.2026):
+аккаунт, в отличие от бота, видит публичный канал целиком. Пакет для входа
+(Telethon) добавлен ради этого; без ключей аккаунта всё работает как раньше.
 
     python -m src.sources.telegram_web --check   какие каналы живы
+    python -m src.sources.telegram_web --login   войти в аккаунт, ключ — в .env
 """
 
 from __future__ import annotations
 
 import html
 import json
+import logging
+import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+from .. import config
 from .feeds import FEEDS_FILE
 from .http import get
 
@@ -50,6 +58,14 @@ BOLD_RE = re.compile(r"<b>(.*?)</b>", re.DOTALL)
 BREAK_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 TAG_RE = re.compile(r"<[^>]+>")
 VIDEO_RE = re.compile(r'<video[^>]*src="([^"]+)"')
+# Плеер стоит и у тяжёлого ролика, только вместо файла в нём «Media is too big».
+PLAYER = "tgme_widget_message_video_player"
+POST_URL_RE = re.compile(r"https://t\.me/(\w+)/(\d+)")
+# Больше боту не залить: sendVideo принимает файл до 50 МБ.
+BOT_UPLOAD_LIMIT = 50 * 1024 * 1024
+ACCOUNT_KEYS = ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_SESSION")
+
+log = logging.getLogger("telegram_web")
 
 
 def load_channels() -> list[dict]:
@@ -128,16 +144,93 @@ def snippet_video(post_url: str) -> str:
     в момент отправки, а не при сборе — между ними проходят часы.
 
     Больших файлов превью не отдаёт вовсе, вместо ролика ставит «Media is too
-    big» (поймано 12.09.2026 на сниппете ICEGERGERT: 1:42 не дали). Тогда пост
-    не пишется вовсе (urgent.run): «показал сниппет» без сниппета пуст.
+    big» (поймано 12.09.2026 на сниппете ICEGERGERT: 1:42 не дали) — такой
+    ролик качает `account_video`.
     """
+    found = VIDEO_RE.search(_embed(post_url))
+    return found.group(1) if found else ""
+
+
+def _embed(post_url: str) -> str:
     if not post_url.startswith("https://t.me/"):
         return ""
     response = get(EMBED.format(url=post_url), min_interval=0.5)
-    if response is None:
-        return ""
-    found = VIDEO_RE.search(response.text)
-    return found.group(1) if found else ""
+    return response.text if response is not None else ""
+
+
+def account_ready() -> bool:
+    return all(os.environ.get(key) for key in ACCOUNT_KEYS)
+
+
+def snippet_reachable(post_url: str) -> bool:
+    """Достанется ли ролик к выходу поста: превью отдаёт его ссылкой, или ролик
+    тяжёлый, но есть аккаунт. Не достанется — пост не пишется (urgent.run):
+    «показал сниппет» без сниппета пуст, 17.09.2026 так вышел Avenuepluggg.
+
+    Сам аккаунт здесь не трогаем: ключ входа, открытый одновременно с двух
+    адресов, Telegram гасит насовсем (AuthKeyDuplicated), а срочное и дежурство
+    идут на разных машинах. Качает ролик только дежурство.
+    """
+    page = _embed(post_url)
+    return bool(VIDEO_RE.search(page)) or (PLAYER in page and account_ready())
+
+
+def _client(session: str = ""):
+    from telethon.sessions import StringSession
+    from telethon.sync import TelegramClient
+
+    return TelegramClient(StringSession(session), int(os.environ["TELEGRAM_API_ID"]),
+                          os.environ["TELEGRAM_API_HASH"])
+
+
+def account_video(post_url: str, folder: Path) -> dict:
+    """Ролик поста через аккаунт владельца: {path, seconds, width, height} или {}.
+
+    Bot API чужой канал не читает («message to copy not found»), а аккаунт видит
+    его целиком. Файл скачивается и заливается ботом заново: переслать
+    от имени бота нельзя, а пересылка от аккаунта подписала бы комментарий
+    не ботом и привела бы в ветку издание.
+    """
+    found = POST_URL_RE.match(post_url)
+    if not (found and account_ready()):
+        return {}
+    client = None
+    try:
+        client = _client(os.environ["TELEGRAM_SESSION"])
+        client.connect()
+        # start() на погасшем ключе спросил бы телефон и повесил дежурство.
+        if not client.is_user_authorized():
+            log.error("Ключ входа в аккаунт Telegram не действует — войти заново: --login")
+            return {}
+        message = client.get_messages(found.group(1), ids=int(found.group(2)))
+        if not (message and message.video) or message.file.size > BOT_UPLOAD_LIMIT:
+            return {}
+        path = client.download_media(message, file=str(folder / "snippet.mp4"))
+        return {"path": Path(path), "seconds": int(message.file.duration or 0),
+                "width": message.file.width or 0, "height": message.file.height or 0}
+    except Exception as exc:  # noqa: BLE001 — без ролика под постом останется вопрос
+        log.warning("Сниппет через аккаунт не скачался: %s", exc)
+        return {}
+    finally:
+        if client is not None:
+            client.disconnect()
+
+
+def login() -> None:
+    """Один раз на компьютере владельца: коды приложения с my.telegram.org,
+    телефон, код из Telegram. Ключ входа ложится в .env и на экран не выводится."""
+    for key, prompt in (("TELEGRAM_API_ID", "api_id"), ("TELEGRAM_API_HASH", "api_hash")):
+        os.environ[key] = os.environ.get(key) or input(f"{prompt} с my.telegram.org: ").strip()
+    with _client() as client:  # start() сам спросит телефон, код и облачный пароль
+        name = client.get_me().first_name
+        session = client.session.save()
+    env = config.ROOT / ".env"
+    lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
+    lines = [line for line in lines if line.partition("=")[0].strip() not in ACCOUNT_KEYS]
+    lines += [f"TELEGRAM_API_ID={os.environ['TELEGRAM_API_ID']}",
+              f"TELEGRAM_API_HASH={os.environ['TELEGRAM_API_HASH']}", f"TELEGRAM_SESSION={session}"]
+    env.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"\nВошёл как {name}. Ключ входа сохранён в .env — скажите Claude «готово».")
 
 
 def _clean(fragment: str) -> str:
@@ -194,6 +287,7 @@ def _selftest() -> None:
     assert len(kept) == 1 and "похудел" not in kept[0]["summary"], kept
     assert VIDEO_RE.search(only).group(1).endswith("snip.mp4?token=k")
     assert snippet_video("") == "" and snippet_video("http://example.com/x") == ""
+    assert POST_URL_RE.match("https://t.me/rapruchannel/5516").groups() == ("rapruchannel", "5516")
 
     posts = parse(page, "RAP.RU")
     assert len(posts) == 2, f"разобрались не все посты: {posts}"
@@ -211,6 +305,9 @@ def _selftest() -> None:
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         _selftest()
+    elif "--login" in sys.argv:
+        config.load_dotenv()
+        login()
     elif "--check" in sys.argv:
         print("Проверяю Telegram-каналы:\n")
         print(f"\nМолчащих каналов: {check()}")

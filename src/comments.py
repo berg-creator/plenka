@@ -34,9 +34,11 @@ from __future__ import annotations
 
 import logging
 import random
+import tempfile
 import time
 from collections.abc import Callable
 from datetime import timedelta
+from pathlib import Path
 
 from . import config, llm, state, telegram
 from .sources import telegram_web
@@ -225,19 +227,28 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
     track = post.get("full_track_file_id", "")
     # Сниппет живёт в чужом посте, и ссылку на файл Telegram выдаёт с временным
     # ключом — берём её сейчас, а не при сборе: между сбором и выходом поста
-    # проходят часы. Большого файла превью не отдаёт, тогда остаётся вопрос.
-    snippet = telegram_web.snippet_video(post.get("source_url", "")) if post.get("snippet") else ""
-    try:
-        if track:
-            telegram.send_audio(chat_id, track, ask(post, rubric, "трек"), reply_to=message_id)
-        elif snippet:
-            telegram.send_video_url(chat_id, snippet, ask(post, "snippet", "сниппет"), reply_to=message_id)
-        else:
-            telegram.send_message(chat_id, ask(post, rubric), reply_to=message_id)
-    except telegram.TelegramError as exc:
-        # Бота могли не пустить в чат или разжаловать — пост от этого не страдает.
-        log.warning("Первый комментарий не ушёл: %s", exc)
-        return False
+    # проходят часы. Большого файла превью не отдаёт — его качает аккаунт
+    # владельца; не вышло и так — остаётся вопрос.
+    source = post.get("source_url", "")
+    snippet = telegram_web.snippet_video(source) if post.get("snippet") else ""
+    with tempfile.TemporaryDirectory() as folder:
+        heavy = (telegram_web.account_video(source, Path(folder))
+                 if post.get("snippet") and not (track or snippet) else {})
+        try:
+            if track:
+                telegram.send_audio(chat_id, track, ask(post, rubric, "трек"), reply_to=message_id)
+            elif snippet:
+                telegram.send_video_url(chat_id, snippet, ask(post, "snippet", "сниппет"), reply_to=message_id)
+            elif heavy:
+                telegram.send_video_file(chat_id, heavy["path"], ask(post, "snippet", "сниппет"),
+                                         seconds=heavy["seconds"], width=heavy["width"],
+                                         height=heavy["height"], reply_to=message_id)
+            else:
+                telegram.send_message(chat_id, ask(post, rubric), reply_to=message_id)
+        except telegram.TelegramError as exc:
+            # Бота могли не пустить в чат или разжаловать — пост от этого не страдает.
+            log.warning("Первый комментарий не ушёл: %s", exc)
+            return False
 
     log.info("Первый комментарий под постом рубрики «%s»", rubric or "неизвестной")
     return True
@@ -275,22 +286,31 @@ def _selftest() -> None:
         {"items": posted} if path == real_posted else snippet)
     real_video, real_url, real_msg = (
         telegram_web.snippet_video, telegram.send_video_url, telegram.send_message)
+    real_account, real_file = telegram_web.account_video, telegram.send_video_file
     real_comment = llm.generate_comment
     llm.generate_comment = lambda payload: {"skip": True}
     telegram_web.snippet_video = lambda url: "https://cdn.telesco.pe/x.mp4?token=k"
     telegram.send_video_url = lambda chat, url, caption, reply_to=None: sent.append(("видео", url))
     telegram.send_message = lambda chat, text, reply_to=None, **_: sent.append(("вопрос", text))
+    telegram.send_video_file = lambda chat, path, caption, reply_to=None, **_: sent.append(("файл", path.name))
     forwarded = {"chat": {"id": -100}, "message_id": 5, "forward_from_message_id": 200}
     try:
         assert seed(forwarded)
         assert sent == [("видео", "https://cdn.telesco.pe/x.mp4?token=k")], sent
-        # Большого ролика превью не отдаёт — тогда остаётся обычный вопрос.
+        # Большого ролика превью не отдаёт — его качает аккаунт, а без аккаунта
+        # остаётся обычный вопрос.
         sent.clear()
         telegram_web.snippet_video = lambda url: ""
+        telegram_web.account_video = lambda url, folder: {
+            "path": folder / "snippet.mp4", "seconds": 51, "width": 720, "height": 1280}
+        assert seed(forwarded) and sent == [("файл", "snippet.mp4")], sent
+        sent.clear()
+        telegram_web.account_video = lambda url, folder: {}
         assert seed(forwarded) and sent[0][0] == "вопрос", sent
     finally:
         state.read_json = real_read
         telegram_web.snippet_video, telegram.send_video_url = real_video, real_url
+        telegram_web.account_video, telegram.send_video_file = real_account, real_file
         telegram.send_message = real_msg
         llm.generate_comment = real_comment
 
