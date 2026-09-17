@@ -216,7 +216,7 @@ def edit(post: dict) -> None:
     молча, а отказывает: обрезанный пост хуже непоправленного.
     """
     message = post["message"]
-    text = listen(post.get("text", "").strip(), post.get("artist", ""), release_title(post))
+    text = track_note(listen(post.get("text", "").strip(), post.get("artist", ""), release_title(post)), post)
     where = message["chat"], message["message_id"], text
     if message["kind"] != "caption":
         telegram.edit_text(*where, buttons=message.get("buttons"))
@@ -266,6 +266,25 @@ def listen(text: str, artist: str, title: str) -> str:
         for label, search in services
     )
     return re.sub(r"\n{3,}", "\n\n", _LISTEN_LINE.sub(lambda _: line, text)).strip()
+
+
+TRACK_NOTE = "▸ Полный трек — в комментариях"
+
+
+def track_note(text: str, post: dict) -> str:
+    """Строка о полном треке в комментариях — над площадками, когда трек у поста есть.
+
+    Трек лежит первым комментарием (comments.seed), но из ленты этого не видно,
+    и за ним в комментарии не заходят (владелец, 17.09.2026). Строку ставит код,
+    а не модель: модель не знает, пришлёт ли трек помощник на Mac к выходу,
+    а пустое обещание хуже молчания. Трек, приложенный после выхода, получает
+    строку при правке поста (edit). Во ВКонтакте её нет: туда уходит сохранённый
+    текст, а трека под записью там нет.
+    """
+    if not post.get("full_track_file_id") or TRACK_NOTE in text:
+        return text
+    at = text.find("▸ Слушать — ")
+    return f"{text[:at]}{TRACK_NOTE}\n{text[at:]}" if at >= 0 else f"{text}\n\n{TRACK_NOTE}"
 
 
 def release_title(post: dict) -> str:
@@ -335,7 +354,7 @@ def send(post: dict, chat_id: str) -> dict | None:
         text = card.meme_text(post)
 
     cover = post.get("cover", "")
-    text = listen(text, post.get("artist", ""), release_title(post))
+    text = track_note(listen(text, post.get("artist", ""), release_title(post)), post)
     # С четвёртого поста о релизе за сутки — без звука: в пятницу их до девяти,
     # а девять уведомлений подряд отписывают быстрее, чем радуют. В тихие часы
     # молчит любой пост (config.QUIET_FROM_HOUR).
@@ -499,12 +518,12 @@ def _selftest() -> None:
                 "full_track_file_id": "ID"}
         # Строка «Слушать» в подпись сырой не уезжает: она развёрнута в площадки.
         send({**post, "text": 'Текст.\n\n▸ <a href="https://zvuk.com/release/1">Слушать</a>'}, "0")
-        assert sent[0][1].startswith("Текст.\n\n▸ Слушать — <a href="), sent[0][1]
+        assert sent[0][1].startswith(f"Текст.\n\n{TRACK_NOTE}\n▸ Слушать — <a href="), sent[0][1]
         sent.clear()
-        # Пост — одна плитка, даже когда трек есть: он уйдёт в комментарии.
+        # Пост — одна плитка, даже когда трек есть: он уйдёт в комментарии, о чём скажет строка.
         # Возвращается сообщение с текстом поста: по нему правит автопилот точности.
         where = send(post, "0")
-        assert sent == [("фото", "Текст.", False, False)], sent
+        assert sent == [("фото", f"Текст.\n\n{TRACK_NOTE}", False, False)], sent
         assert where == {"chat": -100, "message_id": 1, "kind": "caption", "buttons": []}, where
         sent.clear()
         # Отрывок магазина в ленту не идёт вовсе — ни отдельно, ни вместо фото.
@@ -514,12 +533,12 @@ def _selftest() -> None:
         sent.clear()
         # Фото не ушло — текст обычным сообщением.
         where = send({**post, "cover": "https://x/протухла.jpg"}, "0")
-        assert sent == [("текст", "Текст.", False, False)], sent
+        assert sent == [("текст", f"Текст.\n\n{TRACK_NOTE}", False, False)], sent
         assert where == {"chat": -100, "message_id": 1, "kind": "text", "buttons": []}, where
         sent.clear()
         # Без обложки и без кадра — текст обычным сообщением.
         where = send({**post, "cover": ""}, "0")
-        assert sent == [("текст", "Текст.", False, False)] and where["kind"] == "text", where
+        assert sent == [("текст", f"Текст.\n\n{TRACK_NOTE}", False, False)] and where["kind"] == "text", where
         sent.clear()
 
         # Разбор приходит без обложки, но кадр ему находит card.cover по тексту:
@@ -536,7 +555,7 @@ def _selftest() -> None:
         # Все кадры поста уже выходили в канале — идёт текст, а не сырая обложка.
         card.cover = lambda post, seen=(): post.update(photo="")
         send({**post}, "0")
-        assert sent == [("текст", "Текст.", False, False)], sent
+        assert sent == [("текст", f"Текст.\n\n{TRACK_NOTE}", False, False)], sent
 
         # Настоящая карточка: вышедший портрет узнаётся и уменьшенным и пережатым,
         # пост берёт следующий кадр артиста, а его отпечаток по выходе ложится в журнал.
@@ -569,23 +588,23 @@ def _selftest() -> None:
         posted(("release", ago(hours=20)), ("release", ago(hours=3)), ("verdict", ago(hours=2)))
         sent.clear()
         send(release, "0")
-        assert sent == [("фото", "Текст.", False, False)], sent
+        assert sent == [("фото", f"Текст.\n\n{TRACK_NOTE}", False, False)], sent
         posted(("release", ago(hours=3)), ("verdict", ago(hours=2)), ("release", ago(hours=1)))
         sent.clear()
         send(release, "0")
-        assert sent == [("фото", "Текст.", True, False)], sent
+        assert sent == [("фото", f"Текст.\n\n{TRACK_NOTE}", True, False)], sent
 
         # Тихие часы: ночные выходы (01:00–03:00 МСК) в счёт трёх со звуком не идут,
         # а в 00:30 по Москве молчит любой пост.
         posted(*[("release", ago(hours=h)) for h in (17, 16, 15)])
         sent.clear()
         send(release, "0")
-        assert sent == [("фото", "Текст.", False, False)], sent
+        assert sent == [("фото", f"Текст.\n\n{TRACK_NOTE}", False, False)], sent
         state.now = lambda: datetime(2026, 9, 11, 21, 30, tzinfo=timezone.utc)
         sent.clear()
         send(post, "0")
         state.now = lambda: now
-        assert sent == [("фото", "Текст.", True, False)], sent
+        assert sent == [("фото", f"Текст.\n\n{TRACK_NOTE}", True, False)], sent
 
         # Обычный пост уступает слот свежему релизу; сутки с четырьмя релизами
         # отданы им целиком, но годовщина ждать не может.
@@ -696,6 +715,10 @@ def _selftest() -> None:
                  '▸ <a href="https://youtu.be/abc">Смотреть на YouTube</a>'):
         news = f"Текст.\n\n{line}"
         assert listen(news, "Bones", "") == news, line
+    # Полный трек в комментариях — строкой над площадками; нет трека — ни слова о нём.
+    shown = track_note(text, {"full_track_file_id": "x"})
+    assert f"Текст.\n\n{TRACK_NOTE}\n▸ Слушать — " in shown and track_note(shown, {"full_track_file_id": "x"}) == shown
+    assert track_note(text, {}) == text and track_note("Текст.", {"full_track_file_id": "x"}).endswith(f"\n\n{TRACK_NOTE}")
     print("площадки стримингов: все проверки прошли")
 
 
@@ -781,7 +804,7 @@ def main() -> int:
         else:
             full = "нет"
         print(f"Полный трек: {full}")
-        shown = listen(post.get("text", ""), post.get("artist", ""), release_title(post))
+        shown = track_note(listen(post.get("text", ""), post.get("artist", ""), release_title(post)), post)
         if telegram.visible_len(shown) > telegram.MAX_CAPTION:
             print(f"Вид: текстом — подпись к фото не больше {telegram.MAX_CAPTION} знаков, "
                   f"а в посте {telegram.visible_len(shown)}")

@@ -621,7 +621,7 @@ def build_post(application: dict) -> dict:
     artist, title = application["artist"], application["title"]
     parts = [
         f"<b>{esc(artist.upper())} — «{esc(title.upper())}»</b>",
-        "Трек прислал в отбор сам артист. Послушать — первым комментарием.",
+        "Трек прислал в отбор сам артист.",  # где слушать — строкой publish.track_note
     ]
     if application.get("quote"):
         parts.append(f"Со слов артиста:\n<blockquote>{esc(application['quote'])}</blockquote>")
