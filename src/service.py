@@ -55,7 +55,7 @@ LOG_FILE = config.DATA / "service_log.jsonl"
 # Метки известные наперёд: любая нагрузка /start в счёт забила бы файл мусором.
 SOURCES_FILE = config.DATA / "bot_sources.json"
 SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов", "pin": "закреп канала",
-           "gorod": "ролик, за концертами"}
+           "gorod": "ролик, за концертами", "slezhu": "ролик, за релизами"}
 
 CARD_DIR = config.ROOT / "assets" / "cards"
 
@@ -1266,13 +1266,16 @@ def handle_message(message: dict, data: dict) -> bool:
             otbor.handle(message, admin=admin)
             return False
         otbor.cancel(chat_id)
-    if kind == "menu" and (body == "gorod" or body.startswith("gorod_")):
-        # Из ролика о гастролёре: артист зашит в ссылку (?start=gorod_basta — адрес
-        # как в Афише), человеку остаётся написать город. Без артиста — обычный вопрос.
-        count_source("gorod")
+    link, _, slug = body.partition("_")
+    if kind == "menu" and (body == "gorod" or link in ("gorod", "slezhu") and slug):
+        # Из ролика, который кончается решением боли (prompts/reels.md): артист зашит
+        # в ссылку адресом как в Афише — ?start=gorod_mayot за концертами в городе,
+        # ?start=slezhu_sematary за релизами. Подписка одна: бот следит за обоими
+        # и сам спросит город, если артист есть в Афише. Без артиста — обычный вопрос.
+        count_source(link)
         if not _subscribed(chat_id, user_id, admin):
             return False
-        name = next((a["name"] for a in collect.load_artists() if afisha.slug(a["name"]) == body[len("gorod_"):]), "")
+        name = next((a["name"] for a in collect.load_artists() if afisha.slug(a["name"]) == slug), "") if slug else ""
         if name:
             watch_reply(chat_id, name)
         else:
@@ -1630,6 +1633,8 @@ def _selftest() -> None:
         assert state.read_json(SOURCES_FILE, {})[_today()] == {"gorod": 1}
         handle_message(incoming("/start gorod_nobody", 8, chat=7), {})
         assert WATCH_MARK in said[-1][0], "неизвестный адрес — обычный вопрос об артисте"
+        handle_message(incoming("/start slezhu_basta", 12, chat=9), {})
+        assert "Слежу за" in said[-2][0] and state.read_json(SOURCES_FILE, {})[_today()]["slezhu"] == 1
         # Без подписки на канал слежение не заводится: бот и есть то, чем ролик приводит в канал.
         member["ok"] = False
         handle_message(incoming("/start gorod_basta", 9, chat=8), {})

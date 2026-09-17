@@ -71,8 +71,9 @@
 Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу
 висит метка: значок Telegram и config.CHANNEL_HANDLE. После последнего кадра —
 плашка PLATE_SECONDS: крутящийся аватар канала (avatar-wheel), адрес со значком
-и под ним строка-приманка — зачем идти в бота: BAIT (прислать свой трек в ОТБОР) или,
-у ролика о гастролёре с концертной ссылкой в описании, BAIT_GOROD (свой город — за концертами),
+и под ним строка-приманка — решение боли, о которой ролик: BAIT (прислать свой трек
+в ОТБОР), BAIT_GOROD (свой город — за концертами) или BAIT_SLEZHU (за релизами) — по ссылке
+на бота в описании,
 бит на ней затухает. Ссылка на бота — в описании, её требует проверка; метку
 площадки (?start=yt, tt, vk) в каждое описание ставит `package`, и бот считает,
 откуда пришли. TikTok ссылки
@@ -214,7 +215,12 @@ BAIT = "кидай трек — покажем"
 # Ролик о гастролёре зовёт не за треком, а за концертами в своём городе — обещание
 # в ролике одно, и концовка идёт за описанием: там концертная ссылка ?start=gorod_<артист>.
 BAIT_GOROD = "кидай город — скажем"
+# Ролик о релизе, который все пропустили, решает боль «узнал последним»: ссылка
+# ?start=slezhu_<артист> подписывает на его релизы.
+BAIT_SLEZHU = "скажем, когда выйдет"
 GOROD_LINK = f"{BOT_LINK}?start=gorod_"
+SLEZHU_LINK = f"{BOT_LINK}?start=slezhu_"
+WATCH_LINK = re.compile(re.escape(BOT_LINK) + r"\?start=(gorod|slezhu)_([\w-]*)")
 BAIT_Y = 0.735
 # Метка — левый верхний угол безопасной зоны: правее среза и ниже панели.
 BADGE_XY = (round(SAFE_LEFT * 1080), round(SAFE_TOP * 1920))
@@ -404,8 +410,8 @@ def problems(script, name: str = "") -> list[str]:
             errors.append("description: в конце нужны хэштеги, например «… #фонк #рэп»")
         if BOT_LINK not in description:
             errors.append(f"description: нет приманки со ссылкой {BOT_LINK} — строка из «Тянуть в Telegram» в брифе")
-        elif (gorod := re.search(re.escape(GOROD_LINK) + r"([\w-]*)", description)) and not artist_by_slug(gorod.group(1)):
-            errors.append(f"description: в ссылке {GOROD_LINK}{gorod.group(1)} нет артиста из data/artists.json — "
+        elif (watch := WATCH_LINK.search(description)) and not artist_by_slug(watch.group(2)):
+            errors.append(f"description: в ссылке {watch.group(0)} нет артиста из data/artists.json — "
                           "адрес пишется как в Яндекс Афише: MAYOT → mayot, Буерак → buerak")
 
     comment = script.get("comment")
@@ -1391,8 +1397,9 @@ def artist_by_slug(slug: str) -> str:
 
 
 def bait(script: dict) -> str:
-    """Строка-приманка на концовке — по ссылке в описании: концертная зовёт за городом."""
-    return BAIT_GOROD if GOROD_LINK in script.get("description", "") else BAIT
+    """Строка-приманка на концовке — по ссылке в описании: за городом, за релизом или за треком."""
+    watch = WATCH_LINK.search(script.get("description", ""))
+    return {"gorod": BAIT_GOROD, "slezhu": BAIT_SLEZHU}[watch.group(1)] if watch else BAIT
 
 
 def ending(icon: bool = True, text: str = BAIT):
@@ -1690,9 +1697,11 @@ def _selftest() -> None:
     gorod = {**good, "description": f"Приедет к тебе? Кидай боту город: {GOROD_LINK}basta Канал: t.me/plenka_fm #рэп"}
     assert problems(gorod, good["id"]) == [] and f"{GOROD_LINK}basta Канал" in package(gorod), "концертная ссылка как есть"
     assert bait(gorod) == BAIT_GOROD and bait(good) == BAIT
+    assert bait({**good, "description": f"Не пропусти: {SLEZHU_LINK}bones #рэп"}) == BAIT_SLEZHU
     broken("artists.json", description=f"Строка {GOROD_LINK}nobody #фонк")
+    broken("artists.json", description=f"Строка {SLEZHU_LINK}nobody #фонк")
     from . import stories
-    assert all(stories.font(64, 600).getlength(t) <= SAFE_TEXT * 1080 for t in (BAIT, BAIT_GOROD)), "приманка шире зоны"
+    assert all(stories.font(64, 600).getlength(t) <= SAFE_TEXT * 1080 for t in (BAIT, BAIT_GOROD, BAIT_SLEZHU)), "приманка шире зоны"
     # Отрывок трека: строка без голоса длится ровно length, с голосом — не меньше фразы.
     clip = {"track": {"id": 1440818839, "start": 12, "length": 2}, "screen": {"kind": "stock", "query": "crowd"}}
     assert problems({**good, "lines": [*good["lines"], clip, {**clip, "say": "Поверх", "track": {"query": "a — b", "length": 1}}]},
