@@ -67,6 +67,12 @@ MONTH_RE = re.compile(r'data-test-id="scheduleDate\.month">([^<]*)<')
 CITY_RE = re.compile(r'class="person-schedule-place__city">([^<]*)<')
 PLACE_RE = re.compile(r'data-test-id="personSchedule\.placeName">([^<]*)<')
 PASSED = "person-schedule-item__passed"
+# Страница артиста показывает не только его концерты: премию или фестиваль, где он
+# в афише гостем (у OG Buda единственная дата — «Премия Яндекс Музыки»), а у распавшихся
+# групп — трибьюты и симфонические каверы («Сектор Газа» → «посвящение Юрию Хою»;
+# сверено 17.09.2026). Названия события в разметке нет, есть только адрес — по нему
+# и отсеиваем: свой концерт начинается с адреса артиста и не назван посвящением.
+FOREIGN = ("posviashchenie", "tribute", "tribiut", "simfoni", "orkestr", "cover", "kaver")
 
 
 def slug(name: str) -> str:
@@ -125,14 +131,22 @@ def concerts(artist_slug: str, today: date | None = None) -> list[dict]:
     Дату словами берём как есть — в вести только то, что сказал источник.
     """
     response = get(ARTIST.format(slug=artist_slug), min_interval=MIN_INTERVAL)
-    return parse(response.text, today or date.today()) if response is not None else []
+    return parse(response.text, today or date.today(), artist_slug) if response is not None else []
 
 
-def parse(page: str, today: date) -> list[dict]:
+def own_event(event_path: str, artist_slug: str) -> bool:
+    """Концерт самого артиста, а не чужое шоу с ним в афише и не трибьют (см. FOREIGN)."""
+    event_slug = event_path.rsplit("/", 1)[-1]
+    return event_slug.startswith(artist_slug) and not any(word in event_slug for word in FOREIGN)
+
+
+def parse(page: str, today: date, artist_slug: str = "") -> list[dict]:
     found = []
     for chunk in page.split(ITEM_SPLIT)[1:]:
         event, month, city = EVENT_RE.search(chunk), MONTH_RE.search(chunk), CITY_RE.search(chunk)
         if PASSED in chunk or not (event and month and city):
+            continue
+        if artist_slug and not own_event(event.group(1), artist_slug):
             continue
         number = DAY_RE.search(chunk)
         when_text = html.unescape(f"{int(number.group(1))} {month.group(1)}" if number else month.group(1)).strip()
@@ -160,8 +174,14 @@ def main() -> int:
         print(f"«{name}» в Афише не нашёлся (или по адресу {slug(name)} другой артист).")
         return 0
     print(f"{name}: {ARTIST.format(slug=found)}")
-    for item in concerts(found):
+    response = get(ARTIST.format(slug=found), min_interval=MIN_INTERVAL)
+    page = response.text if response is not None else ""
+    own = parse(page, date.today(), found)
+    for item in own:
         print(f"  {item['day']}  {item['when']:<22} {item['city']:<18} {item['place']}  {item['url']}")
+    foreign = len(parse(page, date.today())) - len(own)
+    if foreign:
+        print(f"  чужих шоу и трибьютов не показано: {foreign}")
     return 0
 
 

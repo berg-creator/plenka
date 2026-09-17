@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import re
 from datetime import timedelta
 import pathlib
@@ -53,7 +54,8 @@ LOG_FILE = config.DATA / "service_log.jsonl"
 # Только числа по дню и метке — файл открытый, id человека сюда не попадает.
 # Метки известные наперёд: любая нагрузка /start в счёт забила бы файл мусором.
 SOURCES_FILE = config.DATA / "bot_sources.json"
-SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов", "pin": "закреп канала"}
+SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов", "pin": "закреп канала",
+           "gorod": "ролик, за концертами"}
 
 CARD_DIR = config.ROOT / "assets" / "cards"
 
@@ -398,6 +400,27 @@ def count_source(label: str) -> None:
     day = data.setdefault(_today(), {})
     day[label] = day.get(label, 0) + 1
     state.write_json(SOURCES_FILE, data)
+
+
+# Адрес из config, а не секрет канала: в секрете может стоять числовой id,
+# и человек из ролика увидел бы «подпишись на -100…».
+NOT_SUBSCRIBED = ("Всё в боте <b>бесплатно</b> — достаточно подписаться на "
+                  f'<a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.\n\n'
+                  "Подпишись и пришли ещё раз.")
+
+
+def _subscribed(chat_id: str, user_id: str, admin: bool) -> bool:
+    """Подписан ли человек на канал; нет — говорит, что делать, и возвращает False.
+
+    За подписку здесь всё: и разборы, и отбор, и слежение. Слежение до 17.09.2026
+    проверку обходило, и пришедший из ролика за концертами подписчиком канала
+    не становился — а бот и есть то, чем ролик приводит в канал (GROWTH.md).
+    """
+    channel = config.secret("TELEGRAM_CHANNEL_ID", required=False)
+    if admin or not channel or telegram.is_member(channel, user_id):
+        return True
+    telegram.send_message(chat_id, NOT_SUBSCRIBED)
+    return False
 
 
 def user_key(user_id: str | int) -> str:
@@ -1223,6 +1246,8 @@ def handle_message(message: dict, data: dict) -> bool:
     asked = (message.get("reply_to_message") or {}).get("text", "")
     if not text.startswith("/") and (WATCH_MARK in asked or CITY_MARK in asked):
         otbor.cancel(chat_id)
+        if not _subscribed(chat_id, user_id, admin):
+            return False
         if WATCH_MARK in asked:
             watch_reply(chat_id, text)
         else:
@@ -1241,6 +1266,18 @@ def handle_message(message: dict, data: dict) -> bool:
             otbor.handle(message, admin=admin)
             return False
         otbor.cancel(chat_id)
+    if kind == "menu" and (body == "gorod" or body.startswith("gorod_")):
+        # Из ролика о гастролёре: артист зашит в ссылку (?start=gorod_basta — адрес
+        # как в Афише), человеку остаётся написать город. Без артиста — обычный вопрос.
+        count_source("gorod")
+        if not _subscribed(chat_id, user_id, admin):
+            return False
+        name = next((a["name"] for a in collect.load_artists() if afisha.slug(a["name"]) == body[len("gorod_"):]), "")
+        if name:
+            watch_reply(chat_id, name)
+        else:
+            ask_artist(chat_id)
+        return False
     if kind == "menu" and body in SOURCES:
         # Из ролика и чатов зовут прислать трек — меню между ссылкой и заявкой лишнее.
         count_source(body)
@@ -1254,7 +1291,8 @@ def handle_message(message: dict, data: dict) -> bool:
         telegram.send_message(chat_id, PROYAVKA)
         return False
     if kind == "menu" and body == "slezhu":
-        ask_artist(chat_id)
+        if _subscribed(chat_id, user_id, admin):
+            ask_artist(chat_id)
         return False
     if kind == "menu":
         telegram.send_message(chat_id, MENU, buttons=menu_buttons())
@@ -1263,7 +1301,8 @@ def handle_message(message: dict, data: dict) -> bool:
     # Списками слежения человек распоряжается сам, и это не стоит ни токенов,
     # ни лимита — поэтому разбирается до всех проверок, кроме подписки.
     if kind == "watchlist" and body:
-        watch_reply(chat_id, body)
+        if _subscribed(chat_id, user_id, admin):
+            watch_reply(chat_id, body)
         return False
     if kind == "watchlist":
         watch_list(chat_id)
@@ -1272,6 +1311,8 @@ def handle_message(message: dict, data: dict) -> bool:
         telegram.send_message(chat_id, watch_clear(chat_id))
         return False
     if kind == "city":
+        if not _subscribed(chat_id, user_id, admin):
+            return False
         answer = city_set(chat_id, body)
         if CITY_MARK in answer:
             telegram.send_message(chat_id, answer, ask="Город")
@@ -1290,16 +1331,7 @@ def handle_message(message: dict, data: dict) -> bool:
         telegram.send_message(chat_id, MENU, buttons=menu_buttons())
         return False
 
-    channel = config.secret("TELEGRAM_CHANNEL_ID", required=False)
-    if channel and not admin and not telegram.is_member(channel, user_id):
-        telegram.send_message(
-            chat_id,
-            # Адрес из config, а не секрет канала: в секрете может стоять числовой
-            # id, и человек из ролика увидел бы «подпишись на -100…».
-            "ПРОЯВКА <b>бесплатная</b> — достаточно подписаться на "
-            f'<a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.\n\n'
-            "Подпишись и пришли запрос ещё раз.",
-        )
+    if not _subscribed(chat_id, user_id, admin):
         return False
 
     # Лимит тратят только те ответы, что идут через модель. «Что нового» —
@@ -1408,7 +1440,9 @@ def handle_callback(query: dict, data: dict) -> None:
 
     if action == "slezhu":
         otbor.cancel(chat_id)
-        ask_artist(chat_id)
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        if _subscribed(chat_id, user_id, admin):
+            ask_artist(chat_id)
         return
 
     if action == "mylist":
@@ -1554,7 +1588,11 @@ def _selftest() -> None:
     said: list[tuple[str, list | None, str]] = []
     deleted: list[int] = []
     real = (telegram.send_message, telegram.delete_message, globals()["WATCH_FILE"], otbor.cancel,
-            otbor.active, globals()["find_watch_artist"], afisha.find_artist, itunes.resolve_name)
+            otbor.active, globals()["find_watch_artist"], afisha.find_artist, itunes.resolve_name,
+            telegram.is_member, globals()["SOURCES_FILE"], os.environ.get("TELEGRAM_CHANNEL_ID"))
+    member = {"ok": True}
+    telegram.is_member = lambda channel, user: member["ok"]
+    os.environ["TELEGRAM_CHANNEL_ID"] = "@plenka_fm"
     telegram.send_message = lambda chat, text, buttons=None, ask="", **_: said.append((text, buttons, ask)) or {"message_id": 1}
     telegram.delete_message = lambda chat, message_id: deleted.append(message_id)
     otbor.cancel = lambda chat: None
@@ -1564,9 +1602,10 @@ def _selftest() -> None:
     itunes.resolve_name = lambda name: ""
     tmp = tempfile.TemporaryDirectory()
     globals()["WATCH_FILE"] = pathlib.Path(tmp.name) / "watch.json"
+    globals()["SOURCES_FILE"] = pathlib.Path(tmp.name) / "sources.json"
 
-    def incoming(text: str, message_id: int, date: int = 100, reply: str = "") -> dict:
-        message = {"chat": {"type": "private", "id": 5}, "from": {"id": 5}, "message_id": message_id,
+    def incoming(text: str, message_id: int, date: int = 100, reply: str = "", chat: int = 5) -> dict:
+        message = {"chat": {"type": "private", "id": chat}, "from": {"id": chat}, "message_id": message_id,
                    "date": date, "text": text}
         return {**message, "reply_to_message": {"text": reply}} if reply else message
 
@@ -1584,11 +1623,29 @@ def _selftest() -> None:
         assert "Слежу за" in said[-2][0] and said[-1][2] == "Город", said[-2:]
         handle_message(incoming("питер", 6, reply=said[-1][0]), {})
         assert "Санкт-Петербург" in said[-1][0] and state.read_json(WATCH_FILE, {})["cities"]["5"] == "Санкт-Петербург"
+
+        # Ссылка из ролика о гастролёре: артист зашит в неё, бот подписывает и спрашивает город.
+        handle_message(incoming("/start gorod_basta", 7, chat=6), {})
+        assert "Слежу за" in said[-2][0] and said[-1][2] == "Город", said[-2:]
+        assert state.read_json(SOURCES_FILE, {})[_today()] == {"gorod": 1}
+        handle_message(incoming("/start gorod_nobody", 8, chat=7), {})
+        assert WATCH_MARK in said[-1][0], "неизвестный адрес — обычный вопрос об артисте"
+        # Без подписки на канал слежение не заводится: бот и есть то, чем ролик приводит в канал.
+        member["ok"] = False
+        handle_message(incoming("/start gorod_basta", 9, chat=8), {})
+        handle_message(incoming("Баста", 10, chat=8, reply=f"За кем следить? {WATCH_MARK} — напишу"), {})
+        handle_message(incoming("/gorod Казань", 11, chat=8), {})
+        assert all("подписаться" in text for text, _, _ in said[-3:]) and "8" not in state.read_json(WATCH_FILE, {})["watchers"]
     finally:
         (telegram.send_message, telegram.delete_message, globals()["WATCH_FILE"], otbor.cancel,
-         otbor.active, globals()["find_watch_artist"], afisha.find_artist, itunes.resolve_name) = real
+         otbor.active, globals()["find_watch_artist"], afisha.find_artist, itunes.resolve_name,
+         telegram.is_member, globals()["SOURCES_FILE"], channel_env) = real
+        os.environ.pop("TELEGRAM_CHANNEL_ID", None)
+        if channel_env:
+            os.environ["TELEGRAM_CHANNEL_ID"] = channel_env
         tmp.cleanup()
-    print("СЛЕЖУ: кнопка, имя и город ответом, без команд; повтор /start удалён без второго приветствия")
+    print("СЛЕЖУ: кнопка, имя и город ответом, без команд; ссылка с артистом из ролика; без подписки не заводится; "
+          "повтор /start удалён без второго приветствия")
 
     # Концерты: разбор страницы Афиши без сети, город словами, одна весть на концерт.
     today = datetime.date(2026, 9, 16)

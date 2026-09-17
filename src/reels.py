@@ -71,7 +71,8 @@
 Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу
 висит метка: значок Telegram и config.CHANNEL_HANDLE. После последнего кадра —
 плашка PLATE_SECONDS: крутящийся аватар канала (avatar-wheel), адрес со значком
-и под ним строка-приманка BAIT — зачем идти в бота (прислать свой трек в ОТБОР),
+и под ним строка-приманка — зачем идти в бота: BAIT (прислать свой трек в ОТБОР) или,
+у ролика о гастролёре с концертной ссылкой в описании, BAIT_GOROD (свой город — за концертами),
 бит на ней затухает. Ссылка на бота — в описании, её требует проверка; метку
 площадки (?start=yt, tt, vk) в каждое описание ставит `package`, и бот считает,
 откуда пришли. TikTok ссылки
@@ -210,6 +211,10 @@ ENDING_Y = 0.675
 # в бота» выгоды не называл и был на 5 точек шире зоны, «выложим» звучало как
 # дистрибьютор (владелец, 16.09.2026).
 BAIT = "кидай трек — покажем"
+# Ролик о гастролёре зовёт не за треком, а за концертами в своём городе — обещание
+# в ролике одно, и концовка идёт за описанием: там концертная ссылка ?start=gorod_<артист>.
+BAIT_GOROD = "кидай город — скажем"
+GOROD_LINK = f"{BOT_LINK}?start=gorod_"
 BAIT_Y = 0.735
 # Метка — левый верхний угол безопасной зоны: правее среза и ниже панели.
 BADGE_XY = (round(SAFE_LEFT * 1080), round(SAFE_TOP * 1920))
@@ -399,6 +404,9 @@ def problems(script, name: str = "") -> list[str]:
             errors.append("description: в конце нужны хэштеги, например «… #фонк #рэп»")
         if BOT_LINK not in description:
             errors.append(f"description: нет приманки со ссылкой {BOT_LINK} — строка из «Тянуть в Telegram» в брифе")
+        elif (gorod := re.search(re.escape(GOROD_LINK) + r"([\w-]*)", description)) and not artist_by_slug(gorod.group(1)):
+            errors.append(f"description: в ссылке {GOROD_LINK}{gorod.group(1)} нет артиста из data/artists.json — "
+                          "адрес пишется как в Яндекс Афише: Баста → basta, Три дня дождя → tri-dnia-dozhdia")
 
     comment = script.get("comment")
     if "comment" in script and not (_filled(comment) and len(comment) <= COMMENT_MAX):
@@ -1374,7 +1382,20 @@ def badge(icon: bool = True):
     return frame
 
 
-def ending(icon: bool = True):
+def artist_by_slug(slug: str) -> str:
+    """Имя артиста из data/artists.json по адресу в Афише (транслит имени) — как разбирает бот."""
+    from . import collect
+    from .sources import afisha
+
+    return next((a["name"] for a in collect.load_artists() if afisha.slug(a["name"]) == slug), "")
+
+
+def bait(script: dict) -> str:
+    """Строка-приманка на концовке — по ссылке в описании: концертная зовёт за городом."""
+    return BAIT_GOROD if GOROD_LINK in script.get("description", "") else BAIT
+
+
+def ending(icon: bool = True, text: str = BAIT):
     """Адрес канала на плашке-концовке: крупно, со значком, под аватаром, и под ним приманка."""
     from PIL import Image, ImageDraw
 
@@ -1383,7 +1404,7 @@ def ending(icon: bool = True):
     mark = handle_mark(150, pill=False, icon=icon)
     frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
     frame.alpha_composite(mark, ((clips.WIDTH - mark.width) // 2, round(clips.HEIGHT * ENDING_Y - mark.height / 2)))
-    ImageDraw.Draw(frame).text((clips.WIDTH / 2, clips.HEIGHT * BAIT_Y), BAIT, font=stories.font(64, 600), anchor="mm",
+    ImageDraw.Draw(frame).text((clips.WIDTH / 2, clips.HEIGHT * BAIT_Y), text, font=stories.font(64, 600), anchor="mm",
                                fill=(255, 255, 255, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
     return frame
 
@@ -1420,7 +1441,8 @@ def vk(video: Path) -> Path:
     return video.with_name(f"{video.stem}-vk.mp4")
 
 
-def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float) -> None:
+def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float,
+         text: str = BAIT) -> None:
     """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет три файла: YouTube, TikTok и ВКонтакте.
 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
@@ -1440,9 +1462,9 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     blank = work / "sub-0.png"
     Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)).save(blank)
     badge().save(work / "badge.png")
-    ending().save(work / "ending.png")
+    ending(text=text).save(work / "ending.png")
     badge(icon=False).save(work / "badge-vk.png")
-    ending(icon=False).save(work / "ending-vk.png")
+    ending(icon=False, text=text).save(work / "ending-vk.png")
     entries, now = [], 0.0
     for number, (text, first, end, up) in enumerate(placed, 1):
         # Щель короче кадра — не пауза, а погрешность деления строки: пустой
@@ -1554,7 +1576,7 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
         placed = place(cues(script, [shot.seconds for shot in timed], lengths), flat, ends)
-        burn(video, placed, work, ending_at=total - PLATE_SECONDS)
+        burn(video, placed, work, ending_at=total - PLATE_SECONDS, text=bait(script))
         print(f"  субтитры: {len(placed)} кусков, наверху {sum(p[3] for p in placed)}")
 
     # Превью вынимается из готового ролика, а не рисуется отдельно: так оно
@@ -1574,7 +1596,8 @@ def package(script: dict) -> str:
 
     def described(label: str) -> str:
         # Сценарий пишет одну ссылку, а по метке бот считает приходы с каждой площадки.
-        text = re.sub(re.escape(BOT_LINK) + r"(\?start=\w+)?", f"{BOT_LINK}?start={label}", script["description"])
+        text = re.sub(re.escape(BOT_LINK) + r"(?:\?start=(?:yt|tt|vk)(?![\w-]))?(?!\?start=)",
+                      f"{BOT_LINK}?start={label}", script["description"])
         return field(text)
 
     comment = f"Закрепи первым комментарием: {field(script['comment'])}\n\n" if script.get("comment") else ""
@@ -1664,6 +1687,12 @@ def _selftest() -> None:
     assert f"Закрепи первым комментарием: <code>{good['comment']}</code>" in package(good)
     assert "Закрепи" not in package({k: v for k, v in good.items() if k != "comment"})
     assert all(f"{BOT_LINK}?start={label} #фонк" in package(good) for label in ("yt", "vk", "tt")), "метки площадок"
+    gorod = {**good, "description": f"Приедет к тебе? Кидай боту город: {GOROD_LINK}basta Канал: t.me/plenka_fm #рэп"}
+    assert problems(gorod, good["id"]) == [] and f"{GOROD_LINK}basta Канал" in package(gorod), "концертная ссылка как есть"
+    assert bait(gorod) == BAIT_GOROD and bait(good) == BAIT
+    broken("artists.json", description=f"Строка {GOROD_LINK}nobody #фонк")
+    from . import stories
+    assert all(stories.font(64, 600).getlength(t) <= SAFE_TEXT * 1080 for t in (BAIT, BAIT_GOROD)), "приманка шире зоны"
     # Отрывок трека: строка без голоса длится ровно length, с голосом — не меньше фразы.
     clip = {"track": {"id": 1440818839, "start": 12, "length": 2}, "screen": {"kind": "stock", "query": "crowd"}}
     assert problems({**good, "lines": [*good["lines"], clip, {**clip, "say": "Поверх", "track": {"query": "a — b", "length": 1}}]},
