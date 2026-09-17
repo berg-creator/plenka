@@ -2,6 +2,13 @@
   "artist": "",
   "cover": "",
   "created_at": "2026-09-12T08:08:50+00:00",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 143
+  },
+  "photo": "39af31bd35be3d9e3a1b365b16ce37c667c6735327702b0b062e6465247b34d3",
   "preview": "",
   "release": "",
   "released_at": "",
