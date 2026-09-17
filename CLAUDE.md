@@ -284,7 +284,10 @@ python -m src.clips --selftest         кадров в раскадровке с
 
 - `concurrency: group: state-write` — два одновременных запуска подрались бы при коммите;
 - `git pull --rebase --autostash origin ${{ github.ref_name }}` перед `git push` —
-  между checkout и push мог пройти другой воркфлоу.
+  между checkout и push мог пройти другой воркфлоу;
+- `actions/checkout` с `ref: ${{ github.ref_name }}` — без него запуск берёт коммит,
+  на котором встал в очередь, а не свежий. 17.09.2026 срочные новости ждали сбор
+  шесть минут, упали на конфликте в `data/seen.json`, и вышедший пост остался без записи.
 
 Ожидающий запуск в группе `state-write` GitHub вытесняет следующим. Для `review.yml`
 это потерянные правки, поэтому он раз в три часа сам перезапускает ветки `claude/review-*`

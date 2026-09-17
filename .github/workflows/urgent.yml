@@ -28,6 +28,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        # Голова ветки на старте, а не коммит, на котором запуск встал в очередь:
+        # в state-write он ждёт других, и 17.09.2026 без свежего seen.json
+        # сохранение упало на конфликте, а вышедший пост остался без записи.
+        with:
+          ref: ${{ github.ref_name }}
 
       - uses: actions/setup-python@v5
         with:
