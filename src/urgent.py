@@ -32,7 +32,7 @@ import os
 from datetime import timedelta
 
 from . import compose, config, publish, state, telegram
-from .sources import deezer
+from .sources import deezer, telegram_web
 
 log = logging.getLogger("urgent")
 
@@ -199,6 +199,16 @@ def run(limit: int, dry_run: bool, target: str) -> int:
     for item in news:
         if sent >= limit:
             break
+        # Пост «показал сниппет» без самого сниппета пуст. Большой ролик превью
+        # Telegram не отдаёт («Media is too big»), а бот чужой канал не читает
+        # и скопировать пост не может — 17.09.2026 так вышел сниппет Avenuepluggg
+        # (0:51) голым текстом. Проверяем до модели: и пустой пост не выходит,
+        # и генерация не тратится. Ключ ссылки временный, поэтому сам ролик
+        # comments.seed возьмёт заново, но «слишком большой» — это навсегда.
+        if item.get("snippet") and not telegram_web.snippet_video(item.get("url", "")):
+            used.append(item["fingerprint"])
+            print(f"  — пропущено (сниппет не достаётся): {item.get('title', '')[:50]}")
+            continue
         result = compose.generate_checked("news", compose._news_payload(item))
 
         if result["skip"] or not result["text"]:
@@ -252,11 +262,13 @@ def _selftest() -> int:
         {"fingerprint": "west", "source": "rss", "released_at": "2026-09-12T19:00", "score": 80},
         {"fingerprint": "scene", "source": "telegram", "released_at": "2026-09-12T10:00", "score": 30},
         {"fingerprint": "snippet", "source": "telegram", "snippet": True, "released_at": "2026-09-11T21:00"},
+        {"fingerprint": "snippet-big", "source": "telegram", "snippet": True, "released_at": "2026-09-11T20:00",
+         "url": "https://t.me/big/1"},
         {"fingerprint": "west-old", "source": "rss", "released_at": "2026-09-12T08:00"},
         {"fingerprint": "keef", "source": "rss", "released_at": "2026-09-11T08:00", "score": 100},
     ]
     assert [i["fingerprint"] for i in sorted(items, key=priority, reverse=True)] == \
-        ["snippet", "keef", "scene", "west", "west-old"]
+        ["snippet", "snippet-big", "keef", "scene", "west", "west-old"]
     items.pop()
 
     # Заход: утренний час прошёл, а запуска после него нет — пора; отменённый не в счёт.
@@ -278,13 +290,15 @@ def _selftest() -> int:
           mock.patch.object(compose, "_news_payload", lambda item: item),
           mock.patch.object(compose, "save_post", lambda *a, **k: Path("post.json")),
           mock.patch.object(compose, "mark_used", used.extend),
+          mock.patch.object(telegram_web, "snippet_video", lambda url: "" if "big" in url else "x.mp4"),
           mock.patch.object(state, "read_json", lambda path, default: {}),
           mock.patch.object(publish, "send_for_approval", lambda *a, **k: None),
           # globals(), а не «src.urgent»: под -m модуль живёт как __main__.
           mock.patch.dict(globals(), {"fresh_news": lambda hours: items, "with_portrait": lambda item: item})):
         run(1, False, "admin")
-    assert asked == ["snippet", "scene"] and used == ["snippet", "scene"], (asked, used)
-    print("срочное: сниппет, свой артист и сцена первыми, отброшенная уступает место, заход по часам")
+    assert asked == ["snippet", "scene"] and used == ["snippet", "snippet-big", "scene"], (asked, used)
+    print("срочное: сниппет, свой артист и сцена первыми, отброшенная уступает место, "
+          "сниппет без ролика не пишется, заход по часам")
     return 0
 
 
