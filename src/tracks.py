@@ -102,7 +102,7 @@ def download(url: str, folder: Path) -> Path:
     from yt_dlp import YoutubeDL
 
     options = {
-        "quiet": True, "no_warnings": True, "noplaylist": True, "format": "bestaudio/best",
+        "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True, "format": "bestaudio/best",
         "outtmpl": str(folder / "track.%(ext)s"),
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
     }

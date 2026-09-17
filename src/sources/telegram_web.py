@@ -224,8 +224,10 @@ def login(key: str = "TELEGRAM_SESSION") -> None:
     """Один раз на компьютере владельца: коды приложения с my.telegram.org,
     телефон, код из Telegram. Ключ входа ложится в .env под именем key
     и на экран не выводится."""
-    for key, prompt in (("TELEGRAM_API_ID", "api_id"), ("TELEGRAM_API_HASH", "api_hash")):
-        os.environ[key] = os.environ.get(key) or input(f"{prompt} с my.telegram.org: ").strip()
+    # Не `key`: переменная цикла затёрла бы имя ключа, и 17.09.2026 ключ Mac лёг
+    # в .env второй строкой TELEGRAM_API_HASH, где его никто не читает.
+    for name, prompt in (("TELEGRAM_API_ID", "api_id"), ("TELEGRAM_API_HASH", "api_hash")):
+        os.environ[name] = os.environ.get(name) or input(f"{prompt} с my.telegram.org: ").strip()
     from getpass import getpass
 
     # Свои вопросы вместо английских по умолчанию: команду запускает владелец.
