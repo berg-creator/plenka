@@ -221,9 +221,18 @@ def login() -> None:
     телефон, код из Telegram. Ключ входа ложится в .env и на экран не выводится."""
     for key, prompt in (("TELEGRAM_API_ID", "api_id"), ("TELEGRAM_API_HASH", "api_hash")):
         os.environ[key] = os.environ.get(key) or input(f"{prompt} с my.telegram.org: ").strip()
-    with _client() as client:  # start() сам спросит телефон, код и облачный пароль
+    from getpass import getpass
+
+    # Свои вопросы вместо английских по умолчанию: команду запускает владелец.
+    client = _client().start(
+        phone=lambda: input("Номер телефона, в виде +79991234567: ").strip(),
+        code_callback=lambda: input("Код, который пришёл в Telegram: ").strip(),
+        password=lambda: getpass("Облачный пароль Telegram (при вводе не видно): "))
+    try:
         name = client.get_me().first_name
         session = client.session.save()
+    finally:
+        client.disconnect()
     env = config.ROOT / ".env"
     lines = env.read_text(encoding="utf-8").splitlines() if env.exists() else []
     lines = [line for line in lines if line.partition("=")[0].strip() not in ACCOUNT_KEYS]
