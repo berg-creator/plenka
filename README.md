@@ -397,7 +397,7 @@ python -m src.card --verdict "текст" --artists "A, B"     # только к
 |---|---|
 | **Тон и стиль постов** | `prompts/voice.md` — самый важный файл, правки видны сразу |
 | Правила отдельной рубрики | `prompts/rubrics/*.md` |
-| Кого отслеживаем | `data/artists.json`, потом `python -m src.resolve_ids --missing` |
+| Кого отслеживаем | `data/artists.json` пополняется сама — `src/newcomers.py` раз в сутки берёт тех, о ком пишет пресса сцены; своих — руками, потом `python -m src.resolve_ids --missing` |
 | Связи для «Откуда ноги» | `data/lineage.json` — пополняется вручную, это ядро уникальности |
 | Треки для «Между строк» | `data/subtext.json` |
 | Памятные даты | `data/calendar.json` |

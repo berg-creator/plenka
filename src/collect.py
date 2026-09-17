@@ -27,7 +27,11 @@ RELEASE_MAX_AGE_DAYS = 14
 # Вес артиста по его месту в базе — влияет на приоритет в очереди постов.
 # Русская сцена идёт наравне с ядром: своих новостей и релизов канал ждёт
 # не меньше, чем западных.
-TIER_SCORE = {"core": 100, "ru": 95, "scene": 80, "legend": 70, "ru_pop": 55}
+# auto — найденные сами (src/newcomers.py): своя сцена, но не проверенная вкусом.
+TIER_SCORE = {"core": 100, "ru": 95, "scene": 80, "legend": 70, "auto": 65, "ru_pop": 55}
+
+# Сколько дней тишины терпит сбор у найденного сами, прежде чем перестать искать его релизы.
+DORMANT_DAYS = 183
 
 # Слова, по которым новость без упоминания знакомого артиста всё же интересна.
 NEWS_KEYWORDS_RU = (
@@ -90,14 +94,28 @@ def load_artists() -> list[dict]:
     return payload.get("artists", [])
 
 
+def in_collect(artist: dict) -> bool:
+    """Ищет ли сбор релизы артиста.
+
+    ru_pop нужен только для новостей и шуток — их релизы канал не анонсирует.
+    Найденный сами (поле seen_at, src/newcomers.py) — пока о нём пишут:
+    полгода тишины, и магазины о нём больше не спрашиваем, а из базы он
+    не уходит — по ней ищутся фото и ссылки. Тот же фильтр держит слежение
+    (service.watched_releases): кого сбор не ищет, того ищет рассылка.
+    """
+    if artist.get("tier") == "ru_pop":
+        return False
+    seen = artist.get("seen_at")
+    return not seen or seen >= (state.now() - timedelta(days=DORMANT_DAYS)).date().isoformat()
+
+
 def collect_releases(artists: list[dict], seen: state.Seen) -> list[dict]:
     """Свежие релизы по всем артистам, у которых заполнены id."""
     cutoff = state.now() - timedelta(days=RELEASE_MAX_AGE_DAYS)
     found: list[dict] = []
 
     for artist in artists:
-        # ru_pop нужен только для новостей и шуток — их релизы канал не анонсирует.
-        if artist.get("tier") == "ru_pop":
+        if not in_collect(artist):
             continue
 
         raw: list[dict] = []

@@ -357,10 +357,16 @@ def fans(artist: str, deezer_id: int | None = None) -> int:
 
 
 def known(artist: str, deezer_id: int | None = None) -> str:
-    """Отказ, если артист уже известен; пусто — берём."""
+    """Отказ, если артист уже известен; пусто — берём.
+
+    Найденных сами (tier auto, src/newcomers.py) база не знает в этом смысле:
+    о них писала пресса, но это не значит, что у них есть слушатель, —
+    решают фанаты на Deezer.
+    """
     base = {
         itunes._norm(name)
         for item in state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
+        if item.get("tier") != "auto"
         for name in (item.get("name"), item.get("search_name"), *(item.get("aliases") or []))
         if name
     }

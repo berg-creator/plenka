@@ -895,7 +895,7 @@ def watched_releases(watchers: dict) -> list[dict]:
     Имя и id берутся из подписки (watch_add), поэтому проход — два запроса
     на артиста, без поиска.
     """
-    covered = {a["name"].casefold() for a in collect.load_artists() if a.get("tier") != "ru_pop"}
+    covered = {a["name"].casefold() for a in collect.load_artists() if collect.in_collect(a)}
     wanted: dict[str, dict] = {}
     for names in watchers.values():
         for n in names:

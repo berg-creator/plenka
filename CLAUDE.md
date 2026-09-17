@@ -43,6 +43,8 @@ python -m src.sources.telegram_web --login   войти в аккаунт вла
 python -m src.sources.youtube_comments --selftest  отбор отзывов: брань и спам в пост не идут
 python -m src.check_llm --sample       генератор отвечает + пробный пост
 python -m src.collect --dry-run        что нашлось, без записи
+python -m src.newcomers --dry-run      кого база артистов добавила бы сама и почему, без записи
+python -m src.newcomers --selftest     новенькие: два издания и рэп-пресса, рэп в iTunes, обычные слова мимо
 python -m src.urgent --dry-run         срочные новости за сегодня, без затрат
 python -m src.urgent --selftest        срочное: сниппет, свой артист и сцена первыми, отброшенная уступает место, сниппет без ролика не пишется
 python -m src.compose --dry-run        план генерации без затрат
@@ -96,7 +98,10 @@ python -m src.clips --selftest         кадров в раскадровке с
 
 1. **[src/collect.py](src/collect.py)** — раз в 6 часов обходит iTunes, Deezer,
    YouTube, RSS и Telegram-каналы изданий (`src/sources/`), складывает находки
-   в `data/inbox.jsonl`. Инфоповоды русской сцены берутся только из Telegram:
+   в `data/inbox.jsonl`. Релизы ищутся по `data/artists.json`, и база
+   пополняется сама: раз в сутки `src/newcomers.py` добавляет уровнем `auto`
+   тех, кого за две недели назвали два издания, одно из них — рэп-пресса,
+   а iTunes знает под этим именем рэпера. Инфоповоды русской сцены берутся только из Telegram:
    RSS по ней вымер целиком (`data/feeds.json`), и веб-превью `t.me/s/<канал>` —
    единственный путь, не требующий ни ключа, ни чужого токена.
    Отпечатки виденного — в `data/seen.json`.

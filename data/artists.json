@@ -944,28 +944,28 @@
       "tier": "legend"
     },
     {
+      "aliases": [
+        "YННВ"
+      ],
       "deezer_id": 57264342,
       "itunes_id": 1449022766,
       "name": "УННВ",
       "tags": [
         "ru-underground"
       ],
-      "tier": "ru",
-      "aliases": [
-        "YННВ"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Krovostok"
+      ],
       "deezer_id": 16779,
       "itunes_id": 685986151,
       "name": "Кровосток",
       "tags": [
         "ru-underground"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Krovostok"
-      ]
+      "tier": "ru"
     },
     {
       "deezer_id": 10292790,
@@ -978,6 +978,9 @@
       "tier": "ru"
     },
     {
+      "aliases": [
+        "Kunteynir"
+      ],
       "deezer_id": 5865529,
       "itunes_id": 484265970,
       "name": "Кунтейнир",
@@ -985,10 +988,7 @@
       "tags": [
         "ru-underground"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Kunteynir"
-      ]
+      "tier": "ru"
     },
     {
       "deezer_id": 10216612,
@@ -1121,16 +1121,16 @@
       "tier": "ru"
     },
     {
+      "aliases": [
+        "LSP"
+      ],
       "deezer_id": 8874422,
       "itunes_id": 943459711,
       "name": "ЛСП",
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru",
-      "aliases": [
-        "LSP"
-      ]
+      "tier": "ru"
     },
     {
       "deezer_id": 5036430,
@@ -1142,28 +1142,28 @@
       "tier": "ru"
     },
     {
+      "aliases": [
+        "Husky"
+      ],
       "deezer_id": 6363110,
       "itunes_id": 909146745,
       "name": "Хаски",
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Husky"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Skryptonite"
+      ],
       "deezer_id": 5603958,
       "itunes_id": 837847154,
       "name": "Скриптонит",
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Skryptonite"
-      ]
+      "tier": "ru"
     },
     {
       "deezer_id": 291076,
@@ -1175,16 +1175,16 @@
       "tier": "ru"
     },
     {
+      "aliases": [
+        "Slava KPSS"
+      ],
       "deezer_id": 11052818,
       "itunes_id": 1156448492,
       "name": "Слава КПСС",
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Slava KPSS"
-      ]
+      "tier": "ru"
     },
     {
       "deezer_id": 64238642,
@@ -1214,42 +1214,45 @@
       "tier": "ru"
     },
     {
+      "aliases": [
+        "Pasosh"
+      ],
       "deezer_id": 10348118,
       "itunes_id": 1112985301,
       "name": "Пасош",
       "tags": [
         "ru-indie"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Pasosh"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Dajte Tank (!)"
+      ],
       "deezer_id": 12373790,
       "itunes_id": 1230051303,
       "name": "Дайте танк (!)",
       "tags": [
         "ru-indie"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Dajte Tank (!)"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Kino"
+      ],
       "deezer_id": 4505880,
       "itunes_id": 621768190,
       "name": "Кино",
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Kino"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Grazhdanskaya Oborona"
+      ],
       "deezer_id": 4637757,
       "itunes_id": 474555710,
       "name": "Гражданская Оборона",
@@ -1257,12 +1260,12 @@
         "ru-classic",
         "punk"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Grazhdanskaya Oborona"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Sektor Gaza"
+      ],
       "deezer_id": 6459787,
       "itunes_id": 531116017,
       "name": "Сектор Газа",
@@ -1270,12 +1273,12 @@
         "ru-classic",
         "punk"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Sektor Gaza"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Korol I Shut"
+      ],
       "deezer_id": 4237492,
       "itunes_id": 129994805,
       "name": "Король и Шут",
@@ -1283,70 +1286,67 @@
         "ru-classic",
         "punk"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Korol I Shut"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Akvarium"
+      ],
       "deezer_id": 4179081,
       "itunes_id": 466873036,
       "name": "Аквариум",
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Akvarium"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Auktyon"
+      ],
       "deezer_id": 6215386,
       "itunes_id": 592405403,
       "name": "Аукцыон",
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Auktyon"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Nautilus Pompilius"
+      ],
       "deezer_id": 4179069,
       "itunes_id": 582803010,
       "name": "Наутилус Помпилиус",
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Nautilus Pompilius"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Agatha Christie"
+      ],
       "deezer_id": 14966,
       "itunes_id": 400615958,
       "name": "Агата Кристи",
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Agatha Christie"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Mumiy Troll"
+      ],
       "deezer_id": 296604,
       "itunes_id": 268782751,
       "name": "Мумий Тролль",
       "tags": [
         "ru-classic"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Mumiy Troll"
-      ]
+      "tier": "ru"
     },
     {
       "deezer_id": 4286880,
@@ -1358,40 +1358,40 @@
       "tier": "ru"
     },
     {
+      "aliases": [
+        "Kasta"
+      ],
       "deezer_id": 78801792,
       "itunes_id": 340420197,
       "name": "Каста",
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Kasta"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Kaspiyskiy Gruz"
+      ],
       "deezer_id": 5330639,
       "itunes_id": 738269410,
       "name": "Каспийский Груз",
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Kaspiyskiy Gruz"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "Smoky Mo"
+      ],
       "deezer_id": 4170095,
       "itunes_id": 366970924,
       "name": "Смоки Мо",
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Smoky Mo"
-      ]
+      "tier": "ru"
     },
     {
       "deezer_id": 2662361,
@@ -1403,18 +1403,21 @@
       "tier": "ru"
     },
     {
+      "aliases": [
+        "Basta"
+      ],
       "deezer_id": 4170146,
       "itunes_id": 1372953342,
       "name": "Баста",
       "tags": [
         "ru-rap"
       ],
-      "tier": "ru",
-      "aliases": [
-        "Basta"
-      ]
+      "tier": "ru"
     },
     {
+      "aliases": [
+        "MORGENSHTERN"
+      ],
       "deezer_id": 98335212,
       "itunes_id": 1371400021,
       "name": "Моргенштерн",
@@ -1422,22 +1425,19 @@
         "ru-pop-rap",
         "drama"
       ],
-      "tier": "ru_pop",
-      "aliases": [
-        "MORGENSHTERN"
-      ]
+      "tier": "ru_pop"
     },
     {
+      "aliases": [
+        "INSTASAMKA"
+      ],
       "itunes_id": 1465235237,
       "name": "Инстасамка",
       "tags": [
         "ru-pop-rap",
         "drama"
       ],
-      "tier": "ru_pop",
-      "aliases": [
-        "INSTASAMKA"
-      ]
+      "tier": "ru_pop"
     },
     {
       "deezer_id": 65517932,
@@ -1450,18 +1450,21 @@
       "tier": "ru_pop"
     },
     {
+      "aliases": [
+        "Allj"
+      ],
       "deezer_id": 7968842,
       "itunes_id": 881027285,
       "name": "Элджей",
       "tags": [
         "ru-pop-rap"
       ],
-      "tier": "ru_pop",
-      "aliases": [
-        "Allj"
-      ]
+      "tier": "ru_pop"
     },
     {
+      "aliases": [
+        "Timati"
+      ],
       "deezer_id": 271715,
       "itunes_id": 284266257,
       "name": "Тимати",
@@ -1469,10 +1472,7 @@
         "ru-pop-rap",
         "drama"
       ],
-      "tier": "ru_pop",
-      "aliases": [
-        "Timati"
-      ]
+      "tier": "ru_pop"
     },
     {
       "deezer_id": 73922432,
@@ -1493,16 +1493,16 @@
       "tier": "ru_pop"
     },
     {
+      "aliases": [
+        "Dora"
+      ],
       "deezer_id": 57812002,
       "itunes_id": 1449969935,
       "name": "Дора",
       "tags": [
         "ru-pop"
       ],
-      "tier": "ru_pop",
-      "aliases": [
-        "Dora"
-      ]
+      "tier": "ru_pop"
     },
     {
       "deezer_id": 1582524,
@@ -1539,9 +1539,82 @@
         "ru-rap"
       ],
       "tier": "ru_pop"
+    },
+    {
+      "deezer_id": 13639985,
+      "itunes_id": 1318094493,
+      "name": "Yeat",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 165492217,
+      "itunes_id": 1617297110,
+      "name": "Kai Angel",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "scene"
+    },
+    {
+      "deezer_id": 7073613,
+      "itunes_id": 941367424,
+      "name": "Your Old Droog",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 5059044,
+      "itunes_id": 673556643,
+      "name": "Quavo",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 3977201,
+      "itunes_id": 541282483,
+      "name": "Lil Durk",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 152291,
+      "itunes_id": 283347662,
+      "name": "Macklemore",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 13980161,
+      "itunes_id": 1477722967,
+      "name": "Брутто",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 246791,
+      "itunes_id": 271256,
+      "name": "Drake",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 335992021,
+      "itunes_id": 1826630944,
+      "name": "Killa Crossavah",
+      "seen_at": "2026-09-17",
+      "tags": [],
+      "tier": "auto"
     }
   ],
+  "grown_at": "2026-09-17",
   "ids_updated_at": "2026-08-05T00:09:31+00:00",
-  "note": "Поля itunes_id / deezer_id / youtube_channel_id заполняет скрипт `python -m src.resolve_ids`. Вручную их вписывать не надо. tier: core — ядро вкуса, scene — смежная сцена, legend — классика и наследие, ru — русский андеграунд, ru_pop — русский мейнстрим (нужен для инфоповодов и юмора, не для рубрики РЕЛИЗ).",
+  "note": "Поля itunes_id / deezer_id / youtube_channel_id заполняет скрипт `python -m src.resolve_ids`. Вручную их вписывать не надо. tier: core — ядро вкуса, scene — смежная сцена, legend — классика и наследие, ru — русский андеграунд, ru_pop — русский мейнстрим (нужен для инфоповодов и юмора, не для рубрики РЕЛИЗ). auto — найденные сами по прессе сцены (`python -m src.newcomers`, раз в сутки после сбора): у них есть seen_at, рэп-пресса переводит их в scene, а полгода тишины выводит из сбора. Закрепить такого руками — поставить свой tier и убрать seen_at.",
   "version": 1
 }
