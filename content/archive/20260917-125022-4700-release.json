@@ -2,6 +2,7 @@
   "artist": "Travis Scott",
   "cover": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/e4/6e/dc/e46edc93-9e49-9700-0126-077048061c3b/075679559296.jpg/600x600bb.jpg",
   "created_at": "2026-09-17T12:50:22+00:00",
+  "full_track_file_id": "CQACAgIAAyEGAATrOJtGAAPtaqwHK68GnIyG3YV2Zo0pFuW2V7EAAtarAAJYB2BJSj3qSQaX2ws9BA",
   "message": {
     "buttons": [],
     "chat": -1003786155466,
@@ -14,7 +15,8 @@
   "released_at": "2026-09-17T07:00:00+00:00",
   "rubric": "release",
   "score": 80,
+  "seconds": 180,
   "source_url": "https://music.apple.com/us/album/rhyno-from-gtavi-the-album-single/6812476690?uo=4",
   "text": "<b>TRAVIS SCOTT ВЫПУСТИЛ «RHYNO» С АЛЬБОМА GTA VI</b>\n\nВ Apple Music он подписан «from GTAVI: The Album» — у игры будет свой альбом, и Трэвис в нём уже есть.\n\n<blockquote>Игру всё ещё ждут, а плейлист к ней уже пополняется.</blockquote>\n\n▸ <a href=\"https://music.apple.com/us/album/rhyno-from-gtavi-the-album-single/6812476690?uo=4\">Слушать в Apple Music</a>",
-  "track": ""
+  "track": "RHYNO"
 }
