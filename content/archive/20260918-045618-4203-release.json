@@ -2,6 +2,13 @@
   "artist": "Kaito Shoma",
   "cover": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/34/3f/37/343f3726-9832-0b5b-0261-be59572bfab7/artwork.jpg/600x600bb.jpg",
   "created_at": "2026-09-18T04:56:18+00:00",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 152
+  },
+  "photo": "7c859b25cd2daf258d2d47390db14de14ed668803bc44c39448d129c93a616af",
   "preview": "",
   "release": "Shadows",
   "released_at": "2026-09-18T07:00:00+00:00",
