@@ -3,6 +3,13 @@
   "cover": "",
   "created_at": "2026-09-18T04:56:43+00:00",
   "full_track_file_id": "CQACAgIAAxkDAAIESGqs4mg7jg2ocsTS8V8V94bWC6hBAAIDogACeh9oSZMz6rGbR5oSPQQ",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 156
+  },
+  "photo": "11e011e560e210e6996709ef0ddf04bf01ff04ff04fe033c00f9002200080020",
   "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/a/3/0/aa3000e076a413b3dfcaa7c3e2b94f00.mp3?hdnea=exp=1789681557~acl=/api/1/1/a/a/3/0/aa3000e076a413b3dfcaa7c3e2b94f00.mp3*~data=user_id=0,application_id=42~hmac=4acc9b93ec4054e632cd5ba00884cec3268ec8e101da60c0159a667355bcc861",
   "release": "Аэропорт",
   "released_at": "2026-09-18T00:00:00+00:00",
