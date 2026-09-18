@@ -2,6 +2,13 @@
   "artist": "Chris Travis & Black Kray",
   "cover": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/af/44/86/af4486eb-7636-6f51-45d3-ca1e10c71f99/199316779233_cover.jpg/600x600bb.jpg",
   "created_at": "2026-09-18T04:53:36+00:00",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 150
+  },
+  "photo": "17b01f613a5230e16ae054c64c6c6cccbcd398e6acca2ce33cc3019361ab077b",
   "preview": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/f9/4c/5c/f94c5c62-3d5c-4a36-5aeb-039d5155efda/mzaf_4308772418348612126.plus.aac.p.m4a",
   "release": "Six Speed",
   "released_at": "2026-09-18T07:00:00+00:00",
