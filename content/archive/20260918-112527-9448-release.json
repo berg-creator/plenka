@@ -2,6 +2,13 @@
   "artist": "Kunteynir",
   "cover": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/b0/fb/7c/b0fb7c8f-4a63-f167-7160-a93820e8d42d/859745372008_cover.jpg/600x600bb.jpg",
   "created_at": "2026-09-18T11:25:27+00:00",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 158
+  },
+  "photo": "1c714b71832d87ab0b6f1b8bc631358d3088b4103150ca11f918bd1855101910",
   "preview": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/ce/52/4f/ce524f78-eec5-87a0-14ac-8eded269dbf2/mzaf_14037800009931329553.plus.aac.p.m4a",
   "release": "Метро",
   "released_at": "2026-09-18T07:00:00+00:00",
