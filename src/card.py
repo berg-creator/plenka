@@ -245,11 +245,17 @@ def cover(post: dict, seen=()) -> Path | None:
 
 def _candidates(source: str | Path, artist: str):
     """Кадры поста по порядку: своя картинка, потом фотографии артиста.
-    Генератор: Deezer спрашиваем, только когда своя уже выходила."""
+    Генератор: Deezer спрашиваем, только когда своя уже выходила.
+
+    Совместный релиз подписан «Yung Lean & Metro Boomin», а такого артиста
+    Deezer не знает: 18.09.2026 обложка GTA VI уже выходила, и пост ушёл
+    текстом. Поэтому после склеенного имени — каждый участник по очереди."""
     if source:
         yield source
     if artist:
-        yield from footage.artist_images(artist)
+        parts = re.split(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bx\b)\s*", artist, flags=re.IGNORECASE)
+        for name in dict.fromkeys([artist, *filter(None, parts)]):
+            yield from footage.artist_images(name)
 
 
 def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВКА") -> Image.Image | None:
