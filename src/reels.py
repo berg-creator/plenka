@@ -68,19 +68,20 @@
 текст, который сам шутка или доказательство: `caption` мема, надписи
 в картинках владельца.
 
-Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу
-висит метка: значок Telegram и config.CHANNEL_HANDLE. После последнего кадра —
-плашка PLATE_SECONDS: крутящийся аватар канала (avatar-wheel), адрес со значком
-и под ним строка-приманка — решение боли, о которой ролик: BAIT (прислать свой трек
-в ОТБОР), BAIT_GOROD (свой город — за концертами) или BAIT_SLEZHU (за релизами) — по ссылке
-на бота в описании,
-бит на ней затухает. Ссылка на бота — в описании, её требует проверка; метку
-площадки (?start=yt, tt, vk) в каждое описание ставит `package`, и бот считает,
-откуда пришли. TikTok ссылки
-на чужие площадки режет в охвате, поэтому вторая версия — без метки и без
-концовки вовсе: аватар без адреса никуда не зовёт (владелец, 16.09.2026). Она
-кончается с последней строкой, звук гаснет за TIKTOK_FADE. Оба файла пишет
-один проход ffmpeg, бот шлёт их подряд.
+Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу висит метка:
+значок Telegram и config.CHANNEL_HANDLE. В конце — плашка: крутящийся аватар канала
+(avatar-wheel), адрес со значком и под ним строка-приманка — решение боли, о которой
+ролик: BAIT (прислать свой трек в ОТБОР), BAIT_GOROD (свой город — за концертами) или
+BAIT_SLEZHU (за релизами) — по ссылке на бота в описании, бит на ней затухает. Зовёт
+последняя строка в канал («…в канале ПЛЁНКА») — плашка встаёт на куске субтитров с этим
+словом и голос идёт поверх неё: голос называет место, и на экране само место (владелец,
+17.09.2026). После голоса плашка держится PLATE_SECONDS; не зовёт — встаёт после
+последней строки. Ссылка на бота — в описании, её требует проверка; метку площадки
+(?start=yt, tt, vk) в каждое описание ставит `package`, и бот считает, откуда пришли.
+TikTok ссылки на чужие площадки режет в охвате, поэтому вторая версия — без метки и без
+концовки вовсе: аватар без адреса никуда не зовёт (владелец, 16.09.2026). Она кончается
+с последней строкой — фраза целиком, на её же кадрах, — звук гаснет за TIKTOK_FADE. Оба
+файла пишет один проход ffmpeg, бот шлёт их подряд.
 
 Всё своё в кадре — субтитры, мемная надпись, метка, концовка — внутри безопасной
 зоны SAFE_*: её сняли 16.09.2026 с записи экрана, где Shorts срезал края
@@ -222,6 +223,8 @@ GOROD_LINK = f"{BOT_LINK}?start=gorod_"
 SLEZHU_LINK = f"{BOT_LINK}?start=slezhu_"
 WATCH_LINK = re.compile(re.escape(BOT_LINK) + r"\?start=(gorod|slezhu)_([\w-]*)")
 BAIT_Y = 0.735
+# Слово последней строки, с которого встаёт плашка: голос называет канал — на экране он сам.
+CHANNEL_WORD = re.compile(r"пл[её]нк", re.IGNORECASE)
 # Метка — левый верхний угол безопасной зоны: правее среза и ниже панели.
 BADGE_XY = (round(SAFE_LEFT * 1080), round(SAFE_TOP * 1920))
 BADGE_HEIGHT = 80
@@ -1420,7 +1423,7 @@ def ending(icon: bool = True, text: str = BAIT):
     return frame
 
 
-def plate(work: Path) -> Path:
+def plate(work: Path, seconds: float = PLATE_SECONDS) -> Path:
     """Плашка-концовка: крутящийся аватар канала (assets/avatar/avatar-wheel.mp4) крупно, круглой маской.
 
     Настоящий аватар канала (его же отдаёт getChat @plenka_fm), а не нарисованная
@@ -1428,20 +1431,33 @@ def plate(work: Path) -> Path:
     """
     from . import clips
 
-    out = work / "plate.mp4"
+    out = work / f"plate-{seconds:.2f}.mp4"
     side = PLATE_WHEEL
     clips.run([
         clips.ffmpeg(), "-y",
         "-f", "lavfi", "-i", f"color=c=0x{PLATE_BG[0]:02x}{PLATE_BG[1]:02x}{PLATE_BG[2]:02x}:s={clips.WIDTH}x{clips.HEIGHT}"
-                             f":r={clips.FPS}:d={PLATE_SECONDS}",
+                             f":r={clips.FPS}:d={seconds:.3f}",
         "-stream_loop", "-1", "-i", str(WHEEL),
         "-filter_complex",
         f"[1:v]scale={side}:{side},fps={clips.FPS},format=rgba,"
         f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='255*clip({side / 2 - 1}-hypot(X-{side / 2},Y-{side / 2}),0,1)'[w];"
         f"[0:v][w]overlay={(clips.WIDTH - side) // 2}:{PLATE_TOP}:shortest=1,format=yuv420p",
-        "-t", f"{PLATE_SECONDS}", "-c:v", "libx264", "-crf", "20", str(out),
+        "-t", f"{seconds:.3f}", "-c:v", "libx264", "-crf", "20", str(out),
     ])
     return out
+
+
+def plate_start(script: dict, seconds: list[float], timing: list[tuple[str, float, float]]) -> float | None:
+    """Секунда, с которой плашка встаёт поверх последней строки: первый её кусок субтитров
+    со словом «ПЛЁНКА». None — последняя фраза канал не называет, плашка идёт после неё.
+
+    `seconds` — длины строк, `timing` — куски субтитров из cues.
+    """
+    spoken = [index for index, line in enumerate(script["lines"]) if "say" in line]
+    if not spoken:
+        return None
+    begin = sum(seconds[:spoken[-1]])
+    return next((first for text, first, _ in timing if first >= begin and CHANNEL_WORD.search(text)), None)
 
 
 def tiktok(video: Path) -> Path:
@@ -1453,17 +1469,19 @@ def vk(video: Path) -> Path:
 
 
 def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float,
-         text: str = BAIT) -> None:
+         text: str = BAIT, plate_at: float | None = None) -> None:
     """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет три файла: YouTube, TikTok и ВКонтакте.
 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
     один вход: список кадров с длительностями (concat), пустой прозрачный кадр
     закрывает паузы; тридцать картинок-входов ffmpeg не тянул и вставал.
-    Метка до `ending_at` и концовка после — только в основном файле. TikTok-версия
-    кончается на `ending_at`, со звуком, гаснущим за TIKTOK_FADE: аватар без
-    адреса никуда не зовёт (владелец, 16.09.2026), а оборванный на полудоле бит
-    звучит поломкой. Версия для ВКонтакте — как основная, но адрес без значка
-    Telegram: VK с ним конкурирует и может хуже показывать ролик со значком
+    `ending_at` — конец голоса, `plate_at` — где встаёт концовка (plate_start), по умолчанию
+    там же. Метка до `plate_at` и концовка после — только в основном файле: плашка ложится
+    поверх последней строки целиком, со своим адресом, и субтитров под ней не видно.
+    TikTok-версия кончается на `ending_at` — фраза договорена на своих кадрах, со звуком,
+    гаснущим за TIKTOK_FADE: аватар без адреса никуда не зовёт (владелец, 16.09.2026), а
+    оборванный на полудоле бит звучит поломкой. Версия для ВКонтакте — как основная, но
+    адрес без значка Telegram: VK с ним конкурирует и может хуже показывать ролик со значком
     соперника (владелец, 16.09.2026).
     """
     from PIL import Image
@@ -1493,6 +1511,8 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
                        encoding="utf-8")
     raw = work / "no-subs.mp4"
     video.replace(raw)
+    plate_at = ending_at if plate_at is None else plate_at
+    wheel = plate(work, clips.probe_seconds(raw) - plate_at + 1)
     encode = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-movflags", "+faststart"]
     # Граница концовки — номером кадра, а не секундой: секунда в три знака округляется
     # вверх мимо кадра (34,967 > 34,9667), и первый кадр плашки мелькал в конце TikTok-версии.
@@ -1500,7 +1520,9 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     # с частотой ролика: по умолчанию -loop даёт 25 кадров против 30, и ffmpeg в Actions
     # считал `n` не по тем кадрам — адрес на концовке горел на одном кадре из шести,
     # мигал (gta6, 16.09.2026). Локальный ffmpeg новее и этого не показывал.
-    plate_frame = round(ending_at * clips.FPS)
+    # Плашка — входом со сдвигом на полкадра раньше своего кадра: overlay берёт последний
+    # кадр входа не позже кадра ролика, и на границе она не опаздывает на кадр от адреса.
+    plate_frame, end_frame = round(plate_at * clips.FPS), round(ending_at * clips.FPS)
     edge = (plate_frame - 0.5) / clips.FPS
     clips.run([
         # reinit_filter 0: отрезки ролика разные по цветовому диапазону (фото — pc, видео — tv),
@@ -1510,13 +1532,17 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "ending.png"),
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "badge-vk.png"),
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "ending-vk.png"),
+        "-i", str(wheel),
         "-filter_complex",
         "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split=3[b1][b2][b3];"
+        f"[6:v]setpts=PTS-STARTPTS+{edge:.4f}/TB,split=2[p1][p2];"
         f"[2:v]format=rgba[m];[b1][m]overlay=0:0:shortest=1:enable='lt(t,{edge:.4f})'[marked];"
-        f"[3:v]format=rgba[e];[marked][e]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[main];"
+        f"[marked][p1]overlay=0:0:shortest=1[plated];"
+        f"[3:v]format=rgba[e];[plated][e]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[main];"
         f"[4:v]format=rgba[mv];[b3][mv]overlay=0:0:shortest=1:enable='lt(t,{edge:.4f})'[markedvk];"
-        f"[5:v]format=rgba[ev];[markedvk][ev]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[vk];"
-        f"[b2]trim=end_frame={plate_frame},format=yuv420p[tt];"
+        f"[markedvk][p2]overlay=0:0:shortest=1[platedvk];"
+        f"[5:v]format=rgba[ev];[platedvk][ev]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[vk];"
+        f"[b2]trim=end_frame={end_frame},format=yuv420p[tt];"
         f"[0:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ta]",
         "-map", "[main]", "-map", "0:a", *encode, "-c:a", "copy", str(video),
         "-map", "[tt]", "-map", "[ta]", *encode, "-c:a", "aac", "-b:a", "160k", str(tiktok(video)),
@@ -1546,7 +1572,8 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         flat = [screen for line in script["lines"] for screen in screens(line)]
         from PIL import Image
 
-        # Концовка — отдельный кадр после последнего: аватар канала, адрес под ним вжигает burn.
+        # Концовка — отдельный кадр после последнего: TikTok-версия по нему отрезается,
+        # в остальных burn кладёт поверх плашку с адресом с того же места или раньше.
         shots.append(clips.Shot(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), PLATE_SECONDS, "", "",
                                 backdrop=str(plate(work))))
         flat.append({"kind": "plate"})
@@ -1586,8 +1613,13 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         )
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
-        placed = place(cues(script, [shot.seconds for shot in timed], lengths), flat, ends)
-        burn(video, placed, work, ending_at=total - PLATE_SECONDS, text=bait(script))
+        seconds = [shot.seconds for shot in timed]
+        timing = cues(script, seconds, lengths)
+        placed = place(timing, flat, ends)
+        plate_at = plate_start(script, seconds, timing)
+        burn(video, placed, work, ending_at=total - PLATE_SECONDS, text=bait(script), plate_at=plate_at)
+        if plate_at is not None:
+            print(f"  концовка: со слов о канале, с {plate_at:.1f} с")
         print(f"  субтитры: {len(placed)} кусков, наверху {sum(p[3] for p in placed)}")
 
     # Превью вынимается из готового ролика, а не рисуется отдельно: так оно
@@ -1876,6 +1908,11 @@ def _selftest() -> None:
     shown = place([("а", 0.1, 0.9), ("б", 1.2, 1.8), ("в", 2.1, 2.9)],
                   [{"kind": "stock"}, {"kind": PIC, "path": "нет.jpg", "nosub": True}, {"kind": "stock"}], [1.0, 2.0, 3.0])
     assert [(text, up) for text, _, _, up in shown] == [("а", False), ("в", False)], shown
+    # Концовка встаёт на куске последней фразы со словом «ПЛЁНКА», не раньше и не в другой фразе.
+    calls = {"lines": [{"say": "В ПЛЁНКЕ был бит."}, {"say": "Послушать трек — в канале ПЛЁНКА."}, {"pause": 1.0}]}
+    timing = cues(calls, [2.0, 3.0, 1.0], {1: 2.0, 2: 3.0})
+    assert plate_start(calls, [2.0, 3.0, 1.0], timing) == next(a for text, a, _ in timing if text == "в канале ПЛЁНКА."), timing
+    assert plate_start(calls | {"lines": calls["lines"][:1] + [{"say": "Ну и всё."}]}, [2.0, 3.0], timing[:1]) is None
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "2.top").touch()
         marked = {"kind": PIC, "path": str(Path(tmp) / "2.jpg")}
@@ -1936,7 +1973,7 @@ def _selftest() -> None:
         # Куски встык, как внутри строки: конец одного с погрешностью деления равен началу другого.
         burn(video, [("раз", 0.1, 0.3 + 1e-12, False), ("общественной безопасности.", 0.3, 0.9, False),
                      ("четыре", 0.9 - 1e-12, 1.0, False),
-                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=89 / 30)
+                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=89 / 30, plate_at=2.4)
 
         def still(at: float, source: Path):
             """Кадр ролика на секунде `at`; отрицательная — последний кадр файла, ищется от конца."""
@@ -1957,6 +1994,9 @@ def _selftest() -> None:
         assert white(0.6, low) and not white(0.6, top), "первый кусок внизу"
         assert not white(1.4, low) and not white(1.4, top), "пауза без субтитра"
         assert white(2.3, top) and not white(2.3, low), "второй кусок наверху"
+        # С 72-го кадра (2,4 с) — концовка поверх строки: субтитра на ней нет, а в TikTok строка идёт дальше.
+        assert not white(2.5, top) and not white(2.5, top, vk(video)), "субтитр на плашке"
+        assert white(2.5, top, tiktok(video)), "TikTok оборвал последнюю строку"
 
         def blue(at: float, source: Path) -> bool:
             x, y = BADGE_XY
@@ -1984,15 +2024,19 @@ def _selftest() -> None:
         assert abs(clips.probe_seconds(vk(video)) - clips.probe_seconds(video)) < 0.1
         assert wheel(3.6, video) and white(3.6, middle), "аватар и адрес на концовке"
         assert white(3.6, (BAIT_Y - 0.015, BAIT_Y + 0.015)), "приманка на концовке"
-        # Кадр за кадром с первого кадра плашки: адрес мигал, горя на одном кадре из шести.
-        for frame in range(89, 96):
-            assert white(frame / 30 + 0.01, middle), (frame, "адрес мигает на концовке")
+        # Кадр за кадром с первого кадра плашки: адрес мигал, горя на одном кадре из шести,
+        # а плашка не должна отставать от адреса ни на кадр.
+        # Кадр n — по секунде на полкадра раньше него: -ss берёт первый кадр не раньше секунды.
+        assert not wheel(70.5 / 30, video) and blue(70.5 / 30, video), "концовка раньше слов о канале"
+        for frame in range(72, 96):
+            assert white((frame - 0.5) / 30, middle) and wheel((frame - 0.5) / 30, video), (frame, "концовка мигает")
         for at in (0.6, 3.6):
             assert not white(at, (SAFE_BOTTOM, 1.0)), (at, "внизу — интерфейс площадки")
             assert not white(at, (0.0, 1.0), columns=(SAFE_RIGHT, 1.0)), (at, "справа — колонка кнопок")
         # TikTok-версия кончается с последней строкой: без плашки, звук гаснет, а не обрывается.
         assert abs(clips.probe_seconds(tiktok(video)) - (clips.probe_seconds(video) - PLATE_SECONDS)) < 0.1
-        assert not wheel(-0.3, tiktok(video)) and wheel(3.0, video), "первый кадр плашки в TikTok-версии"
+        assert not wheel(-0.3, tiktok(video)) and not wheel(2.5, tiktok(video)) and wheel(2.5, video), \
+            "плашка в TikTok-версии"
         sound = Path(tmp) / "tiktok.wav"
         clips.run([clips.ffmpeg(), "-y", "-i", str(tiktok(video)), "-ac", "1", "-ar", "8000", "-c:a", "pcm_s16le", str(sound)])
         with wave.open(str(sound)) as take:
