@@ -259,8 +259,12 @@ def attach_track(message: dict, admin: str) -> str:
 
     post = state.read_json(path, {})
     name = f"«{post.get('artist', '')} — {post.get('track', '')}»"
-    if path.parent == config.ARCHIVE:
-        how = "с полным треком" if post.get("full_track_file_id") else "с отрывком"
+    # Вышедший пост берёт трек, пока знает свою ветку комментариев (comments.seed
+    # запоминает её, когда трека к выходу нет): Mac владельца ночью спит, и трек
+    # приходит утром, когда пост уже в канале (18.09.2026).
+    published = path.parent == config.ARCHIVE
+    if published and (post.get("full_track_file_id") or not post.get("thread")):
+        how = "с полным треком" if post.get("full_track_file_id") else "без ветки комментариев"
         return f"Пост {name} уже вышел — {how}. Этот файл к нему не приложить."
 
     try:
@@ -280,6 +284,24 @@ def attach_track(message: dict, admin: str) -> str:
 
     # В пост — file_id перезалитого файла: у присланного теги и обложка свои.
     post["full_track_file_id"] = sent["audio"]["file_id"]
+    if published:
+        # Первым комментарием, как у трека к выходу, и строкой «▸ Или в комментариях ↓»
+        # в самом посте: publish.edit ставит её, раз трек у поста есть.
+        thread = post["thread"]
+        try:
+            telegram.send_audio(thread["chat"], post["full_track_file_id"],
+                                comments.ask(post, post.get("rubric", ""), "трек"), reply_to=thread["message_id"])
+        except telegram.TelegramError as exc:
+            log.error("Трек к %s не встал в комментарии: %s", path.name, exc)
+            return f"Трек к {name} не встал в комментарии: {exc}."
+        state.write_json(path, post)
+        try:
+            publish.edit(post)
+        except telegram.TelegramError as exc:
+            # Трек уже под постом — не повод его откатывать, строки просто нет.
+            log.error("Строка о треке в пост %s не встала: %s", path.name, exc)
+        push_state()
+        return ""
     state.write_json(path, post)
 
     # В git сразу, а не через десять минут: публикатор живёт в другой группе
@@ -763,6 +785,32 @@ def _selftest() -> int:
                      {"update_id": 2, "message": {**text, "reply_to_message": {"message_id": 9}}}],
                     {}, "1", True, 0)
         assert out.getvalue().count("не файл в ответ на запрос трека") == 1, out.getvalue()
+
+    # Трек к вышедшему посту (Mac спал до выхода): встаёт первым комментарием в запомненную
+    # ветку, а пост правится — publish.edit ставит строку «▸ Или в комментариях ↓».
+    # Пост без ветки трек не берёт: положить его некуда.
+    with (tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as queue,
+          mock.patch.object(config, "ARCHIVE", Path(tmp)), mock.patch.object(config, "QUEUE", Path(queue))):
+        sent, edited = [], []
+        post = {"rubric": "release", "artist": "A", "track": "T", "track_request": {"message_id": 562},
+                "thread": {"chat": -200, "message_id": 31}, "message": {"chat": -100, "message_id": 150}}
+        state.write_json(Path(tmp) / "r.json", post)
+        with (mock.patch.object(telegram, "send_chat_action", lambda *a, **k: None),
+              mock.patch.dict(globals(), normalize_track=lambda *a: (b"x", 100, None)),
+              mock.patch.object(telegram, "send_audio",
+                                lambda chat, audio, caption, **kw: sent.append((chat, kw.get("reply_to")))
+                                or {"audio": {"file_id": "F"}}),
+              mock.patch.object(comments, "ask", lambda *a: "вопрос"),
+              mock.patch.object(publish, "edit", edited.append)):
+            assert attach_track(reply(1, audio={"file_id": "a", "mime_type": "audio/mpeg"}), "1") == ""
+            assert sent == [("1", None), (-200, 31)], sent
+            assert edited and edited[0]["full_track_file_id"] == "F"
+            assert state.read_json(Path(tmp) / "r.json", {})["full_track_file_id"] == "F"
+            # Второй трек к тому же посту и пост без ветки — отказ владельцу, без отправки.
+            sent.clear()
+            assert "уже вышел" in attach_track(reply(1, audio={"file_id": "a"}), "1") and not sent
+            state.write_json(Path(tmp) / "r.json", {k: v for k, v in post.items() if k != "thread"})
+            assert "уже вышел" in attach_track(reply(1, audio={"file_id": "a"}), "1") and not sent
     print("приём трека: все проверки прошли")
 
     # Конфликт при подтягивании: ребейз откатывается, а не висит до конца смены.
@@ -845,10 +893,12 @@ def _selftest() -> int:
     try:
         post = forward(11, photo=[{"file_id": "p"}], caption="SMOKY MO ВЫПУСТИЛ СИНГЛ")
         riddle = forward(12, audio={"file_id": "r"}, caption="СЛЕПАЯ ПРОСЛУШКА\n\n30 секунд трека")
-        # Трека к посту нет — первым комментарием обычный вопрос.
+        # Трека к посту о релизе нет — вопроса нет (владелец, 18.09.2026), пост запоминает
+        # ветку: трек, пришедший позже, встанет туда первым (attach_track).
         published({"rubric": "release"})
         run(post, riddle)
-        assert said == [11] and played == [] and riddles == [12], (said, played, riddles)
+        assert said == [] and played == [] and riddles == [12], (said, played, riddles)
+        assert state.read_json(archive / "last-release.json", {})["thread"] == {"chat": "-1002", "message_id": 11}
         # Трек есть — он и открывает ветку, плеером в ответ на ту же пересылку.
         said.clear()
         published({"rubric": "release", "full_track_file_id": "ID"})

@@ -43,6 +43,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 
 from . import config, state
@@ -62,9 +63,19 @@ INTERVAL = 600
 LOG_FILE = Path.home() / "Library" / "Logs" / "plenka-tracks.log"
 
 
-def pick(entries: list[dict], artist: str, seconds: int) -> dict:
-    """Видео из выдачи поиска, у которого длина как в магазине, или {}."""
+# Версии трека, а не сам трек: длина у них та же с точностью до секунды.
+# 18.09.2026 на «That's It» Yung Lean поиск выдал только инструментал и акапеллу,
+# и инструментал сошёлся с магазином по длине (162 с против 161).
+NOT_THE_TRACK = re.compile(r"instrumental|acapella|a cappella|karaoke|slowed|sped up|speed up|nightcore"
+                           r"|reverb|remix|\bcover\b|\b8d\b|минус|инструментал", re.IGNORECASE)
+
+
+def pick(entries: list[dict], artist: str, seconds: int, title: str = "") -> dict:
+    """Видео из выдачи поиска, у которого длина как в магазине, или {}.
+    Инструментал, ремикс и прочие версии — мимо, если сам релиз не такой."""
     names = [n.strip().casefold() for n in re.split(r",|&| feat\.? | x ", artist, flags=re.I) if n.strip()]
+    entries = [e for e in entries if not NOT_THE_TRACK.search(e.get("title") or "")
+               or NOT_THE_TRACK.search(title)]
 
     def channel(entry: dict) -> str:
         return (entry.get("channel") or entry.get("uploader") or "").casefold()
@@ -94,7 +105,7 @@ def find(artist: str, title: str, seconds: int) -> dict:
     except Exception as exc:  # noqa: BLE001 — без ссылки запрос уйдёт с поиском, как раньше
         log.warning("Поиск на YouTube не ответил: %s", exc)
         return {}
-    return pick(found.get("entries") or [], artist, seconds)
+    return pick(found.get("entries") or [], artist, seconds, title)
 
 
 def download(url: str, folder: Path) -> Path:
@@ -117,20 +128,27 @@ def _git(*args: str) -> str:
 
 
 def pending() -> list[tuple[str, dict]]:
-    """Посты очереди на GitHub, к которым найдено видео, а трека ещё нет.
+    """Посты на GitHub, к которым найдено видео, а трека ещё нет.
 
     Очередь читается из свежего origin/main, а не с диска: рабочую папку
     владельца трогать нельзя, и она отстаёт от автоматики на часы.
+    Вышедшие за двое суток — тоже, если пост помнит ветку комментариев
+    (поле thread): Mac ночью спит, и пост о релизе выходит без трека,
+    а трек встаёт под него утром (moderate.attach_track).
     """
     _git("fetch", "-q", "origin", "main")
-    folder = config.QUEUE.relative_to(config.ROOT).as_posix()
+    since = (state.now() - timedelta(days=2)).strftime("%Y%m%d")
     found = []
-    for path in _git("ls-tree", "--name-only", "origin/main", f"{folder}/").split():
-        if not path.endswith(".json"):
-            continue
-        post = json.loads(_git("show", f"origin/main:{path}"))
-        if (post.get("track_request") or {}).get("youtube") and not post.get("full_track_file_id"):
-            found.append((Path(path).name, post))
+    for folder in (config.QUEUE, config.ARCHIVE):
+        for path in _git("ls-tree", "--name-only", "origin/main", f"{folder.relative_to(config.ROOT).as_posix()}/").split():
+            name = Path(path).name
+            if not name.endswith(".json") or folder == config.ARCHIVE and name < since:
+                continue
+            post = json.loads(_git("show", f"origin/main:{path}"))
+            if folder == config.ARCHIVE and not post.get("thread"):
+                continue
+            if (post.get("track_request") or {}).get("youtube") and not post.get("full_track_file_id"):
+                found.append((name, post))
     return found
 
 
@@ -230,6 +248,11 @@ def _selftest() -> int:
     assert pick([{"url": "x", "channel": "random", "duration": 149}], "Nemzzz", 146) == {}
     assert pick([{"url": "x", "channel": "Nemzzz"}], "Nemzzz", 146) == {}
     assert pick([{"url": "x", "channel": "random", "duration": 148}], "Nemzzz", 146)["url"] == "x"
+    # Инструментал той же длины — не трек (18.09.2026, «That's It»), а у ремикса-релиза ремикс — трек.
+    entries = [{"url": "inst", "channel": "Iceolated Music", "title": "That's It - Instrumental", "duration": 161}]
+    assert pick(entries, "Yung Lean & Metro Boomin", 161, "That's It") == {}
+    entries = [{"url": "rmx", "channel": "Bones - Topic", "title": "Dirt (Remix)", "duration": 120}]
+    assert pick(entries, "Bones", 120, "Dirt (Remix)")["url"] == "rmx"
     # Без длины из магазина в сеть не ходим.
     assert find("Nemzzz", "GASS", 0) == {}
     print("✓ видео: длина как в магазине, официальный канал первым, тёзки и заливки мимо")

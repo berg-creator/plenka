@@ -575,12 +575,15 @@ def _selftest() -> None:
         # пост берёт следующий кадр артиста, а его отпечаток по выходе ложится в журнал.
         from PIL import Image
 
-        face, album, reposted = (Path(tmp.name) / f"{n}.jpg" for n in ("face", "album", "reposted"))
+        # Мутный запасной кадр (гладкий градиент — как растянутая обложка) пропускается,
+        # следующий, с резкими краями, встаёт (card.MIN_SHARPNESS).
+        face, blurry, album, reposted = (Path(tmp.name) / f"{n}.jpg" for n in ("face", "blurry", "album", "reposted"))
         Image.radial_gradient("L").convert("RGB").resize((600, 600)).save(face)
-        Image.linear_gradient("L").rotate(90).convert("RGB").resize((600, 600)).save(album)
+        Image.linear_gradient("L").rotate(90).convert("RGB").resize((600, 600)).save(blurry)
+        Image.effect_noise((600, 600), 80).convert("RGB").save(album)
         Image.open(face).resize((300, 300)).save(reposted, quality=40)
         seen = [card.fingerprint(Image.open(reposted))]
-        with mock.patch.object(footage, "artist_images", lambda name: iter([album])):
+        with mock.patch.object(footage, "artist_images", lambda name: iter([blurry, album])):
             lineage = {"text": "Текст.", "rubric": "lineage", "artist": "Bones", "cover": face}
             assert real[0](lineage, seen) and lineage["photo"] == card.fingerprint(Image.open(album)), lineage
             record(lineage, Path("0-lineage.json"), "channel")

@@ -136,6 +136,23 @@ def seen_before(mark: str, seen) -> bool:
     return any(bin(int(mark, 16) ^ int(old, 16)).count("1") <= SAME_PHOTO for old in seen)
 
 
+# Самые резкие края кадра (99,5-й перцентиль FIND_EDGES на 1000 px) не слабее этого.
+# Deezer отдаёт 1000×1000 и растянутую из крошечной картинки обложку: 18.09.2026
+# разбор об эмо-рэпе вышел с мутной обложкой Lil Tracy — у неё 39, у заглушки
+# Deezer вместо портрета 59, у годных портретов и обложек от 90 до 255.
+MIN_SHARPNESS = 60
+
+
+def sharpness(photo: Image.Image) -> int:
+    edges = photo.convert("L").resize((1000, 1000), Image.LANCZOS).filter(ImageFilter.FIND_EDGES).histogram()
+    total, seen = sum(edges), 0
+    for value, count in enumerate(edges):
+        seen += count
+        if seen >= total * 0.995:
+            return value
+    return 255
+
+
 def photo_backdrop(source: str | Path | Image.Image) -> Image.Image | None:
     """Фотография во весь кадр 4:5 с уводом низа в чёрное.
 
@@ -207,7 +224,9 @@ def cover(post: dict, seen=()) -> Path | None:
     img = None
     for candidate in _candidates(source, artist or footage.find_artist(post.get("text", ""))):
         photo = _open(candidate)
-        if photo is None:
+        # Своя картинка поста — сам релиз или кадр новости, её не подменить;
+        # мутный запасной кадр хуже следующего.
+        if photo is None or candidate != source and sharpness(photo) < MIN_SHARPNESS:
             continue
         post["photo"] = fingerprint(photo)
         if not seen_before(post["photo"], seen):

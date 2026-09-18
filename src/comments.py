@@ -27,6 +27,11 @@
 Большого ролика превью не отдаёт вовсе — тогда под постом остаётся вопрос,
 а сам инфоповод «такой-то показал сниппет» силы не теряет.
 
+Под постом о релизе без трека вопроса нет: «кому первому включаете, Крису
+или Блэку?» под постом, где включать нечего, владелец назвал бредом (18.09.2026).
+Ветку пост запоминает полем thread — трек, скачанный позже (Mac владельца спал),
+встаёт туда первым комментарием (moderate.attach_track).
+
 Отключается одной строкой в src/config.py — COMMENT_SEED.
 """
 
@@ -165,7 +170,7 @@ def last_post(post_id: int | None = None) -> dict:
     def load(item: dict) -> dict:
         # Из журнала берётся только рубрика, а полный трек — из самого поста.
         post = state.read_json(config.ARCHIVE / item.get("file", ""), {})
-        return {**post, "rubric": item.get("rubric", "")}
+        return {**post, "rubric": item.get("rubric", ""), "file": item.get("file", "")}
 
     if post_id:
         # Смотрим последние: архив за год перебирать незачем, пересылка
@@ -243,6 +248,13 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                 telegram.send_video_file(chat_id, heavy["path"], ask(post, "snippet", "сниппет"),
                                          seconds=heavy["seconds"], width=heavy["width"],
                                          height=heavy["height"], reply_to=message_id)
+            elif rubric in config.RELEASE_RUBRICS and post.get("file"):
+                # Трек ещё придёт: запоминаем ветку, туда он и встанет первым.
+                path = config.ARCHIVE / post["file"]
+                state.write_json(path, {**state.read_json(path, {}),
+                                        "thread": {"chat": chat_id, "message_id": message_id}})
+                log.info("Под постом о релизе ждём трек: %s", post["file"])
+                return True
             else:
                 telegram.send_message(chat_id, ask(post, rubric), reply_to=message_id)
         except telegram.TelegramError as exc:

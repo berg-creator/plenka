@@ -332,11 +332,38 @@ def fetch_tracks(item: dict) -> dict:
 
     try:
         if item.get("source") == "itunes":
-            return itunes.album_tracks(external_id)
+            data = itunes.album_tracks(external_id)
+            return data if data.get("tracks") else deezer_tracks(item) or data
         if item.get("source") == "deezer":
             return deezer.album_tracks(external_id)
     except Exception as exc:  # треклист — приятное дополнение, а не условие сбора
         log.warning("Треклист не получен (%s): %s", item.get("title", ""), exc)
+    return {}
+
+
+def _bare(title: str) -> str:
+    """«That's It (feat. Future) [from GTAVI: The Album] - Single» → «thats it»."""
+    return itunes._norm(re.split(r"\s*[(\[]", title, maxsplit=1)[0])
+
+
+def deezer_tracks(item: dict) -> dict:
+    """Треклист из Deezer, когда iTunes отдал релиз без песен.
+
+    Так вышел «That's It» Yung Lean & Metro Boomin (17.09.2026): без названия
+    и длины трека запрос трека не ушёл, и пост остался без него. Deezer подписывает
+    тот же релиз иначе («feat. Future & Metro Boomin»), поэтому сверяются название
+    до скобок, артист и число треков — чужой релиз хуже никакого.
+    """
+    names = [n for n in re.split(r"\s*(?:,|&|\bfeat\.?|\bx\b)\s*", item.get("artist", ""), flags=re.I) if n]
+    bare = _bare(item.get("title", ""))
+    # Ищем по одним именам: свежий релиз поиск Deezer по названию ещё не знает
+    # («Yung Lean That's It» — пусто), а по «Yung Lean Metro Boomin» находит.
+    for album in deezer.search_albums(" ".join(names), limit=25):
+        artist = itunes._norm(album.get("artist", {}).get("name", ""))
+        if _bare(album.get("title", "")) == bare and artist in map(itunes._norm, names):
+            data = deezer.album_tracks(album["id"])
+            if len(data.get("tracks") or []) == item.get("track_count"):
+                return data
     return {}
 
 
