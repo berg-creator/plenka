@@ -52,6 +52,9 @@ WATCH_FILE = PRIVATE / "watches.json"
 # до выхода имя и трек в открытый репозиторий не попадают.
 OTBOR_FILE = PRIVATE / "otbor.json"
 OTBOR_POSTS = PRIVATE / "otbor"
+# СВЕДЕНИЕ ещё не построено (NEXT.md, задача 50): кто пришёл по ?start=sved_, тем бот
+# обещал написать первым, когда заработает, — chat_id, поэтому только здесь.
+SVED_FILE = PRIVATE / "sved.json"
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (anthropic — платный Claude, по умолчанию; gigachat — Сбер; gemini — Google).

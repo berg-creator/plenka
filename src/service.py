@@ -55,7 +55,10 @@ LOG_FILE = config.DATA / "service_log.jsonl"
 # Метки известные наперёд: любая нагрузка /start в счёт забила бы файл мусором.
 SOURCES_FILE = config.DATA / "bot_sources.json"
 SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов", "pin": "закреп канала",
-           "gorod": "ролик, за концертами", "slezhu": "ролик, за релизами"}
+           "gorod": "ролик, за концертами", "slezhu": "ролик, за релизами",
+           # СВЕДЕНИЕ проверяет спрос до стройки: ?start=sved_yt — из ролика на YouTube.
+           "sved": "СВЕДЕНИЕ, без площадки", "sved_yt": "СВЕДЕНИЕ, YouTube", "sved_tt": "СВЕДЕНИЕ, TikTok",
+           "sved_vk": "СВЕДЕНИЕ, ВКонтакте", "sved_link": "СВЕДЕНИЕ, без метки: прислали ссылку"}
 
 CARD_DIR = config.ROOT / "assets" / "cards"
 
@@ -105,6 +108,16 @@ PROYAVKA = (
 )
 # Старые кнопки в переписке и ссылки ?start=taste из вышедших постов ведут туда же.
 PROYAVKA_KEYS = ("proyavka", "taste", "lyrics", "roots")
+# Ролик зовёт в СВЕДЕНИЕ, которого ещё нет: ответ честный — делаем, и когда.
+SVED = (
+    "🎚 <b>СВЕДЕНИЕ</b> — делаем.\n\n"
+    "Кидаешь ссылку на своё «Мне нравится» в Яндекс Музыке, зовёшь друга — "
+    "и я считаю, на сколько процентов совпала ваша музыка.\n\n"
+    "Напишу тебе первым, когда заработает."
+)
+# Ссылка на «Мне нравится» или плейлист Яндекс Музыки — то, что ролик СВЕДЕНИЯ велит кинуть
+# боту. Ссылка на трек (album/…/track/…) сюда не попадает — она идёт в отбор и разборы.
+SVED_LINK = re.compile(r"music\.yandex\.\w+/(?:users/[^/\s]+/(?:playlists|tracks)|playlists/)", re.IGNORECASE)
 
 # Префикс отличает кнопки сервиса от кнопок модерации: у тех callback_data
 # вида «pub:имя-файла», и обработчики не должны пересекаться.
@@ -393,6 +406,17 @@ def _resolve(name: str) -> str:
 
 def _today() -> str:
     return state.now().strftime("%Y-%m-%d")
+
+
+def sved_wait(chat_id: str, label: str) -> None:
+    """СВЕДЕНИЯ ещё нет — ролик мерит спрос (NEXT.md, задача 50): приход считается,
+    человек запоминается в приватном хранилище («напишу первым» иначе пустое обещание),
+    ответ честный — делаем."""
+    count_source(label)
+    waiting = state.read_json(config.SVED_FILE, [])
+    if chat_id not in waiting:
+        state.write_json(config.SVED_FILE, waiting + [chat_id])
+    telegram.send_message(chat_id, SVED)
 
 
 def count_source(label: str) -> None:
@@ -1281,6 +1305,14 @@ def handle_message(message: dict, data: dict) -> bool:
         else:
             ask_artist(chat_id)
         return False
+    if kind == "menu" and link == "sved":
+        sved_wait(chat_id, body if body in SOURCES else "sved")
+        return False
+    if not kind and (SVED_LINK.search(text) or text.casefold() in ("сведение", "sved")):
+        # Из Shorts и TikTok метка ?start= не доходит: ссылка в описании там не нажимается,
+        # бота находят поиском. Ролик велит кинуть ссылку — пришедшую ссылку и считаем.
+        sved_wait(chat_id, "sved_link")
+        return False
     if kind == "menu" and body in SOURCES:
         # Из ролика и чатов зовут прислать трек — меню между ссылкой и заявкой лишнее.
         count_source(body)
@@ -1707,27 +1739,34 @@ def _selftest() -> None:
     print("концерты: весть одна на концерт и раз в день, чужой город молчит, прошедшая дата отсеяна")
 
     opened: list[str] = []
-    real = otbor.start, telegram.send_message, globals()["SOURCES_FILE"]
+    real = otbor.start, telegram.send_message, globals()["SOURCES_FILE"], config.SVED_FILE
     otbor.start = lambda chat, user, **_: opened.append(chat)
     replies: list[tuple[str, list]] = []
     telegram.send_message = lambda chat, text, buttons=None, **_: replies.append((text, buttons)) or {"message_id": 1}
     tmp = tempfile.TemporaryDirectory()
     globals()["SOURCES_FILE"] = pathlib.Path(tmp.name) / "sources.json"
+    config.SVED_FILE = pathlib.Path(tmp.name) / "sved.json"
     try:
         # Минута между сообщениями: одинаковые /start подряд иначе сочтутся повтором приложения.
-        for minute, text in enumerate(("/start yt", "/start yt", "/start tt", "/start taste", "/proyavka", "/start")):
+        for minute, text in enumerate(("/start yt", "/start yt", "/start tt", "/start taste", "/proyavka", "/start",
+                                       "/start sved_yt", "/start sved_tt", "/start sved_мусор",
+                                       "https://music.yandex.ru/users/x/playlists/3?utm_source=share")):
             handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
                             "message_id": minute, "date": minute * 60, "text": text}, {})
         saved = SOURCES_FILE.read_text()
-        assert state.read_json(SOURCES_FILE, {}) == {_today(): {"yt": 2, "tt": 1}}, saved
+        assert state.read_json(SOURCES_FILE, {}) == {_today(): {"yt": 2, "tt": 1, "sved_yt": 1, "sved_tt": 1,
+                                                                "sved": 1, "sved_link": 1}}, saved
         assert opened == ["55501"] * 3, opened
         assert "555" not in saved and "777" not in saved, "id человека в открытом файле"
-        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU], "старая ссылка и /proyavka — в ПРОЯВКУ"
-        assert [row[0]["text"][:1] for row in replies[-1][1]] == ["🎙", "🎞", "🔔"], "в меню три раздела"
+        assert not SVED_LINK.search("https://music.yandex.ru/album/1/track/2"), "трек — не плейлист"
+        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU, SVED, SVED, SVED, SVED], \
+            "старая ссылка и /proyavka — в ПРОЯВКУ, sved — честный ответ"
+        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎞", "🔔"], "в меню три раздела"
+        assert state.read_json(config.SVED_FILE, []) == ["55501"], "кому написать, когда СВЕДЕНИЕ заработает"
     finally:
-        otbor.start, telegram.send_message, globals()["SOURCES_FILE"] = real
+        otbor.start, telegram.send_message, globals()["SOURCES_FILE"], config.SVED_FILE = real
         tmp.cleanup()
-    print("метка /start: считается по дню без id и сразу открывает отбор; в меню три раздела")
+    print("метка /start: считается по дню без id и сразу открывает отбор; в меню три раздела; sved — «делаем»")
 
 
 # ─────────────────────────── командная строка ───────────────────────────

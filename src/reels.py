@@ -219,6 +219,10 @@ BAIT_GOROD = "кидай город — скажем"
 # Ролик о релизе, который все пропустили, решает боль «узнал последним»: ссылка
 # ?start=slezhu_<артист> подписывает на его релизы.
 BAIT_SLEZHU = "скажем, когда выйдет"
+# СВЕДЕНИЕ (NEXT.md, задача 50): ролик зовёт кинуть ссылку на плейлист, ?start=sved_yt.
+# Словами голоса; «кидай ссылку — сравним» было на 50 точек шире зоны.
+BAIT_SVED = "кинь ссылку — сверим"
+SVED_LINK = f"{BOT_LINK}?start=sved"
 GOROD_LINK = f"{BOT_LINK}?start=gorod_"
 SLEZHU_LINK = f"{BOT_LINK}?start=slezhu_"
 WATCH_LINK = re.compile(re.escape(BOT_LINK) + r"\?start=(gorod|slezhu)_([\w-]*)")
@@ -1404,7 +1408,9 @@ def artist_by_slug(slug: str) -> str:
 
 
 def bait(script: dict) -> str:
-    """Строка-приманка на концовке — по ссылке в описании: за городом, за релизом или за треком."""
+    """Строка-приманка на концовке — по ссылке в описании: за сведением, городом, релизом или за треком."""
+    if SVED_LINK in script.get("description", ""):
+        return BAIT_SVED
     watch = WATCH_LINK.search(script.get("description", ""))
     return {"gorod": BAIT_GOROD, "slezhu": BAIT_SLEZHU}[watch.group(1)] if watch else BAIT
 
@@ -1641,6 +1647,7 @@ def package(script: dict) -> str:
         # Сценарий пишет одну ссылку, а по метке бот считает приходы с каждой площадки.
         text = re.sub(re.escape(BOT_LINK) + r"(?:\?start=(?:yt|tt|vk)(?![\w-]))?(?!\?start=)",
                       f"{BOT_LINK}?start={label}", script["description"])
+        text = re.sub(re.escape(SVED_LINK) + r"_(?:yt|tt|vk)(?![\w-])", f"{SVED_LINK}_{label}", text)
         if label != "vk":
             # В Shorts и TikTok ссылка в описании не нажимается (владелец, 17.09.2026):
             # имя набирают в поиске Telegram. Ссылка на пост остаётся — её не набрать.
@@ -1738,6 +1745,14 @@ def _selftest() -> None:
     assert package(good).count(f"{config.BOT_HANDLE} #фонк") == 2, "YouTube и TikTok — имя бота, ссылка там не нажимается"
     gorod = {**good, "description": f"Приедет к тебе? Кидай боту город: {GOROD_LINK}basta Канал: t.me/plenka_fm/144 t.me/plenka_fm #рэп"}
     assert problems(gorod, good["id"]) == [] and f"{GOROD_LINK}basta Канал" in package(gorod), "концертная ссылка как есть"
+    sved = {**good, "description": f"Сравни свою музыку с другом: {SVED_LINK}_yt Канал: t.me/plenka_fm #рэп"}
+    assert problems(sved, good["id"]) == [] and bait(sved) == BAIT_SVED, "СВЕДЕНИЕ — своя приманка"
+    assert f"{SVED_LINK}_vk Канал" in package(sved), "ВКонтакте — метка sved_vk"
+    from . import stories
+
+    # Приманка с обводкой по три точки с боков — в ширину SAFE_TEXT: правее — колонка кнопок.
+    for text in (BAIT, BAIT_GOROD, BAIT_SLEZHU, BAIT_SVED):
+        assert stories.font(64, 600).getlength(text) + 6 <= SAFE_TEXT * 1080, (text, "приманка шире зоны")
     assert package(gorod).count(f"{config.BOT_HANDLE} Канал: t.me/plenka_fm/144 {config.CHANNEL_HANDLE} #рэп") == 2, "пост — ссылкой"
     assert bait(gorod) == BAIT_GOROD and bait(good) == BAIT
     assert bait({**good, "description": f"Не пропусти: {SLEZHU_LINK}bones #рэп"}) == BAIT_SLEZHU
