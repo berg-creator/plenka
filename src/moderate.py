@@ -610,6 +610,13 @@ def serve(minutes: int) -> int:
 # в moderate.yml, по которым пуш ставит в очередь свежую смену.
 CODE = ("src/", "requirements.txt", ".github/workflows/moderate.yml")
 
+# Коммит, с которым смена стартовала, — HEAD на момент импорта, до первого push_state.
+# Не GITHUB_SHA: checkout берёт свежую main (ref: github.ref_name), и в неглубокой
+# копии коммита, на котором запуск встал в очередь, нет вовсе — diff отвечал 128,
+# и 18.09.2026 смена четыре часа не уступала место новому коду.
+STARTED_AT = (subprocess.run(["git", "rev-parse", "HEAD"], cwd=config.ROOT, capture_output=True, text=True)
+              .stdout.strip() if os.environ.get("GITHUB_ACTIONS") else "")
+
 
 def code_changed() -> bool:
     """Подтянул ли push_state код новее того, с которым смена стартовала.
@@ -618,11 +625,12 @@ def code_changed() -> bool:
     для него не существует. Уступить место свежей смене — единственный способ
     до него дойти.
     """
-    start = os.environ.get("GITHUB_SHA")
-    if not start:
+    if not STARTED_AT:
         return False  # локально дежурство перезапускают руками
-    diff = subprocess.run(["git", "diff", "--quiet", start, "HEAD", "--", *CODE], cwd=config.ROOT)
-    return diff.returncode == 1  # 0 — без изменений, 128 — git не смог сравнить
+    diff = subprocess.run(["git", "diff", "--quiet", STARTED_AT, "HEAD", "--", *CODE], cwd=config.ROOT)
+    if diff.returncode not in (0, 1):
+        log.error("Код смены не сверить с %s: git diff вернул %s", STARTED_AT, diff.returncode)
+    return diff.returncode == 1  # 0 — без изменений
 
 
 def push_state() -> None:
