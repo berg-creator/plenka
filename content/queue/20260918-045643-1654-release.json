@@ -1,0 +1,19 @@
+{
+  "artist": "Брутто",
+  "cover": "",
+  "created_at": "2026-09-18T04:56:43+00:00",
+  "preview": "https://cdnt-preview.dzcdn.net/api/1/1/a/a/3/0/aa3000e076a413b3dfcaa7c3e2b94f00.mp3?hdnea=exp=1789681557~acl=/api/1/1/a/a/3/0/aa3000e076a413b3dfcaa7c3e2b94f00.mp3*~data=user_id=0,application_id=42~hmac=4acc9b93ec4054e632cd5ba00884cec3268ec8e101da60c0159a667355bcc861",
+  "release": "Аэропорт",
+  "released_at": "2026-09-18T00:00:00+00:00",
+  "rubric": "release",
+  "score": 65,
+  "seconds": 184,
+  "source_url": "https://www.deezer.com/album/1072853602",
+  "text": "<b>БРУТТО ВЫПУСТИЛ \"АЭРОПОРТ\" И ТОЛЬКО ЕГО</b>\n\nНовый сингл от Брутто, известного по песне «Метро». Один трек, три минуты.\n\n<blockquote>Ставьте будильники на утро понедельника.</blockquote>\n\n▸ <a href=\"https://www.deezer.com/album/1072853602\">Слушать в Deezer</a>",
+  "track": "Аэропорт",
+  "track_request": {
+    "message_id": 1079,
+    "sent_at": "2026-09-18T04:57:30+00:00",
+    "youtube": "https://www.youtube.com/watch?v=U5CyUIHfef4"
+  }
+}
