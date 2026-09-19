@@ -743,6 +743,12 @@
       "file": "20260912-080903-6938-poll.json",
       "published_at": "2026-09-19T15:02:46+00:00",
       "rubric": "poll"
+    },
+    {
+      "chat": "channel",
+      "file": "20260912-114252-6882-lineage.json",
+      "published_at": "2026-09-19T18:06:07+00:00",
+      "rubric": "lineage"
     }
   ],
   "photos": [
@@ -841,6 +847,7 @@
     "484b98a494ead26cc0fd832d41af41f9c1fc60fd81fb60fc78615d258d56a116",
     "cf82bf02bc029d05d830e02d090e020c002d04480a5a003a14b40974026812e8",
     "76a066c072c872806b806b006e4036401b800e9004c004c00690030001010001",
-    "01b0038816402c6c4d4c599258855a2d584c1f6cb7ed132a49ba2e98117408c8"
+    "01b0038816402c6c4d4c599258855a2d584c1f6cb7ed132a49ba2e98117408c8",
+    "30c0c14c0d272ee7d274287b909b609ac4bcc0bdc41da0d8d8d0266334a3db84"
   ]
 }
