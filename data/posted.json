@@ -725,6 +725,12 @@
       "file": "20260919-061441-9510-news.json",
       "published_at": "2026-09-19T06:14:47+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260912-080900-6518-poll.json",
+      "published_at": "2026-09-19T10:03:08+00:00",
+      "rubric": "poll"
     }
   ],
   "photos": [
