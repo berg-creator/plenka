@@ -15,7 +15,7 @@ RSS по русскому рэпу вымер: The Flow, Rap.ru, SRSLY и Hip-Ho
 `collect.collect_news` разбирает их теми же фильтрами.
 
 Отсюда же берутся сниппеты: паблик сужается полем `only` в data/feeds.json до
-постов со своим словом, а `snippet_video` достаёт приложенный ролик, который
+постов со своим словом, а `preview_video` скачивает приложенный ролик, который
 ложится под пост канала первым комментарием. Тяжёлого ролика превью не отдаёт,
 и его качает `account_video` — входом в аккаунт владельца (решение от 17.09.2026):
 аккаунт, в отличие от бота, видит публичный канал целиком. Пакет для входа
@@ -59,6 +59,9 @@ BOLD_RE = re.compile(r"<b>(.*?)</b>", re.DOTALL)
 BREAK_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 TAG_RE = re.compile(r"<[^>]+>")
 VIDEO_RE = re.compile(r'<video[^>]*src="([^"]+)"')
+# Размер кадра превью пишет в стиль обёртки: ширина и высота процентом от неё.
+VIDEO_BOX_RE = re.compile(r'message_video_wrap" style="width:(\d+)px;padding-top:([\d.]+)%')
+DURATION_RE = re.compile(r'message_video_duration[^>]*>([\d:]+)<')
 # Плеер стоит и у тяжёлого ролика, только вместо файла в нём «Media is too big».
 PLAYER = "tgme_widget_message_video_player"
 POST_URL_RE = re.compile(r"https://t\.me/(\w+)/(\d+)")
@@ -140,19 +143,39 @@ def parse(page: str, outlet: str) -> list[dict]:
     return posts
 
 
-def snippet_video(post_url: str) -> str:
-    """Ссылка на видеофайл поста паблика — или пустая строка.
+def preview_video(post_url: str, folder: Path) -> dict:
+    """Ролик поста из веб-превью: {path, seconds, width, height} или {}.
 
     Так под пост канала попадает сам сниппет: звук лежит не у нас, а в посте,
     откуда пришёл инфоповод. Ключ в ссылке временный, поэтому она берётся
     в момент отправки, а не при сборе — между ними проходят часы.
 
-    Больших файлов превью не отдаёт вовсе, вместо ролика ставит «Media is too
-    big» (поймано 12.09.2026 на сниппете ICEGERGERT: 1:42 не дали) — такой
-    ролик качает `account_video`.
+    Файл качаем сами и заливаем ботом: по ссылке Telegram его не забирает
+    («failed to get HTTP URL content» — так 15 и 19.09.2026 сниппет не встал
+    ни разу). Больших файлов превью не отдаёт вовсе, вместо ролика ставит
+    «Media is too big» (поймано 12.09.2026 на сниппете ICEGERGERT: 1:42
+    не дали) — такой ролик качает `account_video`.
     """
-    found = VIDEO_RE.search(_embed(post_url))
-    return found.group(1) if found else ""
+    page = _embed(post_url)
+    found = VIDEO_RE.search(page)
+    response = get(found.group(1), timeout=60) if found else None
+    if response is None:
+        return {}
+    path = folder / "snippet.mp4"
+    path.write_bytes(response.content)
+    return {"path": path, **video_meta(page)}
+
+
+def video_meta(page: str) -> dict:
+    """Размер кадра и длина ролика со страницы превью. Без них телефон рисует
+    проигрыватель в своей рамке, и вертикальный сниппет выходит сплющенным."""
+    box, duration = VIDEO_BOX_RE.search(page), DURATION_RE.search(page)
+    width = int(box.group(1)) if box else 0
+    seconds = 0
+    for part in duration.group(1).split(":") if duration else ():
+        seconds = seconds * 60 + int(part)
+    return {"seconds": seconds, "width": width,
+            "height": round(width * float(box.group(2)) / 100) if box else 0}
 
 
 def _embed(post_url: str) -> str:
@@ -303,7 +326,11 @@ def _selftest() -> None:
     kept = [p for p in parse(only, "РЭП СМИ") if "сниппет" in p["summary"].casefold()]
     assert len(kept) == 1 and "похудел" not in kept[0]["summary"], kept
     assert VIDEO_RE.search(only).group(1).endswith("snip.mp4?token=k")
-    assert snippet_video("") == "" and snippet_video("http://example.com/x") == ""
+    assert preview_video("", Path()) == {} and preview_video("http://example.com/x", Path()) == {}
+    embed = ('<div class="tgme_widget_message_video_wrap" style="width:576px;padding-top:133.33333333333%">'
+             '<time class="message_video_duration js-message_video_duration">1:11</time>')
+    assert video_meta(embed) == {"seconds": 71, "width": 576, "height": 768}, video_meta(embed)
+    assert video_meta("") == {"seconds": 0, "width": 0, "height": 0}
     assert POST_URL_RE.match("https://t.me/rapruchannel/5516").groups() == ("rapruchannel", "5516")
 
     posts = parse(page, "RAP.RU")

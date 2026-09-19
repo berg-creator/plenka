@@ -93,7 +93,10 @@ def save_post(
         "seconds": lead.get("seconds") or 0,
         # Название самого релиза: на обложке в рамке подписан он, а не ведущий
         # трек — иначе картинка сообщает, что альбом называется «Филлеры».
-        "release": release_name((source or {}).get("title", "")),
+        # Заголовок новости — не название: 19.09.2026 весь пост паблика
+        # с эмодзи и «Норм звучит?» лёг на фото сниппета четырьмя строками.
+        "release": (release_name((source or {}).get("title", ""))
+                    if (source or {}).get("kind") == "release" else ""),
         # По ним публикатор ставит свежий релиз вперёд очереди (publish.next_post).
         "released_at": (source or {}).get("released_at") or "",
         "score": (source or {}).get("score") or 0,
@@ -1279,7 +1282,11 @@ def _selftest() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         saved = state.read_json(save_post("release", "Текст.", inbox[2], folder=Path(tmp)), {})
+        # Заголовок новости на фото не пишется: это не название релиза.
+        news = state.read_json(save_post("news", "Текст.", {"kind": "news", "title": "👀 Показал сниппет"},
+                                         folder=Path(tmp)), {})
     assert (saved["released_at"], saved["score"]) == (inbox[2]["released_at"], 95), saved
+    assert saved["release"] and news["release"] == "", (saved["release"], news["release"])
 
     print("релиз: предзаказ, старше суток и дубль магазина не пишутся, на релиз один пост")
     return 0
