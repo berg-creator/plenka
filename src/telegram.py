@@ -298,7 +298,7 @@ def send_photo_file(
 
 def send_video_file(
     chat_id: str, path: Path, caption: str, *, seconds: int = 0, width: int = 1080, height: int = 1920,
-    reply_to: int | None = None,
+    reply_to: int | None = None, buttons: list[list[dict]] | None = None,
 ) -> dict:
     """Отправляет готовый ролик с диска.
 
@@ -325,15 +325,21 @@ def send_video_file(
             payload["duration"] = seconds
         if reply_to is not None:
             payload["reply_parameters"] = json.dumps({"message_id": reply_to})
+        if buttons:
+            payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
         return _call("sendVideo", payload, files={"video": (path.name, handle, "video/mp4")})
 
 
-def send_video_url(chat_id: str, url: str, caption: str, *, reply_to: int | None = None) -> dict:
-    """Ролик по чужой ссылке: файл забирает сам Telegram.
+def send_video_url(
+    chat_id: str, url: str, caption: str, *, reply_to: int | None = None, width: int = 0, height: int = 0,
+    quiet: bool = False,
+) -> dict:
+    """Ролик по чужой ссылке или по file_id уже отправленного: файл забирает сам Telegram.
 
     Так под пост попадает сниппет из паблика, откуда пришёл инфоповод. Качать
     его себе незачем: боту Bot API отдаёт не больше 20 МБ, а по ссылке те же
     файлы уходят без нашего диска и без перекодирования — ролик уже mp4.
+    По file_id в канал выходит ролик из пакета владельцу (src/reels.py).
     """
     payload: dict[str, Any] = {
         "chat_id": chat_id,
@@ -342,6 +348,10 @@ def send_video_url(chat_id: str, url: str, caption: str, *, reply_to: int | None
         "parse_mode": "HTML",
         "supports_streaming": True,
     }
+    if width and height:
+        payload.update(width=width, height=height)
+    if quiet:
+        payload["disable_notification"] = True
     if reply_to is not None:
         payload["reply_parameters"] = json.dumps({"message_id": reply_to})
     return _call("sendVideo", payload)

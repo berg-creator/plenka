@@ -83,6 +83,12 @@ TikTok ссылки на чужие площадки режет в охвате,
 с последней строкой — фраза целиком, на её же кадрах, — звук гаснет за TIKTOK_FADE. Оба
 файла пишет один проход ffmpeg, бот шлёт их подряд.
 
+В канал ролик выходит по кнопке «📺 В канал» под TikTok-версией пакета (to_channel):
+живой голос в самом канале держит подписчиков лучше текстов (совет со стороны,
+18.09.2026). Версия — TikTok: в своём канале метка и концовка «иди в канал» лишние.
+Выпуск по кнопке, а не сам: ролик владелец заливает на площадки руками и сам решает,
+какая сборка последняя.
+
 Всё своё в кадре — субтитры, мемная надпись, метка, концовка — внутри безопасной
 зоны SAFE_*: её сняли 16.09.2026 с записи экрана, где Shorts срезал края
 и закрывал метку стрелкой «назад», а субтитр во всю ширину — колонкой кнопок.
@@ -1676,13 +1682,66 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
     if vk(video).exists():
         telegram.send_video_file(admin, vk(video), f"{topic}\nдля ВКонтакте — адрес канала без значка Telegram")
     if tiktok(video).exists():
-        telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — без концовки и адреса канала")
+        # Кнопка — под этой версией: в своём канале звать в канал незачем, а file_id
+        # нажатого сообщения и есть ролик, который выйдет (to_channel).
+        telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — без концовки и адреса канала",
+                                 buttons=[[{"text": "📺 В канал", "callback_data": f"{CALLBACK}:{script['id']}"}]])
     # Превью документом, а не фото: фото Telegram пережимает до 1280 точек
     # по длинной стороне, а обложке нужен кадр 1080×1920 как есть. Отправки
     # документа в telegram.py нет — метод API зовётся напрямую.
     with cover.open("rb") as handle:
         telegram._call("sendDocument", {"chat_id": admin}, files={"document": (cover.name, handle, "image/jpeg")})
     telegram.send_message(admin, package(script))
+
+
+# Кнопка «📺 В канал» под TikTok-версией в пакете; ловит её дежурство (src/moderate.py).
+CALLBACK = "reel"
+
+
+def channel_text(script: dict) -> str:
+    """Подпись ролика в канале: название и, если ролик зовёт в бота, ссылка с той же приманкой."""
+    description = script.get("description", "")
+    watch = WATCH_LINK.search(description)
+    link = SVED_LINK if SVED_LINK in description else watch.group(0) if watch else ""
+    title = f"<b>{html.escape(script['title'], quote=False)}</b>"
+    if not link:
+        return title
+    return f'{title}\n\n▸ <a href="https://{link}">{html.escape(bait(script)).capitalize()}</a>'
+
+
+def to_channel(reel_id: str, message: dict) -> str:
+    """Выпускает ролик в канал по кнопке из пакета. Возвращает текст всплывашки.
+
+    Выходит ровно тот файл, под которым нажата кнопка, — по его file_id: сборка идёт
+    в другом запуске (reels.yml), и у дежурства ролика на диске нет. Пересборка шлёт
+    новый пакет со своей кнопкой, а выпуск один на ролик: отметка — его файл
+    в content/archive, как у любого вышедшего поста. Какая сборка последняя, решает
+    владелец: автовыпуска нет.
+    """
+    from . import publish, telegram
+
+    if not ID_FORMAT.fullmatch(reel_id):
+        return "Непонятный ролик"
+    path = config.ARCHIVE / f"reel-{reel_id}.json"
+    if path.exists():
+        return "Уже в канале"
+    video = message.get("video") or {}
+    script = state.read_json(config.PRIVATE / "reels" / reel_id / "script.json", {})
+    if not video.get("file_id") or not script:
+        return "Не нашёл ролик — пришли «собери» ещё раз"
+    post = {"rubric": "reel", "reel": reel_id, "text": channel_text(script), "video": video["file_id"],
+            "width": video.get("width", 1080), "height": video.get("height", 1920), "comment": script.get("comment", "")}
+    # Файл пишется сразу в архив: to_channel переносит его туда же, а в очереди
+    # или срочных его подхватил бы выход постов. Не вышло — отметку снимаем.
+    config.ARCHIVE.mkdir(parents=True, exist_ok=True)
+    state.write_json(path, post)
+    try:
+        publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
+    except telegram.TelegramError as exc:
+        path.unlink(missing_ok=True)
+        log.error("Ролик %s не вышел: %s", reel_id, exc)
+        return f"Ошибка: {exc}"
+    return "Ролик в канале"
 
 
 # --- проверка -------------------------------------------------------------
@@ -2218,6 +2277,41 @@ def _selftest() -> None:
                 assert pushed == [1] and built == [good["id"]] and replies[-1] == "Собираю"
             finally:
                 telegram.download_file, telegram.send_message, globals()["start_build"] = real
+
+            # «📺 В канал»: кнопка — только под TikTok-версией; выходит file_id нажатого
+            # сообщения, второе нажатие — «уже в канале», сбой выпуска отметки не оставляет.
+            from unittest import mock
+
+            video = Path(tmp) / f"reel-{good['id']}.mp4"
+            for path in (video, tiktok(video), video.with_suffix(".jpg")):
+                path.write_bytes(b"")
+            delivered, published = [], []
+
+            def released(chat, file_id, text, **kw):
+                if file_id == "broken":
+                    raise telegram.TelegramError("sendVideo: сбой")
+                published.append((file_id, text, kw))
+                return {"chat": {"id": -1}, "message_id": 77}
+
+            with mock.patch.dict(os.environ, {"TELEGRAM_ADMIN_ID": "1", "TELEGRAM_CHANNEL_ID": "-1"}), \
+                    mock.patch.multiple(telegram, _call=lambda *a, **kw: {}, send_message=lambda *a, **kw: None,
+                                        send_video_file=lambda chat, path, text, **kw: delivered.append(
+                                            (path, kw.get("buttons"))),
+                                        send_video_url=released), \
+                    mock.patch.multiple(config, ARCHIVE=Path(tmp) / "archive", POSTED_FILE=Path(tmp) / "posted.json"):
+                deliver(good, video, video.with_suffix(".jpg"))
+                button = [[{"text": "📺 В канал", "callback_data": f"{CALLBACK}:{good['id']}"}]]
+                assert delivered == [(video, None), (tiktok(video), button)], delivered
+                assert to_channel(good["id"], {"video": {"file_id": "broken"}}).startswith("Ошибка")
+                assert not (config.ARCHIVE / f"reel-{good['id']}.json").exists()
+                pressed = {"video": {"file_id": "tt", "width": 1080, "height": 1920}}
+                assert to_channel(good["id"], pressed) == "Ролик в канале"
+                assert to_channel(good["id"], pressed) == "Уже в канале" and len(published) == 1
+                assert published[0][0] == "tt" and published[0][2]["width"] == 1080
+                assert published[0][1] == f"<b>{good['title']}</b>", published[0][1]
+                assert state.read_json(config.POSTED_FILE, {})["items"][0]["rubric"] == "reel"
+            gorod = channel_text({"title": "T", "description": f"Кидай город: {GOROD_LINK}mayot #плёнка"})
+            assert f'href="https://{GOROD_LINK}mayot">Кидай город — скажем</a>' in gorod, gorod
         finally:
             config.PRIVATE = saved
 

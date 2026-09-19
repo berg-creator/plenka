@@ -123,8 +123,8 @@ def due(post: dict) -> bool:
             return False
         regular = sum(
             1 for item in items
-            # Отбор (src/otbor.py) выходит мимо слотов и обычному посту место не занимает.
-            if item.get("rubric") not in (*config.RELEASE_RUBRICS, "news", "otbor")
+            # Отбор (src/otbor.py) и ролик (src/reels.py) выходят мимо слотов и обычному посту место не занимают.
+            if item.get("rubric") not in (*config.RELEASE_RUBRICS, "news", "otbor", "reel")
             and (moment := state._parse(item.get("published_at", "")))
             and moment.astimezone(MSK).date() == now.date()
         )
@@ -367,6 +367,11 @@ def send(post: dict, chat_id: str) -> dict | None:
                 log.warning("Мем с картинкой не ушёл (%s), отправляю текстом", exc)
         text = card.meme_text(post)
 
+    # Ролик владельца (src/reels.py) — тем же файлом, что ушёл ему в личку, по file_id.
+    if rubric == "reel":
+        return _where(telegram.send_video_url(chat_id, post["video"], text, width=post.get("width", 0),
+                                              height=post.get("height", 0), quiet=night(state.now())), "caption")
+
     cover = post.get("cover", "")
     text = track_note(listen(text, post.get("artist", ""), release_title(post)), post)
     # С четвёртого поста о релизе за сутки — без звука: в пятницу их до девяти,
@@ -423,8 +428,9 @@ def crosspost_vk(post: dict) -> None:
 
     from . import vk
 
-    # Опросы во ВКонтакте создаются иначе, чем в Telegram, — пока пропускаем.
-    if post.get("rubric") == "poll":
+    # Опросы во ВКонтакте создаются иначе, чем в Telegram, — пока пропускаем. Ролик туда
+    # групповым ключом не залить (clips.deliver): в VK Клипы его кладёт владелец сам.
+    if post.get("rubric") in ("poll", "reel"):
         return
 
     # Мем сюда уходит текстом, надписи и подпись подряд: vk.post картинку

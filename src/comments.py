@@ -256,7 +256,8 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                 log.info("Под постом о релизе ждём трек: %s", post["file"])
                 return True
             else:
-                telegram.send_message(chat_id, ask(post, rubric), reply_to=message_id)
+                # У ролика вопрос для спора уже написан в сценарии (src/reels.py) — модель не нужна.
+                telegram.send_message(chat_id, post.get("comment") or ask(post, rubric), reply_to=message_id)
         except telegram.TelegramError as exc:
             # Бота могли не пустить в чат или разжаловать — пост от этого не страдает.
             log.warning("Первый комментарий не ушёл: %s", exc)
