@@ -1,0 +1,88 @@
+# Разовая проверка 50а: Яндекс Музыка через функцию Облака отвечает с серверов GitHub.
+# Ничего не пишет. Отработал — удалить.
+name: yandex-check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Запросы через функцию
+        env:
+          URL: ${{ secrets.YANDEX_FUNCTION_URL }}
+          KEY: ${{ secrets.YANDEX_FUNCTION_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.error, urllib.parse, urllib.request
+
+          EDITORIAL = {457553308, 460142547}
+          spent = []
+
+          def ya(path, **params):
+              query = urllib.parse.urlencode({"_path": path, **params})
+              request = urllib.request.Request(f"{os.environ['URL']}?{query}",
+                                               headers={"X-Plenka-Key": os.environ["KEY"]})
+              started = time.monotonic()
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      status, body = response.status, response.read()
+              except urllib.error.HTTPError as error:
+                  status, body = error.code, error.read()
+              spent.append(time.monotonic() - started)
+              try:
+                  return status, json.loads(body).get("result")
+              except ValueError:
+                  return status, None
+
+          try:
+              urllib.request.urlopen(os.environ["URL"] + "?_path=search", timeout=20)
+              print("без ключа пустило — ПЛОХО")
+          except urllib.error.HTTPError as error:
+              print("без ключа:", error.code)
+
+          status, found = ya("search", type="artist", text="Баста", page=0)
+          print("search:", status, found and found["artists"]["results"][0]["name"])
+          status, brief = ya("artists/41191/brief-info")
+          print("brief-info:", status, brief and len(brief["similarArtists"]))
+          status, likes = ya("users/music-blog/likes/tracks")
+          ids = [f"{t['id']}:{t['albumId']}" for t in likes["library"]["tracks"]] if likes else []
+          print("likes/tracks:", status, len(ids))
+          status, tracks = ya("tracks", **{"track-ids": ",".join(ids)})
+          print("tracks, все одним запросом:", status, tracks and len(tracks),
+                "доступных:", tracks and sum(bool(t.get("available")) for t in tracks))
+
+          artists = json.load(open("data/artists.json"))["artists"]
+          exact = similar = own = failed = 0
+          for artist in artists:
+              names = {n.casefold() for n in [artist["name"], *artist.get("aliases", [])]}
+              time.sleep(1)
+              status, found = ya("search", type="artist", text=artist["name"], page=0)
+              if status != 200 or found is None:
+                  failed += 1
+                  print("  нет ответа:", artist["name"], status)
+                  continue
+              hit = next((a for a in (found.get("artists") or {}).get("results", [])
+                          if a["name"].casefold() in names), None)
+              if not hit:
+                  continue
+              exact += 1
+              time.sleep(1)
+              status, brief = ya(f"artists/{hit['id']}/brief-info")
+              if status != 200 or brief is None:
+                  failed += 1
+                  print("  нет ответа brief-info:", artist["name"], status)
+                  continue
+              similar += bool(brief.get("similarArtists"))
+              mine = [p["title"] for p in brief.get("playlists", []) if p.get("uid") not in EDITORIAL]
+              own += bool(mine)
+              if mine:
+                  print(f"  {artist['name']}: {mine}")
+          print(f"артистов {len(artists)}: точным именем {exact}, similarArtists не пуст {similar}, "
+                f"с нередакционным плейлистом {own}, без ответа {failed}")
+          spent.sort()
+          print(f"вызовов {len(spent)}, медиана {spent[len(spent) // 2]:.2f} с, максимум {spent[-1]:.2f} с")
+          PY
