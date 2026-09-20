@@ -761,6 +761,17 @@ propazha в src/reels.py рядом с gorod_ и slezhu_, python -m src.reels --
 предлагал, отказались: оживлённое генерацией лицо площадки метят как
 синтетическое, ровно за это канал снесли с YouTube в январе 2026.
 
+**Зал в кадре живой** (владелец, 20.09.2026, задача 54 закрыта): зрители видны
+людьми — в профиль, в расфокусе, — а ведущий и гость по-прежнему со спины,
+крупных планов лица нет нигде. Без людей нарезка читалась атмосферными врезками,
+сколько ни правь свет. Два ряда до этого развалились по одной причине каждый:
+первый — на разном свете, второй — на масштабе, потому что «арена», «ряды вокруг»
+и «большие экраны» движок читает как дворец спорта и рисует концерт. Хвост
+промпта описывает павильон: восемьдесят человек в двух рядах вплотную к круглой
+сцене, фермы низко, два кресла, камера на пьедестале с краю. Сток на этом пути
+проверен и закрыт: ток-шоу на Pixabay и Pexels нет вовсе — уличные толпы,
+синтезатор, ночной город.
+
 **Упор — на сравнение себя с артистом** (владелец: «это самое ценное»). Оно работает
 для одного человека, без друга: кинул ссылку на свои «Мне нравится» — сразу ответ.
 Поэтому строится первым, а сравнение двоих — вторым шагом. Построено 20.09.2026 (50б): бот принимает ссылку
@@ -882,120 +893,6 @@ rb.ru, Lenta.ru, «Медиалогия»). Из пятнадцати главн
 и только после ролика, прошедшего порог (GROWTH.md, «Поправка 18.09.2026»). Тогда
 сессия подбирает 3–5 блогеров со скетчами (не музыкальные каналы), бриф со сценарием,
 ссылка ?start=ad_<блогер>; решает и платит владелец.
-
-## 54. «Экспертиза»: пересобрать кадры под нарезку из ток-шоу
-
-Владелец 20.09.2026 посмотрел первую генерацию и забраковал: кадры сами по себе
-хорошие, но ролик выглядит набором красивых врезок, а не нарезкой передачи.
-Образец выбран — «Пусть говорят»: круглая арена, зрители рядами вокруг, экраны
-на заднике, конверт с результатом. Повторять решено жанр, а не программу:
-логотипа, шрифтов и точной формы декораций конкретного шоу в кадре нет —
-оформление телепрограммы принадлежит каналу, и жалоба снесёт ролик.
-Ведущий в кадре появляется, но только со спины и руками. Своё лицо владелец
-предлагал — отказались: лицо, оживлённое генерацией, площадки метят как
-синтетическое, ровно за это канал потеряли на YouTube в январе 2026.
-
-Главный приём, ради которого всё затевается: **у всех кадров один свет и одна
-оптика**. Первый ряд развалился именно на этом — конверт снят тёплым крупным
-планом, стол экспертизы дневным светом на деревянном столе, зал в контровом.
-Поэтому к каждому промпту клеится один и тот же хвост, дословно.
-
-```
-Проект «ПЛЁНКА», ~/ПЛЕНКА, по-русски. Работай в чистой копии от origin/main.
-Прочитай раздел 54 в NEXT.md.
-
-Задача: пересобрать кадры ролика 20260920-ekspertiza3 так, чтобы он смотрелся
-нарезкой из ток-шоу «Пусть говорят». Сценарий и записанные дубли владельца
-не трогать — меняются только кадры.
-
-ЧТО УЖЕ ГОТОВО И ЗАНОВО НЕ ДЕЛАЕТСЯ
-
-Генерация поставлена и проверена 20.09.2026, всё лежит в `~/.cache/ltx`:
-- `engine/` — движок `ltx-2-mlx` (GitHub xocialize/ltx-2-mlx, ветка ltx-2.5),
-  окружение собрано, mlx-lm поднята до 0.31.3;
-- `ltx-2.5-mlx-q8/` — модель, 44 ГБ, скачана (mlx-community: энкодер int8
-  + `ditq8`); качать заново не надо;
-- `shots.py` — список кадров, `gen.py` — запуск.
-Пакета `mlx-video` для генерации не существует, паки `dgrauet/ltx-2.5-mlx-*`
-закрыты лицензией — не ходи туда. В `gemma4-12b-ltx-v1/config.json` уже
-переименован тип модели (`gemma4_unified` → `gemma4`), рядом лежит `.orig`.
-
-Запуск: переписываешь `~/.cache/ltx/shots.py` списком ниже и зовёшь
-`python3 ~/.cache/ltx/gen.py <папка-вывода>` — он пропускает уже готовые файлы,
-один кадр можно догнать вторым аргументом. Около трёх минут на кадр,
-на все девять — примерно полчаса.
-
-ОБЩИЙ ХВОСТ (приклеивается к каждому промпту дословно, без изменений)
-
-  Russian daytime TV talk show, round arena stage ringed by tiered rows of
-  audience, large glowing LED screens on the back wall, bright television key
-  light, warm amber floor light with cold blue backlight, faint haze in the air,
-  broadcast camera look, shallow depth of field. No visible faces anywhere:
-  everyone is seen from behind or as a dark silhouette. No logos, no readable
-  text on screens.
-
-КАДРЫ (имя — число кадров — что в кадре, перед хвостом)
-
-  1-1  49  Wide shot of the arena: the host, seen from behind in a dark suit,
-           stands in the centre of the round stage and raises a sealed white
-           envelope above his head; rows of audience all around him, screens
-           glowing behind. Slow camera push in.
-  1-2  49  Extreme close-up of the host's hands in dark suit cuffs tearing open
-           a sealed white envelope; behind them the blurred arena and the lights
-           of the hall.
-  2-1  49  The claimant sits alone in an armchair at the centre of the arena,
-           filmed over the host's shoulder from behind, a hard spotlight from
-           above, the audience around him in darkness.
-  2-2  49  A side view along the rows of the audience: people lean to each other
-           and shake their heads, all faces turned away and out of focus.
-  3-2  81  A huge studio screen on the back wall showing a bar chart and a
-           diagram, dark silhouettes of the audience's heads in front of it,
-           camera slowly tracking sideways.
-  5-1  25  The hall gasps: rows of spectators from behind and from the side,
-           hands flying up to their mouths, heads turning to one another,
-           bright studio light.
-  6-1  81  An empty guest armchair alone in the centre of the arena under a
-           single spotlight, a microphone stand beside it, the audience waiting
-           around. Nobody came.
-  7-1  49  The host's hands lay the opened envelope down on a glass table on the
-           stage, printed papers beside it.
-  7-2  49  Final wide shot: the studio applauds, light beams from the rig above,
-           the arena slowly empties. Camera pulls back.
-
-ЧТО ОСТАВИТЬ ИЗ ПРЕЖНЕГО РЯДА (лежит в хранилище, в pics/)
-
-  3-1.mp4  лупа над бумагами с графиками — единственный кадр, который ложится
-           в новый ряд: он про экспертизу, а не про студию. Оставить как есть.
-  4-1.jpg  фото Ганвеста, положено руками. Не трогать.
-  Остальные (1-1, 1-2, 3-2, 5-1) перезаписываются новыми.
-
-ПОРЯДОК
-
-1. Сгенерировать девять кадров, посмотреть каждый (вытащи по три кадра
-   через ffmpeg и открой). Лицо, которое читается, — брак: перегенерируй
-   с прямым запретом («strictly from behind, all faces turned away and
-   completely hidden»), просьба «не в фокусе» не срабатывает.
-2. Собрать локально и посмотреть глазами, прежде чем что-то пушить:
-   скопируй дубли и pics во временную папку, положи туда же сценарий под именем
-   `20260920-ekspertiza3.json` (иначе проверка имени файла не пройдёт), и
-   `python -m src.reels --preview <сценарий> --voice <папка>`.
-   В строке «кадры:» должно стоять двенадцать «врезок» и ни одного «стока» —
-   иначе какая-то строка осталась на стоке и нарезка рвётся.
-3. Положить кадры в приватное хранилище (STATE_DIR, клон plenka-state):
-   `reels/20260920-ekspertiza3/pics/<строка>-<n>.mp4`, коммит и пуш.
-4. `gh workflow run reels.yml -f id=20260920-ekspertiza3` — бот пришлёт
-   владельцу три версии. Дождись, что запуск завершился успехом.
-
-Чего нельзя: показывать узнаваемые лица (ни настоящие, ни сгенерированные)
-и повторять одно лицо из ролика в ролик; ставить в кадр логотип, шрифты или
-точные декорации настоящей телепрограммы.
-
-Заодно: кадр строки 6 в прежней сборке был стоком «man napping couch» — почти
-белое поле с тёмной полосой, брак. Новый 6-1 его закрывает.
-
-Закончить: решение владельца строкой в раздел 50, 54 удалить тем же коммитом,
-коммит и пуш.
-```
 
 ## Закрытые вопросы — не переоткрывать
 
