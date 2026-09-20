@@ -1,8 +1,9 @@
 """Сторож: следит, чтобы канал не встал молча.
 
-Проверяет пять вещей — не опустела ли очередь, не зависла ли публикация,
-не перестал ли поступать материал, не иссякли ли входящие новости
-и не падали ли запуски воркфлоу за сутки.
+Проверяет шесть вещей — не опустела ли очередь, не зависла ли публикация,
+не перестал ли поступать материал, не иссякли ли входящие новости,
+не пишет ли за основной генератор запасной и не падали ли запуски воркфлоу
+за сутки.
 Если что-то не так, пишет тебе в личку. Без этого поломка обнаруживается
 только когда канал уже неделю молчит.
 """
@@ -13,7 +14,7 @@ import argparse
 import os
 from datetime import timedelta
 
-from . import config, state, telegram
+from . import config, llm, state, telegram
 from .sources import yandex_music
 
 
@@ -65,10 +66,42 @@ def problems() -> list[str]:
     if config.secret("YANDEX_FUNCTION_URL", required=False) and not yandex_music.artist("Баста"):
         issues.append("⚠️ Яндекс Музыка не отвечает без входа — СВЕДЕНИЕ не считает.")
 
+    if alarm := spare_alarm(list(state.read_jsonl(config.LLM_LOG))):
+        issues.append(alarm)
+
     if failed := failed_runs():
         issues.append("⚠️ Упали запуски за сутки: " + ", ".join(failed))
 
     return issues
+
+
+# Меньше этого числа обращений за сутки — молчим: один отказ основного генератора
+# бывает у кого угодно, а в тихие сутки он сам по себе даст «больше половины».
+SPARE_MIN = 4
+
+
+def spare_alarm(rows: list[dict]) -> str:
+    """Строка владельцу, если за сутки больше половины текстов написал запасной.
+
+    Переход на запасной молчалив по устройству (llm._generate), а ради ухода
+    с ГигаЧата на Gemini всё и затевалось: начни Google отвечать «high demand»,
+    канал вернётся к генератору, который выдумывает прошлое артистов, и никто
+    об этом не узнает. Порог — половина, а не первый же отказ: одиночный сбой
+    сети лечится сам, а сторож пишет только о сломанном.
+    """
+    spare = llm.fallback()
+    if not spare:
+        return ""
+    day = state.now() - timedelta(days=1)
+    fresh = [
+        r for r in rows
+        if (parsed := state._parse(r.get("at", ""))) is not None and parsed > day
+    ]
+    if len(fresh) < SPARE_MIN:
+        return ""
+    if sum(1 for r in fresh if r.get("llm") == spare) * 2 <= len(fresh):
+        return ""
+    return f"❗ {llm.short_name(llm.provider())} не отвечает, пишет {llm.short_name(spare)}."
 
 
 def failed_runs() -> list[str]:
@@ -103,10 +136,36 @@ def failed_runs() -> list[str]:
     return [f"{name} ×{len(urls)} ({urls[0]})" for name, urls in runs.items()]
 
 
+def selftest() -> int:
+    """Сторож замечает подмену генератора и не паникует от одного отказа."""
+    spare = llm.fallback() or "gigachat"
+    stamp, old = state.iso(), state.iso(state.now() - timedelta(days=2))
+
+    def rows(fresh_spare: int, fresh_main: int, stale: int = 0) -> list[dict]:
+        return (
+            [{"at": stamp, "llm": spare}] * fresh_spare
+            + [{"at": stamp, "llm": llm.provider()}] * fresh_main
+            + [{"at": old, "llm": spare}] * stale
+        )
+
+    assert not spare_alarm([]), "пустой журнал — молчим"
+    assert not spare_alarm(rows(2, 1)), "трёх обращений мало для вывода"
+    assert not spare_alarm(rows(3, 3)), "ровно половина — ещё не поломка"
+    assert not spare_alarm(rows(0, 6)), "основной пишет сам — молчим"
+    assert not spare_alarm(rows(0, 5, stale=20)), "вчерашние отказы не считаются"
+    assert spare_alarm(rows(4, 2)), "запасной написал больше половины — говорим"
+    print("✅ Сторож: подмену генератора видит, одиночный отказ терпит.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Проверка состояния канала")
     parser.add_argument("--quiet", action="store_true", help="молчать, если всё в порядке")
+    parser.add_argument("--selftest", action="store_true", help="проверить правила сторожа без сети")
     args = parser.parse_args()
+
+    if args.selftest:
+        return selftest()
 
     config.load_dotenv()
     issues = problems()

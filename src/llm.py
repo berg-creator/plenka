@@ -20,7 +20,7 @@ import logging
 import os
 from functools import lru_cache
 
-from . import config
+from . import config, state
 from .providers import claude, gemini, gigachat
 
 log = logging.getLogger("llm")
@@ -182,13 +182,34 @@ def _generate(user: str, schema: dict = POST_SCHEMA) -> dict:
     """
     primary = provider()
     try:
-        return _call(primary, user, schema)
+        answer = _call(primary, user, schema)
     except Exception as exc:
         spare = fallback()
         if not spare:
             raise
         log.warning("Генератор %s недоступен (%s). Пишет запасной — %s.", primary, exc, spare)
-        return _call(spare, user, schema)
+        answer = _call(spare, user, schema)
+        _note(spare)
+        return answer
+    _note(primary)
+    return answer
+
+
+def _note(name: str) -> None:
+    """Отметка в журнале: кто написал этот текст.
+
+    Запасной генератор подхватывает молча — в логе запуска остаётся строка
+    WARNING, которую никто не читает, и канал незаметно возвращается на тот
+    генератор, ради ухода от которого переход и делался. Отметка ставится
+    здесь, а не при сохранении поста: через _generate проходит всё — посты,
+    разборы в боте, раскадровки, — и сторожу важна доля, а не рубрика.
+    Журнал дописывается в конец (data/*.jsonl, merge=union), поэтому
+    одновременные запуски на GitHub не дерутся за него.
+    """
+    try:
+        state.append_jsonl(config.LLM_LOG, [{"at": state.iso(), "llm": name}])
+    except OSError as exc:  # журнал не повод терять готовый текст
+        log.warning("Не записался журнал генератора: %s", exc)
 
 
 def generate_service(kind: str, payload: dict) -> dict:
@@ -275,6 +296,11 @@ def _name(key: str) -> str:
         "gemini": f"Google {gemini_model()} (бесплатный тариф)",
         "anthropic": f"Anthropic {claude.MODEL} (платный)",
     }.get(key, key)
+
+
+def short_name(key: str) -> str:
+    """Коротко, как пишут владельцу: «Gemini», «GigaChat»."""
+    return {"gigachat": "GigaChat", "gemini": "Gemini", "anthropic": "Claude"}.get(key, key)
 
 
 def describe() -> str:

@@ -32,6 +32,10 @@ INBOX_FILE = DATA / "inbox.jsonl"
 SEEN_FILE = DATA / "seen.json"
 POSTED_FILE = DATA / "posted.json"
 STORIES_FILE = DATA / "stories.json"
+# Журнал обращений к генератору: кто писал — основной или запасной.
+# Нужен сторожу: переход на запасной виден только строкой в логе запуска,
+# а канал ради ухода с ГигаЧата и переводили (src/health.py).
+LLM_LOG = DATA / "llm.jsonl"
 # Выгрузка плейлиста ВКонтакте: «артист|трек» → вложение audio-…_…
 # Собирается разово руками, потому что audio.search сообществам закрыт.
 CLIPS_FILE = DATA / "clips.json"
