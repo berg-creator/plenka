@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from . import comments, config, otbor, publish, quiz, reels, service, state, telegram, urgent
+from . import comments, config, otbor, publish, quiz, reels, service, state, svedenie, telegram, urgent
 
 log = logging.getLogger("moderate")
 
@@ -569,6 +569,12 @@ def serve(minutes: int) -> int:
     # не проходит ни один pull и ни один push — так 11.09 бот полдня жил
     # со старой очередью и старым кодом.
     push_state()
+    # СВЕДЕНИЕ заработало: тем, кто пришёл на «делаем» и ждёт, бот обещал написать
+    # первым. Список одноразовый — рассылка удаляет его, и дальше проверка пустая.
+    try:
+        svedenie.notify_waiting()
+    except Exception as exc:  # noqa: BLE001 — рассылка не держит дежурство
+        log.error("Ждущие СВЕДЕНИЯ не оповещены: %s", exc)
     offset = state.read_json(OFFSET_FILE, {"offset": 0}).get("offset", 0)
     limits = service.load_state()
     total_handled, total_served = 0, 0

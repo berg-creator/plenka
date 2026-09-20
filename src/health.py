@@ -14,6 +14,7 @@ import os
 from datetime import timedelta
 
 from . import config, state, telegram
+from .sources import yandex_music
 
 
 def problems() -> list[str]:
@@ -57,6 +58,12 @@ def problems() -> list[str]:
             issues.append("⚠️ Новостей не приходило 12 часов — сбор встал или ленты умерли.")
     else:
         issues.append("❗ Сбор ни разу не отработал: inbox отсутствует.")
+
+    # СВЕДЕНИЕ держится на том, что Яндекс Музыка отвечает без входа. Закроет —
+    # бот замолчит молча, а проверить это больше нечем. Спрашиваем, только когда
+    # настроена функция Облака: без неё с адресов GitHub Яндекс отвечает 451 всегда.
+    if config.secret("YANDEX_FUNCTION_URL", required=False) and not yandex_music.artist("Баста"):
+        issues.append("⚠️ Яндекс Музыка не отвечает без входа — СВЕДЕНИЕ не считает.")
 
     if failed := failed_runs():
         issues.append("⚠️ Упали запуски за сутки: " + ", ".join(failed))

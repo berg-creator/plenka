@@ -39,7 +39,7 @@ from datetime import timedelta
 import pathlib
 from pathlib import Path
 
-from . import card, collect, config, llm, otbor, quality, state, stories, telegram
+from . import card, collect, config, llm, otbor, quality, state, stories, svedenie, telegram
 from .sources import afisha, deezer, itunes, lastfm
 
 log = logging.getLogger("service")
@@ -56,7 +56,7 @@ LOG_FILE = config.DATA / "service_log.jsonl"
 SOURCES_FILE = config.DATA / "bot_sources.json"
 SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов", "pin": "закреп канала",
            "gorod": "ролик, за концертами", "slezhu": "ролик, за релизами",
-           # СВЕДЕНИЕ проверяет спрос до стройки: ?start=sved_yt — из ролика на YouTube.
+           # СВЕДЕНИЕ зовут ролики: ?start=sved_yt — из ролика на YouTube.
            "sved": "СВЕДЕНИЕ, без площадки", "sved_yt": "СВЕДЕНИЕ, YouTube", "sved_tt": "СВЕДЕНИЕ, TikTok",
            "sved_vk": "СВЕДЕНИЕ, ВКонтакте", "sved_link": "СВЕДЕНИЕ, без метки: прислали ссылку"}
 
@@ -78,10 +78,11 @@ COMMANDS = {
     "stop": "watchstop", "стоп": "watchstop",
     "gorod": "city", "город": "city",
     "otbor": "otbor", "отбор": "otbor",
+    "sved": "sved", "сведение": "sved",
     "proyavka": "proyavka", "проявка": "proyavka",
 }
 
-# У бота три раздела, и называются они везде одинаково — в меню «/», на экране
+# У бота четыре раздела, и называются они везде одинаково — в меню «/», на экране
 # до «Начать», здесь и на кнопках: 🎙 ОТБОР, 🎞 ПРОЯВКА и 🔔 СЛЕЖУ. Слежение
 # за релизами и концертами жило только кнопкой под разбором артиста и командами,
 # которых никто не знает, — о нём не узнавали вовсе (владелец, 16.09.2026). Раньше разбор был
@@ -94,6 +95,7 @@ MENU = (
     "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
     "🎞 <b>ПРОЯВКА</b>\nПришли артиста, песню или строки из текста — расскажу, откуда это взялось.\n\n"
     "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
+    "🎚 <b>СВЕДЕНИЕ</b>\nКинь ссылку на свои лайки в Яндекс Музыке — посчитаю, на сколько ты совпал с артистами.\n\n"
     # «Нужна подписка» читалась как платная подписка (владелец, 16.09.2026).
     f'Всё <b>бесплатно</b> — достаточно подписаться на <a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.'
 )
@@ -108,13 +110,6 @@ PROYAVKA = (
 )
 # Старые кнопки в переписке и ссылки ?start=taste из вышедших постов ведут туда же.
 PROYAVKA_KEYS = ("proyavka", "taste", "lyrics", "roots")
-# Ролик зовёт в СВЕДЕНИЕ, которого ещё нет: ответ честный — делаем, и когда.
-SVED = (
-    "🎚 <b>СВЕДЕНИЕ</b> — делаем.\n\n"
-    "Кидаешь ссылку на своё «Мне нравится» в Яндекс Музыке, зовёшь друга — "
-    "и я считаю, на сколько процентов совпала ваша музыка.\n\n"
-    "Напишу тебе первым, когда заработает."
-)
 # Ссылка на «Мне нравится» или плейлист Яндекс Музыки — то, что ролик СВЕДЕНИЯ велит кинуть
 # боту. Ссылка на трек (album/…/track/…) сюда не попадает — она идёт в отбор и разборы.
 SVED_LINK = re.compile(r"music\.yandex\.\w+/(?:users/[^/\s]+/(?:playlists|tracks)|playlists/)", re.IGNORECASE)
@@ -129,6 +124,7 @@ def menu_buttons() -> list[list[dict]]:
         [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
         [{"text": "🎞 ПРОЯВКА — разобрать музыку", "callback_data": f"{CALLBACK_PREFIX}proyavka"}],
         [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
+        [{"text": "🎚 СВЕДЕНИЕ — на сколько ты артист", "callback_data": f"{CALLBACK_PREFIX}sved"}],
     ]
 
 
@@ -406,17 +402,6 @@ def _resolve(name: str) -> str:
 
 def _today() -> str:
     return state.now().strftime("%Y-%m-%d")
-
-
-def sved_wait(chat_id: str, label: str) -> None:
-    """СВЕДЕНИЯ ещё нет — ролик мерит спрос (NEXT.md, задача 50): приход считается,
-    человек запоминается в приватном хранилище («напишу первым» иначе пустое обещание),
-    ответ честный — делаем."""
-    count_source(label)
-    waiting = state.read_json(config.SVED_FILE, [])
-    if chat_id not in waiting:
-        state.write_json(config.SVED_FILE, waiting + [chat_id])
-    telegram.send_message(chat_id, SVED)
 
 
 def count_source(label: str) -> None:
@@ -1268,6 +1253,10 @@ def handle_message(message: dict, data: dict) -> bool:
 
     # Ответ на вопрос слежения — намерение явное, заявку отбора он закрывает.
     asked = (message.get("reply_to_message") or {}).get("text", "")
+    if not text.startswith("/") and svedenie.COMPARE_MARK in asked:
+        if _subscribed(chat_id, user_id, admin):
+            svedenie.compare(chat_id, text)
+        return False
     if not text.startswith("/") and (WATCH_MARK in asked or CITY_MARK in asked):
         otbor.cancel(chat_id)
         if not _subscribed(chat_id, user_id, admin):
@@ -1305,13 +1294,18 @@ def handle_message(message: dict, data: dict) -> bool:
         else:
             ask_artist(chat_id)
         return False
-    if kind == "menu" and link == "sved":
-        sved_wait(chat_id, body if body in SOURCES else "sved")
+    if kind == "sved" or kind == "menu" and link == "sved":
+        if kind == "menu":
+            count_source(body if body in SOURCES else "sved")
+        if _subscribed(chat_id, user_id, admin):
+            svedenie.intro(chat_id)
         return False
-    if not kind and (SVED_LINK.search(text) or text.casefold() in ("сведение", "sved")):
+    if not kind and SVED_LINK.search(text):
         # Из Shorts и TikTok метка ?start= не доходит: ссылка в описании там не нажимается,
         # бота находят поиском. Ролик велит кинуть ссылку — пришедшую ссылку и считаем.
-        sved_wait(chat_id, "sved_link")
+        count_source("sved_link")
+        if _subscribed(chat_id, user_id, admin):
+            svedenie.handle(chat_id, text)
         return False
     if kind == "menu" and body in SOURCES:
         # Из ролика и чатов зовут прислать трек — меню между ссылкой и заявкой лишнее.
@@ -1467,6 +1461,13 @@ def handle_callback(query: dict, data: dict) -> None:
     if action == "otbor":
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
         otbor.callback(chat_id, user_id, subject, admin=admin)
+        return
+
+    if action in ("sved", "sravni"):
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        if _subscribed(chat_id, user_id, admin):
+            # Из меню — что это такое и что прислать, из-под ответа — сразу имя артиста.
+            svedenie.ask_artist(chat_id) if action == "sravni" else svedenie.intro(chat_id)
         return
 
     if action == "watch" and subject:
@@ -1739,13 +1740,16 @@ def _selftest() -> None:
     print("концерты: весть одна на концерт и раз в день, чужой город молчит, прошедшая дата отсеяна")
 
     opened: list[str] = []
-    real = otbor.start, telegram.send_message, globals()["SOURCES_FILE"], config.SVED_FILE
+    real = (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
+            globals()["_subscribed"])
     otbor.start = lambda chat, user, **_: opened.append(chat)
+    links: list[str] = []
+    svedenie.handle = lambda chat, text: links.append(text)
+    globals()["_subscribed"] = lambda *a, **kw: True
     replies: list[tuple[str, list]] = []
     telegram.send_message = lambda chat, text, buttons=None, **_: replies.append((text, buttons)) or {"message_id": 1}
     tmp = tempfile.TemporaryDirectory()
     globals()["SOURCES_FILE"] = pathlib.Path(tmp.name) / "sources.json"
-    config.SVED_FILE = pathlib.Path(tmp.name) / "sved.json"
     try:
         # Минута между сообщениями: одинаковые /start подряд иначе сочтутся повтором приложения.
         for minute, text in enumerate(("/start yt", "/start yt", "/start tt", "/start taste", "/proyavka", "/start",
@@ -1759,14 +1763,20 @@ def _selftest() -> None:
         assert opened == ["55501"] * 3, opened
         assert "555" not in saved and "777" not in saved, "id человека в открытом файле"
         assert not SVED_LINK.search("https://music.yandex.ru/album/1/track/2"), "трек — не плейлист"
-        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU, SVED, SVED, SVED, SVED], \
-            "старая ссылка и /proyavka — в ПРОЯВКУ, sved — честный ответ"
-        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎞", "🔔"], "в меню три раздела"
-        assert state.read_json(config.SVED_FILE, []) == ["55501"], "кому написать, когда СВЕДЕНИЕ заработает"
+        intro = svedenie.INTRO
+        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU, intro, intro, intro], \
+            "старая ссылка и /proyavka — в ПРОЯВКУ, метка sved — что прислать"
+        assert links == ["https://music.yandex.ru/users/x/playlists/3?utm_source=share"], links
+        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎞", "🔔", "🎚"], "в меню четыре раздела"
+        # Кнопка «следить» под ответом СВЕДЕНИЯ — кнопка сервиса: подписывает watch_add,
+        # второго пути к тому же списку нет.
+        assert svedenie.buttons("Toxi$")[1][0]["callback_data"] == _cb("watch", "Toxi$")
     finally:
-        otbor.start, telegram.send_message, globals()["SOURCES_FILE"], config.SVED_FILE = real
+        (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
+         globals()["_subscribed"]) = real
         tmp.cleanup()
-    print("метка /start: считается по дню без id и сразу открывает отбор; в меню три раздела; sved — «делаем»")
+    print("метка /start: считается по дню без id и сразу открывает отбор; в меню четыре раздела; "
+          "ссылка на плейлист — в СВЕДЕНИЕ")
 
 
 # ─────────────────────────── командная строка ───────────────────────────
