@@ -116,7 +116,10 @@ SCHEMAS = {"meme": MEME_SCHEMA}
 
 # Модель Gemini. Поколения сменяются каждые пару месяцев, поэтому имя берётся
 # из окружения: что доступно по ключу, показывает python -m src.check_llm.
-GEMINI_MODEL_DEFAULT = "gemini-3.8-flash"
+# Не новейшая намеренно: 20.09.2026 на бесплатном тарифе gemini-3.8-flash
+# ответила 0 раз из 5 («high demand»), 3.7-flash — 0 из 3, а 3.5-flash — 5 из 5.
+# Свежие модели там перегружены, и канал уходил бы на запасной генератор.
+GEMINI_MODEL_DEFAULT = "gemini-3.5-flash"
 
 
 def gemini_model() -> str:

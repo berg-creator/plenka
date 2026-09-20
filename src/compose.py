@@ -255,8 +255,8 @@ def generate_checked(rubric_key: str, payload: dict, attempts: int = 3) -> dict:
     # суток. 11.09.2026 GigaChat и Haiku трижды подряд вставляли «16 треков»
     # и с причиной на руках, и пост пропадал. Если брак только такой, выходит
     # последняя попытка, а строка описи из неё вырезается.
-    if all(issue.startswith(quality.INVENTORY_ISSUES) for issue in issues):
-        log.warning("«%s» выходит с браком описи: %s", rubric_key, "; ".join(issues))
+    if all(issue.startswith(quality.SOFT_ISSUES) for issue in issues):
+        log.warning("«%s» выходит с мягким браком: %s", rubric_key, "; ".join(issues))
         return {**result, "text": re.sub(r"\n*<code>[^<]*</code>", "", result["text"])}
 
     return {

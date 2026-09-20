@@ -76,6 +76,10 @@ RUBRICS_WITHOUT_LINK = frozenset({"lineage", "subtext", "meme", "poll"})
 
 MIN_LENGTH = 60
 MAX_LENGTH = 1500
+# Подпись к фото в Telegram — 1024 знака, длиннее пост уходит в ленту текстом
+# и теряет картинку (card.cover). Это не враньё, а многословие, поэтому брак
+# мягкий: просим переписать короче, но упрямый пост всё равно выпускаем.
+CAPTION_LIMIT = 1024
 
 # Рубрики, где пост открывается заголовком. У мема и опроса его нет,
 # у разборов бота (service.py) — своя форма.
@@ -87,6 +91,9 @@ _LINK = re.compile(r"<a\b.*?</a>", re.IGNORECASE | re.DOTALL)
 # Брак описи — длинно, но не враньё: исчерпав попытки, compose.generate_checked
 # выпускает такой пост, а не теряет его.
 INVENTORY_ISSUES = ("опись <code>", "пересказ описи")
+LONG_ISSUE = "длиннее подписи к фото"
+# Брак, за который пост не выбрасывается: см. compose.generate_checked.
+SOFT_ISSUES = INVENTORY_ISSUES + (LONG_ISSUE,)
 
 # Брак чужой цитаты: по этому началу compose.generate_checked снимает
 # с задания поле outside и пишет пост без чужого голоса — он приятное
@@ -249,6 +256,8 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
         issues.append(f"слишком короткий ({len(stripped)} знаков)")
     if len(stripped) > MAX_LENGTH:
         issues.append(f"слишком длинный ({len(stripped)} знаков)")
+    elif len(stripped) > CAPTION_LIMIT:
+        issues.append(f"{LONG_ISSUE} ({len(stripped)} знаков, влезает 1024)")
 
     # Служебный JSON, просочившийся в текст поста.
     if stripped.startswith("{") or '"skip"' in stripped or '"text":' in stripped:
@@ -684,6 +693,14 @@ def _selftest() -> None:
              "Слушатель под клипом: «этот трек вытащил меня из осени».\n\n"
              "<blockquote>Извинение по расписанию.</blockquote>")
     assert problems(heard, "release", listener) == [], problems(heard, "release", listener)
+
+    # Пост длиннее подписи к фото теряет картинку, но не пропадает:
+    # брак мягкий, compose.generate_checked такой выпускает.
+    long_post = "<b>ЗАГОЛОВОК</b>\n\n" + "Ровно то, что проверяется по данным. " * 30
+    assert CAPTION_LIMIT < len(long_post) <= MAX_LENGTH, len(long_post)
+    assert [p for p in problems(long_post, "lineage") if p.startswith(LONG_ISSUE)]
+    assert all(p.startswith(SOFT_ISSUES) for p in problems(long_post, "lineage"))
+
     print("quality: самопроверка пройдена")
 
 
