@@ -58,6 +58,10 @@ SEARCH_RESULTS = 5
 # среди последних сообщений бота запрос найдётся с запасом.
 REQUEST_SCAN = 300
 SENT_FILE = config.PRIVATE / "tracks_sent.json"
+# Столько раз пробуем скачать, прежде чем сдаться: видео могло стать недоступным
+# навсегда, а запуск идёт каждые десять минут. 18–20.09.2026 два удалённых ролика
+# (Yeat, Ghostface Playa) качались по 288 раз каждый и забили лог ошибками.
+GIVE_UP = 3
 LABEL = "fm.plenka.tracks"
 INTERVAL = 600
 LOG_FILE = Path.home() / "Library" / "Logs" / "plenka-tracks.log"
@@ -152,13 +156,20 @@ def pending() -> list[tuple[str, dict]]:
     return found
 
 
+def waiting(found: list[tuple[str, dict]], sent: dict) -> list[tuple[str, dict]]:
+    """Из очереди — те, что ещё не уходили и не сдались после GIVE_UP неудач."""
+    return [(name, post) for name, post in found
+            if name not in sent.get("sent", []) and sent.get("failed", {}).get(name, 0) < GIVE_UP]
+
+
 def run(dry_run: bool) -> int:
     sent = state.read_json(SENT_FILE, {"sent": []})
-    waiting = [(name, post) for name, post in pending() if name not in sent["sent"]]
-    if not waiting:
+    failed = sent.setdefault("failed", {})
+    queue = waiting(pending(), sent)
+    if not queue:
         print("Трек сейчас не нужен ни одному посту.")
         return 0
-    for name, post in waiting:
+    for name, post in queue:
         print(f"  ↓ {post['artist']} — {post['track']}  {post['track_request']['youtube']}  ({name})")
     if dry_run:
         return 0
@@ -180,10 +191,10 @@ def run(dry_run: bool) -> int:
         # номер у бота, отвечать надо на номер у владельца. Запрос узнаём по имени файла.
         requests = {}
         for message in client.iter_messages(bot, limit=REQUEST_SCAN):
-            for name, _ in waiting:
+            for name, _ in queue:
                 if not message.out and name in (message.message or ""):
                     requests.setdefault(name, message.id)
-        for name, post in waiting:
+        for name, post in queue:
             if name not in requests:
                 log.warning("Запрос трека к %s в личке не нашёлся", name)
                 continue
@@ -193,8 +204,13 @@ def run(dry_run: bool) -> int:
                     client.send_file(bot, str(path), reply_to=requests[name], attributes=[
                         DocumentAttributeAudio(duration=int(post.get("seconds") or 0),
                                                title=post["track"], performer=post["artist"])])
-            except Exception as exc:  # noqa: BLE001 — не скачался один, пробуем остальные; повтор через 10 минут
-                log.error("Трек %s — %s не ушёл: %s", post["artist"], post["track"], exc)
+            except Exception as exc:  # noqa: BLE001 — не скачался один, пробуем остальные
+                # Считаем неудачи: сеть дома падает ненадолго, а удалённое
+                # с YouTube видео не вернётся, и после GIVE_UP пост пропускается.
+                failed[name] = failed.get(name, 0) + 1
+                state.write_json(SENT_FILE, sent)
+                log.error("Трек %s — %s не ушёл (%d из %d): %s",
+                          post["artist"], post["track"], failed[name], GIVE_UP, exc)
                 continue
             # Отправленное второй раз не шлём, даже если дежурство отказало:
             # причину оно уже написало владельцу, а повтор завалил бы личку.
@@ -255,7 +271,13 @@ def _selftest() -> int:
     assert pick(entries, "Bones", 120, "Dirt (Remix)")["url"] == "rmx"
     # Без длины из магазина в сеть не ходим.
     assert find("Nemzzz", "GASS", 0) == {}
-    print("✓ видео: длина как в магазине, официальный канал первым, тёзки и заливки мимо")
+    # Ушедшее второй раз не шлём, а видео, не скачавшееся GIVE_UP раз, бросаем.
+    found = [("a.json", {}), ("b.json", {}), ("c.json", {})]
+    sent = {"sent": ["a.json"], "failed": {"b.json": GIVE_UP, "c.json": GIVE_UP - 1}}
+    assert [name for name, _ in waiting(found, sent)] == ["c.json"]
+    assert [name for name, _ in waiting(found, {"sent": []})] == ["a.json", "b.json", "c.json"]
+    print("✓ видео: длина как в магазине, официальный канал первым, тёзки и заливки мимо;"
+          " мёртвая ссылка бросается после трёх попыток")
     return 0
 
 

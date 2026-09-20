@@ -192,11 +192,14 @@ def _lead_track(source: dict) -> dict:
     """Трек, который уйдёт в пост отрывком. Берём первый с отрывком:
     у сингла он единственный, у альбома открывающий — тот, которым релиз
     сам себя представляет. Выбирать «лучший» нам не по чему.
+
+    Отрывка нет ни у одного — берём всё равно первый: в ленту отрывок давно
+    не идёт, а имя трека и его длина нужны запросу полного трека
+    (compose.needs_track, tracks.find). 18.09.2026 «Shadows» Kaito Shoma
+    остался без трека только потому, что iTunes не дал превью.
     """
-    for track in source.get("tracks") or []:
-        if track.get("preview"):
-            return track
-    return {}
+    tracks = source.get("tracks") or []
+    return next((track for track in tracks if track.get("preview")), tracks[0] if tracks else {})
 
 
 # ─────────────────────────── планирование ───────────────────────────
@@ -877,7 +880,8 @@ def do_backfill_music() -> int:
             log.warning("%s: %s", path.name, exc)
             continue
 
-        if not lead:
+        # Дозагрузка — про отрывок: трек без него в очереди ничего не меняет.
+        if not lead.get("preview"):
             skipped += 1
             continue
 
