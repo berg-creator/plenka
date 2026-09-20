@@ -114,7 +114,13 @@ MEME_SCHEMA = {
 # Схема ответа по рубрике; кого здесь нет, тот отвечает POST_SCHEMA.
 SCHEMAS = {"meme": MEME_SCHEMA}
 
-GEMINI_MODEL = "gemini-2.5-pro"
+# Модель Gemini. Поколения сменяются каждые пару месяцев, поэтому имя берётся
+# из окружения: что доступно по ключу, показывает python -m src.check_llm.
+GEMINI_MODEL_DEFAULT = "gemini-3.8-flash"
+
+
+def gemini_model() -> str:
+    return os.environ.get("GEMINI_MODEL", "").strip() or GEMINI_MODEL_DEFAULT
 
 
 def provider() -> str:
@@ -160,7 +166,7 @@ def _call(name: str, user: str, schema: dict) -> dict:
     if name == "anthropic":
         return claude.generate(voice(), user, schema)
     if name == "gemini":
-        return gemini.generate(GEMINI_MODEL, voice(), user, schema)
+        return gemini.generate(gemini_model(), voice(), user, schema)
     return gigachat.generate(voice(), user, schema)
 
 
@@ -263,7 +269,7 @@ def fetch_batch(batch_id: str) -> dict[str, dict]:
 def _name(key: str) -> str:
     return {
         "gigachat": f"Сбер {gigachat.model_name()}",
-        "gemini": f"Google {GEMINI_MODEL} (бесплатный тариф)",
+        "gemini": f"Google {gemini_model()} (бесплатный тариф)",
         "anthropic": f"Anthropic {claude.MODEL} (платный)",
     }.get(key, key)
 

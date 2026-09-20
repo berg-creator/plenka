@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 
 from . import config, llm
-from .providers import gigachat
+from .providers import gemini, gigachat
 
 
 def check_gigachat(required: bool) -> int:
@@ -43,6 +43,43 @@ def check_gigachat(required: bool) -> int:
     return 0
 
 
+def check_gemini(required: bool) -> int:
+    """Связь с Google и список моделей по ключу.
+
+    Смотрим именно список: поколения Gemini сменяются каждые пару месяцев,
+    и зашитая модель отваливается молча — 404 приходит уже при выходе поста.
+    """
+    try:
+        models = gemini.available_models()
+    except Exception as exc:
+        print(f"✗ Gemini недоступен: {exc}")
+        if "location is not supported" in str(exc):
+            # Ожидаемо с российского адреса, и VPN не помогает: Google смотрит
+            # не только на IP. Канал от этого не страдает — посты пишутся
+            # в GitHub Actions, их сервера в США.
+            print("  Это блокировка по стране, а не поломка: из России Google "
+                  "не отвечает даже через VPN.")
+            print("  Генератор проверяется запуском в GitHub Actions, локально — никак.")
+        else:
+            print("  Ключ: console.cloud.google.com → APIs & Services → Credentials "
+                  "→ GOOGLE_API_KEY в .env")
+        if required:
+            return 1
+        print("  Это запасной генератор: канал работает, но подстраховки нет.")
+        return 0
+
+    print("Gemini, модели по этому ключу:")
+    for name in models:
+        mark = "→" if name == llm.gemini_model() else " "
+        print(f"  {mark} {name}")
+    if llm.gemini_model() not in models:
+        print(f"\n⚠️ Модель {llm.gemini_model()} по твоему ключу недоступна.")
+        print("   Впиши в .env одну из списка: GEMINI_MODEL=...")
+        if required:
+            return 1
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Проверка генератора текстов")
     parser.add_argument("--sample", action="store_true", help="сгенерировать пробный пост")
@@ -50,6 +87,10 @@ def main() -> int:
 
     config.load_dotenv()
     print(f"Генератор: {llm.describe()}\n")
+
+    if "gemini" in (llm.provider(), llm.fallback()):
+        if check_gemini(required=llm.provider() == "gemini"):
+            return 1
 
     if "gigachat" in (llm.provider(), llm.fallback()):
         if check_gigachat(required=llm.provider() == "gigachat"):

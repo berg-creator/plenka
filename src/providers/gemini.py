@@ -1,11 +1,18 @@
-"""Провайдер Google Gemini — работает на бесплатном тарифе.
+"""Провайдер Google Gemini — основной генератор канала с 20.09.2026.
 
 Обращаемся к REST API напрямую, без SDK: одна зависимость меньше, и код
 не ломается при смене версий клиентской библиотеки.
 
-Бесплатный тариф Gemini 2.5 Pro — 100 запросов в сутки и 5 в минуту.
-Каналу нужно 8–10 в сутки, так что запас десятикратный; ограничение
-по минуте обходится паузой между запросами.
+Работает на бесплатном тарифе, поэтому пакетной отправки здесь нет: вдвое
+дешевле нуля не бывает, а пакет отвечает часами. Точные лимиты Google меняет
+и в документации не печатает, так что между запросами держим паузу с запасом —
+каналу нужно 8–10 постов в сутки, в любые лимиты это укладывается.
+
+Из России API не отвечает вовсе («User location is not supported»), причём
+и через VPN тоже: проверить генератор с машины владельца нельзя, только
+запуском в GitHub Actions — их сервера в США. Ключ выпускается один раз
+из разрешённой страны и с 28.05.2026 обязательно привязан к сервис-аккаунту
+(console.cloud.google.com → APIs & Services → Credentials).
 """
 
 from __future__ import annotations
@@ -19,9 +26,15 @@ import requests
 
 BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
-# 5 запросов в минуту на бесплатном тарифе — держим паузу с запасом.
+# Лимит запросов в минуту Google не публикует — держим паузу с запасом.
 MIN_INTERVAL = 13.0
 _last_call = 0.0
+
+
+def _headers() -> dict[str, str]:
+    """Ключ уходит заголовком, а не в адресной строке: иначе он попадает
+    в текст ошибки requests, а оттуда — в журналы GitHub Actions."""
+    return {"x-goog-api-key": _key()}
 
 
 def _key() -> str:
@@ -31,6 +44,26 @@ def _key() -> str:
             "Не задан GOOGLE_API_KEY. Бесплатный ключ: aistudio.google.com/apikey"
         )
     return key
+
+
+def available_models() -> list[str]:
+    """Какие модели отдаёт ключ и умеют писать текст.
+
+    Поколения Gemini сменяются быстрее, чем канал успевает следить: зашитая
+    в код модель однажды просто исчезнет, и запрос вернёт 404 посреди выхода
+    поста. Один дешёвый список перед переключением дороже угадывания
+    по документации.
+    """
+    response = requests.get(BASE, headers=_headers(), timeout=30)
+    if response.status_code != 200:
+        # Своя ошибка вместо raise_for_status: там в тексте только код и адрес,
+        # а причину («location is not supported») Google пишет в теле ответа.
+        raise RuntimeError(f"{response.status_code}: {response.text[:200]}")
+    return [
+        model["name"].removeprefix("models/")
+        for model in response.json().get("models", [])
+        if "generateContent" in model.get("supportedGenerationMethods", [])
+    ]
 
 
 def generate(model: str, system: str, user: str, schema: dict) -> dict:
@@ -54,7 +87,7 @@ def generate(model: str, system: str, user: str, schema: dict) -> dict:
     for attempt in range(3):
         response = requests.post(
             f"{BASE}/{model}:generateContent",
-            params={"key": _key()},
+            headers=_headers(),
             json=payload,
             timeout=120,
         )
@@ -72,7 +105,10 @@ def generate(model: str, system: str, user: str, schema: dict) -> dict:
             break  # ошибка в запросе, повтор не поможет
         time.sleep(5 * (attempt + 1))
 
-    return {"skip": True, "text": "", "reason": f"Gemini не ответил ({last_error})"}
+    # Не ответил — это поломка, а не решение модели: пусть llm._generate
+    # поднимет запасной генератор. Отказ вида skip=true оставил бы канал
+    # без поста, хотя GigaChat рядом и работает.
+    raise RuntimeError(f"Gemini не ответил ({last_error})")
 
 
 def _to_gemini_schema(schema: dict) -> dict:
