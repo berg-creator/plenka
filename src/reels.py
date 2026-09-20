@@ -1270,13 +1270,21 @@ def fit(screen: dict, backdrop: str) -> str:
 def chunks(say: str) -> list[str]:
     """Фраза кусками по 2–4 слова. Режется после трёх слов или на знаке
     препинания после двух, но одинокое последнее слово не остаётся — оно
-    прирастает к куску. Тире отдельным «словом» не считается."""
+    прирастает к куску. Тире отдельным «словом» не считается.
+
+    Короткое закавыченное держится вместе: «Мне нравится» — название папки
+    Яндекса, и разорванное на два субтитра оно читается как обрывок фразы
+    (владелец, 20.09.2026). Склеивается только пара: длинная цитата целиком
+    в кусок не влезает и ломает кегль."""
     words: list[str] = []
+    glue = False
     for word in say.split():
-        if words and not any(ch.isalnum() for ch in word):
+        if words and (glue or not any(ch.isalnum() for ch in word)):
             words[-1] += f" {word}"
+            glue = False
         else:
             words.append(word)
+            glue = "«" in word and "»" not in word
     out, current = [], []
     for index, word in enumerate(words):
         current.append(word)
