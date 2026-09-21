@@ -33,6 +33,14 @@
 а не телефонную полосу. Марки канала в кадре нет вовсе: крутящаяся плёнка
 в углу висела над каждым мемом и спорила с ним, а узнаёт ролик голос.
 
+Бит качает только в версии для своего канала. Для YouTube, TikTok и ВКонтакте
+ролик уходит без музыки — голос и звуки зала (владелец, 21.09.2026): трендовый
+звук он добавляет при загрузке из библиотеки самой площадки. Вшитый в файл тренд
+площадка трендом не считает, и ролик не попадает к тем, кто этот звук слушает,
+а YouTube ещё и опознаёт чужую фонограмму. Звук из библиотеки площадки уже
+лицензирован для неё. В Telegram при загрузке звука не добавить — поэтому
+у канала своя версия, с битом.
+
 Каждый кадр обрезается под 9:16 вокруг главного (поле `focus`): горизонтальный
 мем целиком поверх своей размытой копии смотрелся вставкой из чужой ленты.
 Размытая подложка осталась только для панорам, от которых обрезка оставила бы
@@ -1160,17 +1168,27 @@ def _beat(script: dict, total: float, work: Path) -> Path:
     track, music = bed(script), work / "beat.wav"
     if track is None:
         # Ролик без музыки лучше, чем никакого: голос в нём главное.
-        # Тишина вместо подложки — чтобы склейка шла тем же путём.
         log.warning("Подложки нет ни в %s, ни в assets/audio — ролик без музыки", config.PRIVATE / "audio")
-        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-                   "-t", f"{total}", str(music)])
-        return music
+        return _silence(total, work)
     start, raw = beat_start(track), work / "beat-raw.wav"
     clips.run([clips.ffmpeg(), "-y", "-ss", f"{start:.2f}", "-i", str(track), "-t", f"{total + 1:.2f}", str(raw)])
     gain = BEAT_LUFS - _meter(raw)[0]
     clips.run([clips.ffmpeg(), "-y", "-i", str(raw), "-af", f"volume={gain:.1f}dB", str(music)])
     print(f"  бит: {track.name} с {start:.1f} с, {gain:+.1f} дБ")
     return music
+
+
+def _silence(total: float, work: Path) -> Path:
+    """Тишина на весь ролик вместо бита — чтобы склейка шла тем же путём.
+
+    На ней сводятся версии для площадок: звуки зала и отрывки треков ложатся
+    на неё так же, как на бит, а музыку владелец добавит при загрузке.
+    """
+    from . import clips
+
+    out = work / "silence.wav"
+    clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", f"{total}", str(out)])
+    return out
 
 
 def _excerpt(track: dict, dest: Path) -> Path | None:
@@ -1229,7 +1247,7 @@ def _under_tracks(beat: Path, pieces: list[tuple[Path, float, float]], work: Pat
         f"adelay={at * 1000:.0f}|{at * 1000:.0f}[t{n}];"
         for n, (_, at, length) in enumerate(inputs, 1)
     )
-    out = work / "beat-tracks.wav"
+    out = work / f"{beat.stem}-tracks.wav"
     clips.run([
         clips.ffmpeg(), "-y", "-i", str(beat), *[arg for path, _, _ in inputs for arg in ("-i", str(path))],
         "-filter_complex",
@@ -1485,13 +1503,19 @@ def tiktok(video: Path) -> Path:
     return video.with_name(f"{video.stem}-tiktok.mp4")
 
 
+def channel(video: Path) -> Path:
+    """Версия для своего канала: вид TikTok-версии, но с битом."""
+    return video.with_name(f"{video.stem}-channel.mp4")
+
+
 def vk(video: Path) -> Path:
     return video.with_name(f"{video.stem}-vk.mp4")
 
 
 def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float,
-         text: str = BAIT, plate_at: float | None = None) -> None:
-    """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет три файла: YouTube, TikTok и ВКонтакте.
+         text: str = BAIT, plate_at: float | None = None, bare: Path | None = None) -> None:
+    """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет четыре файла: YouTube, TikTok,
+    ВКонтакте и свой канал.
 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
     один вход: список кадров с длительностями (concat), пустой прозрачный кадр
@@ -1504,6 +1528,9 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     оборванный на полудоле бит звучит поломкой. Версия для ВКонтакте — как основная, но
     адрес без значка Telegram: VK с ним конкурирует и может хуже показывать ролик со значком
     соперника (владелец, 16.09.2026).
+    Звук трёх площадок берётся из `bare` — сведения без бита, музыку владелец добавит при
+    загрузке. Версия для канала — вид TikTok-версии со звуком самого `video`, с битом:
+    в Telegram звук не добавить. Без `bare` у всех четырёх звук `video`.
     """
     from PIL import Image
 
@@ -1553,7 +1580,7 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "ending.png"),
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "badge-vk.png"),
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "ending-vk.png"),
-        "-i", str(wheel),
+        "-i", str(wheel), "-i", str(bare or raw),
         "-filter_complex",
         "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split=3[b1][b2][b3];"
         f"[6:v]setpts=PTS-STARTPTS+{edge:.4f}/TB,split=2[p1][p2];"
@@ -1563,11 +1590,13 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
         f"[4:v]format=rgba[mv];[b3][mv]overlay=0:0:shortest=1:enable='lt(t,{edge:.4f})'[markedvk];"
         f"[markedvk][p2]overlay=0:0:shortest=1[platedvk];"
         f"[5:v]format=rgba[ev];[platedvk][ev]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[vk];"
-        f"[b2]trim=end_frame={end_frame},format=yuv420p[tt];"
-        f"[0:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ta]",
-        "-map", "[main]", "-map", "0:a", *encode, "-c:a", "copy", str(video),
+        f"[b2]trim=end_frame={end_frame},format=yuv420p,split=2[tt][tc];"
+        f"[7:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ta];"
+        f"[0:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ca]",
+        "-map", "[main]", "-map", "7:a", *encode, "-c:a", "copy", str(video),
         "-map", "[tt]", "-map", "[ta]", *encode, "-c:a", "aac", "-b:a", "160k", str(tiktok(video)),
-        "-map", "[vk]", "-map", "0:a", *encode, "-c:a", "copy", str(vk(video)),
+        "-map", "[vk]", "-map", "7:a", *encode, "-c:a", "copy", str(vk(video)),
+        "-map", "[tc]", "-map", "[ca]", *encode, "-c:a", "aac", "-b:a", "160k", str(channel(video)),
     ])
 
 
@@ -1628,17 +1657,21 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
                      float(line["overlay"].get("beat", 1)))
                     for line, at in zip(script["lines"], starts)
                     if "overlay" in line and voices and (voices / line["overlay"]["file"]).is_file()]
-        clips.assemble(
-            parts, _under_tracks(_beat(script, total, work), pieces, work, overlays), total, video, work, voice, 0.0,
-            voice_grade=VOICE_CHAIN, duck=DUCK,
-        )
+        # Свести дважды: с битом — для канала, на тишине — для площадок, где музыку
+        # владелец добавит при загрузке. Видео склейка копирует потоком, второй раз дёшево.
+        bare = work / "bare.mp4"
+        for bed_track, out in ((_beat(script, total, work), video), (_silence(total, work), bare)):
+            clips.assemble(
+                parts, _under_tracks(bed_track, pieces, work, overlays), total, out, work, voice, 0.0,
+                voice_grade=VOICE_CHAIN, duck=DUCK,
+            )
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
         seconds = [shot.seconds for shot in timed]
         timing = cues(script, seconds, lengths)
         placed = place(timing, flat, ends)
         plate_at = plate_start(script, seconds, timing)
-        burn(video, placed, work, ending_at=total - PLATE_SECONDS, text=bait(script), plate_at=plate_at)
+        burn(video, placed, work, ending_at=total - PLATE_SECONDS, text=bait(script), plate_at=plate_at, bare=bare)
         if plate_at is not None:
             print(f"  концовка: со слов о канале, с {plate_at:.1f} с")
         print(f"  субтитры: {len(placed)} кусков, наверху {sum(p[3] for p in placed)}")
@@ -1687,13 +1720,17 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
 
     admin = config.secret("TELEGRAM_ADMIN_ID")
     topic = f"<b>{html.escape(script['topic'], quote=False)}</b>"
-    telegram.send_video_file(admin, video, f"{topic}\nдля YouTube")
+    # Трём площадкам — без музыки: трендовый звук добавляется при загрузке, тихо, под голос.
+    music = "без музыки: звук добавь при загрузке, тихо"
+    telegram.send_video_file(admin, video, f"{topic}\nдля YouTube — {music}")
     if vk(video).exists():
-        telegram.send_video_file(admin, vk(video), f"{topic}\nдля ВКонтакте — адрес канала без значка Telegram")
+        telegram.send_video_file(admin, vk(video), f"{topic}\nдля ВКонтакте — {music}; адрес канала без значка Telegram")
     if tiktok(video).exists():
-        # Кнопка — под этой версией: в своём канале звать в канал незачем, а file_id
-        # нажатого сообщения и есть ролик, который выйдет (to_channel).
-        telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — без концовки и адреса канала",
+        telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — {music}; без концовки и адреса канала")
+    if channel(video).exists():
+        # Кнопка — под этой версией: вид TikTok-версии (в своём канале звать в канал
+        # незачем), но с битом, а file_id нажатого сообщения и есть ролик, который выйдет.
+        telegram.send_video_file(admin, channel(video), f"{topic}\nдля канала — с битом",
                                  buttons=[[{"text": "📺 В канал", "callback_data": f"{CALLBACK}:{script['id']}"}]])
     # Превью документом, а не фото: фото Telegram пережимает до 1280 точек
     # по длинной стороне, а обложке нужен кадр 1080×1920 как есть. Отправки
@@ -2053,10 +2090,14 @@ def _selftest() -> None:
         clips.run([clips.ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(Path(tmp) / "ab.txt"),
                    "-f", "lavfi", "-i", "sine=f=440:r=48000", "-map", "0:v", "-map", "1:a", "-shortest",
                    "-c:v", "copy", "-c:a", "aac", str(video)])
+        # Сведение без бита: у площадок звука нет вовсе, у канала — синус самого ролика.
+        bare = Path(tmp) / "bare.mp4"
+        clips.run([clips.ffmpeg(), "-y", "-i", str(video), "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+                   "-map", "0:v", "-map", "1:a", "-shortest", "-c:v", "copy", "-c:a", "aac", str(bare)])
         # Куски встык, как внутри строки: конец одного с погрешностью деления равен началу другого.
         burn(video, [("раз", 0.1, 0.3 + 1e-12, False), ("общественной безопасности.", 0.3, 0.9, False),
                      ("четыре", 0.9 - 1e-12, 1.0, False),
-                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=89 / 30, plate_at=2.4)
+                     ("три", 2.0, 2.6, True)], Path(tmp), ending_at=89 / 30, plate_at=2.4, bare=bare)
 
         def still(at: float, source: Path):
             """Кадр ролика на секунде `at`; отрицательная — последний кадр файла, ищется от конца."""
@@ -2120,16 +2161,24 @@ def _selftest() -> None:
         assert abs(clips.probe_seconds(tiktok(video)) - (clips.probe_seconds(video) - PLATE_SECONDS)) < 0.1
         assert not wheel(-0.3, tiktok(video)) and not wheel(2.5, tiktok(video)) and wheel(2.5, video), \
             "плашка в TikTok-версии"
-        sound = Path(tmp) / "tiktok.wav"
-        clips.run([clips.ffmpeg(), "-y", "-i", str(tiktok(video)), "-ac", "1", "-ar", "8000", "-c:a", "pcm_s16le", str(sound)])
-        with wave.open(str(sound)) as take:
-            samples = array.array("h", take.readframes(take.getnframes()))
+        # Версия для канала — вид TikTok-версии, но со звуком ролика: с битом.
+        assert abs(clips.probe_seconds(channel(video)) - clips.probe_seconds(tiktok(video))) < 0.1
+        assert not wheel(2.5, channel(video)) and not blue(0.7, channel(video)), "канальная версия — вид TikTok"
 
-        def loudness(a: float, b: float) -> float:
-            piece = samples[int(a * 8000):int(b * 8000)]
+        def samples(path: Path) -> array.array:
+            sound = Path(tmp) / f"{path.stem}.wav"
+            clips.run([clips.ffmpeg(), "-y", "-i", str(path), "-ac", "1", "-ar", "8000", "-c:a", "pcm_s16le", str(sound)])
+            with wave.open(str(sound)) as take:
+                return array.array("h", take.readframes(take.getnframes()))
+
+        def loudness(track: array.array, a: float, b: float) -> float:
+            piece = track[int(a * 8000):int(b * 8000)]
             return math.sqrt(sum(x * x for x in piece) / len(piece))
 
-        assert loudness(2.92, 2.98) < loudness(2.0, 2.5) * 0.5, "звук TikTok-версии обрывается"
+        heard = samples(channel(video))
+        assert loudness(heard, 2.92, 2.98) < loudness(heard, 2.0, 2.5) * 0.5, "звук канальной версии обрывается"
+        for path in (video, tiktok(video), vk(video)):
+            assert loudness(samples(path), 0.5, 2.5) < 30, (path.name, "у площадки бит остался")
         # Аватар крутится: кольцо вокруг кнопки в первом и среднем кадре плашки разное.
         frames = []
         for at in ("0", "0.6"):
@@ -2212,13 +2261,13 @@ def _selftest() -> None:
                 clips.run([clips.ffmpeg(), "-y", "-ss", at, "-i", str(part), "-frames:v", "1", str(Path(tmp) / "z.png")])
                 edges.append(Image.open(Path(tmp) / "z.png").convert("L").getpixel((540, 5)))
             assert abs(edges[0] - edges[1]) > 4 and (edges[0] < edges[1]) == (not out), (out, edges)
-        for focus, channel in ((0.0, 0), (1.0, 2)):
+        for focus, color in ((0.0, 0), (1.0, 2)):
             part = Path(tmp) / f"focus-{focus}.mp4"
             clips.segment(clips.Shot(empty, 0.2, "", "", backdrop=str(Path(tmp) / "half.png")), part, Path(tmp),
                           fade_in=False, grade="", focus=focus)
             clips.run([clips.ffmpeg(), "-y", "-i", str(part), "-frames:v", "1", str(Path(tmp) / "frame.png")])
             pixel = Image.open(Path(tmp) / "frame.png").convert("RGB").getpixel((540, 960))
-            assert pixel[channel] > 200, (focus, pixel)
+            assert pixel[color] > 200, (focus, pixel)
 
     # Ответ голосовым на фразу находит ролик и кадр — и в разборе дежурства тоже.
     saved = config.PRIVATE
@@ -2287,12 +2336,12 @@ def _selftest() -> None:
             finally:
                 telegram.download_file, telegram.send_message, globals()["start_build"] = real
 
-            # «📺 В канал»: кнопка — только под TikTok-версией; выходит file_id нажатого
+            # «📺 В канал»: кнопка — только под версией для канала; выходит file_id нажатого
             # сообщения, второе нажатие — «уже в канале», сбой выпуска отметки не оставляет.
             from unittest import mock
 
             video = Path(tmp) / f"reel-{good['id']}.mp4"
-            for path in (video, tiktok(video), video.with_suffix(".jpg")):
+            for path in (video, tiktok(video), channel(video), video.with_suffix(".jpg")):
                 path.write_bytes(b"")
             delivered, published = [], []
 
@@ -2310,7 +2359,7 @@ def _selftest() -> None:
                     mock.patch.multiple(config, ARCHIVE=Path(tmp) / "archive", POSTED_FILE=Path(tmp) / "posted.json"):
                 deliver(good, video, video.with_suffix(".jpg"))
                 button = [[{"text": "📺 В канал", "callback_data": f"{CALLBACK}:{good['id']}"}]]
-                assert delivered == [(video, None), (tiktok(video), button)], delivered
+                assert delivered == [(video, None), (tiktok(video), None), (channel(video), button)], delivered
                 assert to_channel(good["id"], {"video": {"file_id": "broken"}}).startswith("Ошибка")
                 assert not (config.ARCHIVE / f"reel-{good['id']}.json").exists()
                 pressed = {"video": {"file_id": "tt", "width": 1080, "height": 1920}}
