@@ -55,7 +55,9 @@ Shorts показывают ролик тем, кто этот звук уже �
 
 Эффектов нет: голос робота и «слетевшую пластинку» владелец послушал на keef3
 15.09.2026 и отверг оба. Бит — поле сценария `music`, без него любимый бит
-владельца (BEAT), и только когда нет и его — случайный.
+владельца (BEAT), и только когда нет и его — случайный. `"music": null` — бита
+нет ни в одной версии: ролику-передаче музыку дают отбивки ток-шоу, сведённые
+в фон зала (`room`), а хип-хоп под ведущим спорил бы с ними (владелец, 21.09.2026).
 
 Картинки к фразе владелец может прислать сам — ответом на фразу, как голос.
 Они заменяют кадры строки целиком, по порядку прихода, и режутся по центру
@@ -485,8 +487,8 @@ def problems(script, name: str = "") -> list[str]:
 
     # Есть ли файл, валидатор не знает: биты лежат в приватном хранилище,
     # которого у облачного автора нет. Нет файла — сборка возьмёт BEAT.
-    if "music" in script and not (isinstance(script["music"], str) and MUSIC_FORMAT.fullmatch(script["music"])):
-        errors.append(f"music: имя файла бита из plenka-state/audio, например {BEAT}")
+    if "music" in script and script["music"] is not None and not (isinstance(script["music"], str) and MUSIC_FORMAT.fullmatch(script["music"])):
+        errors.append(f"music: имя файла бита из plenka-state/audio, например {BEAT}, или null — без бита")
     # Имя с цифры сборка приняла бы за дубль — как у overlay.
     if "room" in script and not (isinstance(script["room"], str) and MUSIC_FORMAT.fullmatch(script["room"])
                                  and not script["room"][:1].isdigit()):
@@ -1217,7 +1219,8 @@ def studio(voice: Path, work: Path, room: Path | None = None) -> Path:
 
 
 def bed(script: dict) -> Path | None:
-    """Подложка: бит из поля `music`, иначе BEAT, иначе случайный. None — битов нет нигде.
+    """Подложка: бит из поля `music`, иначе BEAT, иначе случайный. None — бита нет:
+    `music` равно null или битов нет нигде.
 
     Ищется сначала в приватном хранилище, потом в assets/audio. Биты лежат
     в приватном хранилище, а не в открытом репозитории: лицензия Pixabay
@@ -1225,6 +1228,8 @@ def bed(script: dict) -> Path | None:
     """
     from . import clips
 
+    if "music" in script and script["music"] is None:
+        return None
     folders = [folder for folder in (config.PRIVATE / "audio", clips.AUDIO_DIR) if folder.is_dir()]
     for name in (script.get("music"), BEAT):
         found = next((folder / name for folder in folders if name and (folder / name).is_file()), None)
@@ -1247,7 +1252,8 @@ def _beat(script: dict, total: float, work: Path) -> Path:
     track, music = bed(script), work / "beat.wav"
     if track is None:
         # Ролик без музыки лучше, чем никакого: голос в нём главное.
-        log.warning("Подложки нет ни в %s, ни в assets/audio — ролик без музыки", config.PRIVATE / "audio")
+        if "music" not in script or script["music"] is not None:
+            log.warning("Подложки нет ни в %s, ни в assets/audio — ролик без музыки", config.PRIVATE / "audio")
         return _silence(total, work)
     start, raw = beat_start(track), work / "beat-raw.wav"
     clips.run([clips.ffmpeg(), "-y", "-ss", f"{start:.2f}", "-i", str(track), "-t", f"{total + 1:.2f}", str(raw)])
@@ -1804,7 +1810,11 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
     # Трём площадкам — без музыки: трендовый звук добавляется при загрузке, тихо, под голос.
     # Только в приложении: с компьютера YouTube и ВКонтакте звук из библиотеки не накладывают,
     # а TikTok Studio даёт не весь каталог (docs/research/2026-09-21/zvuk-pri-zagruzke.md).
-    music = "без музыки: звук добавь в приложении на телефоне — трек героя, тише голоса"
+    # У передачи (`music`: null) бита нет нигде: своя музыка — отбивки в фоне зала,
+    # трек героя добавляется ради страницы звука, без громкости.
+    beat = bed(script) is not None
+    music = ("без музыки: звук добавь в приложении на телефоне — трек героя, тише голоса" if beat
+             else "музыка уже в ролике: трек героя добавь в приложении на телефоне, громкость на ноль")
     telegram.send_video_file(admin, video, f"{topic}\nдля YouTube — {music}")
     if vk(video).exists():
         telegram.send_video_file(admin, vk(video), f"{topic}\nдля ВКонтакте — {music}; адрес канала без значка Telegram")
@@ -1813,7 +1823,7 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
     if channel(video).exists():
         # Кнопка — под этой версией: вид TikTok-версии (в своём канале звать в канал
         # незачем), но с битом, а file_id нажатого сообщения и есть ролик, который выйдет.
-        telegram.send_video_file(admin, channel(video), f"{topic}\nдля канала — с битом",
+        telegram.send_video_file(admin, channel(video), f"{topic}\nдля канала — {'с битом' if beat else 'как для TikTok'}",
                                  buttons=[[{"text": "📺 В канал", "callback_data": f"{CALLBACK}:{script['id']}"}]])
     # Превью документом, а не фото: фото Telegram пережимает до 1280 точек
     # по длинной стороне, а обложке нужен кадр 1080×1920 как есть. Отправки
@@ -1977,6 +1987,7 @@ def _selftest() -> None:
     broken("пауза без", lines=[{"say": "Фраза", "pause": 1.0, "screen": {"kind": "card", "text": "т"}}])
     broken("music", music="../beat.mp3")
     broken("music", music="beat.ogg")
+    assert not problems({**good, "music": None}), "music: null — ролик без бита"
     broken("subtitle", lines=[{"say": "Фраза", "subtitle": "", "screen": {"kind": "card", "text": "т"}}])
     assert problems({**good, "lines": [{"say": "Четырнадцать лет", "subtitle": "14 лет",
                                         "screen": {"kind": "card"}}]}, good["id"]) == []
@@ -2070,6 +2081,7 @@ def _selftest() -> None:
                 (Path(tmp) / "audio" / name).touch()
             assert bed({"music": "other.mp3"}).name == "other.mp3"
             assert bed({}).name == BEAT and bed({"music": "gone.mp3"}).name == BEAT
+            assert bed({"music": None}) is None
             (Path(tmp) / "audio" / BEAT).unlink()
             assert bed({}).parent.name == "audio"
         finally:
