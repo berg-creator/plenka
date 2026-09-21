@@ -309,10 +309,12 @@ TAIL = 0.2
 # «не как эффект»): низ ниже 100 Гц срезан ещё в DENOISE, здесь — компрессия,
 # чуть верхов полкой и де-эссер после неё: подъём верхов сам добавляет свиста
 # на «с» и «ш». Полка — с 4,5 кГц, где разборчивость, а не выше, в «воздухе»,
-# и голос на 3 дБ громче прежнего: с залом, отзвуком и реакциями вокруг
-# голос с мягкой компрессией и полкой с 6 кГц владелец едва расслышал.
+# и голос на 6 дБ громче прежнего: с залом, отзвуком и реакциями вокруг
+# голос с мягкой компрессией и полкой с 6 кГц владелец едва расслышал,
+# а с +3 дБ — всё ещё. Пики выше нуля: дорожки голоса пишутся во float
+# (VOICE_CODEC), срезает их ограничитель сведения в clips.assemble.
 VOICE_CHAIN = (
-    "acompressor=threshold=0.15:ratio=3:attack=10:release=120:makeup=2.2,"
+    "acompressor=threshold=0.15:ratio=3:attack=10:release=120:makeup=3.1,"
     "highshelf=f=4500:g=2.5,deesser=i=0.4"
 )
 # Пространство — отдельной шиной, как в студии: сухой голос звучит целиком,
@@ -338,6 +340,7 @@ DELAY = (
     "[0:a]highpass=f=300,lowpass=f=5000,"
     "aecho=in_gain=0:out_gain=1:delays=120|240:decays=1|0.35,adelay=0|30[w]"
 )
+VOICE_CODEC = ["-c:a", "pcm_f32le"]
 # Громкость бита до приглушения. Выше голоса по среднему: в паузах бит должен
 # качать в полную силу, а разборчивость под речью держит сайдчейн.
 BEAT_LUFS = -15.0
@@ -1187,11 +1190,12 @@ def studio(voice: Path, work: Path, room: Path | None = None) -> Path:
     from . import clips
 
     dry = work / "voice-dry.wav"
-    clips.run([clips.ffmpeg(), "-y", "-i", str(voice), "-af", f"{VOICE_CHAIN},aformat=channel_layouts=stereo", str(dry)])
+    clips.run([clips.ffmpeg(), "-y", "-i", str(voice), "-af", f"{VOICE_CHAIN},aformat=channel_layouts=stereo",
+               *VOICE_CODEC, str(dry)])
     level, sends = _meter(dry)[0], []
     for name, graph, share in (("reverb", REVERB, REVERB_SHARE), ("delay", DELAY, DELAY_SHARE)):
         wet = work / f"voice-{name}.wav"
-        clips.run([clips.ffmpeg(), "-y", "-i", str(dry), "-filter_complex", graph, "-map", "[w]", str(wet)])
+        clips.run([clips.ffmpeg(), "-y", "-i", str(dry), "-filter_complex", graph, "-map", "[w]", *VOICE_CODEC, str(wet)])
         sends.append((wet, level + 20 * math.log10(share) - _meter(wet)[0]))
     inputs = [arg for wet, _ in sends for arg in ("-i", str(wet))]
     if room:
@@ -1203,7 +1207,7 @@ def studio(voice: Path, work: Path, room: Path | None = None) -> Path:
         + ("[3:a]aformat=sample_rates=48000:channel_layouts=stereo[s3];" if room else "")
         + f"[0:a]{''.join(f'[s{n}]' for n in range(1, len(sends) + 1 + bool(room)))}"
         f"amix=inputs={len(sends) + 1 + bool(room)}:duration=first:normalize=0",
-        str(out),
+        *VOICE_CODEC, str(out),
     ])
     print(f"  голос: шины {', '.join(f'{wet.stem} {gain:+.1f} дБ' for wet, gain in sends)}"
           + (f", зал {room.name}" if room else ""))
