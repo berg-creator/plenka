@@ -74,15 +74,20 @@ SNAPSHOT_DAYS = 30
 # поэтому ниже порога бот так и говорит — и картинку не рисует.
 SOFT = 10
 
+# INTRO уходит с полем ответа, и метка в нём — чтобы список артистов в ответ ушёл
+# сюда, а не в ПРОЯВКУ: без ответа на сообщение список там и разбирается
+# («покажу, что у них общего»). Яндекс называет только эта инструкция — в меню,
+# кнопках и описании бота площадки нет (владелец, 21.09.2026).
+INTRO_MARK = "Ссылку или артистов ответом на это сообщение"
 INTRO = (
     "🎚 <b>СВЕДЕНИЕ</b>\n\n"
-    "Кидай ссылку на своё «Мне нравится» в Яндекс Музыке — посчитаю, на сколько "
-    "процентов ты совпал с артистами, и покажу, с кем сильнее всего.\n\n"
-    "Где взять ссылку: Моя музыка → «Мне нравится» → поделиться. "
+    "Посчитаю, на сколько процентов твоя музыка совпадает с артистами, "
+    "и покажу, с кем сильнее всего.\n\n"
+    "Кинь ссылку на свои лайки в Яндекс Музыке: Моя музыка → «Мне нравится» → поделиться. "
     'Если список закрыт, открой его на <a href="https://music.yandex.ru/settings/other">'
     "music.yandex.ru/settings/other</a> — «Публичный доступ к моей фонотеке».\n\n"
-    "Нет Яндекса — просто напиши артистов, которых слушаешь чаще всего: ВК, Звук, "
-    "Spotify — неважно."
+    f"Или просто напиши через запятую {MIN_NAMES}–{MAX_NAMES} артистов, которых слушаешь чаще всего.\n\n"
+    f"{INTRO_MARK}."
 )
 CLOSED = (
     "Этот список я не читаю — он закрыт или ссылка не на плейлист.\n\n"
@@ -91,7 +96,7 @@ CLOSED = (
 )
 FEW = "В списке всего {count} — по такому считать нечего. Нужно хотя бы {need} треков."
 LIMIT = "Сегодня уже три разбора. Приходи завтра — посчитаю ещё."
-NO_SNAPSHOT = "Сначала кинь ссылку на свои лайки — сравнивать пока не с чем."
+NO_SNAPSHOT = "Сначала кинь ссылку на свои лайки или напиши артистов — сравнивать пока не с чем."
 NO_ARTIST = "Яндекс такого артиста не знает. Напиши имя так, как оно стоит в Яндекс Музыке."
 SILENT = "Яндекс Музыка сейчас не отвечает. Попробуй через полчаса."
 COMPARE_MARK = "Имя артиста ответом на это сообщение"
@@ -116,8 +121,9 @@ def _cb(action: str, arg: str = "") -> str:
     return f"{CALLBACK_PREFIX}{action}:{arg}".encode()[:CALLBACK_BYTES].decode(errors="ignore")
 
 
-# Под INTRO и под CLOSED: без Яндекса или с закрытым списком человек не должен отваливаться.
-NAMES_BUTTON = [[{"text": "✍️ Нет Яндекса — напишу артистов", "callback_data": _cb("imena")}]]
+# Для тех, у кого поле ответа INTRO уже закрыто: закрытый или короткий список,
+# сравнение без снимка, мало найденных имён. С закрытым списком человек не должен отваливаться.
+NAMES_BUTTON = [[{"text": "✍️ Написать артистов", "callback_data": _cb("imena")}]]
 
 
 def buttons(artist: str) -> list[list[dict]]:
@@ -258,7 +264,7 @@ def _send(chat_id: str, text: str, match: dict) -> None:
 
 
 def intro(chat_id: str) -> None:
-    telegram.send_message(chat_id, INTRO, buttons=NAMES_BUTTON)
+    telegram.send_message(chat_id, INTRO, ask="Ссылка или артисты через запятую")
 
 
 def handle(chat_id: str, text: str) -> None:
@@ -275,7 +281,7 @@ def handle(chat_id: str, text: str) -> None:
         return
     tracks = _short(found)
     if len(tracks) < MIN_TRACKS:
-        telegram.send_message(chat_id, FEW.format(count=len(tracks), need=MIN_TRACKS))
+        telegram.send_message(chat_id, FEW.format(count=len(tracks), need=MIN_TRACKS), buttons=NAMES_BUTTON)
         return
 
     best = matches(tracks)
@@ -297,7 +303,7 @@ def compare(chat_id: str, name: str) -> None:
     data = _load()
     tracks = data.get(str(chat_id), {}).get("tracks")
     if not tracks:
-        telegram.send_message(chat_id, NO_SNAPSHOT)
+        telegram.send_message(chat_id, NO_SNAPSHOT, buttons=NAMES_BUTTON)
         return
     if not _spend(data, chat_id):
         telegram.send_message(chat_id, LIMIT)
@@ -349,7 +355,8 @@ def by_names(chat_id: str, text: str) -> None:
     # Имена пишет человек, а ответ уходит HTML-разметкой: «<b>» в имени уронил бы отправку.
     note = f"\n\nНе нашёл: {html.escape(', '.join(missed), quote=False)}." if missed else ""
     if len(known) < MIN_NAMES:
-        telegram.send_message(chat_id, FEW_NAMES.format(need=MIN_NAMES, count=len(known)) + note)
+        telegram.send_message(chat_id, FEW_NAMES.format(need=MIN_NAMES, count=len(known)) + note,
+                              buttons=NAMES_BUTTON)
         return
 
     # Названный артист — «трек» с одним исполнителем: percent и matches считают как есть.

@@ -95,7 +95,8 @@ MENU = (
     "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
     "🎞 <b>ПРОЯВКА</b>\nПришли артиста, песню или строки из текста — расскажу, откуда это взялось.\n\n"
     "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
-    "🎚 <b>СВЕДЕНИЕ</b>\nКинь ссылку на свои лайки в Яндекс Музыке — посчитаю, на сколько ты совпал с артистами.\n\n"
+    # Площадку называет только INTRO СВЕДЕНИЯ: лайки можно и не кидать, а написать артистов.
+    "🎚 <b>СВЕДЕНИЕ</b>\nУзнай, на сколько процентов твоя музыка совпадает с артистами.\n\n"
     # «Нужна подписка» читалась как платная подписка (владелец, 16.09.2026).
     f'Всё <b>бесплатно</b> — достаточно подписаться на <a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.'
 )
@@ -1257,10 +1258,11 @@ def handle_message(message: dict, data: dict) -> bool:
         if _subscribed(chat_id, user_id, admin):
             svedenie.compare(chat_id, text)
         return False
-    if not text.startswith("/") and svedenie.NAMES_MARK in asked:
-        # Нет Яндекса или список закрыт — СВЕДЕНИЕ по названным артистам.
+    if not text.startswith("/") and (svedenie.INTRO_MARK in asked or svedenie.NAMES_MARK in asked):
+        # Ответ на INTRO СВЕДЕНИЯ или на вопрос об артистах: ссылка — в разбор лайков,
+        # остальное — список артистов. Без ответа тот же список ушёл бы в ПРОЯВКУ.
         if _subscribed(chat_id, user_id, admin):
-            svedenie.by_names(chat_id, text)
+            (svedenie.handle if SVED_LINK.search(text) else svedenie.by_names)(chat_id, text)
         return False
     if not text.startswith("/") and (WATCH_MARK in asked or CITY_MARK in asked):
         otbor.cancel(chat_id)
@@ -1472,7 +1474,7 @@ def handle_callback(query: dict, data: dict) -> None:
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
         if _subscribed(chat_id, user_id, admin):
             # Из меню — что это такое и что прислать, из-под ответа — сразу имя артиста,
-            # из-под INTRO и CLOSED — список артистов вместо ссылки.
+            # из-под CLOSED и отказов — список артистов вместо ссылки.
             {"sravni": svedenie.ask_artist, "imena": svedenie.ask_names}.get(action, svedenie.intro)(chat_id)
         return
 
@@ -1779,19 +1781,25 @@ def _selftest() -> None:
         # Кнопка «следить» под ответом СВЕДЕНИЯ — кнопка сервиса: подписывает watch_add,
         # второго пути к тому же списку нет.
         assert svedenie.buttons("Toxi$")[1][0]["callback_data"] == _cb("watch", "Toxi$")
-        # Без Яндекса: кнопка под INTRO спрашивает артистов, ответ с меткой — в by_names.
-        handle_callback({"id": "q", "data": replies[3][1][0][0]["callback_data"],
+        # Ответ на INTRO: ссылка — в разбор лайков, список артистов — в by_names, а не в ПРОЯВКУ.
+        # Telegram отдаёт текст вопроса без разметки — метка должна пережить и это.
+        asked = re.sub(r"<[^>]+>", "", svedenie.INTRO)
+        for n, (text, reply) in enumerate((("Toxi$, Баста", asked), (links[0], asked),
+                                           ("Toxi$, Баста", svedenie.NAMES_ASK))):
+            handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "message_id": 90 + n,
+                            "date": 9000 + n, "text": text, "reply_to_message": {"text": reply}}, {})
+        assert links[1:] == ["имена: Toxi$, Баста", links[0], "имена: Toxi$, Баста"], links
+        assert replies[3][1] is None, "у INTRO поле ответа, а не кнопка"
+        # Кнопка под отказами — тот же вопрос с меткой.
+        handle_callback({"id": "q", "data": svedenie.NAMES_BUTTON[0][0]["callback_data"],
                          "message": {"chat": {"id": 55501}}, "from": {"id": 77701}}, {})
         assert replies[-1][0] == svedenie.NAMES_ASK, replies[-1]
-        handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "message_id": 99,
-                        "date": 9999, "text": "Toxi$, Баста", "reply_to_message": {"text": svedenie.NAMES_ASK}}, {})
-        assert links[-1] == "имена: Toxi$, Баста", links
     finally:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback) = real
         tmp.cleanup()
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню четыре раздела; "
-          "ссылка на плейлист — в СВЕДЕНИЕ, список артистов ответом — тоже")
+          "ссылка на плейлист — в СВЕДЕНИЕ; ответ на INTRO: ссылка — в лайки, артисты — в by_names")
 
 
 # ─────────────────────────── командная строка ───────────────────────────
