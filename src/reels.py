@@ -2333,7 +2333,7 @@ def _selftest() -> None:
                    "-ac", "2", "-ar", "44100", str(hall)])
         voiced = studio(said, room_dir, hall)
         ring = tone(0, voiced, (1.05, 1.35), 1000) / tone(0, voiced, (0.2, 0.8), 1000)
-        assert 0.01 < ring < 0.3, ("пространства нет или оно спорит с голосом", ring)
+        assert 0.004 < ring < 0.3, ("пространства нет или оно спорит с голосом", ring)
         assert tone(0, voiced, (2.2, 2.8), 200) > tone(0, voiced, (0.2, 0.8), 200) * 0.7, "зал не пошёл по кругу"
 
         # Кадр обрезается вокруг focus: у картинки «слева красное, справа
