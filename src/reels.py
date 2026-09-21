@@ -30,7 +30,10 @@
 камкордерная обработка и затемнение превращали ролик в тёмную кашу, где мем
 был маленькой картинкой посреди чёрного поля. Здесь картинка чистая и на весь
 экран, под голосом качает бит, а сам голос проходит дикторскую обработку,
-а не телефонную полосу. Марки канала в кадре нет вовсе: крутящаяся плёнка
+а не телефонную полосу, и звучит в пространстве: отзвук и дилей подмешаны
+отдельной шиной, как в студии (studio). Под ним — фон зала, если сценарий
+его задал (поле `room`): в ролике-передаче мёртвая тишина между репликами
+звучит склейкой. Марки канала в кадре нет вовсе: крутящаяся плёнка
 в углу висела над каждым мемом и спорила с ним, а узнаёт ролик голос.
 
 Бит качает только в версии для своего канала. Для YouTube, TikTok и ВКонтакте
@@ -302,11 +305,37 @@ BEFORE_SPEECH = 0.08
 AFTER_SPEECH = 0.15
 # Воздух после дубля до склейки.
 TAIL = 0.2
-# Дикторская цепочка на склеенную дорожку: лёгкая компрессия, полка верхов
-# и де-эссер после неё — подъём верхов сам добавляет свиста на «с» и «ш».
+# Дикторская цепочка на склеенную дорожку (владелец, 21.09.2026: обработка
+# «не как эффект»): низ ниже 100 Гц срезан ещё в DENOISE, здесь — мягкая
+# компрессия на 2–3 дБ, чуть верхов полкой и де-эссер после неё: подъём верхов
+# сам добавляет свиста на «с» и «ш». Прежняя давила на 8 дБ и поднимала
+# середину верхов на 2,5 — голос звучал сжатым.
 VOICE_CHAIN = (
-    "acompressor=threshold=0.1:ratio=3:attack=5:release=80:makeup=2,"
-    "highshelf=f=4500:g=2.5,deesser=i=0.4"
+    "acompressor=threshold=0.2:ratio=2.5:attack=15:release=150:makeup=1.2,"
+    "highshelf=f=6000:g=2,deesser=i=0.4"
+)
+# Пространство — отдельной шиной, как в студии: сухой голос звучит целиком,
+# а отзвук и дилей подмешиваются к нему чуть-чуть. Эффект поперёк всего голоса
+# делает его глухим и отодвигает. Доля — громкость шины к сухому голосу,
+# её владелец назвал сам: отзвук 10%, дилей 7%.
+REVERB_SHARE = 0.10
+DELAY_SHARE = 0.07
+# Отзвук — свёртка с розовым шумом, гаснущим на 60 дБ за REVERB_SECONDS:
+# небольшой зал, а не собор. Ревербератора в ffmpeg нет, а многократное эхо
+# звенит металлом. Шум у каналов свой — отзвук стерео, вокруг голоса.
+# Предзадержка отделяет отзвук от слова, и оно остаётся разборчивым; на шину
+# не идёт низ, который мутит, и верх, где шипят «с».
+REVERB_SECONDS = 0.8
+REVERB = (
+    f"anoisesrc=r=48000:d={REVERB_SECONDS}:c=pink:seed=1[n1];"
+    f"anoisesrc=r=48000:d={REVERB_SECONDS}:c=pink:seed=2[n2];"
+    f"[n1][n2]amerge=inputs=2,asetnsamples=64,volume='exp(-6.9*t/{REVERB_SECONDS})':eval=frame[ir];"
+    "[0:a]highpass=f=300,lowpass=f=7000,adelay=25|25[in];[in][ir]afir[w]"
+)
+# Дилей — два коротких повтора, правый на 30 мс позже левого: ширина, а не эхо.
+DELAY = (
+    "[0:a]highpass=f=300,lowpass=f=5000,"
+    "aecho=in_gain=0:out_gain=1:delays=120|240:decays=1|0.35,adelay=0|30[w]"
 )
 # Громкость бита до приглушения. Выше голоса по среднему: в паузах бит должен
 # качать в полную силу, а разборчивость под речью держит сайдчейн.
@@ -452,6 +481,10 @@ def problems(script, name: str = "") -> list[str]:
     # которого у облачного автора нет. Нет файла — сборка возьмёт BEAT.
     if "music" in script and not (isinstance(script["music"], str) and MUSIC_FORMAT.fullmatch(script["music"])):
         errors.append(f"music: имя файла бита из plenka-state/audio, например {BEAT}")
+    # Имя с цифры сборка приняла бы за дубль — как у overlay.
+    if "room" in script and not (isinstance(script["room"], str) and MUSIC_FORMAT.fullmatch(script["room"])
+                                 and not script["room"][:1].isdigit()):
+        errors.append("room: фон зала — mp3 или wav в папке ролика, имя не с цифры")
 
     lines = script.get("lines") if isinstance(script.get("lines"), list) else []
     if not any(isinstance(line, dict) and _filled(line.get("say")) for line in lines):
@@ -1137,6 +1170,45 @@ def _trimmed(script: dict, voices: Path | None, work: Path) -> Path:
     return out
 
 
+def studio(voice: Path, work: Path, room: Path | None = None) -> Path:
+    """Голос как из студии: VOICE_CHAIN, к нему отзвук и дилей шинами, под ним фон зала.
+
+    Шины выставляются по замеру, а не коэффициентом: облако собирает на ffmpeg 6.1,
+    а там afir нормирует импульс иначе, чем в свежем, — одна и та же доля
+    звучала бы по-разному.
+
+    Зал (поле сценария `room`) — сюда, а не в подложку: подложку голос проседает
+    сайдчейном на 10–14 дБ, и фон дышал бы насосом, громче в каждой паузе, — а живой
+    зал не стихает от того, что ведущий заговорил. Так он же попадает в обе версии,
+    с битом и без. Громкость и ход (гул до «тишины в зале», шорох после) — в самом файле,
+    его готовят руками, как звуки overlay; короче ролика — идёт по кругу.
+    """
+    from . import clips
+
+    dry = work / "voice-dry.wav"
+    clips.run([clips.ffmpeg(), "-y", "-i", str(voice), "-af", f"{VOICE_CHAIN},aformat=channel_layouts=stereo", str(dry)])
+    level, sends = _meter(dry)[0], []
+    for name, graph, share in (("reverb", REVERB, REVERB_SHARE), ("delay", DELAY, DELAY_SHARE)):
+        wet = work / f"voice-{name}.wav"
+        clips.run([clips.ffmpeg(), "-y", "-i", str(dry), "-filter_complex", graph, "-map", "[w]", str(wet)])
+        sends.append((wet, level + 20 * math.log10(share) - _meter(wet)[0]))
+    inputs = [arg for wet, _ in sends for arg in ("-i", str(wet))]
+    if room:
+        inputs += ["-stream_loop", "-1", "-i", str(room)]
+    out = work / "voice-studio.wav"
+    clips.run([
+        clips.ffmpeg(), "-y", "-i", str(dry), *inputs, "-filter_complex",
+        "".join(f"[{n}:a]volume={gain:.1f}dB[s{n}];" for n, (_, gain) in enumerate(sends, 1))
+        + ("[3:a]aformat=sample_rates=48000:channel_layouts=stereo[s3];" if room else "")
+        + f"[0:a]{''.join(f'[s{n}]' for n in range(1, len(sends) + 1 + bool(room)))}"
+        f"amix=inputs={len(sends) + 1 + bool(room)}:duration=first:normalize=0",
+        str(out),
+    ])
+    print(f"  голос: шины {', '.join(f'{wet.stem} {gain:+.1f} дБ' for wet, gain in sends)}"
+          + (f", зал {room.name}" if room else ""))
+    return out
+
+
 def bed(script: dict) -> Path | None:
     """Подложка: бит из поля `music`, иначе BEAT, иначе случайный. None — битов нет нигде.
 
@@ -1649,7 +1721,9 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
             # и -shortest срезал бы концовку.
             padded = work / "voice-padded.wav"
             clips.run([clips.ffmpeg(), "-y", "-i", str(voice), "-af", f"apad=whole_dur={total:.3f}", str(padded)])
-            voice = padded
+            # Хвост отзвука звенит в этой тишине, а не обрезается с концом дубля.
+            room = voices / script["room"] if voices and "room" in script and (voices / script["room"]).is_file() else None
+            voice = studio(padded, work, room)
         starts = [sum(shot.seconds for shot in timed[:index]) for index in range(len(timed))]
         pieces = [(piece, at, line["track"]["length"]) for index, (line, at) in enumerate(zip(script["lines"], starts))
                   if "track" in line and (piece := _excerpt(line["track"], work / f"track-{index}.m4a"))]
@@ -1663,7 +1737,7 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         for bed_track, out in ((_beat(script, total, work), video), (_silence(total, work), bare)):
             clips.assemble(
                 parts, _under_tracks(bed_track, pieces, work, overlays), total, out, work, voice, 0.0,
-                voice_grade=VOICE_CHAIN, duck=DUCK,
+                voice_grade="anull", duck=DUCK,
             )
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
@@ -1878,6 +1952,9 @@ def _selftest() -> None:
                     {"file": "a.wav", "at": -1, "length": 1}, {"file": "a.wav", "at": 1, "length": 11},
                     {"file": "a.wav", "at": 1, "length": 1, "beat": 2}):
         broken("overlay", lines=[{**over, "overlay": overlay}])
+    assert problems({**good, "room": "zal.wav"}, good["id"]) == []
+    broken("room", room="1.wav")
+    broken("room", room="zal.txt")
     assert spoken_frames({"lines": [clip, {"say": "ф"}]}) == [2] and "поверх отрывка" in line_text(1, 1, {**clip, "say": "ф"})
     for track, word in (({"id": 5, "length": 11}, "length"), ({"id": 5, "start": 25, "length": 6}, "start + length"),
                         ({"length": 2}, "id трека"), ({"id": 5.0, "length": 2}, "id трека"), ({"query": "a"}, "length")):
@@ -2240,6 +2317,19 @@ def _selftest() -> None:
         before, during = tone(0, mixed, (0.5, 1.5), 200), tone(0, mixed, (2.3, 3.7), 200)
         assert tone(0, mixed, (2.3, 3.7), 1000) > 1000 and tone(0, mixed, (0.5, 1.5), 1000) < 100, "отрывок не на месте"
         assert during < before * 0.2 and tone(0, mixed, (4.5, 5.5), 200) > before * 0.8, (before, during)
+
+        # Голос из студии: сухой звучит целиком, пространство за ним — чуть-чуть,
+        # а зал короче ролика идёт по кругу до конца.
+        said, hall, room_dir = Path(tmp) / "said.wav", Path(tmp) / "hall.wav", Path(tmp) / "studio"
+        room_dir.mkdir()
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=1000:d=1", "-af", "volume=0.3,apad=whole_dur=3",
+                   "-ar", "48000", str(said)])
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=200:d=1", "-af", "volume=0.05",
+                   "-ac", "2", "-ar", "44100", str(hall)])
+        voiced = studio(said, room_dir, hall)
+        ring = tone(0, voiced, (1.05, 1.35), 1000) / tone(0, voiced, (0.2, 0.8), 1000)
+        assert 0.01 < ring < 0.3, ("пространства нет или оно спорит с голосом", ring)
+        assert tone(0, voiced, (2.2, 2.8), 200) > tone(0, voiced, (0.2, 0.8), 200) * 0.7, "зал не пошёл по кругу"
 
         # Кадр обрезается вокруг focus: у картинки «слева красное, справа
         # синее» кадр с focus 0 красный, с focus 1 синий.
