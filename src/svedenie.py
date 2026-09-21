@@ -25,6 +25,17 @@
 с артистом»: без него каждое сравнение снова тянуло бы всю фонотеку.
 Разборов — три в сутки на человека: каждый стоит до 25 запросов к Яндексу.
 
+Запасной путь — имена (решение владельца 21.09.2026). «Мне нравится» открывается
+только на сайте Яндекса, с телефона до этой настройки почти никто не дойдёт,
+а ВК Музыка и Звук без входа не читаются вовсе (проверено 21.09: ВК уводит
+на badbrowser.php, Звук отдаёт заглушку). Поэтому человек с любым стримингом
+может просто написать 5–20 артистов, которых слушает чаще всего. Второго счёта
+под это нет: каждый названный артист становится в снимке одной «строкой», как
+трек с одним исполнителем, и процент — доля названных, что входят в круг
+кандидата. Снимок тот же, поэтому «Сравнить с артистом» работает и после имён,
+а свой плейлист артиста второй строкой не выходит — общих треков у имён нет.
+Такой разбор стоит около сорока запросов: поиск и brief-info на каждое имя.
+
     python -m src.svedenie --selftest              формула, отказы и ответ — без сети
     python -m src.svedenie --dry-run               разбор открытой фонотеки, без Telegram
     python -m src.svedenie --check "ССЫЛКА"        что ответил бы бот на эту ссылку
@@ -33,7 +44,9 @@
 from __future__ import annotations
 
 import argparse
+import html
 import logging
+import re
 import tempfile
 from collections import Counter
 from datetime import timedelta
@@ -49,6 +62,10 @@ CANDIDATES = 20
 TOP = 3
 # Меньше — считать не из чего: на десятке треков процент пляшет от одного лайка.
 MIN_TRACKS = 15
+# Запасной путь именами: меньше пяти — процент шагает по 25%, больше двадцати —
+# это уже не «чаще всего», а вся фонотека, и запросов к Яндексу на каждое имя два.
+MIN_NAMES = 5
+MAX_NAMES = 20
 # Снимок фонотеки живёт месяц: дальше человек слушает уже другое.
 SNAPSHOT_DAYS = 30
 # Ниже этого процента совпадения нет: у разношёрстной фонотеки (проверено
@@ -63,7 +80,9 @@ INTRO = (
     "процентов ты совпал с артистами, и покажу, с кем сильнее всего.\n\n"
     "Где взять ссылку: Моя музыка → «Мне нравится» → поделиться. "
     'Если список закрыт, открой его на <a href="https://music.yandex.ru/settings/other">'
-    "music.yandex.ru/settings/other</a> — «Публичный доступ к моей фонотеке»."
+    "music.yandex.ru/settings/other</a> — «Публичный доступ к моей фонотеке».\n\n"
+    "Нет Яндекса — просто напиши артистов, которых слушаешь чаще всего: ВК, Звук, "
+    "Spotify — неважно."
 )
 CLOSED = (
     "Этот список я не читаю — он закрыт или ссылка не на плейлист.\n\n"
@@ -77,6 +96,12 @@ NO_ARTIST = "Яндекс такого артиста не знает. Напи�
 SILENT = "Яндекс Музыка сейчас не отвечает. Попробуй через полчаса."
 COMPARE_MARK = "Имя артиста ответом на это сообщение"
 COMPARE_ASK = "С кем сравнить? " + COMPARE_MARK + " — посчитаю, на сколько ты совпал с ним."
+NAMES_MARK = "Артистов через запятую ответом на это сообщение"
+NAMES_ASK = (
+    f"Кого ты слушаешь чаще всего? {NAMES_MARK} — от {MIN_NAMES} до {MAX_NAMES}, "
+    "как их зовут в любом стриминге."
+)
+FEW_NAMES = "Нужно хотя бы {need} артистов, которых Яндекс знает, — нашёл {count}."
 # Тем, кто пришёл на «делаем» и остался ждать (config.SVED_FILE).
 READY = "🎚 <b>СВЕДЕНИЕ</b> заработало — кидай ссылку на своё «Мне нравится», посчитаю."
 
@@ -89,6 +114,10 @@ CALLBACK_BYTES = 64
 
 def _cb(action: str, arg: str = "") -> str:
     return f"{CALLBACK_PREFIX}{action}:{arg}".encode()[:CALLBACK_BYTES].decode(errors="ignore")
+
+
+# Под INTRO и под CLOSED: без Яндекса или с закрытым списком человек не должен отваливаться.
+NAMES_BUTTON = [[{"text": "✍️ Нет Яндекса — напишу артистов", "callback_data": _cb("imena")}]]
 
 
 def buttons(artist: str) -> list[list[dict]]:
@@ -148,12 +177,16 @@ def percent(tracks: list[list], circle: set[int]) -> int:
     return round(100 * hits / len(tracks))
 
 
-def matches(tracks: list[list], limit: int = TOP) -> list[dict]:
-    """Артисты, с которыми человек совпал сильнее всего."""
+def matches(tracks: list[list], limit: int = TOP, known: dict | None = None) -> list[dict]:
+    """Артисты, с которыми человек совпал сильнее всего.
+
+    known — уже прочитанные артисты по id: у имён brief-info пришёл при поиске,
+    и второй раз за ним ходить незачем.
+    """
     counts = Counter(artist for _, artists in tracks for artist in artists)
     found = []
     for artist_id, liked in counts.most_common(CANDIDATES):
-        data = yandex_music.info(artist_id)
+        data = (known or {}).get(artist_id) or yandex_music.info(artist_id)
         if data:
             found.append({**data, "percent": percent(tracks, set(data["circle"])), "liked": liked})
     # Круги соседей по сцене покрывают одни и те же треки, и проценты сходятся
@@ -175,12 +208,15 @@ def own_percent(match: dict, tracks: list[list]) -> int:
     return round(100 * len(mine & theirs) / min(len(mine), len(theirs)))
 
 
-def answer(tracks: list[list], found: list[dict]) -> str:
-    """Ответ человеку: только проценты и имена, вкус бот не оценивает."""
+def answer(tracks: list[list], found: list[dict], unit: str = "трекам") -> str:
+    """Ответ человеку: только проценты и имена, вкус бот не оценивает.
+
+    unit — чем считали: треками из лайков или артистами, которых человек назвал.
+    """
     head = (
-        f"Посчитал по {len(tracks)} трекам из твоего списка:"
+        f"Посчитал по {len(tracks)} {unit} из твоего списка:"
         if found[0]["percent"] >= SOFT
-        else f"Посчитал по {len(tracks)} трекам. Список слишком разный — "
+        else f"Посчитал по {len(tracks)} {unit}. Список слишком разный — "
         "заметного совпадения ни с кем нет. Ближе всех:"
     )
     lines = ["🎚 <b>СВЕДЕНИЕ</b>\n", head + "\n"]
@@ -222,7 +258,7 @@ def _send(chat_id: str, text: str, match: dict) -> None:
 
 
 def intro(chat_id: str) -> None:
-    telegram.send_message(chat_id, INTRO)
+    telegram.send_message(chat_id, INTRO, buttons=NAMES_BUTTON)
 
 
 def handle(chat_id: str, text: str) -> None:
@@ -235,7 +271,7 @@ def handle(chat_id: str, text: str) -> None:
     telegram.send_chat_action(chat_id)
     found = yandex_music.by_link(text)
     if found is None:
-        telegram.send_message(chat_id, CLOSED)
+        telegram.send_message(chat_id, CLOSED, buttons=NAMES_BUTTON)
         return
     tracks = _short(found)
     if len(tracks) < MIN_TRACKS:
@@ -280,6 +316,50 @@ def compare(chat_id: str, name: str) -> None:
     _send(chat_id, text, match)
 
 
+def ask_names(chat_id: str) -> None:
+    telegram.send_message(chat_id, NAMES_ASK, ask="Артисты через запятую")
+
+
+def names(text: str) -> list[str]:
+    """Имена из сообщения: через запятую или с новой строки, без повторов, не больше двадцати."""
+    # ponytail: имя с запятой внутри («Tyler, The Creator») разрежется на два;
+    # чинить, если в «Не нашёл» такие начнут попадаться.
+    unique: dict[str, str] = {}
+    for name in re.split(r"[,\n]", text):
+        if name := name.strip()[:120]:
+            unique.setdefault(name.casefold(), name)
+    return list(unique.values())[:MAX_NAMES]
+
+
+def by_names(chat_id: str, text: str) -> None:
+    """Запасной путь: человек назвал артистов сам. Счёт и снимок — те же, что у лайков."""
+    data = _load()
+    if not _spend(data, chat_id):
+        telegram.send_message(chat_id, LIMIT)
+        return
+
+    telegram.send_chat_action(chat_id)
+    known: dict[int, dict] = {}
+    missed: list[str] = []
+    for name in names(text):
+        if found := yandex_music.artist(name):
+            known[found["id"]] = found  # «Баста» и «Basta» — один артист, одна строка
+        else:
+            missed.append(name)
+    # Имена пишет человек, а ответ уходит HTML-разметкой: «<b>» в имени уронил бы отправку.
+    note = f"\n\nНе нашёл: {html.escape(', '.join(missed), quote=False)}." if missed else ""
+    if len(known) < MIN_NAMES:
+        telegram.send_message(chat_id, FEW_NAMES.format(need=MIN_NAMES, count=len(known)) + note)
+        return
+
+    # Названный артист — «трек» с одним исполнителем: percent и matches считают как есть.
+    tracks = [[f"a{artist_id}", [artist_id]] for artist_id in known]
+    best = matches(tracks, known=known)
+    data[str(chat_id)]["tracks"] = tracks
+    _save(data)
+    _send(chat_id, answer(tracks, best, unit="артистам") + note, best[0])
+
+
 def notify_waiting() -> None:
     """Тем, кто пришёл по метке до стройки, бот обещал написать первым.
 
@@ -313,7 +393,11 @@ def _selftest() -> None:
     }
     real = (yandex_music.info, yandex_music.artist, yandex_music.by_link, yandex_music.playlist,
             telegram.send_message, telegram.send_photo_file, telegram.send_chat_action,
-            card.save, config.SVED_STATE, config.SVED_FILE)
+            card.save, config.SVED_STATE, config.SVED_FILE, yandex_music._get)
+    # brief-info отдаёт id самого артиста строкой, соседей — числом, а треки — числом:
+    # круг приводится к числам, иначе сам артист в свой круг не входит.
+    yandex_music._get = lambda path, **kw: {"artist": {"id": "7", "name": "X"}, "similarArtists": [{"id": 8}]}
+    assert yandex_music.info(7)["circle"] == [7, 8] and yandex_music.info(7)["id"] == 7
     replies: list[str] = []
     yandex_music.info = lambda artist_id: fake.get(int(artist_id))
     yandex_music.artist = lambda name: next((a for a in fake.values() if a["name"] == name), None)
@@ -386,6 +470,25 @@ def _selftest() -> None:
         compare("60002", "Дора")
         assert replies[-1] == NO_SNAPSHOT, replies[-1]
 
+        # Имена вместо ссылки: запятые и строки, пробелы, повтор в другом регистре, потолок в двадцать.
+        assert names(" Toxi$, Дора\ntoxi$ ,, Кто-то\n") == ["Toxi$", "Дора", "Кто-то"]
+        assert len(names(",".join(f"x{i}" for i in range(30)))) == MAX_NAMES
+        assert NAMES_BUTTON[0][0]["callback_data"] == "s:imena:"
+        fake.update({n: {"id": n, "name": name, "circle": [n], "photo": "", "playlist": None}
+                     for n, name in ((2, "Сосед"), (3, "Третий"), (5, "Пятый"))})
+        # Четыре найденных — отказ, и ненайденный назван, а не выкинут молча.
+        by_names("70003", "Toxi$, Дора, Сосед, Кто-то, Третий")
+        assert replies[-1].startswith("Нужно хотя бы 5") and "Не нашёл: Кто-то." in replies[-1], replies[-1]
+        # Пять: круг Toxi$ (1, 2, 3) покрывает троих из пяти названных — 60%.
+        by_names("70003", "Toxi$, Дора, Сосед, Третий, Пятый, Кто-то, toxi$")
+        text = replies[-1]
+        assert "Посчитал по 5 артистам" in text and "ты на <b>60%</b> Toxi$" in text, text
+        assert "Не нашёл: Кто-то." in text and "собрал сам" not in text, text
+        saved = state.read_json(config.SVED_STATE, {})["70003"]
+        assert saved["tracks"][0] == ["a1", [1]] and len(saved["tracks"]) == 5, saved["tracks"]
+        compare("70003", "Дора")
+        assert "ты на <b>20%</b> Дора".casefold() in replies[-1].casefold(), "сравнение по снимку из имён"
+
         # Ждущие: одно сообщение и файл удалён — обещание не висит второй раз.
         state.write_json(config.SVED_FILE, ["55501", "60002"])
         notify_waiting()
@@ -395,10 +498,11 @@ def _selftest() -> None:
     finally:
         (yandex_music.info, yandex_music.artist, yandex_music.by_link, yandex_music.playlist,
          telegram.send_message, telegram.send_photo_file, telegram.send_chat_action,
-         card.save, config.SVED_STATE, config.SVED_FILE) = real
+         card.save, config.SVED_STATE, config.SVED_FILE, yandex_music._get) = real
 
     print("СВЕДЕНИЕ: процент по кругу артиста, свой плейлист второй строкой, "
-          "закрытый список и четвёртый разбор за сутки — отказ, снимок без имён")
+          "закрытый список и четвёртый разбор за сутки — отказ, снимок без имён; "
+          "по названным артистам: ненайденные названы, меньше пяти — отказ")
 
 
 def _show(link: str) -> int:

@@ -167,10 +167,13 @@ def info(artist_id: int | str) -> dict | None:
     if not data or not data.get("artist"):
         return None
     artist = data["artist"]
+    # Сам артист приходит с id строкой, а соседи и исполнители треков — числом
+    # (проверено 21.09.2026). Без приведения сам артист не входил в свой круг:
+    # «ты на N% Toxi$» не засчитывал треки самого Toxi$.
     return {
-        "id": artist["id"],
+        "id": int(artist["id"]),
         "name": artist.get("name", ""),
-        "circle": [artist["id"], *(a["id"] for a in data.get("similarArtists", []) if a.get("id"))],
+        "circle": [int(artist["id"]), *(int(a["id"]) for a in data.get("similarArtists", []) if a.get("id"))],
         "playlist": _own_playlist(artist.get("name", ""), data.get("playlists") or []),
         "photo": _photo(artist),
     }

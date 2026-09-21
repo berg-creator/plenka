@@ -1257,6 +1257,11 @@ def handle_message(message: dict, data: dict) -> bool:
         if _subscribed(chat_id, user_id, admin):
             svedenie.compare(chat_id, text)
         return False
+    if not text.startswith("/") and svedenie.NAMES_MARK in asked:
+        # Нет Яндекса или список закрыт — СВЕДЕНИЕ по названным артистам.
+        if _subscribed(chat_id, user_id, admin):
+            svedenie.by_names(chat_id, text)
+        return False
     if not text.startswith("/") and (WATCH_MARK in asked or CITY_MARK in asked):
         otbor.cancel(chat_id)
         if not _subscribed(chat_id, user_id, admin):
@@ -1463,11 +1468,12 @@ def handle_callback(query: dict, data: dict) -> None:
         otbor.callback(chat_id, user_id, subject, admin=admin)
         return
 
-    if action in ("sved", "sravni"):
+    if action in ("sved", "sravni", "imena"):
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
         if _subscribed(chat_id, user_id, admin):
-            # Из меню — что это такое и что прислать, из-под ответа — сразу имя артиста.
-            svedenie.ask_artist(chat_id) if action == "sravni" else svedenie.intro(chat_id)
+            # Из меню — что это такое и что прислать, из-под ответа — сразу имя артиста,
+            # из-под INTRO и CLOSED — список артистов вместо ссылки.
+            {"sravni": svedenie.ask_artist, "imena": svedenie.ask_names}.get(action, svedenie.intro)(chat_id)
         return
 
     if action == "watch" and subject:
@@ -1741,10 +1747,12 @@ def _selftest() -> None:
 
     opened: list[str] = []
     real = (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
-            globals()["_subscribed"])
+            globals()["_subscribed"], svedenie.by_names, telegram.answer_callback)
     otbor.start = lambda chat, user, **_: opened.append(chat)
     links: list[str] = []
     svedenie.handle = lambda chat, text: links.append(text)
+    svedenie.by_names = lambda chat, text: links.append("имена: " + text)
+    telegram.answer_callback = lambda *a, **kw: None
     globals()["_subscribed"] = lambda *a, **kw: True
     replies: list[tuple[str, list]] = []
     telegram.send_message = lambda chat, text, buttons=None, **_: replies.append((text, buttons)) or {"message_id": 1}
@@ -1771,12 +1779,19 @@ def _selftest() -> None:
         # Кнопка «следить» под ответом СВЕДЕНИЯ — кнопка сервиса: подписывает watch_add,
         # второго пути к тому же списку нет.
         assert svedenie.buttons("Toxi$")[1][0]["callback_data"] == _cb("watch", "Toxi$")
+        # Без Яндекса: кнопка под INTRO спрашивает артистов, ответ с меткой — в by_names.
+        handle_callback({"id": "q", "data": replies[3][1][0][0]["callback_data"],
+                         "message": {"chat": {"id": 55501}}, "from": {"id": 77701}}, {})
+        assert replies[-1][0] == svedenie.NAMES_ASK, replies[-1]
+        handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "message_id": 99,
+                        "date": 9999, "text": "Toxi$, Баста", "reply_to_message": {"text": svedenie.NAMES_ASK}}, {})
+        assert links[-1] == "имена: Toxi$, Баста", links
     finally:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
-         globals()["_subscribed"]) = real
+         globals()["_subscribed"], svedenie.by_names, telegram.answer_callback) = real
         tmp.cleanup()
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню четыре раздела; "
-          "ссылка на плейлист — в СВЕДЕНИЕ")
+          "ссылка на плейлист — в СВЕДЕНИЕ, список артистов ответом — тоже")
 
 
 # ─────────────────────────── командная строка ───────────────────────────
