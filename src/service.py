@@ -58,7 +58,11 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "gorod": "ролик, за концертами", "slezhu": "ролик, за релизами",
            # СВЕДЕНИЕ зовут ролики: ?start=sved_yt — из ролика на YouTube.
            "sved": "СВЕДЕНИЕ, без площадки", "sved_yt": "СВЕДЕНИЕ, YouTube", "sved_tt": "СВЕДЕНИЕ, TikTok",
-           "sved_vk": "СВЕДЕНИЕ, ВКонтакте", "sved_link": "СВЕДЕНИЕ, без метки: прислали ссылку"}
+           "sved_vk": "СВЕДЕНИЕ, ВКонтакте", "sved_link": "СВЕДЕНИЕ, без метки: прислали ссылку",
+           "ad": "реклама, канал не распознан"}
+# Платный пост ведёт в СВЕДЕНИЕ ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
+# и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
+AD_LABEL = re.compile(r"ad_[a-z0-9_]{1,32}")
 
 CARD_DIR = config.ROOT / "assets" / "cards"
 
@@ -419,17 +423,21 @@ NOT_SUBSCRIBED = ("Всё в боте <b>бесплатно</b> — достат
                   "Подпишись и пришли ещё раз.")
 
 
-def _subscribed(chat_id: str, user_id: str, admin: bool) -> bool:
+def _subscribed(chat_id: str, user_id: str, admin: bool, retry: str = "") -> bool:
     """Подписан ли человек на канал; нет — говорит, что делать, и возвращает False.
 
     За подписку здесь всё: и разборы, и отбор, и слежение. Слежение до 17.09.2026
     проверку обходило, и пришедший из ролика за концертами подписчиком канала
     не становился — а бот и есть то, чем ролик приводит в канал (GROWTH.md).
+
+    `retry` — действие кнопки «Подписался»: пришедший по ссылке с меткой после
+    подписки не знает, что «прислать ещё раз», а за рекламный переход заплачено.
     """
     channel = config.secret("TELEGRAM_CHANNEL_ID", required=False)
     if admin or not channel or telegram.is_member(channel, user_id):
         return True
-    telegram.send_message(chat_id, NOT_SUBSCRIBED)
+    again = [[{"text": "✅ Подписался", "callback_data": f"{CALLBACK_PREFIX}{retry}"}]] if retry else None
+    telegram.send_message(chat_id, NOT_SUBSCRIBED, buttons=again)
     return False
 
 
@@ -1301,10 +1309,10 @@ def handle_message(message: dict, data: dict) -> bool:
         else:
             ask_artist(chat_id)
         return False
-    if kind == "sved" or kind == "menu" and link == "sved":
+    if kind == "sved" or kind == "menu" and link in ("sved", "ad"):
         if kind == "menu":
-            count_source(body if body in SOURCES else "sved")
-        if _subscribed(chat_id, user_id, admin):
+            count_source(body if body in SOURCES or AD_LABEL.fullmatch(body) else link)
+        if _subscribed(chat_id, user_id, admin, retry="sved"):
             svedenie.intro(chat_id)
         return False
     if not kind and SVED_LINK.search(text):
@@ -1472,7 +1480,7 @@ def handle_callback(query: dict, data: dict) -> None:
 
     if action in ("sved", "sravni", "imena"):
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
-        if _subscribed(chat_id, user_id, admin):
+        if _subscribed(chat_id, user_id, admin, retry=action):
             # Из меню — что это такое и что прислать, из-под ответа — сразу имя артиста,
             # из-под CLOSED и отказов — список артистов вместо ссылки.
             {"sravni": svedenie.ask_artist, "imena": svedenie.ask_names}.get(action, svedenie.intro)(chat_id)
@@ -1682,6 +1690,9 @@ def _selftest() -> None:
         handle_message(incoming("Баста", 10, chat=8, reply=f"За кем следить? {WATCH_MARK} — напишу"), {})
         handle_message(incoming("/gorod Казань", 11, chat=8), {})
         assert all("подписаться" in text for text, _, _ in said[-3:]) and "8" not in state.read_json(WATCH_FILE, {})["watchers"]
+        # С рекламы без подписки: кнопка «Подписался» снова открывает СВЕДЕНИЕ, метку не теряем.
+        handle_message(incoming("/start ad_mainstream", 13, chat=10), {})
+        assert said[-1][1] == [[{"text": "✅ Подписался", "callback_data": f"{CALLBACK_PREFIX}sved"}]], said[-1]
     finally:
         (telegram.send_message, telegram.delete_message, globals()["WATCH_FILE"], otbor.cancel,
          otbor.active, globals()["find_watch_artist"], afisha.find_artist, itunes.resolve_name,
@@ -1764,18 +1775,20 @@ def _selftest() -> None:
         # Минута между сообщениями: одинаковые /start подряд иначе сочтутся повтором приложения.
         for minute, text in enumerate(("/start yt", "/start yt", "/start tt", "/start taste", "/proyavka", "/start",
                                        "/start sved_yt", "/start sved_tt", "/start sved_мусор",
+                                       "/start ad_mainstream", "/start ad_мусор",
                                        "https://music.yandex.ru/users/x/playlists/3?utm_source=share")):
             handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
                             "message_id": minute, "date": minute * 60, "text": text}, {})
         saved = SOURCES_FILE.read_text()
         assert state.read_json(SOURCES_FILE, {}) == {_today(): {"yt": 2, "tt": 1, "sved_yt": 1, "sved_tt": 1,
-                                                                "sved": 1, "sved_link": 1}}, saved
+                                                                "sved": 1, "sved_link": 1,
+                                                                "ad_mainstream": 1, "ad": 1}}, saved
         assert opened == ["55501"] * 3, opened
         assert "555" not in saved and "777" not in saved, "id человека в открытом файле"
         assert not SVED_LINK.search("https://music.yandex.ru/album/1/track/2"), "трек — не плейлист"
         intro = svedenie.INTRO
-        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU, intro, intro, intro], \
-            "старая ссылка и /proyavka — в ПРОЯВКУ, метка sved — что прислать"
+        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU] + [intro] * 5, \
+            "старая ссылка и /proyavka — в ПРОЯВКУ, метки sved и ad — что прислать"
         assert links == ["https://music.yandex.ru/users/x/playlists/3?utm_source=share"], links
         assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎞", "🔔", "🎚"], "в меню четыре раздела"
         # Кнопка «следить» под ответом СВЕДЕНИЯ — кнопка сервиса: подписывает watch_add,
