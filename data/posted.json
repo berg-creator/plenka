@@ -791,6 +791,12 @@
       "file": "20260921-061720-2414-news.json",
       "published_at": "2026-09-21T06:17:28+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260913-083244-7430-subtext.json",
+      "published_at": "2026-09-21T10:07:01+00:00",
+      "rubric": "subtext"
     }
   ],
   "photos": [
