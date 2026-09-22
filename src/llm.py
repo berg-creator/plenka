@@ -120,10 +120,19 @@ SCHEMAS = {"meme": MEME_SCHEMA}
 # ответила 0 раз из 5 («high demand»), 3.7-flash — 0 из 3, а 3.5-flash — 5 из 5.
 # Свежие модели там перегружены, и канал уходил бы на запасной генератор.
 GEMINI_MODEL_DEFAULT = "gemini-3.5-flash"
+# Кто пишет, когда у основной модели кончились бесплатные 20 запросов в сутки:
+# квота у каждой модели своя (см. src/providers/gemini.py). Перегруженные 20.09
+# свежие модели идут за основной, облегчённая 3.1-flash-lite — последней.
+GEMINI_SPARE = ("gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.1-flash-lite")
 
 
 def gemini_model() -> str:
     return os.environ.get("GEMINI_MODEL", "").strip() or GEMINI_MODEL_DEFAULT
+
+
+def gemini_models() -> list[str]:
+    first = gemini_model()
+    return [first, *(m for m in GEMINI_SPARE if m != first)]
 
 
 def provider() -> str:
@@ -169,7 +178,7 @@ def _call(name: str, user: str, schema: dict) -> dict:
     if name == "anthropic":
         return claude.generate(voice(), user, schema)
     if name == "gemini":
-        return gemini.generate(gemini_model(), voice(), user, schema)
+        return gemini.generate(gemini_models(), voice(), user, schema)
     return gigachat.generate(voice(), user, schema)
 
 

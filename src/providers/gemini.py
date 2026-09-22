@@ -4,9 +4,12 @@
 не ломается при смене версий клиентской библиотеки.
 
 Работает на бесплатном тарифе, поэтому пакетной отправки здесь нет: вдвое
-дешевле нуля не бывает, а пакет отвечает часами. Точные лимиты Google меняет
-и в документации не печатает, так что между запросами держим паузу с запасом —
-каналу нужно 8–10 постов в сутки, в любые лимиты это укладывается.
+дешевле нуля не бывает, а пакет отвечает часами. Бесплатно Google даёт 20
+запросов в сутки на модель (22.09.2026: «limit: 20 … PerDayPerProjectPerModel»),
+а каналу со всеми перегенерациями брака и разборами в боте нужно больше.
+Квота у каждой модели своя, поэтому запрос идёт по списку моделей: кончилась
+у одной — пишет следующая, и до запасного ГигаЧата доходит, только когда
+не ответил никто.
 
 Из России API не отвечает вовсе («User location is not supported»), причём
 и через VPN тоже: проверить генератор с машины владельца нельзя, только
@@ -66,14 +69,8 @@ def available_models() -> list[str]:
     ]
 
 
-def generate(model: str, system: str, user: str, schema: dict) -> dict:
-    """Один запрос к Gemini с ответом строго по схеме."""
-    global _last_call
-
-    waited = time.monotonic() - _last_call
-    if waited < MIN_INTERVAL:
-        time.sleep(MIN_INTERVAL - waited)
-
+def generate(models: list[str], system: str, user: str, schema: dict) -> dict:
+    """Запрос к Gemini с ответом строго по схеме: модели по очереди, до первой ответившей."""
     payload: dict[str, Any] = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
@@ -83,38 +80,52 @@ def generate(model: str, system: str, user: str, schema: dict) -> dict:
         },
     }
 
-    last_error, status = "", 0
-    for attempt in range(4):
-        if attempt:
-            # «High demand» у Gemini держится минуту-другую: 22.09.2026 запрос
-            # в 06:13 ушёл на ГигаЧат, а в 06:15 Gemini уже ответил. Паузы
-            # 15+30+45 секунд такой всплеск переживают; лимит (429) ждём дольше.
-            time.sleep((30 if status == 429 else 15) * attempt)
-        try:
-            response = requests.post(
-                f"{BASE}/{model}:generateContent",
-                headers=_headers(),
-                json=payload,
-                timeout=120,
-            )
-        except requests.RequestException as exc:
-            # Не дождались ответа — та же перегрузка, что и 503, повторяем.
-            last_error, status = str(exc), 0
-            continue
-        _last_call = time.monotonic()
-
-        if response.status_code == 200:
-            return _parse(response.json())
-
-        status = response.status_code
-        last_error = f"{status}: {response.text[:200]}"
-        if status < 500 and status != 429:
-            break  # ошибка в запросе, повтор не поможет
+    errors = []
+    for model in models:
+        for attempt in range(2):
+            if attempt:
+                # «High demand» держится минуту-другую: 22.09.2026 запрос в 06:13
+                # ушёл на ГигаЧат, а в 06:15 Gemini уже ответил. Один повтор,
+                # дальше — следующая модель: у неё своя очередь.
+                time.sleep(15)
+            error = _ask(model, payload)
+            if isinstance(error, dict):
+                return error
+            if not error.startswith("503"):
+                # Кончилась суточная квота (429), модель пропала (404),
+                # не дождались ответа — повтор на той же модели не поможет.
+                break
+        errors.append(f"{model}: {error}")
 
     # Не ответил — это поломка, а не решение модели: пусть llm._generate
     # поднимет запасной генератор. Отказ вида skip=true оставил бы канал
     # без поста, хотя GigaChat рядом и работает.
-    raise RuntimeError(f"Gemini не ответил ({last_error})")
+    raise RuntimeError(f"Gemini не ответил ({'; '.join(errors)})")
+
+
+def _ask(model: str, payload: dict) -> dict | str:
+    """Один запрос к одной модели: разобранный ответ или текст ошибки."""
+    global _last_call
+
+    waited = time.monotonic() - _last_call
+    if waited < MIN_INTERVAL:
+        time.sleep(MIN_INTERVAL - waited)
+    try:
+        # ponytail: зависнут все модели разом — до двух минут на каждую;
+        # укоротить тайм-аут, если такое начнёт случаться.
+        response = requests.post(
+            f"{BASE}/{model}:generateContent",
+            headers=_headers(),
+            json=payload,
+            timeout=120,
+        )
+    except requests.RequestException as exc:
+        return str(exc)
+    finally:
+        _last_call = time.monotonic()
+    if response.status_code == 200:
+        return _parse(response.json())
+    return f"{response.status_code}: {response.text[:300]}"
 
 
 def _to_gemini_schema(schema: dict) -> dict:
