@@ -425,13 +425,21 @@ def crosspost_vk(post: dict) -> None:
     if post.get("rubric") in ("poll", "reel"):
         return
 
-    # Мем сюда уходит текстом, надписи и подпись подряд: vk.post картинку
-    # с диска не берёт, только ссылку, а мемная нарисована у нас.
-    text = card.meme_text(post) if post.get("rubric") == "meme" else post.get("text", "")
+    # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
+    # нет вовсе: кадр нарисован у нас (card.cover, card.meme) и уходит файлом
+    # с диска — раньше разбор появлялся во ВКонтакте голым текстом. Кадр
+    # рисуется на копии поста: отпечаток уже проставлен при выходе в Telegram,
+    # и второй проход не должен его переписать.
+    if post.get("rubric") == "meme":
+        text, photo = card.meme_text(post), card.meme(post)
+    else:
+        text = post.get("text", "")
+        photo = post.get("cover", "") or card.cover(
+            dict(post), state.read_json(config.POSTED_FILE, {}).get("photos", []))
     try:
         post_id = vk.post(
             text,
-            photo_url=post.get("cover", ""),
+            photo=photo or "",
             artist=post.get("artist", ""),
             track=post.get("track", ""),
         )
@@ -596,6 +604,18 @@ def _selftest() -> None:
         archived = state.read_json(config.ARCHIVE / "0-release.json", {})
         assert archived == {**post, "message": {"chat": -100, "message_id": 2, "kind": "caption", "buttons": []}}, archived
         assert not (config.QUEUE / "0-release.json").exists()
+
+        # Во ВКонтакте у разбора ссылки на картинку нет: туда уходит тот же
+        # нарисованный кадр файлом, иначе разбор появляется там голым текстом.
+        from . import vk
+
+        card.cover = lambda post, seen=(): Path("кадр.jpg")
+        vk_sent: dict = {}
+        with (mock.patch.dict(os.environ, {"VK_TOKEN": "x"}),
+              mock.patch.object(vk, "post", lambda text, **kw: vk_sent.update(kw) or 5)):
+            crosspost_vk({"text": "Текст.", "rubric": "lineage"})
+        assert vk_sent["photo"] == Path("кадр.jpg"), vk_sent
+        card.cover = lambda post, seen=(): None
 
         # Днём пост о релизе выходит со звуком, в 00:30 по Москве молчит любой пост.
         posted(("release", ago(hours=3)), ("verdict", ago(hours=2)))

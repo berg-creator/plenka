@@ -252,16 +252,41 @@ def known_names() -> list[str]:
     return sorted(names, key=len, reverse=True)
 
 
+def spellings() -> list[tuple[str, str]]:
+    """Все написания имени — своё и из aliases — и имя базы рядом с каждым.
+
+    Разбор написан по-русски, и «Смоки Мо» в его тексте по базе не находится:
+    там имя магазинное. Магазинные написания уже собраны в поле aliases
+    (src/collect.py), поэтому сверка идёт по ним, а наружу уходит имя базы —
+    по нему ищется фотография.
+    """
+    from . import state
+
+    return [
+        (spelling, a["name"])
+        for a in state.read_json(config.ARTISTS_FILE, {}).get("artists", [])
+        if a.get("name")
+        for spelling in (a["name"], *(a.get("aliases") or []))
+    ]
+
+
 def find_artist(text: str) -> str:
-    """Первый артист из базы, упомянутый в тексте.
+    """Артист из базы, названный в тексте раньше других. Пусто — не нашли.
 
     Сверка идёт по границам слова: без них «Nas» находится внутри «Dynasty»,
     и разбор русского клауд-рэпа иллюстрируется фотографией из Квинса.
+
+    Побеждает названный первым, а не самое длинное имя в тексте: разбор
+    о Bladee упоминает и Thaiboy Digital, и лицом поста становился он.
+    В одном и том же месте выигрывает длинное — иначе «Lil B» заберёт
+    совпадение у «Lil Baby».
     """
-    for name in known_names():
-        if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE):
-            return name
-    return ""
+    found = [
+        (match.start(), -len(spelling), name)
+        for spelling, name in spellings()
+        if (match := re.search(rf"(?<!\w){re.escape(spelling)}(?!\w)", text, re.IGNORECASE))
+    ]
+    return min(found)[2] if found else ""
 
 
 def artist_image(text: str) -> Path | None:
@@ -446,13 +471,38 @@ def procedural(dest: Path, seconds: float, ffmpeg_bin: str) -> Path:
     return dest
 
 
+def _selftest() -> None:
+    """Поиск артиста в тексте: без сети, на выдуманной базе."""
+    from unittest import mock
+
+    from . import state
+
+    base = {"artists": [{"name": "Bladee"}, {"name": "Thaiboy Digital"},
+                        {"name": "Smoky Mo", "aliases": ["Смоки Мо"]},
+                        {"name": "Lil B"}, {"name": "Lil Baby"}]}
+    with mock.patch.object(state, "read_json", lambda *a, **kw: base):
+        # Лицом поста становится тот, с кого он начался, а не самое длинное имя.
+        assert find_artist("BLADEE и Thaiboy Digital собрали Drain Gang") == "Bladee"
+        # Разбор написан по-русски — сверка по aliases, наружу имя базы.
+        assert find_artist("Смоки Мо читал ещё в нулевых") == "Smoky Mo"
+        # В одном месте текста длинное имя выигрывает у короткого.
+        assert find_artist("Lil Baby выпустил альбом") == "Lil Baby"
+        assert find_artist("Никого из базы тут нет") == ""
+    print("Поиск артиста: первый в тексте, русское написание, длинное имя")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Видеоряд для клипов")
     parser.add_argument("--check", action="store_true", help="проверить ключ и выдачу")
+    parser.add_argument("--selftest", action="store_true", help="проверить поиск артиста без сети")
     parser.add_argument("--grab", metavar="ЗАПРОС", help="скачать один ролик на пробу")
     args = parser.parse_args()
 
     config.load_dotenv()
+
+    if args.selftest:
+        _selftest()
+        return 0
 
     if args.check:
         pixabay = bool(config.secret("PIXABAY_API_KEY", required=False))

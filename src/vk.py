@@ -113,7 +113,7 @@ def playlist() -> tuple[str, str]:
 def post(
     text: str,
     *,
-    photo_url: str = "",
+    photo: str | Path = "",
     link: str = "",
     artist: str = "",
     track: str = "",
@@ -137,7 +137,7 @@ def post(
     owner = -group_id()  # у сообществ идентификатор отрицательный
     message = to_plain_text(text)
 
-    photo = _upload_photo(photo_url) if photo_url else ""
+    attachment = _upload_photo(photo) if photo else ""
 
     target = link or _first_link(text)
     if target and target not in message:
@@ -152,8 +152,8 @@ def post(
         "from_group": 1,  # запись от имени сообщества, а не от лица админа
         "message": message[:16000],
     }
-    if photo:
-        params["attachments"] = photo
+    if attachment:
+        params["attachments"] = attachment
     return int(_call("wall.post", **params).get("post_id", 0))
 
 
@@ -172,9 +172,14 @@ def _drop_link(text: str, url: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def _upload_photo(url: str) -> str:
-    """Переносит картинку по ссылке на серверы ВКонтакте. Возвращает вложение
-    вида `photo-123_456` или пустую строку, если не вышло.
+def _upload_photo(source: str | Path) -> str:
+    """Переносит картинку на серверы ВКонтакте. Возвращает вложение вида
+    `photo-123_456` или пустую строку, если не вышло.
+
+    Берёт и ссылку, и файл с диска: у релиза картинка — обложка магазина,
+    а кадр разбора и мем нарисованы у нас (src/card.py), и по ссылке их взять
+    неоткуда. Раньше сюда шла только ссылка, и разбор уходил во ВКонтакте
+    без картинки вовсе.
 
     Загрузка идёт через сервер сообщений, а не через `photos.getWallUploadServer`,
     как просит документация: стеновой метод для групповой авторизации закрыт
@@ -187,14 +192,18 @@ def _upload_photo(url: str) -> str:
     Внешние адреса ВКонтакте не принимает: файл нужно скачать и залить.
     """
     try:
-        image = requests.get(url, timeout=30)
-        if image.status_code != 200:
-            return ""
+        if str(source).startswith(("http://", "https://")):
+            image = requests.get(str(source), timeout=30)
+            if image.status_code != 200:
+                return ""
+            content = image.content
+        else:
+            content = Path(source).read_bytes()
 
         server = _call("photos.getMessagesUploadServer")
         upload = requests.post(
             server["upload_url"],
-            files={"photo": ("cover.jpg", image.content, "image/jpeg")},
+            files={"photo": ("cover.jpg", content, "image/jpeg")},
             timeout=60,
         ).json()
 
@@ -206,7 +215,7 @@ def _upload_photo(url: str) -> str:
         )
         item = saved[0] if isinstance(saved, list) else saved.get("items", [{}])[0]
         return f"photo{item['owner_id']}_{item['id']}"
-    except (VKError, requests.RequestException, KeyError, IndexError):
+    except (VKError, requests.RequestException, KeyError, IndexError, OSError):
         return ""
 
 
@@ -295,6 +304,7 @@ def _selftest() -> None:
     """Из чего собирается запись: без сети, с подменённым API."""
     import os
     import sys
+    import tempfile
     from unittest import mock
 
     text = ('<b>SODA LUV ВЫПУСТИЛ АЛЬБОМ</b>\n\nДевять вещей, 23 минуты.\n\n'
@@ -304,14 +314,18 @@ def _selftest() -> None:
     def fake_call(method: str, **params):
         if method == "groups.getById":
             return {"groups": [{"id": 240682204}]}
+        if method == "photos.getMessagesUploadServer":
+            return {"upload_url": "https://upload/x"}
+        if method == "photos.saveMessagesPhoto":
+            return [{"owner_id": -240682204, "id": 1}]
         sent.update(params)
         return {"post_id": 7}
 
     playlist_url = "https://vk.ru/audios-240682204?z=audio_playlist-240682204_1_e3cfff80617c147439"
-    with (mock.patch.dict(os.environ, {"VK_PLAYLIST": playlist_url, "VK_GROUP": "240682204"}),
+    with (mock.patch.dict(os.environ, {"VK_PLAYLIST": playlist_url, "VK_GROUP_ID": "240682204"}),
           mock.patch.object(sys.modules[__name__], "_call", fake_call),
-          mock.patch.object(sys.modules[__name__], "_upload_photo", lambda url: "photo-240682204_1")):
-        assert post(text, photo_url="https://x/cover.jpg") == 7
+          mock.patch.object(sys.modules[__name__], "_upload_photo", lambda source: "photo-240682204_1")):
+        assert post(text, photo="https://x/cover.jpg") == 7
 
     message = sent["message"]
     assert "<b>" not in message, message
@@ -322,7 +336,24 @@ def _selftest() -> None:
     # Обложка — единственное вложение, которое доходит.
     assert sent["attachments"] == "photo-240682204_1", sent
     assert sent["from_group"] == 1 and sent["owner_id"] == -240682204, sent
-    print("ВКонтакте: обложка вложением, релиз и подборка ссылками в тексте")
+
+    # Кадр разбора и мем нарисованы у нас, ссылки на них нет: уходят файлом с диска.
+    frame = Path(tempfile.gettempdir()) / "plenka-vk-selftest.jpg"
+    frame.write_bytes(b"\xff\xd8jpeg")
+    uploaded: dict = {}
+
+    def fake_upload(url, files=None, timeout=0):
+        uploaded["bytes"] = files["photo"][1]
+        return mock.Mock(json=lambda: {"photo": "p", "server": 1, "hash": "h"})
+
+    with (mock.patch.dict(os.environ, {"VK_GROUP_ID": "240682204"}),
+          mock.patch.object(sys.modules[__name__], "_call", fake_call),
+          mock.patch.object(requests, "post", fake_upload)):
+        assert post("Разбор.", photo=frame) == 7
+    frame.unlink()
+    assert uploaded["bytes"] == b"\xff\xd8jpeg", uploaded
+    assert sent["attachments"] == "photo-240682204_1", sent
+    print("ВКонтакте: обложка вложением, кадр с диска тоже, ссылки в тексте")
 
 
 def main() -> int:
