@@ -39,7 +39,7 @@ from datetime import timedelta
 import pathlib
 from pathlib import Path
 
-from . import card, collect, config, llm, otbor, quality, skleyka, state, stories, svedenie, telegram
+from . import card, collect, config, llm, otbor, quality, skleyka, state, stories, svedenie, telegram, vkladysh
 from .sources import afisha, deezer, itunes, lastfm
 
 log = logging.getLogger("service")
@@ -66,6 +66,8 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "sv": "СВЕДЕНИЕ, друг позвал сравнить",
            # СКЛЕЙКА зовут туда, где просят свести трек: ?start=skleyka_chat — из чатов артистов.
            "skleyka": "СКЛЕЙКА, без площадки", "skleyka_chat": "СКЛЕЙКА, чаты артистов",
+           # Ссылка в подписи вкладыша: пересланная карточка привела нового человека.
+           "vkladysh": "ВКЛАДЫШ, пересланная карточка",
            "ad": "реклама, канал не распознан"}
 # Платный пост ведёт в СВЕДЕНИЕ ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
@@ -92,6 +94,7 @@ COMMANDS = {
     "skleyka": "skleyka", "склейка": "skleyka",
     "sved": "sved", "сведение": "sved",
     "proyavka": "proyavka", "проявка": "proyavka",
+    "vkladysh": "vkladysh", "вкладыш": "vkladysh",
 }
 
 # У бота четыре раздела, и называются они везде одинаково — в меню «/», на экране
@@ -110,6 +113,7 @@ MENU = (
     "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
     # Площадку называет только INTRO СВЕДЕНИЯ: лайки можно и не кидать, а написать артистов.
     "🎚 <b>СВЕДЕНИЕ</b>\nУзнай, на сколько процентов твоя музыка совпадает с артистами.\n\n"
+    "📼 <b>ВКЛАДЫШ</b>\nКинь ссылку на трек — пришлю карточку со всеми площадками для друга.\n\n"
     # «Нужна подписка» читалась как платная подписка (владелец, 16.09.2026).
     f'Всё <b>бесплатно</b> — достаточно подписаться на <a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.'
 )
@@ -118,12 +122,22 @@ MENU = (
 PROYAVKA = (
     "🎞 <b>ПРОЯВКА</b>\n\n"
     "Пришли одним сообщением:\n"
-    "· артиста или песню — <i>Bones</i>, <i>Молчат Дома — Судно</i> или ссылку\n"
+    "· артиста — <i>Bones</i>; песню — <i>Молчат Дома — Судно</i> или ссылку: сперва придёт "
+    "вкладыш, разбор — кнопкой под ним\n"
     "· список, кого слушаешь, — покажу, что у них общего, и сделаю карточку\n"
     "· несколько строк из песни — разберу, что в них происходит"
 )
 # Старые кнопки в переписке и ссылки ?start=taste из вышедших постов ведут туда же.
 PROYAVKA_KEYS = ("proyavka", "taste", "lyrics", "roots")
+# Что прислать во ВКЛАДЫШ (src/vkladysh.py) — на кнопку, /vkladysh и ?start=vkladysh.
+# VK и Звук без входа ничего не отдают — их не зовём.
+VKLADYSH = (
+    "📼 <b>ВКЛАДЫШ</b>\n\n"
+    "Кинь ссылку на трек — Яндекс, Spotify, Apple Music, YouTube — или напиши <i>Артист — Трек</i>. "
+    "Пришлю карточку со всеми площадками: перешлёшь другу, и он откроет трек у себя."
+)
+# Строка под вкладышем: кнопки живут отдельно, карточку пересылают без них.
+VKLADYSH_NEXT = "Перешли карточку другу — площадки в ней. А дальше?"
 # Ссылка на «Мне нравится» или плейлист Яндекс Музыки — то, что ролик СВЕДЕНИЯ велит кинуть
 # боту. Ссылка на трек (album/…/track/…) сюда не попадает — она идёт в отбор и разборы.
 SVED_LINK = re.compile(r"music\.yandex\.\w+/(?:users/[^/\s]+/(?:playlists|tracks)|playlists/)", re.IGNORECASE)
@@ -140,6 +154,7 @@ def menu_buttons() -> list[list[dict]]:
         [{"text": "🎞 ПРОЯВКА — разобрать музыку", "callback_data": f"{CALLBACK_PREFIX}proyavka"}],
         [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
         [{"text": "🎚 СВЕДЕНИЕ — на сколько ты артист", "callback_data": f"{CALLBACK_PREFIX}sved"}],
+        [{"text": "📼 ВКЛАДЫШ — трек для друга", "callback_data": f"{CALLBACK_PREFIX}vkladysh"}],
     ]
 
 
@@ -1356,10 +1371,24 @@ def handle_message(message: dict, data: dict) -> bool:
         if _subscribed(chat_id, user_id, admin):
             svedenie.handle(chat_id, text)
         return False
+    if kind == "vkladysh" or kind == "menu" and body == "vkladysh":
+        if kind == "menu":
+            count_source(body)
+        if track := vkladysh.find(body) if kind == "vkladysh" and body else {}:
+            _vkladysh(chat_id, track)
+        else:
+            telegram.send_message(chat_id, VKLADYSH)
+        return False
     if kind == "menu" and body in SOURCES:
         # Из ролика и чатов зовут прислать трек — меню между ссылкой и заявкой лишнее.
         count_source(body)
         otbor.start(chat_id, user_id, admin=admin)
+        return False
+    if not kind and (track := vkladysh.find(text)):
+        # Трек ссылкой или «Артист — Трек» — сперва ВКЛАДЫШ (src/vkladysh.py): мгновенно,
+        # без модели и без подписки, разбор вкуса — кнопкой под ним. Не нашёлся —
+        # прежний разбор по имени; /proyavka с текстом идёт в разбор сразу.
+        _vkladysh(chat_id, track)
         return False
     if kind == "proyavka" and body:
         kind, text = "", body
@@ -1436,6 +1465,16 @@ def handle_message(message: dict, data: dict) -> bool:
 # Что из ответов проходит через модель. Остальное — выборка из магазина
 # или работа со списком слежения: они бесплатны и лимит не трогают.
 COSTS_TOKENS = {"new": False, "watchlist": False, "watchstop": False, "watch": False, "city": False}
+
+
+def _vkladysh(chat_id: str, track: dict) -> None:
+    vkladysh.send(chat_id, track)
+    # Двадцать знаков — как у кнопок под разбором (_subject): кириллица в 64 байта.
+    who = otbor._credits(track["artist"])[0][:20]
+    telegram.send_message(chat_id, VKLADYSH_NEXT, buttons=[
+        [{"text": "🔔 Следить за артистом", "callback_data": _cb("watch", who)}],
+        [{"text": "🎞 Разбор вкуса", "callback_data": _cb("razbor", who)}],
+    ])
 
 
 def _subject(kind: str, body: str) -> str:
@@ -1537,8 +1576,15 @@ def handle_callback(query: dict, data: dict) -> None:
         {"sravni": svedenie.ask_artist, "imena": svedenie.ask_names}.get(action, svedenie.intro)(chat_id)
         return
 
+    if action == "vkladysh":
+        telegram.send_message(chat_id, VKLADYSH)
+        return
+
     if action == "watch" and subject:
-        watch_reply(chat_id, subject)
+        # Под вкладышем эта кнопка первая в разговоре — подписку до неё не спрашивали.
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        if _subscribed(chat_id, user_id, admin, retry=raw):
+            watch_reply(chat_id, subject)
         return
 
     if action == "slezhu":
@@ -1556,9 +1602,12 @@ def handle_callback(query: dict, data: dict) -> None:
         telegram.send_message(chat_id, watch_remove(chat_id, subject))
         return
 
-    if action in ("rec", "new") and subject:
+    if action in ("rec", "new", "razbor") and subject:
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
-        kind = "recommend" if action == "rec" else "new"
+        kind = {"rec": "recommend", "new": "new", "razbor": "taste"}[action]
+        # Разбор из-под ВКЛАДЫША — первый в разговоре, подписку до него не спрашивали.
+        if action == "razbor" and not _subscribed(chat_id, user_id, admin, retry=raw):
+            return
 
         if COSTS_TOKENS.get(kind, True):
             denied = check_limit(data, key, admin=admin)
@@ -1574,7 +1623,7 @@ def handle_callback(query: dict, data: dict) -> None:
             telegram.send_message(chat_id, "Плёнку зажевало. Попробуй ещё раз.")
             return
 
-        _deliver(chat_id, answer, image)
+        _deliver(chat_id, answer, image, subject=subject if action == "razbor" else "")
         _spend_if_costly(data, key, kind)
         return
 
@@ -1846,7 +1895,7 @@ def _selftest() -> None:
         assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU] + [intro] * 5, \
             "старая ссылка и /proyavka — в ПРОЯВКУ, метки sved и ad — что прислать"
         assert links == ["https://music.yandex.ru/users/x/playlists/3?utm_source=share"], links
-        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎞", "🔔", "🎚"], "в меню четыре раздела"
+        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎛", "🎞", "🔔", "🎚", "📼"], "в меню шесть разделов"
         # Кнопка «следить» под ответом СВЕДЕНИЯ — кнопка сервиса: подписывает watch_add,
         # второго пути к тому же списку нет.
         assert svedenie.buttons("Toxi$")[1][0]["callback_data"] == _cb("watch", "Toxi$")
@@ -1874,12 +1923,27 @@ def _selftest() -> None:
         saved = SOURCES_FILE.read_text()
         assert state.read_json(SOURCES_FILE, {})[_today()]["sv"] == 1
         assert "ab12cd34" not in saved and "555" not in saved and "777" not in saved, saved
+
+        # ВКЛАДЫШ: трек текстом — карточка и кнопки под ней, без модели; метка и команда — что прислать.
+        cards, real_vk = [], (vkladysh.find, vkladysh.send)
+        vkladysh.find = lambda text: {"artist": "Bones, Xavier Wulf", "title": "Dirt"} if " — " in text else {}
+        vkladysh.send = lambda chat, track: cards.append(track["title"])
+        try:
+            for n, text in enumerate(("Bones — Dirt", "/start vkladysh", "/vkladysh")):
+                handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
+                                "message_id": 200 + n, "date": 20000 + n * 60, "text": text}, {})
+        finally:
+            vkladysh.find, vkladysh.send = real_vk
+        assert cards == ["Dirt"], cards
+        assert replies[-3][0] == VKLADYSH_NEXT and replies[-3][1][1][0]["callback_data"] == _cb("razbor", "Bones")
+        assert [text for text, _ in replies[-2:]] == [VKLADYSH] * 2, replies[-2:]
+        assert state.read_json(SOURCES_FILE, {})[_today()]["vkladysh"] == 1
     finally:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
         tmp.cleanup()
-    print("метка /start: считается по дню без id и сразу открывает отбор; в меню четыре раздела; "
-          "ссылка на плейлист — в СВЕДЕНИЕ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
+    print("метка /start: считается по дню без id и сразу открывает отбор; в меню шесть разделов; "
+          "ссылка на плейлист — в СВЕДЕНИЕ, трек — во ВКЛАДЫШ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал")
 
 

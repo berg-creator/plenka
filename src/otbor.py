@@ -127,7 +127,8 @@ ACCEPTED = ("Принято ✅ Ты {place}-й в очереди. В канал
             "Выйдет — пришлю ссылку.")
 CANCELLED = "Отменил. Захочешь вернуться — /otbor."
 CLOSED = "Эта заявка уже закрыта. Новая — /otbor."
-PUBLISHED = "Вышло: {link}\n\nПерешли своим — пусть слушают и пишут в комментариях."
+PUBLISHED = ("Вышло: {link}\n\nПерешли своим — пусть слушают и пишут в комментариях. "
+             "Ниже — вкладыш трека со всеми площадками: его можно выложить у себя.")
 
 
 def _cb(choice: str) -> str:
@@ -702,12 +703,17 @@ def shift(target: str) -> None:
 
 
 def notify(data: dict) -> None:
-    """Артисту — ссылка на его пост: перешлёт своим, ради этого отбор и затеян."""
+    """Артисту — ссылка на его пост: перешлёт своим, ради этого отбор и затеян.
+    Следом — ВКЛАДЫШ его трека (src/vkladysh.py): карточку со всеми площадками
+    артист постит у себя сам, и на ней марка канала."""
+    from . import vkladysh  # vkladysh сам берёт поиск отсюда
+
     changed = False
     for entry in data["done"]:
         if entry.get("notified"):
             continue
-        message = state.read_json(config.ARCHIVE / entry["file"], {}).get("message") or {}
+        post = state.read_json(config.ARCHIVE / entry["file"], {})
+        message = post.get("message") or {}
         if not message:
             if not (config.OTBOR_POSTS / entry["file"]).exists():
                 entry["notified"] = changed = True  # владелец удалил пост кнопкой — сказать нечего
@@ -717,6 +723,13 @@ def notify(data: dict) -> None:
             telegram.send_message(entry["chat"], PUBLISHED.format(link=link), preview=True)
         except telegram.TelegramError as exc:
             log.warning("Артист не узнал о выходе: %s", exc)  # закрыл бота — повторять незачем
+        else:
+            try:
+                if listen := publish._LISTEN_LINE.search(post.get("text", "")):
+                    vkladysh.send(entry["chat"], {"artist": post["artist"], "title": post["track"],
+                                                  "url": html.unescape(listen.group(1)), "cover": post.get("cover", "")})
+            except Exception as exc:  # noqa: BLE001 — весть ушла, второй раз её слать нельзя
+                log.warning("Вкладыш артисту не ушёл: %s", exc)
         entry["notified"] = changed = True
     if changed:
         save(data)
@@ -844,11 +857,16 @@ def _selftest() -> None:
         assert delivered and "NOBODY HOME" in delivered[0] and len(load()["queue"]) == 1
         path = next(config.OTBOR_POSTS.glob("*.json"))
         state.write_json(config.POSTED_FILE, {"items": [{"rubric": "otbor", "published_at": state.iso()}]})
-        state.write_json(config.ARCHIVE / path.name, {"message": {"message_id": 321}})
+        state.write_json(config.ARCHIVE / path.name, {**build_post(queued), "message": {"message_id": 321}})
         path.unlink()
-        shift("channel")
+        cards = []
+        with mock.patch("src.vkladysh.send", lambda chat, track: cards.append((chat, track))):
+            shift("channel")
         assert len(delivered) == 1, "второй пост отбора в тот же день"
         assert last("1") == PUBLISHED.format(link="https://t.me/plenka_fm/321")
+        assert cards == [("1", {"artist": "Nobody Home", "title": "Night Drive",
+                                "url": "https://music.apple.com/us/album/x/1?i=2",
+                                "cover": "https://is1.mzstatic.com/c.jpg"})], cards
 
         # Разборы понимают ссылку и «Артист — Трек»: в разбор уходит имя артиста.
         assert subject("Molchat Doma — Судно") == "Molchat Doma"
@@ -859,7 +877,7 @@ def _selftest() -> None:
         "artist": "Rick Astley", "title": "Never Gonna Give You Up"}
     assert _match("Nobody Home & Ghost", "Night Drive (feat. Ghost) - Single", "nobody home", "Night Drive")
     assert not _match("Nobody Homeless", "Night Drive", "Nobody Home", "Night Drive")
-    print("отбор: три способа прислать, отказы, пост шаблоном, выход раз в день и весть артисту")
+    print("отбор: три способа прислать, отказы, пост шаблоном, выход раз в день, весть и вкладыш артисту")
 
 
 def main() -> int:

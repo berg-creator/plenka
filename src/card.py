@@ -238,7 +238,7 @@ def cover(post: dict, seen=()) -> Path | None:
 
     rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
     draw = ImageDraw.Draw(img)
-    stories.kicker(draw, (stories.MARGIN, int(HEIGHT * 0.07)), rubric.title if rubric else "", 40,
+    stories.kicker(draw, (stories.MARGIN, int(HEIGHT * 0.07)), rubric.title if rubric else post.get("kicker", ""), 40,
                    stories.LIGHT)
 
     # Подписывается сам релиз; ведущий трек — только когда названия релиза нет
