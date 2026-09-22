@@ -35,7 +35,10 @@
 7. Мастер — низ ниже 120 Гц в моно, склейка шины 2:1, жёсткий клиппер по верхушкам
    ударов и ограничитель до MASTER_LUFS, пик не выше CEILING dBTP.
 
-Ручки бота — mix(..., voice=, echo=): голос к биту и доля эха, в дБ.
+Ручки бота — mix(..., voice=, echo=): голос к биту и доля эха, в дБ. Дорожки
+по отдельности — mix(..., parts=): даблы за ведущим его же райдером, бэки шире
+и дальше в отзвук, эдлибы по краям в эхо (PARTS); место голосу — только в музыке,
+вырезы саунд-дизайна — только барабанов и баса. Простой режим — две дорожки.
 
 Промежуточное — во float: пики выше нуля между шагами не срезаются, режет только
 мастер. Подгонку под референс (Matchering) сюда не тащим: это
@@ -47,6 +50,7 @@
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   склейка и пара ДО/ПОСЛЕ одной громкости
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --style грязно --design
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --voice 2 --echo -4   ручки «голос громче», «эха меньше»
+    python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --part бэк БЭКИ --part барабаны БАРАБАНЫ   по дорожкам
 """
 
 from __future__ import annotations
@@ -573,6 +577,15 @@ def _apply(source: Path, track: Path, dest: Path, before: str = "anull") -> Path
     return dest
 
 
+def _sum(inputs: list[tuple[Path, float]], dest: Path, before: str = "anull") -> Path:
+    """Дорожки с поправками громкости, дБ, — в одну dest; before — цепочка каждой до суммы."""
+    _ffmpeg(*(arg for path, _ in inputs for arg in ("-i", path)), "-filter_complex",
+            "".join(f"[{n}:a]{before},volume={gain:.2f}dB[s{n}];" for n, (_, gain) in enumerate(inputs))
+            + "".join(f"[s{n}]" for n in range(len(inputs)))
+            + f"amix=inputs={len(inputs)}:duration=longest:normalize=0", *reels.VOICE_CODEC, dest)
+    return dest
+
+
 def _gaps(vocal: Path, beat: Path, lift: float = 0.0) -> tuple[list[float], list[float | None]]:
     """Голос против бита окнами 0,4 с через каждые 0,1 с: середина окна
     и разница в LU; None — голос в этом окне не звучит."""
@@ -969,8 +982,13 @@ def _master(total: Path, glue: str, master: Path) -> tuple[float, float, float]:
 
 
 def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
-        voice: float = 0.0, echo: float = 0.0) -> Path:
+        voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = ()) -> Path:
     """Склейка в out/skleyka.wav, промежуточное — в out/work.
+
+    parts — дорожки по отдельности, [(роль, файл)]: даблы, бэки и эдлибы встают вокруг
+    ведущего vocal (voices); пришли барабаны или бас — место голосу делается только
+    в остальном бите, а вырезы саунд-дизайна — только в них: музыка под вырезом идёт
+    дальше. beat — весь бит вместе, по нему меряются темп, громкость и удары.
 
     Ручки бота: voice — голос к биту, дБ («голос громче / тише» — по ±2): сдвигает
     и баланс, и цель райдера, иначе в местах, где бит перекрывал голос, райдер
@@ -982,7 +1000,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
           + (f", голос {voice:+g} дБ" if voice else "") + (f", эхо {echo:+g} дБ" if echo else ""))
 
     clean = f"{FORMAT},{_center(vocal)}{HIGHPASS}"
-    if look.get("autotune") and (tune := _autotune(beat)):
+    if tune := look.get("autotune") and _autotune(beat):
         clean += f",{tune}"
     squeezed, dry = work / "vocal-comp.wav", work / "vocal.wav"
     _ffmpeg("-i", vocal, "-af", f"{clean},volume={VOCAL_LUFS - loudness(vocal, clean + ',')[0]:.2f}dB,{VOCAL_CHAIN}"
@@ -998,10 +1016,19 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     flip = "pan=stereo|c0=c0|c1=-1*c1," if width < 0 else ""
     head = f"{FORMAT},{flip}"
     print(f"  бит: корреляция каналов {width:+.2f}" + (", один канал перевёрнут" if flip else ""))
-    ducked = _room(beat, dry, head, loudness(beat, head)[0] + VOCAL_OVER_BEAT + voice - sung, lines, work)
+    # Барабаны и бас пришли отдельно — место голосу только в остальном бите.
+    drums = [path for part, path in parts if part in ("барабаны", "бас")]
+    music = [path for part, path in parts if part in ("бит", "музыка")] if drums else [beat]
+    kit = _sum([(path, 0.0) for path in drums], work / "kit.wav", head.rstrip(",")) if drums else None
+    room = None
+    if music:
+        whole = music[0] if len(music) == 1 else _sum([(path, 0.0) for path in music], work / "music.wav")
+        room = _room(whole, dry, head, loudness(beat, head)[0] + VOCAL_OVER_BEAT + voice - sung, lines, work)
+    ducked = _sum([(room, 0.0), (kit, 0.0)], work / "beat-parts.wav") if room and kit else room or kit
     under = loudness(ducked)[0]
     ridden = _ride(dry, ducked, under + VOCAL_OVER_BEAT + voice - sung, RIDE_TARGET + voice, work)
     level = loudness(ridden)[0]
+    placed = voices([(part, path) for part, path in parts if part in PARTS], level, work / "ride.wav", work, tune or "")
 
     rhythm = grid(beat) if design or look.get("delay", ("",))[0] == "в темп" else None
     if rhythm:
@@ -1017,9 +1044,11 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
         sends.append(("double", DOUBLE, DOUBLE_SHARE))
     wets = []  # (шина, громкость в склейке по EBU R128)
     for name, graph, share in sends:
-        wet = work / f"{name}.wav"
-        _ffmpeg("-i", ridden, "-filter_complex", graph, "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
-        wets.append((wet, level + 20 * math.log10(share) + (0.0 if name == "double" else echo)))
+        wet, source = work / f"{name}.wav", ridden if name == "double" else _sends(ridden, placed, name, work)
+        _ffmpeg("-i", source, "-filter_complex", graph, "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
+        # Части посылают в шину сверх ведущего: доля его отзвука к нему самому остаётся той же.
+        extra = 0.0 if source == ridden else loudness(source)[0] - level
+        wets.append((wet, level + 20 * math.log10(share) + extra + (0.0 if name == "double" else echo)))
     bed, tricks = ducked, []
     if design and lines:
         length, first = rhythm[0], lines[0][0]
@@ -1044,9 +1073,16 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
                        THROW_BARS * 4 * length, THROWS)
         print(f"  саунд-дизайн: первое слово {first:.2f} с, входы " + (", ".join(f"{t:.1f}" for t in entries) or "—")
               + f" с; бросков {len(ends)}, на октаву ниже {len(ends) // 2}")
-        bed = _opening(ducked, first, rhythm, work)
+        # Вырез и фильтр до первого слова не пересекаются по времени (входы — через
+        # 16 долей после него), поэтому порядок не важен, а вырез удобнее резать первым:
+        # пришли барабаны и бас — только их.
+        bed = ducked
         if downs:
-            bed = _cut(bed, downs, length, work)
+            bed = _cut(kit or ducked, downs, length, work)
+            if kit and room:
+                bed = _sum([(room, 0.0), (bed, 0.0)], work / "beat-cut-parts.wav")
+        bed = _opening(bed, first, rhythm, work)
+        if downs:
             tricks.append(("вырезы", bed, None, [(d - length + 0.2, d - 0.2) for d in downs],
                            [(d - 5 * length, d - length) for d in downs]))
         # Бит вступает позже голоса (у Coruscate — на 29,9 с, после акапеллы с 10 с):
@@ -1064,13 +1100,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
                     [(e, e + 3 * length) for e in ends], [(e, e + 3 * length) for e in ends])]
         wets += [(path, target) for _, path, target, _, _ in tricks if path and target is not None]
     gains = {wet: target - loudness(wet)[0] for wet, target in wets}
-    parts = [(ridden, 0.0), (bed, 0.0), *gains.items()]
-    total = work / "sum.wav"
-    _ffmpeg(*(arg for part, _ in parts for arg in ("-i", part)), "-filter_complex",
-            "".join(f"[{n}:a]volume={gain:.2f}dB[s{n}];" for n, (_, gain) in enumerate(parts))
-            + "".join(f"[s{n}]" for n in range(len(parts)))
-            + f"amix=inputs={len(parts)}:duration=longest:normalize=0",
-            *reels.VOICE_CODEC, total)
+    total = _sum([(ridden, 0.0), (bed, 0.0), *((path, gain) for path, gain, _ in placed), *gains.items()], work / "sum.wav")
     if tricks:
         print("  слышно: " + _audible(bed, [(name, path, gains.get(path, 0.0), spans, ref)
                                             for name, path, _, spans, ref in tricks if path and spans]))
@@ -1120,7 +1150,7 @@ def compare(vocal: Path, beat: Path, master: Path, out: Path) -> tuple[Path, Pat
 # склейки. Одна дорожка бэков или эдлибов расходится в стороны расширителем Сениора (DOUBLE)
 # без центра — центр остаётся ведущему (Heldens). reverb и delay — посыл к доле ведущего, раз.
 PARTS = {
-    "дабл": {"cut": 180, "gain": -8.0, "pan": 0.8, "deess": "deesser=i=0.8", "reverb": 0.0, "delay": 0.0},
+    "дабл": {"cut": 150, "gain": -8.0, "pan": 0.8, "deess": "deesser=i=0.8", "reverb": 0.0, "delay": 0.0},
     "бэк": {"cut": 200, "gain": -10.0, "pan": 0.9, "deess": DEESSER, "reverb": 2.0, "delay": 0.0},
     "эдлиб": {"cut": 200, "gain": -6.0, "pan": 0.7, "deess": DEESSER, "reverb": 1.0, "delay": 2.0},
 }
@@ -1132,15 +1162,17 @@ def _pan(position: float) -> str:
     return f"pan=stereo|c0={math.cos(angle):.4f}*c0|c1={math.sin(angle):.4f}*c0"
 
 
-def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work: Path) -> list[tuple[Path, float, str]]:
+def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work: Path,
+           tune: str = "") -> list[tuple[Path, float, str]]:
     """Части голоса сухими дорожками на своих местах: [(файл, поправка громкости в сумме, роль)].
 
     Цепочка — как у ведущего: срез, громкость к VOCAL_LUFS, компрессия, тембр по замеру,
-    де-эссер своей роли; дальше — своя точка панорамы и своя громкость к ведущему level."""
+    де-эссер своей роли; дальше — своя точка панорамы и своя громкость к ведущему level.
+    tune — автотюн ведущего: ненастроенный дабл под настроенным голосом звучит фальшиво."""
     placed = []
     for n, (part, path) in enumerate(parts):
         look, same = PARTS[part], [i for i, (other, _) in enumerate(parts) if other == part]
-        chain = f"{FORMAT},{_center(path)}highpass=f={look['cut']},pan=mono|c0=0.5*c0+0.5*c1"
+        chain = f"{FORMAT},{_center(path)}highpass=f={look['cut']},pan=mono|c0=0.5*c0+0.5*c1" + (f",{tune}" if tune else "")
         squeezed, dry = work / f"part{n}-comp.wav", work / f"part{n}.wav"
         _ffmpeg("-i", path, "-af", f"{chain},volume={VOCAL_LUFS - loudness(path, chain + ',')[0]:.2f}dB,{VOCAL_CHAIN}",
                 *reels.VOICE_CODEC, squeezed)
@@ -1165,13 +1197,7 @@ def _sends(ridden: Path, placed: list[tuple[Path, float, str]], key: str, work: 
     going = [(path, gain + 20 * math.log10(PARTS[part][key])) for path, gain, part in placed if PARTS[part][key]]
     if not going:
         return ridden
-    source = work / f"send-{key}.wav"
-    inputs = [(ridden, 0.0), *going]
-    _ffmpeg(*(arg for path, _ in inputs for arg in ("-i", path)), "-filter_complex",
-            "".join(f"[{n}:a]volume={gain:.2f}dB[s{n}];" for n, (_, gain) in enumerate(inputs))
-            + "".join(f"[s{n}]" for n in range(len(inputs))) + f"amix=inputs={len(inputs)}:duration=longest:normalize=0",
-            *reels.VOICE_CODEC, source)
-    return source
+    return _sum([(ridden, 0.0), *going], work / f"send-{key}.wav")
 
 
 # ─────────────────────────── бот ───────────────────────────
@@ -1782,12 +1808,7 @@ def _bus(parts: list[tuple[str, Path, str]], vocal: bool, dest: Path) -> Path:
     """Дорожки одной стороны — в одну, как их выгрузил артист: каждая со своим уровнем.
     Одна — как есть."""
     paths = [path for _, path, part in parts if (part in VOCAL_SIDE) == vocal]
-    if len(paths) == 1:
-        return paths[0]
-    _ffmpeg(*(arg for path in paths for arg in ("-i", path)), "-filter_complex",
-            "".join(f"[{n}:a]{FORMAT}[i{n}];" for n in range(len(paths))) + "".join(f"[i{n}]" for n in range(len(paths)))
-            + f"amix=inputs={len(paths)}:duration=longest:normalize=0", *reels.VOICE_CODEC, dest)
-    return dest
+    return paths[0] if len(paths) == 1 else _sum([(path, 0.0) for path in paths], dest, FORMAT)
 
 
 def _service(login: contextlib.ExitStack):
@@ -1845,8 +1866,10 @@ def run_job(spec_path: Path) -> int:
                 result["why"] = "отказ"
                 return 0
             vocal, beat = _bus(parts, True, work / "vocal.wav"), _bus(parts, False, work / "beat.wav")
+            lead = [p for p in parts if p[2] == "вокал"] or [p for p in parts if p[2] in VOCAL_SIDE]
             extra = {key: knobs[key] for key in ("voice", "echo") if knobs.get(key)}
-            master = mix(vocal, beat, work / "out", knobs["style"], knobs["design"], **extra)
+            master = mix(_bus(lead, True, work / "lead.wav"), beat, work / "out", knobs["style"], knobs["design"],
+                         parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead], **extra)
             try:
                 movie = story(vocal, beat, master, work)
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
@@ -2120,6 +2143,8 @@ def main() -> int:
                         help="саунд-дизайн: вдохи, фильтр и вырезы бита, подъёмы, броски, остановка плёнки")
     parser.add_argument("--voice", type=float, default=0.0, help="голос к биту, дБ (ручки бота — по ±2)")
     parser.add_argument("--echo", type=float, default=0.0, help="доля отзвука, дилея и бросков, дБ (ручки бота — по ±4)")
+    parser.add_argument("--part", nargs=2, action="append", default=[], metavar=("РОЛЬ", "ФАЙЛ"),
+                        help="дорожка по отдельности: дабл, бэк, эдлиб, барабаны, бас, музыка (БИТ — всё вместе)")
     parser.add_argument("--job", type=Path, metavar="ФАЙЛ", help="склейка заявки из бота (её запускает дежурство)")
     parser.add_argument("--selftest", action="store_true", help="роли, маршрут, заявка, ручки, лимиты — без сети")
     parser.add_argument("--dry-run", action="store_true", help="заявки и склейки в очереди, ничего не делая")
@@ -2138,7 +2163,10 @@ def main() -> int:
             print(f"  {job['id']}: {look(job['knobs'])}" + (" — идёт" if "started" in job else ""))
         return 0
     if args.mix:
-        master = mix(*args.mix, args.out, args.style, args.design, args.voice, args.echo)
+        if bad := [part for part, _ in args.part if part not in PARTS and part not in INSTRUMENTS]:
+            parser.error(f"роли {', '.join(bad)} нет")
+        master = mix(*args.mix, args.out, args.style, args.design, args.voice, args.echo,
+                     [(part, Path(path)) for part, path in args.part])
         compare(*args.mix, master, args.out)
         print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}")
         return 0
