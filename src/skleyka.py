@@ -1255,7 +1255,12 @@ def run_job(spec_path: Path) -> int:
             vocal, beat = _bus(parts, True, work / "vocal.wav"), _bus(parts, False, work / "beat.wav")
             extra = {key: knobs[key] for key in ("voice", "echo") if knobs.get(key)}
             master = mix(vocal, beat, work / "out", knobs["style"], knobs["design"], **extra)
-            _send(spec, master, parts, note + (GUESSED if guessed and len(parts) == 2 else ""), service, work)
+            try:
+                movie = story(vocal, beat, master, work)
+            except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
+                print(f"  склейка {spec['job']}: ролик не собрался: {type(exc).__name__}")
+                movie = None
+            _send(spec, master, parts, note + (GUESSED if guessed and len(parts) == 2 else ""), service, work, movie)
             result["ok"] = True
     except Exception as exc:  # noqa: BLE001 — человеку честный ответ, в журнал — без его данных
         print(f"  склейка {spec['job']}: сбой {type(exc).__name__}: {str(exc)[:200]}")
@@ -1266,7 +1271,60 @@ def run_job(spec_path: Path) -> int:
     return 0
 
 
-def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path) -> None:
+# Ролик для сторис: те же 7,5 секунды сначала ДО, потом ПОСЛЕ, одной громкости —
+# слышно, что сделала склейка, а не насколько стало громче (как в compare). Внизу —
+# адрес бота: кто увидел сторис, склеит свой трек сам.
+STORY_HALF = 7.5
+STORY_CAPTION = "Для сторис: ДО и ПОСЛЕ одной громкости."
+
+
+def _ink(words: str, size: int, top: float, dest: Path) -> Path:
+    """Надпись прозрачным кадром 1080×1920 шрифтом роликов канала: drawtext в ffmpeg
+    на Маке нет, а Pillow есть везде."""
+    from PIL import Image, ImageDraw
+
+    from . import stories
+
+    frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
+    ImageDraw.Draw(frame).text((clips.WIDTH / 2, clips.HEIGHT * top), words, font=stories.font(size, 600),
+                               fill="white", anchor="mt")
+    frame.save(dest)
+    return dest
+
+
+def story(vocal: Path, beat: Path, master: Path, work: Path) -> Path:
+    """Ролик 9:16 на 15 с: самый громкий кусок склейки — ДО и ПОСЛЕ, волна и адрес бота.
+    Надписи — в безопасной зоне площадок (reels.SAFE_*)."""
+    _, trace = reels.meter(master)
+    n = round(STORY_HALF / 0.1)  # ebur128 отмечает громкость каждые 0,1 с
+    loud = [m for _, m, _ in trace]
+    best = max(range(max(1, len(loud) - n)), key=lambda i: sum(loud[i:i + n]))
+    cut = f"atrim=start={max(0.0, trace[best][0] - 0.4):.2f}:duration={STORY_HALF},asetpts=PTS-STARTPTS"
+    before, after, out = work / "story-do.wav", work / "story-posle.wav", work / "story.mp4"
+    _ffmpeg("-i", vocal, "-i", beat, "-filter_complex",
+            f"[0:a]{FORMAT},{cut}[v];[1:a]{FORMAT},{cut}[b];[v][b]amix=inputs=2:normalize=0", *reels.VOICE_CODEC, before)
+    _ffmpeg("-i", master, "-af", f"{FORMAT},{cut}", *reels.VOICE_CODEC, after)
+    (raw, peak), glued = loudness(before), loudness(after)[0]
+    level = min(glued, raw + CEILING - peak)
+    labels = [_ink(words, size, top, work / f"ink{n}.png") for n, (words, size, top) in enumerate(
+        (("ДО", 220, reels.SAFE_TOP + 0.04), ("ПОСЛЕ", 220, reels.SAFE_TOP + 0.04),
+         (f"склеено в {config.BOT_HANDLE}", 64, reels.SAFE_BOTTOM - 0.07)))]
+    _ffmpeg("-i", before, "-i", after, *(arg for label in labels for arg in ("-loop", "1", "-i", label)),
+            "-filter_complex",
+            f"[0:a]volume={level - raw:.2f}dB[a0];[1:a]volume={level - glued:.2f}dB[a1];"
+            "[a0][a1]concat=n=2:v=0:a=1,asplit[a][w];"
+            f"[w]showwaves=s={clips.WIDTH}x560:mode=cline:rate=30:colors=white,format=rgba[wave];"
+            f"color=c=0x101010:s={clips.WIDTH}x{clips.HEIGHT}:r=30:d={2 * STORY_HALF}[bg];"
+            "[bg][wave]overlay=0:(H-h)/2[s0];"
+            f"[s0][2:v]overlay=0:0:enable='lt(t,{STORY_HALF})'[s1];"
+            f"[s1][3:v]overlay=0:0:enable='gte(t,{STORY_HALF})'[s2];"
+            "[s2][4:v]overlay=0:0:shortest=1[v]",
+            "-map", "[v]", "-map", "[a]", "-t", 2 * STORY_HALF, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-preset", "veryfast", "-c:a", "aac", "-b:a", "192k", out)
+    return out
+
+
+def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path, movie: Path | None) -> None:
     """MP3 плеером — его пересылают, WAV документом — его льют на площадки, ручки — отдельным
     сообщением: кнопки на плеере ушли бы вместе с пересылкой."""
     chat, knobs = spec["chat"], spec["knobs"]
@@ -1284,6 +1342,8 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path)
         telegram.send_document(chat, wav)
     else:
         telegram.send_big(service(), chat, wav, "", via=spec["files"][0]["m"])
+    if movie:
+        telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(2 * STORY_HALF))
     left = spec["left"]
     telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}"),
                           buttons=buttons(spec["track"], knobs, swap=len(parts) == 2))
