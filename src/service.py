@@ -1276,6 +1276,10 @@ def handle_message(message: dict, data: dict) -> bool:
         if _subscribed(chat_id, user_id, admin):
             svedenie.compare(chat_id, text)
         return False
+    if not text.startswith("/") and skleyka.TALK_MARK in asked:
+        # Ответ словами на ручки готовой склейки (src/skleyka.py): пересборка, а не разбор.
+        skleyka.talk(chat_id, text, message["reply_to_message"], admin=admin)
+        return False
     if not text.startswith("/") and (svedenie.INTRO_MARK in asked or svedenie.NAMES_MARK in asked):
         # Ответ на INTRO СВЕДЕНИЯ или на вопрос об артистах: ссылка — в разбор лайков,
         # остальное — список артистов. Без ответа тот же список ушёл бы в ПРОЯВКУ.

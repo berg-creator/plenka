@@ -58,6 +58,7 @@ from __future__ import annotations
 import argparse
 import array
 import contextlib
+import html
 import json
 import math
 import re
@@ -71,7 +72,7 @@ import wave
 from datetime import timedelta
 from pathlib import Path
 
-from . import clips, config, reels, state, telegram
+from . import clips, config, llm, reels, state, telegram
 
 RATE = 44100
 # Любой формат на входе: моно становится стерео, частота — 44,1 кГц. Неслышимое
@@ -1244,7 +1245,8 @@ READY = ("🎛 <b>Склейка готова</b> — {look}.\n{parts}.\n{note}"
          "Это черновая склейка автоматом, не студия. Громкость как у релизов; WAV для площадок — следующим файлом.")
 MISMATCH = "Дорожки разной длины ({a} и {b}): если голос уехал от бита — выгрузи обе с самого начала проекта.\n"
 GUESSED = "Вокал и бит пришли одним альбомом — где что, понял по звуку. Перепутал — жми «↔ поменять».\n"
-TUNE = ("Не так? Подкрути — пересоберу{left}.\n\n"
+TUNE = ("Не так? Подкрути — пересоберу{left}. Или напиши словами, что поменять, — ответом "
+        "на это сообщение: «голос тише, эха больше».\n\n"
         "Выложишь трек на площадки — жми «В ОТБОР»: он выйдет в канале с твоим именем.")
 
 # Альбом в Telegram — до десяти файлов: хватает на вокал, даблы, бэки, эдлибы и бит по частям.
@@ -1683,6 +1685,75 @@ def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> N
     telegram.send_message(chat_id, REBUILD.format(what=look(knobs), minutes=minutes))
 
 
+# Ответ словами на ручки готовой склейки — «голос тише на припеве, эха побольше».
+# Модель (prompts/skleyka.md) только выбирает значения тех же ручек, что у кнопок,
+# код держит их в пределах, а пересборка — та же, что с кнопки, и в тот же лимит.
+# Ответ без пересборки лимита не тратит, но генератор общий с каналом, поэтому
+# разговоров у трека не больше TALKS. Метка в тексте ручек (TUNE) — ответ на это
+# сообщение идёт сюда, а не в разбор (src/service.py).
+TALK_MARK = "напиши словами"
+TALKS = 6
+TALK_FAILED = "Не разобрал — подкрути кнопками выше."
+TALKED = "Поговорили про этот трек достаточно — дальше кнопками выше."
+TALK_KNOBS = ("style", "design", "voice", "echo")
+
+
+def heard(knobs: dict, answer: dict) -> dict:
+    """Ручки из ответа модели: только известные и в пределах, остальное — как было."""
+    new = dict(knobs)
+    if answer.get("style") in STYLES:
+        new["style"] = answer["style"]
+    if isinstance(answer.get("design"), bool):
+        new["design"] = answer["design"]
+    for key, (low, high) in (("voice", (-VOICE_LIMIT, VOICE_LIMIT)), ("echo", ECHO_LIMITS)):
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            new[key] = float(max(low, min(high, round(float(answer[key])))))
+    return new
+
+
+def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> None:
+    """Просьба словами ответом на ручки: чей трек — по кнопкам того сообщения, а если
+    Telegram их не приложил — последний трек человека."""
+    chat_id, data = str(chat_id), load()
+    codes = [button.get("callback_data", "") for row in (reply.get("reply_markup") or {}).get("inline_keyboard", [])
+             for button in row]
+    track_id = next((code[len(PREFIX):].partition(":")[0] for code in codes if code.startswith(PREFIX)), "") \
+        or max((key for key, track in data["tracks"].items() if track["chat"] == chat_id),
+               key=lambda key: data["tracks"][key]["at"], default="")
+    track = data["tracks"].get(track_id)
+    if not track or track["chat"] != chat_id:
+        telegram.send_message(chat_id, STALE)
+        return
+    owner = admin or track.get("admin")
+    if not owner and track["tweaks"] >= config.SKLEYKA_TWEAKS:
+        telegram.send_message(chat_id, NO_TWEAKS)
+        return
+    if not owner and track.get("talks", 0) >= TALKS:
+        telegram.send_message(chat_id, TALKED)
+        return
+    track["talks"] = track.get("talks", 0) + 1
+    save(data)
+    try:
+        answer = llm.generate_skleyka({
+            "request": text[:500],
+            "knobs": {key: track["knobs"][key] for key in TALK_KNOBS},
+            "limits": {"voice": [-VOICE_LIMIT, VOICE_LIMIT], "echo": list(ECHO_LIMITS),
+                       "style": {name: kind["about"] for name, kind in STYLES.items()}}})
+    except Exception as exc:  # noqa: BLE001 — генератор недоступен, кнопки остаются
+        print(f"  склейка: разговор не вышел: {type(exc).__name__}")
+        telegram.send_message(chat_id, TALK_FAILED)
+        return
+    knobs = heard(track["knobs"], answer)
+    words = html.escape(str(answer.get("reply", "")).strip())[:400]
+    if knobs == track["knobs"]:
+        telegram.send_message(chat_id, words or TALK_FAILED)
+        return
+    track.update(knobs=knobs, tweaks=track["tweaks"] + 1)
+    minutes = _enqueue(data, track_id, knobs, tweak=True)
+    save(data)
+    telegram.send_message(chat_id, (f"{words}\n\n" if words else "") + REBUILD.format(what=look(knobs), minutes=minutes))
+
+
 # Склейка, что идёт сейчас: (процесс, заявка, папка). Одна на дежурство.
 _RUNNING: tuple[subprocess.Popen, dict, Path] | None = None
 
@@ -1968,7 +2039,7 @@ def _selftest() -> None:
     """Без сети: роли по имени и по звуку, куда идёт файл, заявка от дорожек до очереди,
     ручки и возврат лимита, лимит суток, отказы по тишине и длине."""
     sent: list[str] = []
-    real = (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret)
+    real = (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka)
     telegram.send_message = lambda chat, text, **_: sent.append(text) or {"message_id": len(sent)}
     telegram.edit_markup = lambda chat, message, markup: None
     config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
@@ -2117,6 +2188,45 @@ def _selftest() -> None:
         assert sent[-1] == FAILED and data["used"]["7"] == [] and data["tracks"][track]["tweaks"] == 2
         save(data)
 
+        # Ответ словами: модель выбирает ручки, код держит пределы; ничего не поменялось —
+        # только ответ, без пересборки; генератор упал — кнопки.
+        answers: list = []
+
+        def model(payload: dict) -> dict:
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        llm.generate_skleyka = model
+        props = llm.SKLEYKA_SCHEMA["properties"]
+        assert set(props) == {*TALK_KNOBS, "reply"} and all(name in props["style"]["description"] for name in STYLES)
+        assert TALK_MARK in TUNE
+        data["tracks"]["t1"] = {"chat": "7", "files": [], "knobs": dict(KNOBS), "tweaks": 0,
+                                "at": state.iso(state.now() + timedelta(minutes=1))}
+        save(data)
+        menu = {"text": TUNE, "reply_markup": {"inline_keyboard": buttons("t1", KNOBS, swap=False)}}
+        answers[:] = [{"style": "мелодично", "design": True, "voice": -9, "echo": "много", "reply": "Голос <тише>."}]
+        talk(7, "автотюн", menu)
+        data = load()
+        assert data["jobs"][-1]["track"] == "t1" and data["tracks"]["t1"]["tweaks"] == 1
+        assert data["jobs"][-1]["knobs"] == dict(KNOBS, style="мелодично", design=True, voice=-VOICE_LIMIT), data["jobs"][-1]
+        assert sent[-1].startswith("Голос &lt;тише&gt;.\n\nПересобираю: «мелодично»"), sent[-1]
+        jobs = len(data["jobs"])
+        answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "reply": "Ширину не кручу."}]
+        talk(7, "шире", {"text": TUNE})  # кнопок Telegram не приложил — последний трек человека
+        assert sent[-1] == "Ширину не кручу." and load()["tracks"]["t1"]["tweaks"] == 1 and len(load()["jobs"]) == jobs
+        answers[:] = [RuntimeError("сеть")]
+        talk(7, "эха", menu)
+        assert sent[-1] == TALK_FAILED
+        talk(8, "эха", menu)
+        assert sent[-1] == STALE, "чужая склейка"
+        data = load()
+        data["tracks"]["t1"]["talks"] = TALKS
+        save(data)
+        talk(7, "эха", menu)
+        assert sent[-1] == TALKED and not answers
+
         # Лимит суток: две склейки — третья завтра; владельцу лимита нет.
         data["used"]["7"] = [state.iso(), state.iso()]
         save(data)
@@ -2127,10 +2237,10 @@ def _selftest() -> None:
         assert turn(KNOBS, "e+")["echo"] == ECHO_STEP and turn(dict(KNOBS, voice=VOICE_LIMIT), "v+")["voice"] == VOICE_LIMIT
         assert "с саунд-дизайном" in look(turn(KNOBS, "d")) and turn(KNOBS, "c1")["style"] == "мелодично"
     finally:
-        telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret = real
+        telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka = real
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, звук до склейки, "
-          "ручки, лимиты, отказы — ок")
+          "ручки кнопками и словами, лимиты, отказы — ок")
 
 
 def main() -> int:

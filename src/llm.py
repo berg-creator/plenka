@@ -111,6 +111,22 @@ MEME_SCHEMA = {
     "additionalProperties": False,
 }
 
+# СКЛЕЙКА (src/skleyka.py): просьба словами — в значения тех же ручек, что у кнопок.
+# Пределы код держит сам (skleyka.heard), здесь они — подсказка модели: ГигаЧат
+# строгих схем не принимает и видит только описания полей.
+SKLEYKA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "style": {"type": "string", "description": "Стиль: чисто, мелодично, грязно или близко"},
+        "design": {"type": "boolean", "description": "Саунд-дизайн: true — включён"},
+        "voice": {"type": "number", "description": "Голос к биту, дБ, от -6 до 6"},
+        "echo": {"type": "number", "description": "Эхо — отзвук и повторы вместе, дБ, от -12 до 8"},
+        "reply": {"type": "string", "description": "Ответ человеку: что сделал или чего не умею, 1–3 фразы до 300 знаков"},
+    },
+    "required": ["style", "design", "voice", "echo", "reply"],
+    "additionalProperties": False,
+}
+
 # Схема ответа по рубрике; кого здесь нет, тот отвечает POST_SCHEMA.
 SCHEMAS = {"meme": MEME_SCHEMA}
 
@@ -248,6 +264,17 @@ def generate_clip(payload: dict) -> dict:
         f"содержания не добавляй. Если новость пустая — верни skip=true и причину "
         f"одной строкой.",
         CLIP_SCHEMA,
+    )
+
+
+def generate_skleyka(payload: dict) -> dict:
+    """Просьба человека к готовой склейке — в новые значения ручек (prompts/skleyka.md)."""
+    return _generate(
+        f"{(config.PROMPTS / 'skleyka.md').read_text(encoding='utf-8')}\n\n"
+        f"## Данные\n\n"
+        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"Верни ручки по правилам выше: о чём не просили — как в knobs.",
+        SKLEYKA_SCHEMA,
     )
 
 
