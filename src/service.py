@@ -62,6 +62,8 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            # Запуск без денег (NEXT.md, 50е): владелец отвечает там, где люди сами просили сравнение вкуса.
            "sved_forum": "СВЕДЕНИЕ, форум Яндекс Музыки", "sved_otvet": "СВЕДЕНИЕ, Ответы Mail.ru",
            "sved_pikabu": "СВЕДЕНИЕ, Пикабу",
+           # Приглашение сравнить музыку (?start=sv_<код>): метка одна на все, код сюда не пишется.
+           "sv": "СВЕДЕНИЕ, друг позвал сравнить",
            "ad": "реклама, канал не распознан"}
 # Платный пост ведёт в СВЕДЕНИЕ ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
@@ -1312,6 +1314,14 @@ def handle_message(message: dict, data: dict) -> bool:
         else:
             ask_artist(chat_id)
         return False
+    if kind == "menu" and link == "sv":
+        # Друг позвал сравнить музыку: код — ключ к снимку пригласившего. «Подписался»
+        # несёт его в себе, иначе после подписки друг попал бы в обычное СВЕДЕНИЕ.
+        count_source("sv")
+        code = slug[:16]  # коды восьмизначные; длинный мусор не влез бы в 64 байта кнопки
+        if _subscribed(chat_id, user_id, admin, retry=f"sv:{code}"):
+            svedenie.invite(chat_id, code)
+        return False
     if kind == "sved" or kind == "menu" and link in ("sved", "ad"):
         if kind == "menu":
             count_source(body if body in SOURCES or AD_LABEL.fullmatch(body) else link)
@@ -1481,12 +1491,17 @@ def handle_callback(query: dict, data: dict) -> None:
         otbor.callback(chat_id, user_id, subject, admin=admin)
         return
 
-    if action in ("sved", "sravni", "imena"):
+    if action in ("sved", "sravni", "imena", "sv"):
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
-        if _subscribed(chat_id, user_id, admin, retry=action):
-            # Из меню — что это такое и что прислать, из-под ответа — сразу имя артиста,
-            # из-под CLOSED и отказов — список артистов вместо ссылки.
-            {"sravni": svedenie.ask_artist, "imena": svedenie.ask_names}.get(action, svedenie.intro)(chat_id)
+        # raw целиком: у приглашения за действием идёт код, и повтор после подписки его не теряет.
+        if not _subscribed(chat_id, user_id, admin, retry=raw):
+            return
+        if action == "sv":
+            svedenie.invite(chat_id, subject)
+            return
+        # Из меню — что это такое и что прислать, из-под ответа — сразу имя артиста,
+        # из-под CLOSED и отказов — список артистов вместо ссылки.
+        {"sravni": svedenie.ask_artist, "imena": svedenie.ask_names}.get(action, svedenie.intro)(chat_id)
         return
 
     if action == "watch" and subject:
@@ -1696,6 +1711,9 @@ def _selftest() -> None:
         # С рекламы без подписки: кнопка «Подписался» снова открывает СВЕДЕНИЕ, метку не теряем.
         handle_message(incoming("/start ad_mainstream", 13, chat=10), {})
         assert said[-1][1] == [[{"text": "✅ Подписался", "callback_data": f"{CALLBACK_PREFIX}sved"}]], said[-1]
+        # По приглашению друга — тоже, и код приглашения кнопка несёт с собой.
+        handle_message(incoming("/start sv_ab12cd34", 14, chat=11), {})
+        assert said[-1][1] == [[{"text": "✅ Подписался", "callback_data": f"{CALLBACK_PREFIX}sv:ab12cd34"}]], said[-1]
     finally:
         (telegram.send_message, telegram.delete_message, globals()["WATCH_FILE"], otbor.cancel,
          otbor.active, globals()["find_watch_artist"], afisha.find_artist, itunes.resolve_name,
@@ -1763,8 +1781,10 @@ def _selftest() -> None:
 
     opened: list[str] = []
     real = (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
-            globals()["_subscribed"], svedenie.by_names, telegram.answer_callback)
+            globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite)
     otbor.start = lambda chat, user, **_: opened.append(chat)
+    invited: list[tuple[str, str]] = []
+    svedenie.invite = lambda chat, code: invited.append((chat, code))
     links: list[str] = []
     svedenie.handle = lambda chat, text: links.append(text)
     svedenie.by_names = lambda chat, text: links.append("имена: " + text)
@@ -1810,12 +1830,24 @@ def _selftest() -> None:
         handle_callback({"id": "q", "data": svedenie.NAMES_BUTTON[0][0]["callback_data"],
                          "message": {"chat": {"id": 55501}}, "from": {"id": 77701}}, {})
         assert replies[-1][0] == svedenie.NAMES_ASK, replies[-1]
+
+        # Приглашение друга: /start sv_<код> и «Подписался» с кодом ведут в svedenie.invite,
+        # в открытый файл идёт одна метка sv — без кода и без id.
+        handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
+                        "message_id": 99, "date": 99999, "text": "/start sv_ab12cd34"}, {})
+        handle_callback({"id": "q", "data": f"{CALLBACK_PREFIX}sv:ab12cd34",
+                         "message": {"chat": {"id": 55501}}, "from": {"id": 77701}}, {})
+        assert invited == [("55501", "ab12cd34")] * 2, invited
+        saved = SOURCES_FILE.read_text()
+        assert state.read_json(SOURCES_FILE, {})[_today()]["sv"] == 1
+        assert "ab12cd34" not in saved and "555" not in saved and "777" not in saved, saved
     finally:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
-         globals()["_subscribed"], svedenie.by_names, telegram.answer_callback) = real
+         globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
         tmp.cleanup()
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню четыре раздела; "
-          "ссылка на плейлист — в СВЕДЕНИЕ; ответ на INTRO: ссылка — в лайки, артисты — в by_names")
+          "ссылка на плейлист — в СВЕДЕНИЕ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
+          "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал")
 
 
 # ─────────────────────────── командная строка ───────────────────────────

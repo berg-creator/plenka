@@ -4,9 +4,10 @@
 вкусом», 18 266 голосов с 2019 года, и Яндекс её так и не сделал. Сравнение
 двух людей требует второго человека, а сравнение с артистом работает сразу:
 кинул ссылку на свои лайки — получил ответ и карточку, которую есть что
-переслать. Поэтому строится оно первым, а сравнение двоих — следом (NEXT.md,
-задача 50в). Модель здесь не нужна вовсе: всё, что бот говорит, — это проценты
-и имена, а придумывать ему нечего.
+переслать. Поэтому оно строилось первым, а сравнение с другом — следом
+(22.09.2026): это единственный механизм, которым бот раздаёт себя сам, — каждое
+сравнение приводит второго человека. Модель здесь не нужна вовсе: всё, что бот
+говорит, — это проценты и имена, а придумывать ему нечего.
 
 Формула. Процент — доля доступных треков из списка человека, где хоть один
 исполнитель входит в круг артиста: сам артист и `similarArtists` Яндекса.
@@ -21,9 +22,10 @@
 на тысяче лайков это сотни запросов brief-info ради тех же трёх имён.
 
 Списки — данные о человеке, поэтому снимок лежит только в приватном хранилище
-(config.SVED_STATE), живёт 30 дней и нужен ровно для кнопки «Сравнить
-с артистом»: без него каждое сравнение снова тянуло бы всю фонотеку.
-Разборов — три в сутки на человека: каждый стоит до 25 запросов к Яндексу.
+(config.SVED_STATE), живёт 30 дней и нужен ровно для кнопок «Сравнить
+с артистом» и «Сравнить с другом»: без него каждое сравнение снова тянуло бы
+всю фонотеку. Разборов — три в сутки на человека: каждый стоит до 25 запросов
+к Яндексу.
 
 Запасной путь — имена (решение владельца 21.09.2026). «Мне нравится» открывается
 только на сайте Яндекса, с телефона до этой настройки почти никто не дойдёт,
@@ -36,6 +38,24 @@
 а свой плейлист артиста второй строкой не выходит — общих треков у имён нет.
 Такой разбор стоит около сорока запросов: поиск и brief-info на каждое имя.
 
+Вдвоём. Под ответом — кнопка «👥 Сравнить с другом»: она открывает «поделиться»
+Telegram с личной ссылкой ?start=sv_<код>. Код случайный и лежит в снимке
+пригласившего: chat_id в ссылке не светится, а в открытый bot_sources.json идёт
+одна метка sv на все приглашения. Друг открыл ссылку — код ложится в его запись
+хранилища полем invite, а не в память смены: дежурство перезапускается с каждым
+пушем, а закрытый список уводит друга через «Написать артистов», и код должен
+дожить до любого из двух путей. Посчитался снимок друга — сравнение идёт следом,
+тем же разбором из трёх суточных: второй раз за одно действие не тратится.
+
+Формула вдвоём: общие исполнители к меньшему из двух множеств исполнителей.
+Она одна на любые пары — лайки–лайки, лайки–имена, имена–имена: названный
+артист в снимке — тот же id исполнителя, что в лайках. К меньшему — потому что
+двадцать названных против трёхсот артистов в лайках от большего давали бы
+копейки при полном совпадении вкуса. У двух списков лайков строкой ниже — число
+общих треков и до тридцати поимённо; у имён общих треков нет. Итог получают
+оба; имя друга нигде не пишется — пригласившему приходит «твой друг». Снимок
+пригласившего протух или удалён — друг получает обычное СВЕДЕНИЕ с пояснением.
+
     python -m src.svedenie --selftest              формула, отказы и ответ — без сети
     python -m src.svedenie --dry-run               разбор открытой фонотеки, без Telegram
     python -m src.svedenie --check "ССЫЛКА"        что ответил бы бот на эту ссылку
@@ -47,10 +67,12 @@ import argparse
 import html
 import logging
 import re
+import secrets
 import tempfile
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 from . import card, config, state, telegram
 from .sources import yandex_music
@@ -110,6 +132,24 @@ FEW_NAMES = "Нужно хотя бы {need} артистов, которых Я
 # Тем, кто пришёл на «делаем» и остался ждать (config.SVED_FILE).
 READY = "🎚 <b>СВЕДЕНИЕ</b> заработало — кидай ссылку на своё «Мне нравится», посчитаю."
 
+# Вдвоём. Метка — та же INTRO_MARK: ответ друга разбирается как любой ответ на INTRO,
+# а код приглашения ждёт в его записи хранилища (см. докстринг).
+FRIEND_INTRO = (
+    "🎚 <b>СВЕДЕНИЕ</b>\n\n"
+    "Друг позвал сравнить музыку. Кинь ссылку на свои лайки в Яндекс Музыке "
+    "(Моя музыка → «Мне нравится» → поделиться) или напиши через запятую "
+    f"{MIN_NAMES}–{MAX_NAMES} артистов, которых слушаешь чаще всего, — посчитаю, на сколько вы совпали.\n\n"
+    f"{INTRO_MARK}."
+)
+EXPIRED = ("Это приглашение устарело: друг считал свою музыку больше месяца назад. "
+           "Посчитаю твою, а под ответом будет своя ссылка — перешли её другу.")
+SELF = "Это твоя ссылка — её нужно переслать другу. Он кинет свою музыку, и итог придёт вам обоим."
+FRIEND_DONE = "Твой друг сравнил музыку с тобой."
+SHARE_TEXT = "Сравни свою музыку с моей — бот посчитает, на сколько процентов мы совпали"
+# Сколько общих артистов и треков называть: больше не читают, а сообщение — до 4096 знаков.
+DUEL_ARTISTS = 10
+DUEL_TRACKS = 30
+
 # Префикс и обрезка — как у кнопок сервиса (service.CALLBACK_PREFIX и _cb):
 # «следить» разбирает service.handle_callback через watch_add, и второй путь
 # к тому же списку заводить незачем. Связку держит service._selftest.
@@ -126,11 +166,20 @@ def _cb(action: str, arg: str = "") -> str:
 NAMES_BUTTON = [[{"text": "✍️ Написать артистов", "callback_data": _cb("imena")}]]
 
 
-def buttons(artist: str) -> list[list[dict]]:
-    return [
+def share_url(code: str) -> str:
+    """«Поделиться» Telegram с личной ссылкой: человек сразу выбирает, кому переслать."""
+    link = f"https://t.me/{config.BOT_HANDLE.lstrip('@')}?start=sv_{code}"
+    return "https://t.me/share/url?" + urlencode({"url": link, "text": SHARE_TEXT}, quote_via=quote)
+
+
+def buttons(artist: str, code: str = "") -> list[list[dict]]:
+    rows = [
         [{"text": "🎯 Сравнить с артистом", "callback_data": _cb("sravni")}],
         [{"text": f"🔔 Следить за {artist}", "callback_data": _cb("watch", artist)}],
     ]
+    if code:
+        rows.insert(0, [{"text": "👥 Сравнить с другом", "url": share_url(code)}])
+    return rows
 
 
 # ─────────────────────────── снимок фонотеки ───────────────────────────
@@ -155,6 +204,17 @@ def _short(tracks: list[dict]) -> list[list]:
     """Снимок: id трека и id его исполнителей. Имена не хранятся — они не нужны,
     а лишние данные о человеке в хранилище не лежат."""
     return [[t["id"], [a["id"] for a in t["artists"] if a.get("id")]] for t in tracks if t["available"]]
+
+
+def _keep(data: dict, chat_id: str, tracks: list[list]) -> tuple[str, str]:
+    """Кладёт снимок в хранилище. Возвращает личный код и приглашение, по которому
+    человек пришёл (пусто — сам по себе): приглашение одноразовое и снимается здесь."""
+    entry = data[str(chat_id)]
+    entry["tracks"] = tracks
+    code = entry.setdefault("code", secrets.token_hex(4))
+    invited = entry.pop("invite", "")
+    _save(data)
+    return code, invited
 
 
 def _spend(data: dict, chat_id: str) -> bool:
@@ -214,6 +274,25 @@ def own_percent(match: dict, tracks: list[list]) -> int:
     return round(100 * len(mine & theirs) / min(len(mine), len(theirs)))
 
 
+def together(mine: list[list], theirs: list[list]) -> dict:
+    """Совпадение двоих: общие исполнители к меньшему из двух множеств исполнителей.
+
+    common — общие исполнители, кого оба слушают чаще — первыми; smaller — сколько
+    исполнителей в меньшем списке; same — общие треки по порядку первого списка,
+    None, если хоть кто-то назвал артистов: у имён «трек» — сам артист, a<id>.
+    """
+    a, b = (Counter(artist for _, artists in side for artist in artists) for side in (mine, theirs))
+    common = sorted(a.keys() & b.keys(), key=lambda artist: a[artist] + b[artist], reverse=True)
+    smaller = min(len(a), len(b))
+    liked = [{track for track, _ in side if not track.startswith("a")} for side in (mine, theirs)]
+    return {
+        "share": round(100 * len(common) / smaller) if smaller else 0,
+        "common": common,
+        "smaller": smaller,
+        "same": [track for track, _ in mine if track in liked[1]] if all(liked) else None,
+    }
+
+
 def answer(tracks: list[list], found: list[dict], unit: str = "трекам") -> str:
     """Ответ человеку: только проценты и имена, вкус бот не оценивает.
 
@@ -242,13 +321,14 @@ def _card(match: dict) -> Path:
         label="СВЕДЕНИЕ",
         name=f"sved-{state.now().strftime('%H%M%S')}",
         photo_url=match.get("photo", ""),
+        handle=config.BOT_HANDLE,
     )
 
 
-def _send(chat_id: str, text: str, match: dict) -> None:
+def _send(chat_id: str, text: str, match: dict, code: str = "") -> None:
     """Карточка и ответ. Карточка уходит без подписи и без кнопок: её пересылают."""
     if match["percent"] < SOFT:
-        telegram.send_message(chat_id, text, buttons=buttons(match["name"]))
+        telegram.send_message(chat_id, text, buttons=buttons(match["name"], code))
         return
     try:
         picture = _card(match)
@@ -257,7 +337,60 @@ def _send(chat_id: str, text: str, match: dict) -> None:
     else:
         telegram.send_photo_file(chat_id, picture, "")
         picture.unlink(missing_ok=True)
-    telegram.send_message(chat_id, text, buttons=buttons(match["name"]))
+    telegram.send_message(chat_id, text, buttons=buttons(match["name"], code))
+
+
+def _inviter(data: dict, code: str) -> str:
+    """Чей это код. Пусто — снимок пригласившего протух или удалён."""
+    return next((chat for chat, entry in data.items() if code and entry.get("code") == code
+                 and entry.get("tracks")), "")
+
+
+def duel_text(result: dict) -> tuple[str, list[str]]:
+    """Итог вдвоём шаблоном и имена общих артистов для карточки. Имена артистов
+    и треков берутся у Яндекса только для вывода: в снимке их нет."""
+    common, same = result["common"], result["same"]
+    lines = [f"Вы совпали на <b>{result['share']}%</b>: общих артистов {len(common)} "
+             f"из {result['smaller']} в меньшем из ваших списков."]
+    if same is not None:
+        lines.append(f"Общих треков — {len(same)}.")
+    names = [found["name"] for artist in common[:DUEL_ARTISTS] if (found := yandex_music.info(artist))]
+    if names:
+        rest = f" и ещё {len(common) - DUEL_ARTISTS}" if len(common) > DUEL_ARTISTS else ""
+        lines.append("\nОбщие артисты: " + html.escape(", ".join(names), quote=False) + rest + ".")
+    if same:
+        lines.append("\nОбщие треки:")
+        lines += [html.escape(f"· {', '.join(a['name'] for a in t['artists'])} — {t['title']}", quote=False)
+                  for t in yandex_music.tracks(same[:DUEL_TRACKS])]
+        if len(same) > DUEL_TRACKS:
+            lines.append(f"и ещё {len(same) - DUEL_TRACKS}")
+    return "\n".join(lines), names
+
+
+def _duel(chat_id: str, code: str, tracks: list[list]) -> None:
+    """Сравнение с тем, кто позвал: итог и карточка — обоим."""
+    data = _load()
+    inviter = _inviter(data, code)
+    if not inviter:
+        telegram.send_message(chat_id, EXPIRED)
+        return
+    result = together(tracks, data[inviter]["tracks"])
+    text, names = duel_text(result)
+    try:
+        picture = card.save(f"вы совпали на {result['share']}%", names, label="СВЕДЕНИЕ",
+                            name=f"sved-duo-{state.now().strftime('%H%M%S')}", handle=config.BOT_HANDLE)
+    except Exception as exc:  # noqa: BLE001 — без картинки итог всё равно уходит
+        log.info("Карточка вдвоём не нарисовалась: %s", exc)
+        picture = None
+    for chat, head in ((chat_id, ""), (inviter, FRIEND_DONE + " ")):
+        try:
+            if picture:
+                telegram.send_photo_file(chat, picture, "")
+            telegram.send_message(chat, f"🎚 <b>СВЕДЕНИЕ</b> вдвоём\n\n{head}{text}")
+        except Exception as exc:  # noqa: BLE001 — пригласивший мог закрыть бота, другу итог всё равно нужен
+            log.info("Итог вдвоём не ушёл в %s: %s", "друга" if chat == chat_id else "пригласившего", exc)
+    if picture:
+        picture.unlink(missing_ok=True)
 
 
 # ─────────────────────────── разговор ───────────────────────────
@@ -265,6 +398,24 @@ def _send(chat_id: str, text: str, match: dict) -> None:
 
 def intro(chat_id: str) -> None:
     telegram.send_message(chat_id, INTRO, ask="Ссылка или артисты через запятую")
+
+
+def invite(chat_id: str, code: str) -> None:
+    """Друг открыл ?start=sv_<код>: запомнить код и спросить его музыку."""
+    data = _load()
+    inviter = _inviter(data, code)
+    if not inviter:
+        telegram.send_message(chat_id, EXPIRED)
+        intro(chat_id)
+        return
+    if inviter == str(chat_id):
+        telegram.send_message(chat_id, SELF)
+        return
+    entry = data.setdefault(str(chat_id), {})
+    entry["invite"] = code
+    entry.setdefault("at", state.iso())  # без отметки времени _save выкинул бы запись сразу
+    _save(data)
+    telegram.send_message(chat_id, FRIEND_INTRO, ask="Ссылка или артисты через запятую")
 
 
 def handle(chat_id: str, text: str) -> None:
@@ -289,9 +440,10 @@ def handle(chat_id: str, text: str) -> None:
         telegram.send_message(chat_id, SILENT)
         return
 
-    data[str(chat_id)]["tracks"] = tracks
-    _save(data)
-    _send(chat_id, answer(tracks, best), best[0])
+    code, invited = _keep(data, chat_id, tracks)
+    if invited:
+        _duel(chat_id, invited, tracks)
+    _send(chat_id, answer(tracks, best), best[0], code)
 
 
 def ask_artist(chat_id: str) -> None:
@@ -319,7 +471,7 @@ def compare(chat_id: str, name: str) -> None:
     text = f"🎚 <b>СВЕДЕНИЕ</b>\n\nТы на <b>{match['percent']}%</b> {match['name']}."
     if share := own_percent(match, tracks):
         text += f"\n\nС тем, что он собрал сам («{match['playlist']['title']}»), — {share}%."
-    _send(chat_id, text, match)
+    _send(chat_id, text, match, data[str(chat_id)].get("code", ""))
 
 
 def ask_names(chat_id: str) -> None:
@@ -362,9 +514,10 @@ def by_names(chat_id: str, text: str) -> None:
     # Названный артист — «трек» с одним исполнителем: percent и matches считают как есть.
     tracks = [[f"a{artist_id}", [artist_id]] for artist_id in known]
     best = matches(tracks, known=known)
-    data[str(chat_id)]["tracks"] = tracks
-    _save(data)
-    _send(chat_id, answer(tracks, best, unit="артистам") + note, best[0])
+    code, invited = _keep(data, chat_id, tracks)
+    if invited:
+        _duel(chat_id, invited, tracks)
+    _send(chat_id, answer(tracks, best, unit="артистам") + note, best[0], code)
 
 
 def notify_waiting() -> None:
@@ -400,22 +553,27 @@ def _selftest() -> None:
     }
     real = (yandex_music.info, yandex_music.artist, yandex_music.by_link, yandex_music.playlist,
             telegram.send_message, telegram.send_photo_file, telegram.send_chat_action,
-            card.save, config.SVED_STATE, config.SVED_FILE, yandex_music._get)
+            card.save, config.SVED_STATE, config.SVED_FILE, yandex_music._get, yandex_music.tracks)
     # brief-info отдаёт id самого артиста строкой, соседей — числом, а треки — числом:
     # круг приводится к числам, иначе сам артист в свой круг не входит.
     yandex_music._get = lambda path, **kw: {"artist": {"id": "7", "name": "X"}, "similarArtists": [{"id": 8}]}
     assert yandex_music.info(7)["circle"] == [7, 8] and yandex_music.info(7)["id"] == 7
     replies: list[str] = []
+    said: list[tuple[str, str]] = []  # кому ушло каждое сообщение: итог вдвоём должны получить оба
     yandex_music.info = lambda artist_id: fake.get(int(artist_id))
     yandex_music.artist = lambda name: next((a for a in fake.values() if a["name"] == name), None)
     yandex_music.playlist = lambda owner, kind: [
         {"id": "t1", "available": True, "artists": [], "title": ""},
         {"id": "нет", "available": True, "artists": [], "title": ""},
     ]
-    telegram.send_message = lambda chat_id, text, **kw: replies.append(text) or {}
+    telegram.send_message = lambda chat_id, text, **kw: replies.append(text) or said.append((str(chat_id), text)) or {}
     telegram.send_photo_file = lambda chat_id, path, caption, **kw: replies.append("[карточка]") or {}
     telegram.send_chat_action = lambda *a, **kw: None
-    card.save = lambda *a, **kw: Path(tempfile.gettempdir()) / "sved-test.jpg"
+    drawn: list[dict] = []
+    card.save = lambda *a, **kw: drawn.append(kw) or Path(tempfile.gettempdir()) / "sved-test.jpg"
+    yandex_music.tracks = lambda ids: [
+        {"id": i, "title": "Песня <1>", "artists": [{"id": 1, "name": "Toxi$"}], "available": True} for i in ids
+    ]
 
     try:
         tmp = tempfile.TemporaryDirectory()
@@ -454,6 +612,8 @@ def _selftest() -> None:
         ]
         handle("55501", "ссылка")
         assert replies[-2] == "[карточка]" and "ты на <b>100%</b> Toxi$" in replies[-1], replies[-2:]
+        # Адрес внизу карточки СВЕДЕНИЯ — бот: кто увидел её в сторис, считает свой процент у него.
+        assert drawn[-1]["handle"] == config.BOT_HANDLE, drawn[-1]
         saved = state.read_json(config.SVED_STATE, {})["55501"]
         assert saved["used"] == 3 and len(saved["tracks"]) == MIN_TRACKS, saved["used"]
         assert saved["tracks"][0] == ["t0", [1]], "в снимке только id — имён человека в файле нет"
@@ -496,6 +656,63 @@ def _selftest() -> None:
         compare("70003", "Дора")
         assert "ты на <b>20%</b> Дора".casefold() in replies[-1].casefold(), "сравнение по снимку из имён"
 
+        # Вдвоём, формула: общие исполнители к меньшему из двух множеств.
+        # Лайки (1, 2, 5, 3, 9) и имена (1, 9, 7): общих двое из трёх названных — 67%, треков нет.
+        mixed = together(tracks, [["a1", [1]], ["a9", [9]], ["a7", [7]]])
+        assert (mixed["share"], mixed["smaller"], mixed["same"]) == (67, 3, None), mixed
+        assert sorted(mixed["common"]) == [1, 9]
+        # Лайки и лайки (1, 8): общий один из двух — 50%, общий трек t1.
+        both = together(tracks, [["t1", [1]], ["t77", [8]]])
+        assert (both["share"], both["common"], both["same"]) == (50, [1], ["t1"]), both
+        assert together([["a1", [1]]], [["a1", [1]]])["same"] is None, "у имён общих треков нет"
+
+        # Личная ссылка под ответом: «поделиться» Telegram, в ссылке код, а не chat_id.
+        code = state.read_json(config.SVED_STATE, {})["55501"]["code"]
+        share = buttons("Toxi$", code)[0][0]
+        assert share["text"] == "👥 Сравнить с другом" and share["url"].startswith("https://t.me/share/url?")
+        assert f"start%3Dsv_{code}" in share["url"] and "55501" not in share["url"], share["url"]
+        assert "url" not in buttons("Toxi$")[0][0], "без кода — прежние кнопки"
+
+        # Своя ссылка — переслать другу; протухший код — обычное СВЕДЕНИЕ с пояснением.
+        invite("55501", code)
+        assert replies[-1] == SELF, replies[-1]
+        invite("90009", "нет-такого")
+        assert replies[-2:] == [EXPIRED, INTRO], replies[-2:]
+        assert "invite" not in state.read_json(config.SVED_STATE, {}).get("90009", {})
+
+        # Друг открыл ссылку: вопрос с меткой INTRO, код ждёт в его записи хранилища.
+        invite("80008", code)
+        assert replies[-1] == FRIEND_INTRO and INTRO_MARK in FRIEND_INTRO
+        assert state.read_json(config.SVED_STATE, {})["80008"]["invite"] == code
+        # Ответ друга — обычный разбор, следом итог вдвоём обоим; разбор тратится один.
+        yandex_music.by_link = lambda url: [
+            {"id": f"t{i}", "available": True, "artists": [{"id": 1, "name": "Toxi$"}], "title": ""}
+            for i in (0, 1, 2)
+        ] + [{"id": f"x{i}", "available": True, "artists": [{"id": 9, "name": "Дора"}], "title": ""}
+             for i in range(MIN_TRACKS)]
+        start, first = len(replies), len(said)
+        handle("80008", "ссылка")
+        duel = [(chat, text) for chat, text in said[first:] if "вдвоём" in text]
+        assert [chat for chat, _ in duel] == ["80008", "55501"], duel
+        # У пригласившего исполнители 1, 2, 5, 3, 9 и треки t1–t4, у друга 1 и 9 и треки t0–t2:
+        # оба исполнителя друга есть у пригласившего — 100%, общие треки t1 и t2.
+        assert "Вы совпали на <b>100%</b>: общих артистов 2 из 2" in duel[0][1], duel[0][1]
+        assert "Общих треков — 2." in duel[0][1] and "· Toxi$ — Песня &lt;1&gt;" in duel[0][1], duel[0][1]
+        assert "Общие артисты: Дора, Toxi$." in duel[0][1], "первым — кого оба слушают чаще"
+        assert duel[1][1].startswith(f"🎚 <b>СВЕДЕНИЕ</b> вдвоём\n\n{FRIEND_DONE}"), duel[1][1]
+        assert replies[start:].count("[карточка]") == 3, "карточка вдвоём обоим и своя — другу"
+        assert "ты на" in replies[-1], "другу следом и свой процент"
+        assert drawn[-2]["handle"] == config.BOT_HANDLE and drawn[-2]["label"] == "СВЕДЕНИЕ"
+        friend = state.read_json(config.SVED_STATE, {})["80008"]
+        assert "invite" not in friend and friend["used"] == 1, friend
+        assert all(isinstance(t, str) for t, _ in friend["tracks"]), "в снимке только id"
+        # Закрытый список уводит друга в имена — код доживает и до этого пути.
+        invite("70004", code)
+        first = len(said)
+        by_names("70004", "Toxi$, Дора, Сосед, Третий, Пятый")
+        duel = [text for chat, text in said[first:] if "вдвоём" in text]
+        assert len(duel) == 2 and "совпали на <b>100%</b>" in duel[0] and "Общих треков" not in duel[0], duel
+
         # Ждущие: одно сообщение и файл удалён — обещание не висит второй раз.
         state.write_json(config.SVED_FILE, ["55501", "60002"])
         notify_waiting()
@@ -505,11 +722,13 @@ def _selftest() -> None:
     finally:
         (yandex_music.info, yandex_music.artist, yandex_music.by_link, yandex_music.playlist,
          telegram.send_message, telegram.send_photo_file, telegram.send_chat_action,
-         card.save, config.SVED_STATE, config.SVED_FILE, yandex_music._get) = real
+         card.save, config.SVED_STATE, config.SVED_FILE, yandex_music._get, yandex_music.tracks) = real
 
     print("СВЕДЕНИЕ: процент по кругу артиста, свой плейлист второй строкой, "
           "закрытый список и четвёртый разбор за сутки — отказ, снимок без имён; "
-          "по названным артистам: ненайденные названы, меньше пяти — отказ")
+          "по названным артистам: ненайденные названы, меньше пяти — отказ; "
+          "вдвоём: процент по общим исполнителям на лайках и именах, итог обоим, "
+          "своя и протухшая ссылка, адрес бота на карточке")
 
 
 def _show(link: str) -> int:

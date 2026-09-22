@@ -46,7 +46,8 @@ def _fit(draw: ImageDraw.ImageDraw, text: str, limit: int, sizes: tuple[tuple[in
     return f, textwrap.wrap(text, width=sizes[-1][1])[:6], sizes[-1][0]
 
 
-def render(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА") -> Image.Image:
+def render(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА",
+           handle: str = config.CHANNEL_HANDLE) -> Image.Image:
     """Карточка: плашка рубрики, список артистов, приговор вкусу, подпись канала."""
     img = stories.background(WIDTH, HEIGHT)
     draw = ImageDraw.Draw(img)
@@ -94,7 +95,6 @@ def render(verdict: str, artists: list[str], *, label: str = "ПРОЯВКА") -
     draw.rectangle([margin, fy - 16, margin + 96, fy - 8], fill=stories.ACCENT)
     draw.text((margin, fy), "ПЛЁНКА", font=footer, fill=stories.INK)
 
-    handle = "@plenka_fm"
     hbox = draw.textbbox((0, 0), handle, font=footer)
     draw.text((WIDTH - margin - hbox[2], fy), handle, font=footer, fill=(110, 100, 86))
 
@@ -277,7 +277,8 @@ def _candidates(source: str | Path, artist: str):
             yield from footage.artist_images(name)
 
 
-def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВКА") -> Image.Image | None:
+def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВКА",
+                    handle: str = config.CHANNEL_HANDLE) -> Image.Image | None:
     """Карточка на портрете артиста.
 
     Человек спрашивает про артиста и ждёт увидеть артиста — служебная плашка
@@ -312,7 +313,6 @@ def render_on_photo(verdict: str, photo_url: str, *, label: str = "ПРОЯВК�
     fy = HEIGHT - int(HEIGHT * 0.068)
     draw.rectangle([margin, fy - 14, margin + 84, fy - 7], fill=stories.ACCENT)
     draw.text((margin, fy), "ПЛЁНКА", font=footer, fill=(246, 244, 239))
-    handle = "@plenka_fm"
     hbox = draw.textbbox((0, 0), handle, font=footer)
     draw.text((WIDTH - margin - hbox[2], fy), handle, font=footer, fill=(198, 192, 182))
 
@@ -326,13 +326,16 @@ def save(
     label: str = "ПРОЯВКА",
     name: str = "card",
     photo_url: str = "",
+    handle: str = config.CHANNEL_HANDLE,
 ) -> Path:
+    """handle — адрес в правом нижнем углу. У СВЕДЕНИЯ там бот, а не канал: кто увидел
+    «ты на 68% Toxi$» в чужих сторис, хочет свой процент, и считает его бот."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{name}.jpg"
 
-    image = render_on_photo(verdict, photo_url, label=label) if photo_url else None
+    image = render_on_photo(verdict, photo_url, label=label, handle=handle) if photo_url else None
     if image is None:
-        image = render(verdict, artists, label=label)
+        image = render(verdict, artists, label=label, handle=handle)
 
     image.convert("RGB").save(path, "JPEG", quality=90)
     return path
