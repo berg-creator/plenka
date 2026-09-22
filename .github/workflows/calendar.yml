@@ -30,7 +30,7 @@ jobs:
 
       - name: Проверить даты
         env:
-          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
           LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
           GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}

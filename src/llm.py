@@ -127,7 +127,7 @@ def gemini_model() -> str:
 
 
 def provider() -> str:
-    return os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
+    return os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
 
 
 def fallback() -> str:

@@ -130,7 +130,7 @@ jobs:
           YANDEX_FUNCTION_KEY: ${{ secrets.YANDEX_FUNCTION_KEY }}
           # Разборы ПРОЯВКИ генерируются здесь же — генератор тот же,
           # что у постов канала, иначе бот и канал звучат по-разному.
-          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
           LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
           GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}

@@ -65,7 +65,7 @@ SVED_STATE = PRIVATE / "svedenie.json"
 SVED_PER_DAY = 3
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
-# (anthropic — платный Claude, по умолчанию; gigachat — Сбер; gemini — Google).
+# (gemini — Google, по умолчанию; anthropic — платный Claude; gigachat — Сбер).
 # Переменная LLM_FALLBACK задаёт запасной генератор на случай, когда основной
 # недоступен: см. src/llm.py. Сама модель выбирается внутри провайдера
 # в src/providers/.

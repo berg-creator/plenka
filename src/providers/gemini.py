@@ -83,27 +83,33 @@ def generate(model: str, system: str, user: str, schema: dict) -> dict:
         },
     }
 
-    last_error = ""
-    for attempt in range(3):
-        response = requests.post(
-            f"{BASE}/{model}:generateContent",
-            headers=_headers(),
-            json=payload,
-            timeout=120,
-        )
+    last_error, status = "", 0
+    for attempt in range(4):
+        if attempt:
+            # «High demand» у Gemini держится минуту-другую: 22.09.2026 запрос
+            # в 06:13 ушёл на ГигаЧат, а в 06:15 Gemini уже ответил. Паузы
+            # 15+30+45 секунд такой всплеск переживают; лимит (429) ждём дольше.
+            time.sleep((30 if status == 429 else 15) * attempt)
+        try:
+            response = requests.post(
+                f"{BASE}/{model}:generateContent",
+                headers=_headers(),
+                json=payload,
+                timeout=120,
+            )
+        except requests.RequestException as exc:
+            # Не дождались ответа — та же перегрузка, что и 503, повторяем.
+            last_error, status = str(exc), 0
+            continue
         _last_call = time.monotonic()
 
         if response.status_code == 200:
             return _parse(response.json())
 
-        last_error = f"{response.status_code}: {response.text[:200]}"
-        if response.status_code == 429:
-            # Упёрлись в лимит — ждём дольше обычного.
-            time.sleep(30 * (attempt + 1))
-            continue
-        if response.status_code < 500:
+        status = response.status_code
+        last_error = f"{status}: {response.text[:200]}"
+        if status < 500 and status != 429:
             break  # ошибка в запросе, повтор не поможет
-        time.sleep(5 * (attempt + 1))
 
     # Не ответил — это поломка, а не решение модели: пусть llm._generate
     # поднимет запасной генератор. Отказ вида skip=true оставил бы канал
