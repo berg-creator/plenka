@@ -37,7 +37,7 @@
 
 Ручки бота — mix(..., voice=, echo=): голос к биту и доля эха, в дБ. Дорожки
 по отдельности — mix(..., parts=): даблы за ведущим его же райдером, бэки шире
-и дальше в отзвук, эдлибы по краям в эхо (PARTS); место голосу — только в музыке,
+и дальше в отзвук, эдлибы — каждый выкрик в свою точку панорамы и в эхо (PARTS); место голосу — только в музыке,
 вырезы саунд-дизайна — только барабанов и баса. Простой режим — две дорожки.
 
 Промежуточное — во float: пики выше нуля между шагами не срезаются, режет только
@@ -51,6 +51,7 @@
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --style грязно --design
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --voice 2 --echo -4   ручки «голос громче», «эха меньше»
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --part бэк БЭКИ --part барабаны БАРАБАНЫ   по дорожкам
+    python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --like ТРЕК   тембр, ширина и громкость — к чужому треку
 """
 
 from __future__ import annotations
@@ -73,6 +74,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from . import clips, config, llm, reels, state, telegram
+from .sources import itunes
 
 RATE = 44100
 # Любой формат на входе: моно становится стерео, частота — 44,1 кГц. Неслышимое
@@ -311,6 +313,18 @@ CLIPPER = "asoftclip=type=hard"
 # каждый сам по себе. Порог — по замеру, чтобы сжатие было GLUE дБ по EBU R128
 # (на пяти треках вышло 1,6–1,7).
 GLUE = 1.5
+# «Как у <артиста>» — подгонка к 30-секундному превью его трека в магазине: октавы
+# микса к 1 кГц, стороны к середине и громкость. Не Matchering: у того подгонка
+# без предела, и чужой мастер перекраивал бы трек целиком, а здесь только наклон —
+# колокола не больше LIKE_TONE дБ, стороны не больше LIKE_WIDTH, громкость в LIKE_LUFS.
+# Превью — кусок трека, обычно припев: для наклона тембра и ширины его хватает,
+# а для громкости берётся его EBU R128 в пределах ряда рэп-мастеров.
+LIKE_TONE = 3.0
+LIKE_WIDTH = 3.0
+LIKE_LUFS = (-12.0, -8.0)
+LIKE_PASSES = 2
+# Стороны — выше 150 Гц: ниже 120 мастер и так сводит в моно.
+LIKE_BAND = "highpass=f=150,"
 
 
 def _ffmpeg(*args) -> None:
@@ -957,15 +971,15 @@ def _glue(total: Path) -> str:
     return chain
 
 
-def _master(total: Path, glue: str, master: Path) -> tuple[float, float, float]:
-    """Мастер: низ в моно, склейка шины, клиппер и ограничитель до MASTER_LUFS —
+def _master(total: Path, glue: str, master: Path, target: float = MASTER_LUFS) -> tuple[float, float, float]:
+    """Мастер: низ в моно, склейка шины, клиппер и ограничитель до target LUFS —
     в master. Возвращает громкость, истинный пик и подъём.
 
     Клиппер и ограничитель съедают часть громкости, поэтому подъём подбирается
     замером. Пик волны лежит между отсчётами и на 44,1 кГц выходит до дБ выше
     порога, поэтому оба работают на учетверённой частоте. Клиппер упирается в ноль,
     и сигнал к нему подводится так, чтобы ноль пришёлся на CLIP дБ над порогом."""
-    push, limit = MASTER_LUFS - loudness(total, glue)[0], CEILING - 0.3
+    push, limit = target - loudness(total, glue)[0], CEILING - 0.3
     for _ in range(6):
         _ffmpeg("-i", total, "-af",
                 f"{LOW_MONO},{glue}volume={push - limit - CLIP:.2f}dB,aresample={4 * RATE},{CLIPPER},"
@@ -974,16 +988,30 @@ def _master(total: Path, glue: str, master: Path) -> tuple[float, float, float]:
                 f"aresample={RATE}",
                 "-c:a", "pcm_s24le", master)
         level, peak = loudness(master)
-        if abs(level - MASTER_LUFS) < 0.3 and peak <= CEILING:
+        if abs(level - target) < 0.3 and peak <= CEILING:
             break
-        push += MASTER_LUFS - level
+        push += target - level
         # Ровно на превышение порог сходится к потолку снизу бесконечно — с запасом 0,1 дБ.
         limit -= peak - CEILING + 0.1 if peak > CEILING else 0.0
     return level, peak, push
 
 
+def _sides(path: Path) -> float:
+    """Стороны к середине выше LIKE_BAND, дБ: чем больше, тем шире."""
+    mid, side = _channels(path, f"{FORMAT},{LIKE_BAND}{MS},")[:2]
+    return side - mid
+
+
+def _shape(total: Path, gains: dict[int, float], wide: float, work: Path) -> Path:
+    """Сумма склейки с колоколами gains и сторонами громче на wide дБ — в work/like.wav."""
+    k, matched = 10 ** (wide / 20), work / "like.wav"
+    _ffmpeg("-i", total, "-af", f"{_bells(gains)}pan=stereo|c0={(1 + k) / 2:.4f}*c0+{(1 - k) / 2:.4f}*c1"
+            f"|c1={(1 - k) / 2:.4f}*c0+{(1 + k) / 2:.4f}*c1", *reels.VOICE_CODEC, matched)
+    return matched
+
+
 def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
-        voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = ()) -> Path:
+        voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = (), like: Path | None = None) -> Path:
     """Склейка в out/skleyka.wav, промежуточное — в out/work.
 
     parts — дорожки по отдельности, [(роль, файл)]: даблы, бэки и эдлибы встают вокруг
@@ -994,7 +1022,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     Ручки бота: voice — голос к биту, дБ («голос громче / тише» — по ±2): сдвигает
     и баланс, и цель райдера, иначе в местах, где бит перекрывал голос, райдер
     съел бы поправку; echo — доля отзвука, дилея и бросков к своей, дБ («эха
-    больше / меньше» — по ±4); дабл не эхо, его не трогает."""
+    больше / меньше» — по ±4); дабл не эхо, его не трогает. like — превью трека, к которому
+    подтянуть тембр, ширину и громкость («как у <артиста>», _like)."""
     look, work = STYLES[style], out / "work"
     work.mkdir(parents=True, exist_ok=True)
     print(f"  стиль «{style}»: {look['about']}" + (", саунд-дизайн" if design else "")
@@ -1031,7 +1060,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     level = loudness(ridden)[0]
     placed = voices([(part, path) for part, path in parts if part in PARTS], level, work / "ride.wav", work, tune or "")
 
-    rhythm = grid(beat) if design or look.get("delay", ("",))[0] == "в темп" else None
+    adlibs = [(path, gain) for path, gain, part in placed if part == "эдлиб"]
+    rhythm = grid(beat) if design or adlibs or look.get("delay", ("",))[0] == "в темп" else None
     if rhythm:
         print(f"  темп {60 / rhythm[0]:.1f} ударов в минуту, сильная доля {rhythm[1]:.2f} с")
     sends = []
@@ -1045,11 +1075,21 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
         sends.append(("double", DOUBLE, DOUBLE_SHARE))
     wets = []  # (шина, громкость в склейке по EBU R128)
     for name, graph, share in sends:
-        wet, source = work / f"{name}.wav", ridden if name == "double" else _sends(ridden, placed, name, work)
-        _ffmpeg("-i", source, "-filter_complex", graph, "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
-        # Части посылают в шину сверх ведущего: доля его отзвука к нему самому остаётся той же.
-        extra = 0.0 if source == ridden else loudness(source)[0] - level
-        wets.append((wet, level + 20 * math.log10(share) + extra + (0.0 if name == "double" else echo)))
+        wet = work / f"{name}.wav"
+        _ffmpeg("-i", ridden, "-filter_complex", graph, "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
+        wets.append((wet, level + 20 * math.log10(share) + (0.0 if name == "double" else echo)))
+    # Свой отзвук бэков и эдлибов: посыл каждой части — на её громкости в сумме плюс reverb,
+    # и шина отзвука выходит той же громкостью, что посыл.
+    if going := [(path, gain + PARTS[part]["reverb"]) for path, gain, part in placed if PARTS[part]["reverb"] is not None]:
+        send, wet = _sum(going, work / "send-parts.wav"), work / "parts-room.wav"
+        _ffmpeg("-i", send, "-filter_complex", _reverb(PARTS_ROOM), "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
+        wets.append((wet, loudness(send)[0] + echo))
+    # Эхо эдлибов — своё, в темп, приседает под ведущим: повторы — в его паузах.
+    for n, (path, gain) in enumerate(adlibs):
+        wet = work / f"adlib-echo{n}.wav"
+        _ffmpeg("-i", path, "-i", ridden, "-filter_complex", _tempo_delay(rhythm[0], level, "[1:a]"),
+                "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
+        wets.append((wet, loudness(path)[0] + gain + ADLIB_ECHO + echo))
     bed, tricks = ducked, []
     if design and lines:
         length, first = rhythm[0], lines[0][0]
@@ -1106,8 +1146,30 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
         print("  слышно: " + _audible(bed, [(name, path, gains.get(path, 0.0), spans, ref)
                                             for name, path, _, spans, ref in tricks if path and spans]))
 
-    master = out / "skleyka.wav"
-    level, peak, push = _master(total, _glue(total), master)
+    # «Как у <артиста>»: сверяется готовый мастер, а не сумма до него — клиппер
+    # и ограничитель возвращали половину поправки, — и колокол в октаву недобирает
+    # до своей середины, поэтому поправка доводится за LIKE_PASSES проходов мастера.
+    master, target, gains, wide = out / "skleyka.wav", MASTER_LUFS, dict.fromkeys(TONE, 0.0), 0.0
+    if like:
+        theirs, their_sides = tone(like, FORMAT), _sides(like)
+        target = max(LIKE_LUFS[0], min(LIKE_LUFS[1], loudness(like)[0]))
+    for attempt in range(LIKE_PASSES + 1 if like else 1):
+        source = _shape(total, gains, wide, work) if attempt else total
+        level, peak, push = _master(source, _glue(source), master, target)
+        if not like:
+            break
+        ours, miss_sides = tone(master, FORMAT), their_sides - _sides(master)
+        miss = {f: theirs[f] - ours[f] for f in TONE}
+        print(f"  к референсу, проход {attempt}: тембр отходит на {statistics.fmean(map(abs, miss.values())):.1f} дБ "
+              f"в среднем, стороны — на {miss_sides:+.1f}")
+        step = ({f: round(max(-LIKE_TONE, min(LIKE_TONE, gains[f] + miss[f])), 1) for f in TONE},
+                round(max(-LIKE_WIDTH, min(LIKE_WIDTH, wide + miss_sides)), 1))
+        if attempt == LIKE_PASSES or max(abs(step[1] - wide), *(abs(step[0][f] - gains[f]) for f in TONE)) < 0.5:
+            break
+        gains, wide = step
+    if like:
+        print("  как у референса: тембр " + (", ".join(f"{f} Гц {g:+.1f}" for f, g in gains.items() if g) or "как был")
+              + f"; стороны {wide:+.1f} дБ; громкость {target:.1f} LUFS")
     if design and lines and (at := _stop_at(ducked, lines, rhythm)) is not None:
         _tape_stop(master, at, rhythm[0], work)
         print(f"  остановка плёнки с {at:.2f} с")
@@ -1148,19 +1210,60 @@ def compare(vocal: Path, beat: Path, master: Path, out: Path) -> tuple[Path, Pat
 # (Сениор), один — в центре под ведущим. Бэки — очень широко (Goldberg) и дальше, в отзвук;
 # эдлибы — по краям и в эхо: им можно меньше внятности и больше эффектов (Hoffman, Waves).
 # Цифр громкости у инженеров нет, только «достаточно тихо» (KRUG): дБ к ведущему — выбор
-# склейки. Одна дорожка бэков или эдлибов расходится в стороны расширителем Сениора (DOUBLE)
-# без центра — центр остаётся ведущему (Heldens). reverb и delay — посыл к доле ведущего, раз.
+# склейки. Одна дорожка бэков расходится в стороны расширителем Сениора (DOUBLE)
+# без центра — центр остаётся ведущему (Heldens).
+#
+# Пространство. У ведущего отзвук и дилей — отдельные шины, подмешанные тихо: голос
+# остаётся сухим и чётким (Firkins — 15 % мокрого, Schaeffer, Joshua). Бэки и эдлибы,
+# наоборот, растворяются в своём отзвуке (владелец 22.09.2026: «на бэке оставляю дилей
+# и реверб на той же шине… чтобы они растворялись»; Bainz — броски «100‑percent wet»):
+# reverb — громкость их общего отзвука PARTS_ROOM к ним самим, дБ, мимо стиля ведущего;
+# None — сухо, как даблы у KRUG. Ручка «эха» двигает и его.
+#
+# Эдлибы — «эй», «у», «йа» между строк — владелец 22.09.2026 сводил так: «по панировке
+# раскидывал и эхо накидывал». Поэтому каждый выкрик встаёт в свою точку панорамы
+# по кругу ADLIB_PANS — лево, право, ближе к центру слева и справа (_scatter), а у каждой
+# дорожки эдлибов своё эхо в темп на ADLIB_ECHO дБ к ней: повторы приседают под
+# ведущим и звучат в паузах, как броски саунд-дизайна. Полоса эдлибов уже, чем
+# у ведущего, — 300 Гц … 5 кГц, как советует Rewak (Splice) отличать их от ведущего,
+# и лёгкий перегруз (LaRay на эдлибах Cardi B — Sansamp): выкрик читается фоном,
+# а не вторым ведущим.
 PARTS = {
-    "дабл": {"cut": 150, "gain": -8.0, "pan": 0.8, "deess": "deesser=i=0.8", "reverb": 0.0, "delay": 0.0},
-    "бэк": {"cut": 200, "gain": -10.0, "pan": 0.9, "deess": DEESSER, "reverb": 2.0, "delay": 0.0},
-    "эдлиб": {"cut": 200, "gain": -6.0, "pan": 0.7, "deess": DEESSER, "reverb": 1.0, "delay": 2.0},
+    "дабл": {"cut": 150, "gain": -8.0, "pan": 0.8, "deess": "deesser=i=0.8", "reverb": None},
+    "бэк": {"cut": 200, "gain": -10.0, "pan": 0.9, "deess": DEESSER, "reverb": -14.0},
+    "эдлиб": {"cut": 300, "gain": -6.0, "pan": 0.7, "deess": DEESSER, "reverb": -16.0,
+              "color": "lowpass=f=5000,volume=6dB,asoftclip=type=atan:oversample=4,volume=-6dB"},
 }
+PARTS_ROOM = 1.2
+ADLIB_PANS = (-0.7, 0.7, -0.4, 0.4)
+ADLIB_PAUSE = 0.2
+ADLIB_LONG = 2.0
+ADLIB_ECHO = -8.0
 
 
 def _pan(position: float) -> str:
     """Моно — в точку панорамы от −1 (левый край) до 1 с постоянной мощностью."""
     angle = (position + 1) * math.pi / 4
     return f"pan=stereo|c0={math.cos(angle):.4f}*c0|c1={math.sin(angle):.4f}*c0"
+
+
+def _scatter(events: list[tuple[float, float]], first: int = 0) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Громкость левого и правого канала по ходу дорожки, точки (секунда, дБ) для _gain_track:
+    выкрик events[i] — в точку ADLIB_PANS[first + i] с постоянной мощностью. Точка меняется
+    посреди паузы перед выкриком, за 5 мс: в тишине не щёлкает."""
+    left, right = [], []
+    for i, (start, _) in enumerate(events):
+        angle = (ADLIB_PANS[(first + i) % len(ADLIB_PANS)] + 1) * math.pi / 4
+        gains = (20 * math.log10(max(math.cos(angle), 1e-6)), 20 * math.log10(max(math.sin(angle), 1e-6)))
+        at = 0.0
+        if i:
+            at = (events[i - 1][1] + start) / 2
+            left.append((at, left[-1][1]))
+            right.append((at, right[-1][1]))
+            at += 0.005
+        left.append((at, gains[0]))
+        right.append((at, gains[1]))
+    return left, right
 
 
 def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work: Path,
@@ -1177,8 +1280,20 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
         squeezed, dry = work / f"part{n}-comp.wav", work / f"part{n}.wav"
         _ffmpeg("-i", path, "-af", f"{chain},volume={VOCAL_LUFS - loudness(path, chain + ',')[0]:.2f}dB,{VOCAL_CHAIN}",
                 *reels.VOICE_CODEC, squeezed)
-        tone = f"{_equalizer(squeezed, _lines(_envelope(squeezed)), work)}{look['deess']}"
-        if len(same) == 1 and part != "дабл":
+        tone = f"{_equalizer(squeezed, _lines(_envelope(squeezed)), work)}{look['deess']}" \
+            + (f",{look['color']}" if "color" in look else "")
+        events = _lines(_envelope(squeezed), VOICE_RANGE, ADLIB_PAUSE) if part == "эдлиб" else []
+        # Длинные партии под видом эдлибов (сплошной бэк) по кругу встали бы на минуту
+        # в одну сторону — такие расходятся в стороны, как бэки.
+        scattered = len(events) > 1 and statistics.median(b - a for a, b in events) <= ADLIB_LONG
+        if scattered:
+            seconds = clips.probe_seconds(squeezed) + 1
+            left, right = (_gain_track(points, seconds, work / f"part{n}-{side}.wav")
+                           for side, points in zip("lr", _scatter(events, 2 * same.index(n))))
+            _ffmpeg("-i", squeezed, "-i", left, "-i", right, "-filter_complex",
+                    f"[0:a]{tone},aformat=channel_layouts=mono,pan=stereo|c0=c0|c1=c0[s];[1:a]aresample={RATE}[l];[2:a]aresample={RATE}[r];"
+                    "[l][r]join=inputs=2:channel_layout=stereo[g];[s][g]amultiply,volume=2", *reels.VOICE_CODEC, dry)
+        elif len(same) == 1 and part != "дабл":
             _ffmpeg("-i", squeezed, "-filter_complex", f"[0:a]{tone}[t];" + DOUBLE.replace("[0:a]", "[t]"),
                     "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, dry)
         else:
@@ -1187,18 +1302,10 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
         if part == "дабл" and ride:
             dry = _apply(dry, ride, work / f"part{n}-ride.wav")
         placed.append((dry, level + look["gain"] - loudness(dry)[0], part))
-        print(f"  {part}: {'в стороны' if len(same) == 1 and part != 'дабл' else 'панорама'}, "
-              f"{look['gain']:+.0f} дБ к ведущему")
+        where = (f"{len(events)} выкриков по панораме" if scattered
+                 else "в стороны" if len(same) == 1 and part != "дабл" else "панорама")
+        print(f"  {part}: {where}, {look['gain']:+.0f} дБ к ведущему")
     return placed
-
-
-def _sends(ridden: Path, placed: list[tuple[Path, float, str]], key: str, work: Path) -> Path:
-    """Что уходит в отзвук или дилей: ведущий и части со своими посылами (PARTS).
-    Ни одна часть туда не посылает — просто ведущий."""
-    going = [(path, gain + 20 * math.log10(PARTS[part][key])) for path, gain, part in placed if PARTS[part][key]]
-    if not going:
-        return ridden
-    return _sum([(ridden, 0.0), *going], work / f"send-{key}.wav")
 
 
 # ─────────────────────────── бот ───────────────────────────
@@ -1266,7 +1373,7 @@ TRACK_DAYS = 7
 # Ручки: голос к биту и доля эха, дБ, — шаг и пределы.
 VOICE_STEP, VOICE_LIMIT = 2.0, 6.0
 ECHO_STEP, ECHO_LIMITS = 4.0, (-12.0, 8.0)
-KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swap": False}
+KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swap": False, "like": None}
 # Кнопки идут через service.handle_callback: префикс service.CALLBACK_PREFIX
 # и действие sk. Импортировать service отсюда нельзя — он импортирует нас.
 PREFIX = "s:sk:"
@@ -1610,6 +1717,8 @@ def look(knobs: dict) -> str:
         words.append("эха " + ("больше" if knobs["echo"] > 0 else "меньше"))
     if knobs["design"]:
         words.append("с саунд-дизайном")
+    if knobs.get("like"):
+        words.append(f"тембр, ширина и громкость — к «{knobs['like']['title']}»")
     return ", ".join(words)
 
 
@@ -1695,6 +1804,8 @@ TALK_MARK = "напиши словами"
 TALKS = 6
 TALK_FAILED = "Не разобрал — подкрути кнопками выше."
 TALKED = "Поговорили про этот трек достаточно — дальше кнопками выше."
+LIKE_MISSING = "«{name}» в магазинах не нашёл — звук ни к чему не подтягивал."
+LIKE_LOST = "Отрывок «{name}» не скачался — звук к нему не подтягивал.\n"
 TALK_KNOBS = ("style", "design", "voice", "echo")
 
 
@@ -1736,7 +1847,8 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
     try:
         answer = llm.generate_skleyka({
             "request": text[:500],
-            "knobs": {key: track["knobs"][key] for key in TALK_KNOBS},
+            "knobs": {**{key: track["knobs"][key] for key in TALK_KNOBS},
+                      "like": (track["knobs"].get("like") or {}).get("title", "")},
             "limits": {"voice": [-VOICE_LIMIT, VOICE_LIMIT], "echo": list(ECHO_LIMITS),
                        "style": {name: kind["about"] for name, kind in STYLES.items()}}})
     except Exception as exc:  # noqa: BLE001 — генератор недоступен, кнопки остаются
@@ -1745,6 +1857,19 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
         return
     knobs = heard(track["knobs"], answer)
     words = html.escape(str(answer.get("reply", "")).strip())[:400]
+    # «Как у <артиста>»: модель называет, чей трек, а сам трек ищет код — в магазине,
+    # с превью и тем же исполнителем. Не нашёлся — подгонки нет, и человеку это сказано.
+    asked, now = str(answer.get("like") or "").strip()[:100], track["knobs"].get("like")
+    if not asked:
+        knobs["like"] = None
+    elif not now or asked.casefold() != now["title"].casefold():
+        try:
+            knobs["like"] = itunes.find_song(asked) or now
+        except Exception as exc:  # noqa: BLE001 — магазин недоступен, остальные ручки работают
+            print(f"  склейка: трек для подгонки не нашёлся: {type(exc).__name__}")
+            knobs["like"] = now
+        if knobs["like"] is now:
+            words = (f"{words}\n" if words else "") + LIKE_MISSING.format(name=html.escape(asked))
     if knobs == track["knobs"]:
         telegram.send_message(chat_id, words or TALK_FAILED)
         return
@@ -1939,6 +2064,11 @@ def run_job(spec_path: Path) -> int:
             vocal, beat = _bus(parts, True, work / "vocal.wav"), _bus(parts, False, work / "beat.wav")
             lead = [p for p in parts if p[2] == "вокал"] or [p for p in parts if p[2] in VOCAL_SIDE]
             extra = {key: knobs[key] for key in ("voice", "echo") if knobs.get(key)}
+            if like := knobs.get("like"):
+                extra["like"] = reels._download(like["url"], work / "like.m4a", 10_000)
+                if not extra["like"]:
+                    note += LIKE_LOST.format(name=html.escape(like["title"]))
+                    spec["knobs"] = dict(knobs, like=None)
             master = mix(_bus(lead, True, work / "lead.wav"), beat, work / "out", knobs["style"], knobs["design"],
                          parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead], **extra)
             try:
@@ -2039,7 +2169,8 @@ def _selftest() -> None:
     """Без сети: роли по имени и по звуку, куда идёт файл, заявка от дорожек до очереди,
     ручки и возврат лимита, лимит суток, отказы по тишине и длине."""
     sent: list[str] = []
-    real = (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka)
+    real = (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
+            itunes.find_song)
     telegram.send_message = lambda chat, text, **_: sent.append(text) or {"message_id": len(sent)}
     telegram.edit_markup = lambda chat, message, markup: None
     config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
@@ -2200,7 +2331,7 @@ def _selftest() -> None:
 
         llm.generate_skleyka = model
         props = llm.SKLEYKA_SCHEMA["properties"]
-        assert set(props) == {*TALK_KNOBS, "reply"} and all(name in props["style"]["description"] for name in STYLES)
+        assert set(props) == {*TALK_KNOBS, "like", "reply"} and all(name in props["style"]["description"] for name in STYLES)
         assert TALK_MARK in TUNE
         data["tracks"]["t1"] = {"chat": "7", "files": [], "knobs": dict(KNOBS), "tweaks": 0,
                                 "at": state.iso(state.now() + timedelta(minutes=1))}
@@ -2216,6 +2347,20 @@ def _selftest() -> None:
         answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "reply": "Ширину не кручу."}]
         talk(7, "шире", {"text": TUNE})  # кнопок Telegram не приложил — последний трек человека
         assert sent[-1] == "Ширину не кручу." and load()["tracks"]["t1"]["tweaks"] == 1 and len(load()["jobs"]) == jobs
+        # «Как у артиста»: трек ищет код, а не модель; не нашёлся — подгонки нет, и это сказано.
+        itunes.find_song = lambda query: {"id": 1, "title": "Future — Mask Off", "url": "u"} if "Future" in query else {}
+        answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "like": "Future", "reply": "Автотюн оставил."}]
+        talk(7, "как у Future", menu)
+        assert load()["tracks"]["t1"]["knobs"]["like"]["id"] == 1 and "к «Future — Mask Off»" in sent[-1], sent[-1]
+        answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "like": "Никто", "reply": ""}]
+        talk(7, "как у Никто", menu)
+        assert sent[-1] == LIKE_MISSING.format(name="Никто") and load()["tracks"]["t1"]["knobs"]["like"]["id"] == 1, sent[-1]
+        answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "like": "", "reply": "Убрал."}]
+        talk(7, "как было", menu)
+        assert load()["tracks"]["t1"]["knobs"]["like"] is None and load()["tracks"]["t1"]["tweaks"] == 3
+        data = load()
+        data["tracks"]["t1"]["tweaks"] = 1
+        save(data)
         answers[:] = [RuntimeError("сеть")]
         talk(7, "эха", menu)
         assert sent[-1] == TALK_FAILED
@@ -2236,11 +2381,16 @@ def _selftest() -> None:
         assert sent[-1] == INTRO
         assert turn(KNOBS, "e+")["echo"] == ECHO_STEP and turn(dict(KNOBS, voice=VOICE_LIMIT), "v+")["voice"] == VOICE_LIMIT
         assert "с саунд-дизайном" in look(turn(KNOBS, "d")) and turn(KNOBS, "c1")["style"] == "мелодично"
+        # Эдлибы: выкрики по очереди лево и право, точка меняется в паузе, а не на звуке.
+        left, right = _scatter([(1.0, 1.5), (2.0, 2.3), (4.0, 4.2)])
+        assert left[0][1] > right[0][1] and left[-1][1] > right[-1][1] and left[2][1] < right[2][1], (left, right)
+        assert all(1.5 < t < 2.0 for t, _ in left[1:3]) and len(left) == len(right) == 5
     finally:
-        telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka = real
+        (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
+         itunes.find_song) = real
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, звук до склейки, "
-          "ручки кнопками и словами, лимиты, отказы — ок")
+          "ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме — ок")
 
 
 def main() -> int:
@@ -2253,6 +2403,8 @@ def main() -> int:
                         help="саунд-дизайн: вдохи, фильтр и вырезы бита, подъёмы, броски, остановка плёнки")
     parser.add_argument("--voice", type=float, default=0.0, help="голос к биту, дБ (ручки бота — по ±2)")
     parser.add_argument("--echo", type=float, default=0.0, help="доля отзвука, дилея и бросков, дБ (ручки бота — по ±4)")
+    parser.add_argument("--like", type=Path, metavar="ФАЙЛ",
+                        help="трек, к которому подтянуть тембр, ширину и громкость («как у артиста»)")
     parser.add_argument("--part", nargs=2, action="append", default=[], metavar=("РОЛЬ", "ФАЙЛ"),
                         help="дорожка по отдельности: дабл, бэк, эдлиб, барабаны, бас, музыка (БИТ — всё вместе)")
     parser.add_argument("--job", type=Path, metavar="ФАЙЛ", help="склейка заявки из бота (её запускает дежурство)")
@@ -2276,7 +2428,7 @@ def main() -> int:
         if bad := [part for part, _ in args.part if part not in PARTS and part not in INSTRUMENTS]:
             parser.error(f"роли {', '.join(bad)} нет")
         master = mix(*args.mix, args.out, args.style, args.design, args.voice, args.echo,
-                     [(part, Path(path)) for part, path in args.part])
+                     [(part, Path(path)) for part, path in args.part], args.like)
         compare(*args.mix, master, args.out)
         print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}")
         return 0

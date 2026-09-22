@@ -225,6 +225,50 @@ def song_preview(track: int | str) -> str:
     return next((item["previewUrl"] for item in (data or {}).get("results", []) if item.get("previewUrl")), "")
 
 
+def find_song(query: str) -> dict:
+    """Трек с превью по запросу «артист» или «артист — трек»: {id, title, url}; пусто — не нашлось.
+
+    Нужно СКЛЕЙКЕ: «как у <артиста>» подтягивает звук к превью (src/skleyka.py).
+    Магазин российский: в американском «Баста» записан как Basta, а западные
+    артисты есть в обоих. Исполнитель — точно названный: первым в выдаче бывает
+    чужой трек с тем же словом или сборник; минусовки мимо — у них нет голоса.
+    Не нашёлся по имени в песнях («Future» тонет в песнях с этим словом) —
+    самые популярные песни артиста из его карточки.
+    """
+    artist, _, title = (part.strip() for part in query.partition("—"))
+    want = artist.casefold()
+
+    def pick(items: list[dict], exact: bool) -> dict:
+        for item in items:
+            name, track = item.get("artistName", "").casefold(), item.get("trackName", "")
+            if (item.get("previewUrl") and not re.search(r"(?i)instrumental|karaoke|a ?cappella|минус", track)
+                    and (name == want if exact else want in name) and title.casefold() in track.casefold()):
+                return {"id": item["trackId"], "title": f"{item['artistName']} — {track}", "url": item["previewUrl"]}
+        return {}
+
+    if not want:
+        return {}
+    if title:
+        # Названный трек бывает только в одном магазине: SICKO MODE в российском нет.
+        for country in ("ru", "us"):
+            songs = (get_json(SEARCH_URL, params={"term": f"{artist} {title}", "entity": "song", "limit": 50,
+                                                  "country": country}, min_interval=MIN_INTERVAL) or {}).get("results", [])
+            if found := pick(songs, exact=False):
+                return found
+        return {}
+    songs = (get_json(SEARCH_URL, params={"term": artist, "entity": "song", "attribute": "artistTerm", "limit": 50,
+                                          "country": "ru"}, min_interval=MIN_INTERVAL) or {}).get("results", [])
+    if found := pick(songs, exact=True):
+        return found
+    artists = (get_json(SEARCH_URL, params={"term": artist, "entity": "musicArtist", "limit": 5, "country": "ru"},
+                        min_interval=MIN_INTERVAL) or {}).get("results", [])
+    card = next((item["artistId"] for item in artists if item.get("artistName", "").casefold() == want), None)
+    if not card:
+        return {}
+    top = get_json(LOOKUP_URL, params={"id": card, "entity": "song", "limit": 10, "country": "ru"}, min_interval=MIN_INTERVAL)
+    return pick((top or {}).get("results", []), exact=False)
+
+
 def _parse_date(raw: str | None) -> datetime | None:
     if not raw:
         return None

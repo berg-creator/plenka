@@ -121,9 +121,11 @@ SKLEYKA_SCHEMA = {
         "design": {"type": "boolean", "description": "Саунд-дизайн: true — включён"},
         "voice": {"type": "number", "description": "Голос к биту, дБ, от -6 до 6"},
         "echo": {"type": "number", "description": "Эхо — отзвук и повторы вместе, дБ, от -12 до 8"},
+        "like": {"type": "string",
+                 "description": "К чьему треку подтянуть тембр, ширину и громкость: «Артист» или «Артист — Трек»; пусто — ни к чьему"},
         "reply": {"type": "string", "description": "Ответ человеку: что сделал или чего не умею, 1–3 фразы до 300 знаков"},
     },
-    "required": ["style", "design", "voice", "echo", "reply"],
+    "required": ["style", "design", "voice", "echo", "like", "reply"],
     "additionalProperties": False,
 }
 
