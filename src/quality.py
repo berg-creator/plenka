@@ -139,7 +139,7 @@ _ORDINAL = (
 # вышли X и Y» сюда не попадает.
 INVENTED_PAST = re.compile(
     r"\b(?:молчани\w*|молчал\w*|замолчал\w*|затишь\w*|вернул\w*|возвращени\w*|камб[еэ]к\w*|"
-    r"к\s+корням|дебют\w*|успешн\w*|начинал\w*|трилоги\w*|после\s+серии|"
+    r"к\s+корням|дебют\w*|успешн\w*|начинал\w*|трилоги\w*|после\s+серии|тенденци\w*|"
     r"после\s+(?:\w+\s+)?(?:перерыв|пауз)\w*|впервые\s+за|"
     r"перв\w+\s+(?:\w+\s+)?за\s+(?:\d+\s+)?(?:год|лет|месяц|полгода|недел|осен|зим|весн|сезон)\w*|"
     r"(?:сингл|релиз|альбом)\w*\s+подряд)\b"
@@ -181,10 +181,21 @@ _COUNT = (r"\d+|од(?:ин|на)|дв[ае]|три|четыре|пять|шес
 INVENTORY_COUNT = re.compile(rf"(?:{_COUNT})\s+(?:трек\w*|вещ\w+|песн\w+|композиц\w+|штук\w*)")
 INVENTORY_TIME = re.compile(r"\d+\s*минут|\b\d{1,3}:\d{2}\b")
 
+# Числительное перед «минут» в любом падеже узнаётся по трём первым буквам:
+# «трёх», «трех», «три» — всё это 3. Больше десяти такой потолок не объявляют.
+_MINUTES = {"одн": 1, "два": 2, "две": 2, "дву": 2, "три": 3, "трё": 3, "тре": 3,
+            "чет": 4, "пят": 5, "шес": 6, "сем": 7, "вос": 8, "дев": 9, "дес": 10}
+
 # Номер релиза — отдельно и со своей причиной для повтора. С общей («о прошлом
 # только по previous_releases») GigaChat трижды подряд писал Смоки Мо «третий
 # сингл за лето»: принимал счёт по полю за данные, и пост пропадал.
-RELEASE_NUMBER = re.compile(rf"\b{_ORDINAL}\s+(?:альбом|релиз|сингл|микстейп)\w*\b")
+# «Третья работа за лето» и «ещё один короткий сингл» — тот же счёт, только
+# другим словом и без числительного (живой прогон 11.09.2026 их пропускал).
+_RELEASE_WORD = r"(?:альбом|релиз|сингл|микстейп|работ|пластинк)\w*"
+RELEASE_NUMBER = re.compile(
+    rf"\b{_ORDINAL}\s+{_RELEASE_WORD}\b|"
+    rf"\bещ[ёе]\s+од(?:ин|на)\s+(?:\w+\s+)?{_RELEASE_WORD}\b"
+)
 
 # Прошлое без previous_releases в данных: модели не с чем сравнивать, а она
 # сравнивает — «предыдущий альбом» у kizaru, «очередной сольный сингл»,
@@ -232,6 +243,35 @@ def _flat(text: str) -> str:
 
 def _quoted(matches: list[str]) -> str:
     return ", ".join(f"«{m}»" for m in dict.fromkeys(matches))
+
+
+def _seconds(length: str) -> int:
+    """«3:07» в секунды. Не разобралось — 0, сверка тогда молчит."""
+    parts = length.split(":")
+    return int(parts[0]) * 60 + int(parts[1]) if len(parts) == 2 and length.replace(":", "").isdigit() else 0
+
+
+def _stated_limit(text: str) -> tuple[int, bool]:
+    """Потолок длительности, объявленный на все треки разом, в секундах.
+
+    Второе значение — строгость: «меньше трёх минут» ровно 3:00 не прощает,
+    «укладываются в три минуты» — прощает. Ничего не объявлено — (0, False).
+    """
+    for sentence in re.split(r"[.!?]", text):
+        if not re.search(r"\b(?:все|кажд\w+|любо\w+|ни\s+од\w+)\b", sentence):
+            continue
+        strict = bool(re.search(r"\b(?:меньше|короче|не\s+дотягива\w+|не\s+доходят|не\s+достига\w+)\b", sentence))
+        loose = bool(re.search(r"\b(?:укладыва\w+|умещ\w+|в\s+пределах|не\s+длиннее|не\s+больше)\b", sentence))
+        if not (strict or loose):
+            continue
+        found = re.search(r"(\d+|[а-яё]+)\s*(?:-?х\s*)?минут", sentence)
+        if not found:
+            continue
+        word = found.group(1)
+        minutes = int(word) if word.isdigit() else _MINUTES.get(word[:3], 0)
+        if minutes:
+            return minutes * 60, strict
+    return 0, False
 
 
 def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
@@ -401,6 +441,16 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
                 facts.get("longest_track"), facts.get("shortest_track")
             ):
                 issues.append(f"выдуманное устройство: «кроме {word}» — этот трек не самый длинный и не самый короткий")
+
+        # «Все треки меньше трёх минут» — утверждение проверяемое, и у kizaru
+        # CA$HEY оно врало: три вещи ровно по 3:00. Сверяем с самым длинным.
+        # Строгое «меньше трёх минут» и нестрогое «укладываются в три минуты»
+        # судим по-разному: ровно 3:00 в три минуты укладывается, а «меньше» — нет.
+        limit, strict = _stated_limit(own)
+        longest = _seconds(facts.get("longest_track", ""))
+        if limit and longest and (longest >= limit if strict else longest > limit):
+            issues.append(f"выдуманные длительности: все треки короче не выходит — "
+                          f"самый длинный {facts['longest_track']}")
 
     # Неподдерживаемая разметка, которую Telegram не разберёт.
     if re.search(r"<\s*(br|p|ul|ol|li|h[1-6])\b", stripped, re.IGNORECASE):
@@ -586,6 +636,10 @@ def _selftest() -> None:
         ("первый трек за полгода", single), ("первый трек за осень", single),
         ("ритмы бодрые, голос мощный", cashey), ("тексты про бандитизм и богатство", cashey),
         ("сборник лучших минусовок", cashey),
+        # Живой прогон 11.09.2026 пропустил их сквозь прежние списки; «ещё один
+        # сингл» дожил до поста 18.09 про Ghostface Playa.
+        ("третья работа за лето", summer), ("ещё один короткий сингл", single),
+        ("закрепил тенденцию коротких треков", single),
     ]
     for fragment, facts in invented:
         post = f"<b>SMOKY MO ВЫПУСТИЛ SORRY MAMA</b>\n\nУ него {fragment}.\n\n<blockquote>Вот и всё.</blockquote>"
