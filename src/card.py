@@ -328,7 +328,7 @@ def save(
     photo_url: str = "",
     handle: str = config.CHANNEL_HANDLE,
 ) -> Path:
-    """handle — адрес в правом нижнем углу. У СВЕДЕНИЯ там бот, а не канал: кто увидел
+    """handle — адрес в правом нижнем углу. У ДВОЙНИКА там бот, а не канал: кто увидел
     «ты на 68% Toxi$» в чужих сторис, хочет свой процент, и считает его бот."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{name}.jpg"

@@ -56,20 +56,20 @@ LOG_FILE = config.DATA / "service_log.jsonl"
 SOURCES_FILE = config.DATA / "bot_sources.json"
 SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": "чаты артистов", "pin": "закреп канала",
            "gorod": "ролик, за концертами", "slezhu": "ролик, за релизами",
-           # СВЕДЕНИЕ зовут ролики: ?start=sved_yt — из ролика на YouTube.
-           "sved": "СВЕДЕНИЕ, без площадки", "sved_yt": "СВЕДЕНИЕ, YouTube", "sved_tt": "СВЕДЕНИЕ, TikTok",
-           "sved_vk": "СВЕДЕНИЕ, ВКонтакте", "sved_link": "СВЕДЕНИЕ, без метки: прислали ссылку",
+           # В ДВОЙНИКА зовут ролики: ?start=sved_yt — из ролика на YouTube.
+           "sved": "ДВОЙНИК, без площадки", "sved_yt": "ДВОЙНИК, YouTube", "sved_tt": "ДВОЙНИК, TikTok",
+           "sved_vk": "ДВОЙНИК, ВКонтакте", "sved_link": "ДВОЙНИК, без метки: прислали ссылку",
            # Запуск без денег (NEXT.md, 50е): владелец отвечает там, где люди сами просили сравнение вкуса.
-           "sved_forum": "СВЕДЕНИЕ, форум Яндекс Музыки", "sved_otvet": "СВЕДЕНИЕ, Ответы Mail.ru",
-           "sved_pikabu": "СВЕДЕНИЕ, Пикабу",
+           "sved_forum": "ДВОЙНИК, форум Яндекс Музыки", "sved_otvet": "ДВОЙНИК, Ответы Mail.ru",
+           "sved_pikabu": "ДВОЙНИК, Пикабу",
            # Приглашение сравнить музыку (?start=sv_<код>): метка одна на все, код сюда не пишется.
-           "sv": "СВЕДЕНИЕ, друг позвал сравнить",
+           "sv": "ДВОЙНИК, друг позвал сравнить",
            # СКЛЕЙКА зовут туда, где просят свести трек: ?start=skleyka_chat — из чатов артистов.
            "skleyka": "СКЛЕЙКА, без площадки", "skleyka_chat": "СКЛЕЙКА, чаты артистов",
            # Ссылка в подписи вкладыша: пересланная карточка привела нового человека.
            "vkladysh": "ВКЛАДЫШ, пересланная карточка",
            "ad": "реклама, канал не распознан"}
-# Платный пост ведёт в СВЕДЕНИЕ ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
+# Платный пост ведёт в ДВОЙНИКА ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
 AD_LABEL = re.compile(r"ad_[a-z0-9_]{1,32}")
 
@@ -92,7 +92,7 @@ COMMANDS = {
     "gorod": "city", "город": "city",
     "otbor": "otbor", "отбор": "otbor",
     "skleyka": "skleyka", "склейка": "skleyka",
-    "sved": "sved", "сведение": "sved",
+    "sved": "sved", "двойник": "sved", "сведение": "skleyka",
     "proyavka": "proyavka", "проявка": "proyavka",
     "vkladysh": "vkladysh", "вкладыш": "vkladysh",
 }
@@ -111,8 +111,8 @@ MENU = (
     "🎛 <b>СКЛЕЙКА</b>\nПришли вокал и бит — сведу их в готовый трек.\n\n"
     "🎞 <b>ПРОЯВКА</b>\nПришли артиста, песню или строки из текста — расскажу, откуда это взялось.\n\n"
     "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
-    # Площадку называет только INTRO СВЕДЕНИЯ: лайки можно и не кидать, а написать артистов.
-    "🎚 <b>СВЕДЕНИЕ</b>\nУзнай, на сколько процентов твоя музыка совпадает с артистами.\n\n"
+    # Площадку называет только INTRO ДВОЙНИКА: лайки можно и не кидать, а написать артистов.
+    "🪞 <b>ДВОЙНИК</b>\nУзнай, на сколько процентов твоя музыка совпадает с артистами.\n\n"
     "📼 <b>ВКЛАДЫШ</b>\nКинь ссылку на трек — пришлю карточку со всеми площадками для друга.\n\n"
     # «Нужна подписка» читалась как платная подписка (владелец, 16.09.2026).
     f'Всё <b>бесплатно</b> — достаточно подписаться на <a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.'
@@ -138,7 +138,7 @@ VKLADYSH = (
 )
 # Строка под вкладышем: кнопки живут отдельно, карточку пересылают без них.
 VKLADYSH_NEXT = "Перешли карточку другу — площадки в ней. А дальше?"
-# Ссылка на «Мне нравится» или плейлист Яндекс Музыки — то, что ролик СВЕДЕНИЯ велит кинуть
+# Ссылка на «Мне нравится» или плейлист Яндекс Музыки — то, что ролик ДВОЙНИКА велит кинуть
 # боту. Ссылка на трек (album/…/track/…) сюда не попадает — она идёт в отбор и разборы.
 SVED_LINK = re.compile(r"music\.yandex\.\w+/(?:users/[^/\s]+/(?:playlists|tracks)|playlists/)", re.IGNORECASE)
 
@@ -153,7 +153,7 @@ def menu_buttons() -> list[list[dict]]:
         [{"text": "🎛 СКЛЕЙКА — свести вокал и бит", "callback_data": f"{CALLBACK_PREFIX}skleyka"}],
         [{"text": "🎞 ПРОЯВКА — разобрать музыку", "callback_data": f"{CALLBACK_PREFIX}proyavka"}],
         [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
-        [{"text": "🎚 СВЕДЕНИЕ — на сколько ты артист", "callback_data": f"{CALLBACK_PREFIX}sved"}],
+        [{"text": "🪞 ДВОЙНИК — на сколько ты артист", "callback_data": f"{CALLBACK_PREFIX}sved"}],
         [{"text": "📼 ВКЛАДЫШ — трек для друга", "callback_data": f"{CALLBACK_PREFIX}vkladysh"}],
     ]
 
@@ -1296,7 +1296,7 @@ def handle_message(message: dict, data: dict) -> bool:
         skleyka.talk(chat_id, text, message["reply_to_message"], admin=admin)
         return False
     if not text.startswith("/") and (svedenie.INTRO_MARK in asked or svedenie.NAMES_MARK in asked):
-        # Ответ на INTRO СВЕДЕНИЯ или на вопрос об артистах: ссылка — в разбор лайков,
+        # Ответ на INTRO ДВОЙНИКА или на вопрос об артистах: ссылка — в разбор лайков,
         # остальное — список артистов. Без ответа тот же список ушёл бы в ПРОЯВКУ.
         if _subscribed(chat_id, user_id, admin):
             (svedenie.handle if SVED_LINK.search(text) else svedenie.by_names)(chat_id, text)
@@ -1352,7 +1352,7 @@ def handle_message(message: dict, data: dict) -> bool:
         return False
     if kind == "menu" and link == "sv":
         # Друг позвал сравнить музыку: код — ключ к снимку пригласившего. «Подписался»
-        # несёт его в себе, иначе после подписки друг попал бы в обычное СВЕДЕНИЕ.
+        # несёт его в себе, иначе после подписки друг попал бы в обычного ДВОЙНИКА.
         count_source("sv")
         code = slug[:16]  # коды восьмизначные; длинный мусор не влез бы в 64 байта кнопки
         if _subscribed(chat_id, user_id, admin, retry=f"sv:{code}"):
@@ -1790,7 +1790,7 @@ def _selftest() -> None:
         handle_message(incoming("Баста", 10, chat=8, reply=f"За кем следить? {WATCH_MARK} — напишу"), {})
         handle_message(incoming("/gorod Казань", 11, chat=8), {})
         assert all("подписаться" in text for text, _, _ in said[-3:]) and "8" not in state.read_json(WATCH_FILE, {})["watchers"]
-        # С рекламы без подписки: кнопка «Подписался» снова открывает СВЕДЕНИЕ, метку не теряем.
+        # С рекламы без подписки: кнопка «Подписался» снова открывает ДВОЙНИКА, метку не теряем.
         handle_message(incoming("/start ad_mainstream", 13, chat=10), {})
         assert said[-1][1] == [[{"text": "✅ Подписался", "callback_data": f"{CALLBACK_PREFIX}sved"}]], said[-1]
         # По приглашению друга — тоже, и код приглашения кнопка несёт с собой.
@@ -1895,8 +1895,8 @@ def _selftest() -> None:
         assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU] + [intro] * 5, \
             "старая ссылка и /proyavka — в ПРОЯВКУ, метки sved и ad — что прислать"
         assert links == ["https://music.yandex.ru/users/x/playlists/3?utm_source=share"], links
-        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎛", "🎞", "🔔", "🎚", "📼"], "в меню шесть разделов"
-        # Кнопка «следить» под ответом СВЕДЕНИЯ — кнопка сервиса: подписывает watch_add,
+        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎛", "🎞", "🔔", "🪞", "📼"], "в меню шесть разделов"
+        # Кнопка «следить» под ответом ДВОЙНИКА — кнопка сервиса: подписывает watch_add,
         # второго пути к тому же списку нет.
         assert svedenie.buttons("Toxi$")[1][0]["callback_data"] == _cb("watch", "Toxi$")
         # Ответ на INTRO: ссылка — в разбор лайков, список артистов — в by_names, а не в ПРОЯВКУ.
@@ -1943,7 +1943,7 @@ def _selftest() -> None:
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
         tmp.cleanup()
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню шесть разделов; "
-          "ссылка на плейлист — в СВЕДЕНИЕ, трек — во ВКЛАДЫШ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
+          "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал")
 
 

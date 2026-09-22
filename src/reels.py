@@ -240,7 +240,7 @@ BAIT_GOROD = "кидай город — скажем"
 # Ролик о релизе, который все пропустили, решает боль «узнал последним»: ссылка
 # ?start=slezhu_<артист> подписывает на его релизы.
 BAIT_SLEZHU = "скажем, когда выйдет"
-# СВЕДЕНИЕ (src/svedenie.py): ролик зовёт кинуть ссылку на лайки, ?start=sved_yt,
+# ДВОЙНИК (src/svedenie.py): ролик зовёт кинуть ссылку на лайки, ?start=sved_yt,
 # а бот отвечает «ты на N% <артист>». Словами голоса; «кидай ссылку — сравним»
 # было на 50 точек шире зоны, «кинь лайки — посчитаем» — на 26.
 BAIT_SVED = "кинь лайки — сверим"
@@ -1944,7 +1944,7 @@ def _selftest() -> None:
     gorod = {**good, "description": f"Приедет к тебе? Кидай боту город: {GOROD_LINK}basta Канал: t.me/plenka_fm/144 t.me/plenka_fm #рэп"}
     assert problems(gorod, good["id"]) == [] and f"{GOROD_LINK}basta Канал" in package(gorod), "концертная ссылка как есть"
     sved = {**good, "description": f"Сравни свою музыку с другом: {SVED_LINK}_yt Канал: t.me/plenka_fm #рэп"}
-    assert problems(sved, good["id"]) == [] and bait(sved) == BAIT_SVED, "СВЕДЕНИЕ — своя приманка"
+    assert problems(sved, good["id"]) == [] and bait(sved) == BAIT_SVED, "ДВОЙНИК — своя приманка"
     assert f"{SVED_LINK}_vk Канал" in package(sved), "ВКонтакте — метка sved_vk"
     from . import stories
 

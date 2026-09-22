@@ -1,4 +1,4 @@
-"""СВЕДЕНИЕ — «ты на 89% Toxi$»: бот считает, на сколько музыка человека совпала с артистом.
+"""ДВОЙНИК — «ты на 89% Toxi$»: бот считает, на сколько музыка человека совпала с артистом.
 
 Зачем. Самая большая просьба на форуме Яндекс Музыки — «найдите людей с тем же
 вкусом», 18 266 голосов с 2019 года, и Яндекс её так и не сделал. Сравнение
@@ -54,7 +54,7 @@ Telegram с личной ссылкой ?start=sv_<код>. Код случай�
 копейки при полном совпадении вкуса. У двух списков лайков строкой ниже — число
 общих треков и до тридцати поимённо; у имён общих треков нет. Итог получают
 оба; имя друга нигде не пишется — пригласившему приходит «твой друг». Снимок
-пригласившего протух или удалён — друг получает обычное СВЕДЕНИЕ с пояснением.
+пригласившего протух или удалён — друг получает обычного ДВОЙНИКА с пояснением.
 
     python -m src.svedenie --selftest              формула, отказы и ответ — без сети
     python -m src.svedenie --dry-run               разбор открытой фонотеки, без Telegram
@@ -102,7 +102,7 @@ SOFT = 10
 # кнопках и описании бота площадки нет (владелец, 21.09.2026).
 INTRO_MARK = "Ссылку или артистов ответом на это сообщение"
 INTRO = (
-    "🎚 <b>СВЕДЕНИЕ</b>\n\n"
+    "🪞 <b>ДВОЙНИК</b>\n\n"
     "Посчитаю, на сколько процентов твоя музыка совпадает с артистами, "
     "и покажу, с кем сильнее всего.\n\n"
     "Кинь ссылку на свои лайки в Яндекс Музыке: Моя музыка → «Мне нравится» → поделиться. "
@@ -130,12 +130,12 @@ NAMES_ASK = (
 )
 FEW_NAMES = "Нужно хотя бы {need} артистов, которых Яндекс знает, — нашёл {count}."
 # Тем, кто пришёл на «делаем» и остался ждать (config.SVED_FILE).
-READY = "🎚 <b>СВЕДЕНИЕ</b> заработало — кидай ссылку на своё «Мне нравится», посчитаю."
+READY = "🪞 <b>ДВОЙНИК</b> заработал — кидай ссылку на своё «Мне нравится», посчитаю."
 
 # Вдвоём. Метка — та же INTRO_MARK: ответ друга разбирается как любой ответ на INTRO,
 # а код приглашения ждёт в его записи хранилища (см. докстринг).
 FRIEND_INTRO = (
-    "🎚 <b>СВЕДЕНИЕ</b>\n\n"
+    "🪞 <b>ДВОЙНИК</b>\n\n"
     "Друг позвал сравнить музыку. Кинь ссылку на свои лайки в Яндекс Музыке "
     "(Моя музыка → «Мне нравится» → поделиться) или напиши через запятую "
     f"{MIN_NAMES}–{MAX_NAMES} артистов, которых слушаешь чаще всего, — посчитаю, на сколько вы совпали.\n\n"
@@ -304,7 +304,7 @@ def answer(tracks: list[list], found: list[dict], unit: str = "трекам") ->
         else f"Посчитал по {len(tracks)} {unit}. Список слишком разный — "
         "заметного совпадения ни с кем нет. Ближе всех:"
     )
-    lines = ["🎚 <b>СВЕДЕНИЕ</b>\n", head + "\n"]
+    lines = ["🪞 <b>ДВОЙНИК</b>\n", head + "\n"]
     lines += [f"· ты на <b>{a['percent']}%</b> {a['name']}" for a in found]
     best = found[0]
     if share := own_percent(best, tracks):
@@ -318,7 +318,7 @@ def _card(match: dict) -> Path:
     return card.save(
         f"ты на {match['percent']}% {match['name']}",
         [match["name"]],
-        label="СВЕДЕНИЕ",
+        label="ДВОЙНИК",
         name=f"sved-{state.now().strftime('%H%M%S')}",
         photo_url=match.get("photo", ""),
         handle=config.BOT_HANDLE,
@@ -377,7 +377,7 @@ def _duel(chat_id: str, code: str, tracks: list[list]) -> None:
     result = together(tracks, data[inviter]["tracks"])
     text, names = duel_text(result)
     try:
-        picture = card.save(f"вы совпали на {result['share']}%", names, label="СВЕДЕНИЕ",
+        picture = card.save(f"вы совпали на {result['share']}%", names, label="ДВОЙНИК",
                             name=f"sved-duo-{state.now().strftime('%H%M%S')}", handle=config.BOT_HANDLE)
     except Exception as exc:  # noqa: BLE001 — без картинки итог всё равно уходит
         log.info("Карточка вдвоём не нарисовалась: %s", exc)
@@ -386,7 +386,7 @@ def _duel(chat_id: str, code: str, tracks: list[list]) -> None:
         try:
             if picture:
                 telegram.send_photo_file(chat, picture, "")
-            telegram.send_message(chat, f"🎚 <b>СВЕДЕНИЕ</b> вдвоём\n\n{head}{text}")
+            telegram.send_message(chat, f"🪞 <b>ДВОЙНИК</b> с другом\n\n{head}{text}")
         except Exception as exc:  # noqa: BLE001 — пригласивший мог закрыть бота, другу итог всё равно нужен
             log.info("Итог вдвоём не ушёл в %s: %s", "друга" if chat == chat_id else "пригласившего", exc)
     if picture:
@@ -419,7 +419,7 @@ def invite(chat_id: str, code: str) -> None:
 
 
 def handle(chat_id: str, text: str) -> None:
-    """Пришла ссылка на плейлист — главный вход СВЕДЕНИЯ."""
+    """Пришла ссылка на плейлист — главный вход ДВОЙНИКА."""
     data = _load()
     if not _spend(data, chat_id):
         telegram.send_message(chat_id, LIMIT)
@@ -468,7 +468,7 @@ def compare(chat_id: str, name: str) -> None:
         return
 
     match = {**found, "percent": percent(tracks, set(found["circle"]))}
-    text = f"🎚 <b>СВЕДЕНИЕ</b>\n\nТы на <b>{match['percent']}%</b> {match['name']}."
+    text = f"🪞 <b>ДВОЙНИК</b>\n\nТы на <b>{match['percent']}%</b> {match['name']}."
     if share := own_percent(match, tracks):
         text += f"\n\nС тем, что он собрал сам («{match['playlist']['title']}»), — {share}%."
     _send(chat_id, text, match, data[str(chat_id)].get("code", ""))
@@ -534,7 +534,7 @@ def notify_waiting() -> None:
         except Exception as exc:  # noqa: BLE001 — один закрытый чат не держит остальных
             log.info("Ждущему %s не написалось: %s", chat_id, exc)
     config.SVED_FILE.unlink(missing_ok=True)
-    log.info("СВЕДЕНИЕ: оповещено ждущих — %d", len(waiting))
+    log.info("ДВОЙНИК: оповещено ждущих — %d", len(waiting))
 
 
 # ─────────────────────────── проверки ───────────────────────────
@@ -612,7 +612,7 @@ def _selftest() -> None:
         ]
         handle("55501", "ссылка")
         assert replies[-2] == "[карточка]" and "ты на <b>100%</b> Toxi$" in replies[-1], replies[-2:]
-        # Адрес внизу карточки СВЕДЕНИЯ — бот: кто увидел её в сторис, считает свой процент у него.
+        # Адрес внизу карточки ДВОЙНИКА — бот: кто увидел её в сторис, считает свой процент у него.
         assert drawn[-1]["handle"] == config.BOT_HANDLE, drawn[-1]
         saved = state.read_json(config.SVED_STATE, {})["55501"]
         assert saved["used"] == 3 and len(saved["tracks"]) == MIN_TRACKS, saved["used"]
@@ -673,7 +673,7 @@ def _selftest() -> None:
         assert f"start%3Dsv_{code}" in share["url"] and "55501" not in share["url"], share["url"]
         assert "url" not in buttons("Toxi$")[0][0], "без кода — прежние кнопки"
 
-        # Своя ссылка — переслать другу; протухший код — обычное СВЕДЕНИЕ с пояснением.
+        # Своя ссылка — переслать другу; протухший код — обычного ДВОЙНИКА с пояснением.
         invite("55501", code)
         assert replies[-1] == SELF, replies[-1]
         invite("90009", "нет-такого")
@@ -692,17 +692,17 @@ def _selftest() -> None:
              for i in range(MIN_TRACKS)]
         start, first = len(replies), len(said)
         handle("80008", "ссылка")
-        duel = [(chat, text) for chat, text in said[first:] if "вдвоём" in text]
+        duel = [(chat, text) for chat, text in said[first:] if "с другом" in text]
         assert [chat for chat, _ in duel] == ["80008", "55501"], duel
         # У пригласившего исполнители 1, 2, 5, 3, 9 и треки t1–t4, у друга 1 и 9 и треки t0–t2:
         # оба исполнителя друга есть у пригласившего — 100%, общие треки t1 и t2.
         assert "Вы совпали на <b>100%</b>: общих артистов 2 из 2" in duel[0][1], duel[0][1]
         assert "Общих треков — 2." in duel[0][1] and "· Toxi$ — Песня &lt;1&gt;" in duel[0][1], duel[0][1]
         assert "Общие артисты: Дора, Toxi$." in duel[0][1], "первым — кого оба слушают чаще"
-        assert duel[1][1].startswith(f"🎚 <b>СВЕДЕНИЕ</b> вдвоём\n\n{FRIEND_DONE}"), duel[1][1]
+        assert duel[1][1].startswith(f"🪞 <b>ДВОЙНИК</b> с другом\n\n{FRIEND_DONE}"), duel[1][1]
         assert replies[start:].count("[карточка]") == 3, "карточка вдвоём обоим и своя — другу"
         assert "ты на" in replies[-1], "другу следом и свой процент"
-        assert drawn[-2]["handle"] == config.BOT_HANDLE and drawn[-2]["label"] == "СВЕДЕНИЕ"
+        assert drawn[-2]["handle"] == config.BOT_HANDLE and drawn[-2]["label"] == "ДВОЙНИК"
         friend = state.read_json(config.SVED_STATE, {})["80008"]
         assert "invite" not in friend and friend["used"] == 1, friend
         assert all(isinstance(t, str) for t, _ in friend["tracks"]), "в снимке только id"
@@ -710,7 +710,7 @@ def _selftest() -> None:
         invite("70004", code)
         first = len(said)
         by_names("70004", "Toxi$, Дора, Сосед, Третий, Пятый")
-        duel = [text for chat, text in said[first:] if "вдвоём" in text]
+        duel = [text for chat, text in said[first:] if "с другом" in text]
         assert len(duel) == 2 and "совпали на <b>100%</b>" in duel[0] and "Общих треков" not in duel[0], duel
 
         # Ждущие: одно сообщение и файл удалён — обещание не висит второй раз.
@@ -724,7 +724,7 @@ def _selftest() -> None:
          telegram.send_message, telegram.send_photo_file, telegram.send_chat_action,
          card.save, config.SVED_STATE, config.SVED_FILE, yandex_music._get, yandex_music.tracks) = real
 
-    print("СВЕДЕНИЕ: процент по кругу артиста, свой плейлист второй строкой, "
+    print("ДВОЙНИК: процент по кругу артиста, свой плейлист второй строкой, "
           "закрытый список и четвёртый разбор за сутки — отказ, снимок без имён; "
           "по названным артистам: ненайденные названы, меньше пяти — отказ; "
           "вдвоём: процент по общим исполнителям на лайках и именах, итог обоим, "
@@ -753,7 +753,7 @@ SAMPLE = "https://music.yandex.ru/users/music-blog/playlists/3"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="СВЕДЕНИЕ: на сколько процентов ты совпал с артистом")
+    parser = argparse.ArgumentParser(description="ДВОЙНИК: на сколько процентов ты совпал с артистом")
     parser.add_argument("--selftest", action="store_true", help="формула, отказы и ответ — без сети")
     parser.add_argument("--dry-run", action="store_true", help="разбор открытой фонотеки, без Telegram")
     parser.add_argument("--check", metavar="ССЫЛКА", help="что ответил бы бот на эту ссылку")

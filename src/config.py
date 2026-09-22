@@ -56,7 +56,7 @@ WATCH_FILE = PRIVATE / "watches.json"
 # до выхода имя и трек в открытый репозиторий не попадают.
 OTBOR_FILE = PRIVATE / "otbor.json"
 OTBOR_POSTS = PRIVATE / "otbor"
-# СВЕДЕНИЕ (src/svedenie.py). Кто пришёл по ?start=sved_ до стройки — тем бот обещал
+# ДВОЙНИК (src/svedenie.py). Кто пришёл по ?start=sved_ до стройки — тем бот обещал
 # написать первым; список одноразовый, рассылка его удаляет. Снимок фонотеки —
 # чужие лайки, то есть данные о человеке: тоже только в приватном хранилище.
 SVED_FILE = PRIVATE / "sved.json"
