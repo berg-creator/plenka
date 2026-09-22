@@ -14,24 +14,28 @@
 1. Вокал приводится к VOCAL_LUFS, и только потом компрессия VOCAL_CHAIN — её пороги
    отсчитаны от этого уровня. Иначе тихая запись прошла бы мимо компрессора,
    а громкая сплющилась. Голос, записанный в один канал стерео, встаёт в центр.
-2. Тембр вокала выравнивается к сведённому рэп-вокалу (TONE) по замеру октав:
-   домашние записи расходятся на 10 дБ, и одна полка на всех не годится.
-3. Бит: каналы в противофазе переворачиваются, место под голос — провал на 2–4 кГц
-   только в середине (M/S), края не тронуты, и бит остаётся широким. Сайдчейн
-   ratio 2 с быстрым отпуском (DUCK): приглушение из роликов (reels.DUCK, ratio 6)
-   для песни глубоко — бит качался бы насосом.
+2. Тембр вокала выравнивается к сведённому рэп-вокалу (TONE) по замеру октав —
+   на весь трек и по ходу трека: домашние записи расходятся на 10 дБ, а куски
+   одной записи — на 6–7, и одна полка на всех не годится.
+3. Бит: каналы в противофазе переворачиваются; место голосу — как soothe с голосом
+   в сайдчейне: середина бита приседает по полосам выше 120 Гц ключом от тех же
+   полос голоса, глубже всего в 1–4 кГц и только пока голос звучит (ROOM_*).
+   Низ и края не тронуты: бочка и 808 качают, бит остаётся широким.
 4. Баланс — вровень по EBU R128, а по ходу трека голос ведёт райдер: где бит
    его перекрывает, голос плавно поднимается. Один баланс на весь трек владелец
    услышал с первой прослушки: «где-то будто слишком громкий бит».
 5. Стиль (STYLES) — набор эффектов, названный словом, понятным без знания
    сведения. Отзвук, дилей и дабл — шинами, доля к сухому голосу по замеру,
    как в reels.studio.
-6. Саунд-дизайн — по флагу: вдох перевёрнутого отзвука перед первым словом,
-   бит из-под фильтра до первого слова, броски дилея на концах строк, остановка
-   плёнки в конце. Всё синтезом ffmpeg, без чужих сэмплов, и всё — на доли
-   бита (grid).
-7. Мастер — низ ниже 120 Гц в моно, клиппер по верхушкам ударов и ограничитель
-   до MASTER_LUFS, пик не выше CEILING dBTP.
+6. Саунд-дизайн — по флагу и по всему треку: вдох перевёрнутого отзвука перед
+   первым словом и на входах голоса, бит из-под фильтра до первого слова, на входах
+   после пауз — подъём шума и вырез бита перед сильной долей, броски дилея на концах
+   фраз (каждый второй — на октаву ниже), остановка плёнки в конце. Всё синтезом
+   ffmpeg, без чужих сэмплов, на доли и такты бита (grid), громкость приёмов — к биту.
+7. Мастер — низ ниже 120 Гц в моно, склейка шины 2:1, жёсткий клиппер по верхушкам
+   ударов и ограничитель до MASTER_LUFS, пик не выше CEILING dBTP.
+
+Ручки бота — mix(..., voice=, echo=): голос к биту и доля эха, в дБ.
 
 Промежуточное — во float: пики выше нуля между шагами не срезаются, режет только
 мастер. Подгонку под референс (Matchering) сюда не тащим: это
@@ -42,6 +46,7 @@
 
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   склейка и пара ДО/ПОСЛЕ одной громкости
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --style грязно --design
+    python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --voice 2 --echo -4   ручки «голос громче», «эха меньше»
 """
 
 from __future__ import annotations
@@ -102,20 +107,53 @@ VOCAL_CHAIN = (
 TONE = {125: -15, 250: -6, 500: 0, 2000: -4, 4000: -7, 8000: -9}
 TONE_CUT = -9.0
 TONE_BOOST = {2000: 3.0, 4000: 3.0}
+# Тембр по ходу трека: куски одной записи пишутся по-разному — у Little Chicago's
+# Finest на 176–192 с полоса 500 Гц на 5 дБ выше 1 кГц, на 160–168 — на 5 ниже,
+# и одна поправка на весь трек оставляла на 2:58 «коробку» (владелец: «плотность
+# пропала, начал звучать дёшево»). Поэтому к общей поправке — своя по окнам
+# TONE_STEP с: октавы к 1 кГц, сглаженные на TONE_SPAN с по окнам с голосом,
+# тянутся к среднему тембру уже поправленного голоса. Это и есть TONE там, где
+# общая поправка его достала, а где упёрлась в предел — окна не тащат за предел
+# весь трек. Не дальше TONE_LOCAL дБ от общей, вверх — не выше TONE_BOOST.
+# Замер: на 176–192 с стало +2,8, на 160–168 — −2,3 (дальше не пускает TONE_LOCAL);
+# куски по 3 с на пяти треках отходят от среднего тембра на 1,1–1,4 дБ вместо 2,4–3,0.
+TONE_STEP = 0.5
+TONE_SPAN = 3.0
+TONE_LOCAL = 4.0
 # Де-эссер последним: подъём разборчивости и компрессия сами добавляют свиста.
 DEESSER = "deesser=i=0.5"
 
 # --- бит --------------------------------------------------------------------
-# Место под голос: провал BEAT_DIP дБ в полосе 2–4 кГц, где разборчивость, —
-# только в середине, где стоит голос, и только пока голос звучит (Гиббс в Sound
-# On Sound включает провалы под голос так же). Края бита не тронуты: ширина
-# остаётся, а в паузах бит звучит целиком.
-BEAT_DIP = -2.0
-BEAT_EQ = "equalizer@dip=f=2800:t=o:w=1.3:g=0:c=FL"
-# Порог −20 дБ от вокала на VOCAL_LUFS: в строке бит проседает на 1–2 дБ
-# и за 0,1 с возвращается в паузе. С порогом −24 дБ сжатый голос проваливал
-# бит на 3,3 дБ, а на громких словах — на 5.
-DUCK = "sidechaincompress=threshold=0.1:ratio=2:attack=5:release=100"
+# Место голосу — как soothe с голосом в сайдчейне (руководство soothe2: «carve out
+# space for the vocals by using them as the sidechain key input… with the mid/side
+# stereo mode»; Jaycen Joshua ставит подавитель резонансов на шину музыки с голосом
+# в ключе, Podlesny Twins — Soothe на мелодии «на частоты вокала»): середина бита
+# (M/S) по полосам выше 120 Гц приседает компрессорами с ключом от тех же полос
+# голоса — только там и тогда, где голос звучит. Ниже 120 Гц голоса нет (срез
+# HIGHPASS), и бочка с 808 не трогаются вовсе; края бита тоже. Полосы — крутые
+# фильтры по SPLIT, 24 дБ на октаву: полоса 120–250 Гц ниже 120 почти не задевает.
+SPLIT = (120, 250, 500, 1000, 2000, 4000, 8000)
+# Глубина полосы — маскировка: насколько полоса бита громче той же полосы голоса
+# при балансе склейки в десятой части окон с голосом, где бит перекрывает его
+# сильнее всего (ROOM_SHARE): медиана почти везде отрицательна — голос в середине
+# громче бита, — и места не делалось бы вовсе, а место нужно именно там, где бит
+# голос накрывает. Потолок ROOM_CAP: больше всего в 1–4 кГц, где разборчивость,
+# мало в 120–250 Гц — это тело бита — и выше 8 кГц. Отпуск длиннее на низких
+# полосах: быстрый на 120 Гц качал бы саму волну. Ratio 1,25 и порог на 5 глубин
+# ниже обычного слога: провал почти один на громком и на тихом слоге, как у soothe,
+# который режет, пока в ключе есть голос, и как у Сениора (1,04:1, не больше 2 дБ).
+# С ratio 2 тихие слоги — а бит перекрывает именно их — получали вдвое меньше
+# громких: у Little Chicago's Finest в 1–2 кГц 1,8 дБ против 4,0 на медиане.
+# Замер на трёх треках против прежнего провала 2,8 кГц и сайдчейна на весь бит:
+# голос к биту в 1–2 кГц по медиане +8,7 / +7,6 / +4,8 дБ вместо +5,8 / +5,6 / +2,6
+# (Little Chicago's Finest, M.E.R.C. Music, projectquestion), в 2–4 кГц +10,1 / +8,9 /
+# +9,8 вместо +8,4 / +7,0 / +7,8; бит громче голоса по EBU R128 в 13 / 11 / 14% окон
+# с голосом вместо 11 / 12 / 13%: низ больше не приседает, и общую громкость
+# место почти не трогает — её ведёт райдер.
+ROOM_CAP = (1.5, 2.0, 3.0, 5.0, 5.0, 3.0, 1.5)
+ROOM_RELEASE = (250, 200, 150, 100, 80, 60, 50)
+ROOM_SHARE = 0.9
+ROOM_RATIO = 1.25
 
 # --- баланс -----------------------------------------------------------------
 # Вокал к биту по EBU R128. Бит без пауз, а у вокала паузы отсекает сам замер,
@@ -190,23 +228,53 @@ NOTES = "до до# ре ре# ми фа фа# соль соль# ля ля# с�
 ENV_RATE = 100
 # Голос звучит, пока громче своего почти самого громкого места минус VOICE_RANGE дБ.
 VOICE_RANGE = 30.0
-# Вдох: первое слово задом наперёд уходит в отзвук на BREATH_SECONDS, отзвук
-# разворачивается обратно и нарастает к слову за BREATH_BEATS долей.
+# Саунд-дизайн — по всему треку, а не только во вступлении и в конце: после прослушки 2
+# владелец его почти не услышал («его мало, вообще будто нет») и в пример дал
+# A$AP Rocky. Всё синтезом ffmpeg, без чужих сэмплов, на доли и такты бита (grid),
+# а громкость каждого приёма — к биту (*_DB, LU к громкости бита по EBU R128): его
+# и должно быть слышно поверх бита.
+# Вдох: слово задом наперёд уходит в отзвук на BREATH_SECONDS, отзвук разворачивается
+# обратно и нарастает к слову за BREATH_BEATS долей. Перед первым словом и на входах.
 BREATH_SECONDS = 2.5
 BREATH_BEATS = 2
-BREATH_SHARE = 0.5
+BREATH_DB = -2.0
 # Бит до первого слова: за FILTER_BEATS долей закрывается фильтром до FILTER_LOW Гц
 # и за OPEN_BEATS долей открывается к сильной доле первого слова.
 FILTER_LOW = 400
 FILTER_BEATS = 8
 OPEN_BEATS = 2
-# Броски: последнее слово строки перед паузой длиннее THROW_PAUSE — в дилей в темп,
-# не больше THROWS на трек, перед самыми длинными паузами: у инженеров бросков
-# 3–4 на трек (Profitt в Sound On Sound), на каждой строке они стали бы кашей.
-THROW_PAUSE = 0.4
+# Фразы для саунд-дизайна размечаются строже, чем окна с голосом: эдлибы, подпевки
+# и хвосты отзвука в стеме тише главного голоса на 15 дБ и больше. С общим порогом
+# (VOICE_RANGE) у Little Chicago's Finest на 4:41 выходило 5 строк без единой паузы
+# длиннее 0,8 с; с PHRASE_RANGE и паузой от PHRASE_PAUSE — 35 фраз, и четыре самые
+# длинные паузы, 0,65–0,81 с, — ровно начала частей трека.
+PHRASE_RANGE = 15.0
+PHRASE_PAUSE = 0.25
+# Входы голоса после паузы от ENTRY_BEATS доли — самые длинные паузы первыми,
+# не чаще раза в ENTRY_BARS тактов. Двух долей мало где дождёшься: у Little
+# Chicago's Finest части начинаются после 1,2–1,5 доли. На входе бит вырезается
+# на последнюю долю перед сильной долей (McCloskey о DaBaby в Sound On Sound:
+# «maximum impact… have nothing happening just before it»; полная тишина звучала
+# плохо — хвосты отзвука и дилея остаются, они на своих шинах), за такт до выреза
+# нарастает шум, в первое слово — вдох.
+ENTRY_BEATS = 1
+ENTRY_BARS = 8
+# Подъём шума: белый шум, фильтр открывается от RISE_LOW до RISE_HIGH Гц, громкость
+# растёт на RISE_RANGE дБ за такт и обрывается на вырезе.
+RISE_LOW = 300
+RISE_HIGH = 12000
+RISE_RANGE = 24
+RISE_DB = -6.0
+# Броски: последнее слово фразы — в дилей в темп, перед самыми длинными паузами
+# первыми, не чаще раза в THROW_BARS тактов и не больше THROWS. Каждый второй —
+# на октаву ниже: asetrate вдвое вниз и atempo 2 — высота падает, длина та же
+# (rubberband в ffmpeg на Маке нет). Пауза за фразой бывает и в четверть секунды,
+# поэтому повторы приседают под всем голосом (Bainz о Young Thug в Sound On Sound:
+# дилей «side-chained to the vocal, so it only sounds when the vocal isn't there»).
 THROW_WORD = 0.3
-THROWS = 4
-THROW_SHARE = 0.4
+THROWS = 12
+THROW_BARS = 4
+THROW_DB = -1.0
 # Остановка плёнки: с последней доли, где бит ещё играет в полную силу, скорость
 # падает до нуля за STOP_BEATS долей.
 STOP_BEATS = 2
@@ -224,7 +292,20 @@ CEILING = -2.0
 # на ударах по 6 дБ и больше — насосом на весь трек. Верхушки ударов до CLIP дБ
 # над порогом срезает клиппер: на миллисекундном ударе искажение не слышно.
 # У готового бита с YouTube пики и так низкие, и клиппер почти не работает.
+# Клиппер жёсткий: мягкие (asoftclip tanh и atan) на той же громкости и том же пике
+# держат удар хуже — они гнут всю волну с нескольких дБ ниже потолка, а не одни
+# верхушки. Замер по ударам бочки у Little Chicago's Finest на −10 LUFS и −2 dBTP:
+# верхушка удара к окружению теряет 1,4 дБ с жёстким, 1,9 с tanh и 2,5 с atan,
+# атака бочки к телу — 0,4 / 0,8 / 0,9 дБ, остаток искажений −24 / −22 / −19 дБ;
+# у M.E.R.C. Music верхушка — 0,7 / 1,2 дБ (жёсткий / tanh). Низ ниже 100 Гц у всех
+# один (±0,1 дБ): «жёсткий съедает бас» (Шеперд) — о клиппинге на много дБ, а тут два.
 CLIP = 2.0
+CLIPPER = "asoftclip=type=hard"
+# Склейка шины перед клиппером — компрессор 2:1, атака 30 мс, отпуск 200 мс: атака
+# пропускает удар, отпуск успевает за долей, и голос с битом сжимаются вместе, а не
+# каждый сам по себе. Порог — по замеру, чтобы сжатие было GLUE дБ по EBU R128
+# (на пяти треках вышло 1,6–1,7).
+GLUE = 1.5
 
 
 def _ffmpeg(*args) -> None:
@@ -293,16 +374,62 @@ def _bells(gains: dict[int, float]) -> str:
     return "".join(f"equalizer=f={f}:t=o:w=1:g={g:.1f}," for f, g in gains.items() if g)
 
 
-def _equalizer(vocal: Path) -> str:
-    """Поправка тембра к TONE колоколами по октавам. Меряется голос уже с де-эссером,
-    а соседние колокола задевают друг друга, поэтому замер повторяется
-    по поправленному голосу."""
+def _equalizer(vocal: Path, lines: list[tuple[float, float]], work: Path) -> str:
+    """Поправка тембра к TONE колоколами по октавам: общая на весь трек и своя по ходу
+    трека — командами asendcmd колоколам equalizer@t…, шагами по 0,1 с, чтобы
+    не щёлкало. Меряется голос уже с де-эссером, а соседние колокола задевают друг
+    друга, поэтому каждый замер повторяется по поправленному голосу."""
     gains = dict.fromkeys(TONE, 0.0)
     for _ in range(2):
         for f, db in tone(vocal, _bells(gains) + DEESSER).items():
             gains[f] = max(TONE_CUT, min(TONE_BOOST.get(f, 0.0), gains[f] + TONE[f] - db))
     print("  тембр: " + ", ".join(f"{f} Гц {g:+.1f}" for f, g in gains.items() if g))
-    return _bells(gains)
+    # Колокол есть и у 1 кГц: поправка окна меняет только форму, а общую мощность
+    # окна возвращает он — иначе окна, где 1 кГц провален, теряли бы громкость
+    # целиком, и райдер поднимал бы голос вдвое чаще (у Little Chicago's Finest бит
+    # перекрывал голос в 37% окон вместо 20%).
+    octaves = sorted([*TONE, 1000])
+    cmd, local = work / "tone.cmd", "".join(f"equalizer@t{f}=f={f}:t=o:w=1:g=0," for f in octaves)
+    extra, ref, drift = {f: {} for f in octaves}, {}, []
+    split = [f / 2 ** 0.5 for f in octaves] + [octaves[-1] * 2 ** 0.5]
+    for again in range(2):
+        chain = _bells(gains) + (f"asendcmd=f='{cmd}',{local}" if again else "") + f"{DEESSER},{MID},"
+        power = dict(zip(octaves, ([10 ** (db / 10) for db in band] for band in _bands(vocal, chain, split, TONE_STEP)[1:])))
+        sung = _sung(lines, len(power[1000]), TONE_STEP)
+        if not sung:
+            return _bells(gains)
+        ref = ref or {f: 10 * math.log10(sum(power[f][i] for i in sung) / sum(power[1000][i] for i in sung)) for f in TONE}
+        miss = []
+        for w in sung:
+            near = [i for i in sung if abs(i - w) * TONE_STEP <= TONE_SPAN / 2]
+            total = {f: sum(power[f][i] for i in near) + 1e-15 for f in octaves}
+            shape = {f: ref.get(f, 0.0) - 10 * math.log10(total[f] / total[1000]) for f in octaves}
+            level = -10 * math.log10(sum(total[f] * 10 ** (shape[f] / 10) for f in octaves) / sum(total.values()))
+            miss += [abs(shape[f]) for f in TONE]
+            for f in octaves:
+                # Вверх — не выше TONE_BOOST, как и общая; у 1 кГц общего колокола нет.
+                top = TONE_BOOST.get(f, 0.0) - gains[f] if f in TONE else TONE_LOCAL
+                extra[f][w] = max(-TONE_LOCAL, min(TONE_LOCAL, top, extra[f].get(w, 0.0) + shape[f] + level))
+        drift.append(statistics.fmean(miss))
+        # Между окнами с голосом — по прямой, до первого и после последнего — как у них.
+        times, rows, sent = [(w + 0.5) * TONE_STEP for w in sung], [], {}
+        for n in range(round(len(power[1000]) * TONE_STEP * 10) + 1):
+            t, row = n / 10, []
+            k = min(max(0, sum(x <= t for x in times) - 1), len(times) - 2)
+            for f in octaves:
+                a, b = extra[f][sung[k]], extra[f][sung[min(k + 1, len(sung) - 1)]]
+                share = 0.0 if len(times) < 2 else min(1.0, max(0.0, (t - times[k]) / (times[k + 1] - times[k])))
+                value = round(a + (b - a) * share, 1)
+                if sent.get(f) != value:
+                    sent[f] = value
+                    row.append(f"equalizer@t{f} g {value}")
+            if row:
+                rows.append(f"{t:.1f} " + ", ".join(row) + ";")
+        cmd.write_text("\n".join(rows))
+    reach = {f: (min(extra[f].values()), max(extra[f].values())) for f in octaves}
+    print(f"  тембр по ходу: окна отходили от среднего на {drift[0]:.1f} дБ, после поправки — на {drift[1]:.1f}; "
+          + ", ".join(f"{f} Гц {lo:+.1f}…{hi:+.1f}" for f, (lo, hi) in reach.items()))
+    return _bells(gains) + f"asendcmd=f='{cmd}',{local}"
 
 
 def _envelope(path: Path, chain: str = "") -> list[float]:
@@ -322,7 +449,7 @@ def _rise(path: Path, chain: str) -> list[float]:
 
 
 def grid(beat: Path) -> tuple[float, float]:
-    """Сетка бита: длина доли и где первая доля, секунды.
+    """Сетка бита: длина доли и где сильная доля такта, секунды.
 
     Меряется минута с начала места, где качает низ (reels.beat_start). Темп — в пределах
     60–120 ударов в минуту: быстрый бит считается вдвое медленнее, и каждая доля
@@ -334,6 +461,8 @@ def grid(beat: Path) -> tuple[float, float]:
     с доли, — поэтому темп и первая доля уточняются гребёнкой с шагом 0,02 удара
     в минуту. Выбирать гребёнкой и сам темп нельзя: на медленной сетке лежат только
     самые громкие удары, и у M.E.R.C. Music она выбрала 80 вместо 107.
+    Первая доля — сильная доля такта: из четырёх фаз сетки та, где сильнее бьёт
+    низ (бочка), и такты — через каждые четыре доли от неё.
     """
     offset = reels.beat_start(beat)
     cut = f"atrim=start={offset:.2f}:duration=60,"
@@ -352,7 +481,12 @@ def grid(beat: Path) -> tuple[float, float]:
                     period, s) for s in range(int(period)))
 
     _, period, start = max(comb(60 * ENV_RATE / (bpm + d / 50)) for d in range(-10, 11))
-    return period / ENV_RATE, offset + start / ENV_RATE
+
+    def kick(phase: int) -> float:
+        return statistics.fmean(low[round(start + (4 * k + phase) * period)]
+                                for k in range(int((len(low) - 1 - start - phase * period) / (4 * period)) + 1))
+
+    return period / ENV_RATE, offset + (start + max(range(4), key=kick) * period) / ENV_RATE
 
 
 BPM = [60 + 0.1 * i for i in range(601)]
@@ -393,14 +527,15 @@ def _on_grid(t: float, beat: tuple[float, float], how=round) -> float:
     return start + how((t - start) / length) * length
 
 
-def _lines(level: list[float]) -> list[tuple[float, float]]:
-    """Строки голоса по огибающей: (начало, конец), секунды. Паузы короче
-    THROW_PAUSE — внутри строки, щелчки короче 0,1 с — не голос."""
+def _lines(level: list[float], below: float = VOICE_RANGE, pause: float = 0.4) -> list[tuple[float, float]]:
+    """Строки голоса по огибающей: (начало, конец), секунды. Голос — громче почти
+    самого громкого места минус below дБ; паузы короче pause — внутри строки,
+    щелчки короче 0,1 с — не голос."""
     top, lines = sorted(level)[int(len(level) * 0.95)], []
     for i, db in enumerate(level):
-        if db <= top - VOICE_RANGE:
+        if db <= top - below:
             continue
-        if lines and i - lines[-1][1] < THROW_PAUSE * ENV_RATE:
+        if lines and i - lines[-1][1] < pause * ENV_RATE:
             lines[-1][1] = i + 1
         else:
             lines.append([i, i + 1])
@@ -454,10 +589,11 @@ def masked(gaps: list[float | None]) -> float:
     return 100 * sum(gap < -2 for gap in sung) / max(len(sung), 1)
 
 
-def _ride(dry: Path, beat: Path, lift: float, work: Path) -> Path:
-    """Голос с общим подъёмом lift и райдером (RIDE_*) — в work/vocal-ride.wav."""
+def _ride(dry: Path, beat: Path, lift: float, target: float, work: Path) -> Path:
+    """Голос с общим подъёмом lift и райдером (RIDE_*) к цели target — голос к биту
+    в окне, дБ, — в work/vocal-ride.wav."""
     times, gaps = _gaps(dry, beat, lift)
-    want = [0.0 if gap is None else max(0.0, min(RIDE_MAX, RIDE_TARGET - gap)) for gap in gaps]
+    want = [0.0 if gap is None else max(0.0, min(RIDE_MAX, target - gap)) for gap in gaps]
     hold, smooth = round(RIDE_HOLD * 5), round(RIDE_SMOOTH * 5)
     peak = [max(want[max(0, i - hold):i + hold + 1]) for i in range(len(want))]
     ride = [statistics.fmean(peak[max(0, i - smooth):i + smooth + 1]) for i in range(len(peak))]
@@ -479,18 +615,20 @@ def _reverb(seconds: float, before: str = "highpass=f=300,lowpass=f=7000,adelay=
     )
 
 
-def _tempo_delay(length: float, under: float | None = None) -> str:
+def _tempo_delay(length: float, under: float | None = None, key: str = "") -> str:
     """Дилей в темп от стены к стене: слева повторы через четверть, справа — через
     восьмую (главный и второй у инженеров Sound On Sound), по три с затуханием;
     на возврат — полоса 200 Гц – 5 кГц (Элмхёрст в Mix With The Masters).
 
     under — громкость голоса, LUFS: под голосом дилей приседает на 8–10 дБ
     (2:1, атака сразу, отпуск 150 мс, как у Сениора) и раскрывается в паузах.
-    Иначе повторы ложились бы на следующие слова и мутили их."""
+    Иначе повторы ложились бы на следующие слова и мутили их. key — вход с голосом
+    для ключа («[1:a]»), если на входе дилея не весь голос, а только броски."""
     head, tail = "[0:a]", "[w]"
     if under is not None:
-        head = "[0:a]asplit[x][k];[x]"
-        tail = f"[d];[d][k]sidechaincompress=threshold={10 ** ((under - 18) / 20):.4f}:ratio=2:attack=0.01:release=150[w]"
+        head = "[0:a]" if key else "[0:a]asplit[x][k];[x]"
+        tail = (f"[d];[d]{key or '[k]'}sidechaincompress=threshold={10 ** ((under - 18) / 20):.4f}:ratio=2:attack=0.01:"
+                "release=150[w]")
     return (
         f"{head}highpass=f=200,lowpass=f=5000,pan=mono|c0=0.5*c0+0.5*c1,asplit[a][b];"
         + "".join(f"[{side}]aecho=in_gain=0:out_gain=1:delays={d:.0f}|{2 * d:.0f}|{3 * d:.0f}"
@@ -511,32 +649,117 @@ def _autotune(beat: Path) -> str:
     return AUTOTUNE.format(notes="|".join(f"m{n:02d}={int(n in notes)}" for n in range(12)))
 
 
-def _dip(lines: list[tuple[float, float]], path: Path) -> str:
-    """Провал бита под голос (BEAT_DIP) — командами фильтру: пока голос звучит,
-    туда и обратно за 50 мс, чтобы не щёлкало."""
-    steps = [f"{max(0.0, start - 0.05 + 0.01 * k):.2f} equalizer@dip g {BEAT_DIP * k / 5:.2f};\n"
-             f"{end + 0.01 * k:.2f} equalizer@dip g {BEAT_DIP * (1 - k / 5):.2f};"
-             for start, end in lines for k in range(1, 6)]
-    path.write_text("\n".join(steps))
-    return f"asendcmd=f='{path}'," if steps else ""
+def _band(low: float, high: float, order: int = 3) -> str:
+    """Полоса low–high крутыми фильтрами: order раз по 12 дБ на октаву с каждой
+    стороны; 0 — без этой стороны."""
+    return ",".join([f"highpass=f={low:.0f}"] * order * bool(low) + [f"lowpass=f={high:.0f}"] * order * bool(high)) or "anull"
 
 
-def _breath(voice: Path, first: float, beat: tuple[float, float], work: Path) -> Path | None:
-    """Вдох перед первым словом: слово задом наперёд уходит в отзвук, отзвук
-    разворачивается обратно и нарастает к слову с доли за BREATH_BEATS до него."""
-    length = beat[0]
-    start = _on_grid(first - BREATH_BEATS * length, beat)
-    swell = first - start
-    if start < 0 or swell < length:
-        return None
-    out = work / "breath.wav"
-    _ffmpeg("-i", voice, "-filter_complex", _reverb(
-        BREATH_SECONDS,
-        f"atrim=start={first:.3f}:end={first + length:.3f},asetpts=PTS-STARTPTS,areverse,apad=pad_dur={BREATH_SECONDS}",
-        f"areverse,atrim=start={BREATH_SECONDS - swell:.3f}:end={BREATH_SECONDS:.3f},asetpts=PTS-STARTPTS,"
-        f"afade=t=in:d={swell:.3f},afade=t=out:st={swell - 0.03:.3f}:d=0.03,adelay={1000 * start:.0f}|{1000 * start:.0f}"),
-        "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, out)
+def _bands(path: Path, chain: str = "", split=SPLIT, step: float = 0.1) -> list[list[float]]:
+    """Уровень полос по окнам step секунд, дБ RMS, за один проход: полосы между
+    частотами split, 36 дБ на октаву, как в tone, нулевая — ниже первой частоты.
+    Тишина — −150."""
+    edges = (0, *split, 0)
+    n = len(edges) - 1
+    graph = (f"[0:a]{chain}asplit={n}" + "".join(f"[i{k}]" for k in range(n)) + ";"
+             + "".join(f"[i{k}]{_band(edges[k], edges[k + 1])},asetnsamples={round(RATE * step)},astats=metadata=1:reset=1:"
+                       f"measure_perchannel=none:measure_overall=RMS_level,"
+                       f"ametadata@{k}=print:key=lavfi.astats.Overall.RMS_level[o{k}];" for k in range(n))
+             + "".join(f"[o{k}]" for k in range(n)) + f"amix=inputs={n}")
+    levels = [[] for _ in range(n)]
+    for k, db in re.findall(r"\[ametadata@(\d+) @ \w+\] lavfi\.astats\.Overall\.RMS_level=(-?[\d.]+|-inf)",
+                            _stderr("-i", path, "-filter_complex", graph)):
+        levels[int(k)].append(max(-150.0, float(db)))
+    return levels
+
+
+def _sung(lines: list[tuple[float, float]], n: int, step: float) -> list[int]:
+    """Окна по step секунд, середина которых — в строке голоса."""
+    return [i for i in range(n) if any(a <= (i + 0.5) * step < b for a, b in lines)]
+
+
+MID = "pan=mono|c0=0.5*c0+0.5*c1"
+
+
+def _room(beat: Path, dry: Path, head: str, lift: float, lines: list[tuple[float, float]], work: Path) -> Path:
+    """Бит с местом голосу — в work/beat.wav: полосы середины SPLIT приседают ключом
+    от тех же полос голоса (ROOM_*). head — цепочка бита до M/S, lift — на сколько
+    голос в склейке громче себя сухого против бита, дБ.
+
+    Провал — разность «сжатая полоса − полоса», прибавленная к целой середине:
+    без голоса она ноль, и бит выходит бит в бит (замер: −146 дБ), а бока не тронуты
+    вовсе. Полоса для провала — bandpass второго порядка на октаву: у него
+    вещественная часть равна квадрату модуля, и x − k·BP(x) — честный колокол
+    вниз; у крутых фильтров фаза на краях полосы уходит за 90°, и та же разность
+    там поднимала бит (+0,1 дБ на куске с голосом вместо провала). Ключу крутизна
+    нужна — он крутыми фильтрами. acrossover с sidechaincompress в ffmpeg 8.1
+    зависал в половине прогонов (docs/research/2026-09-22/asap-rocky.md), фильтры —
+    ни разу."""
+    under, over = _bands(beat, f"{head}{MID},"), _bands(dry, f"{MID},")
+    sung = _sung(lines, min(len(under[0]), len(over[0])), 0.1)
+    depth, key = {}, {}
+    for b in range(1, len(SPLIT) + 1):
+        masking = sorted(under[b][i] - over[b][i] - lift for i in sung)
+        cut = max(0.0, min(ROOM_CAP[b - 1], masking[int(ROOM_SHARE * (len(masking) - 1))])) if sung else 0.0
+        if cut:
+            depth[b], key[b] = cut, statistics.median(over[b][i] for i in sung) - cut * ROOM_RATIO / (ROOM_RATIO - 1)
+    out = work / "beat.wav"
+    if not depth:
+        print("  место голосу: бит голос не перекрывает")
+        _ffmpeg("-i", beat, "-af", head.rstrip(","), *reels.VOICE_CODEC, out)
+        return out
+    edges = (*SPLIT, 20000)
+    for again in range(2):
+        # Порог у компрессора не ниже −60 дБ, а верх голоса тише, поэтому порог стоит
+        # на −20 дБ, а ключ поднимается до него. Ключ — голос, дополненный тишиной ровно
+        # до длины бита (amix по первому входу): кончись голос раньше, сайдчейн оборвал
+        # бы бит.
+        _ffmpeg("-i", beat, "-i", dry, "-filter_complex",
+                f"[0:a]{head}asplit[b][z];[b]{MS},channelsplit[m][s];[m]asplit={len(depth) + 1}[m0]"
+                + "".join(f"[p{b}]" for b in depth) + f";[z]volume=0,{MID}[zero];[1:a]{MID}[v];"
+                f"[zero][v]amix=inputs=2:duration=first:normalize=0,asplit={len(depth)}" + "".join(f"[k{b}]" for b in depth) + ";"
+                + "".join(f"[p{b}]bandpass=f={(edges[b - 1] * edges[b]) ** 0.5:.0f}:t=q:w=1.41,asplit[x{b}][y{b}];"
+                          f"[k{b}]{_band(edges[b - 1], edges[b] if b < len(SPLIT) else 0, 2)},volume={-20 - key[b]:.2f}dB[q{b}];"
+                          f"[x{b}][q{b}]sidechaincompress=threshold=0.1:ratio={ROOM_RATIO}:attack=5:release={ROOM_RELEASE[b - 1]}:"
+                          f"knee=1[c{b}];[y{b}]volume=-1[n{b}];" for b in depth)
+                + "[m0]" + "".join(f"[c{b}][n{b}]" for b in depth)
+                + f"amix=inputs={2 * len(depth) + 1}:normalize=0[M];[M][s]amerge=inputs=2,{LR}", *reels.VOICE_CODEC, out)
+        # Колокола соседних полос складываются, а детектор с быстрой атакой читает слог
+        # выше среднего окна: без поправки провал выходил в 1,4–2,3 раза глубже задуманного.
+        # Поэтому замер провала по окнам с голосом и один пересчёт порогов.
+        done = _bands(out, f"{MID},")
+        got = {b: statistics.median(under[b][i] - done[b][i] for i in sung) for b in depth}
+        if not again:
+            key = {b: key[b] + (got[b] - depth[b]) * ROOM_RATIO / (ROOM_RATIO - 1) for b in depth}
+    print("  место голосу: " + ", ".join(f"{edges[b - 1]}–{edges[b]} Гц −{got[b]:.1f} (задумано −{depth[b]:.1f})"
+                                          for b in depth) + " дБ")
     return out
+
+
+def _breaths(voice: Path, words: list[float], beat: tuple[float, float], work: Path) -> tuple[Path | None, list]:
+    """Вдохи перед словами words: слово задом наперёд уходит в отзвук, отзвук
+    разворачивается обратно и нарастает к слову с доли за BREATH_BEATS до него.
+    Возвращает шину и окна вдохов."""
+    length, s, spans = beat[0], BREATH_SECONDS, []
+    for word in words:
+        start = _on_grid(word - BREATH_BEATS * length, beat)
+        if start >= 0 and word - start >= length:
+            spans.append((start, word))
+    if not spans:
+        return None, []
+    n, out = len(spans), work / "breath.wav"
+    _ffmpeg("-i", voice, "-filter_complex",
+            f"anoisesrc=r={RATE}:d={s}:c=pink:seed=1[n1];anoisesrc=r={RATE}:d={s}:c=pink:seed=2[n2];"
+            f"[n1][n2]amerge=inputs=2,asetnsamples=64,volume='exp(-6.9*t/{s})':eval=frame,asplit={n}"
+            + "".join(f"[r{k}]" for k in range(n)) + f";[0:a]asplit={n}" + "".join(f"[v{k}]" for k in range(n)) + ";"
+            + "".join(f"[v{k}]atrim=start={word:.3f}:end={word + length:.3f},asetpts=PTS-STARTPTS,areverse,"
+                      f"highpass=f=300,lowpass=f=7000,apad=pad_dur={s}[i{k}];[i{k}][r{k}]afir,areverse,"
+                      f"atrim=start={s - (word - start):.3f}:end={s:.3f},asetpts=PTS-STARTPTS,afade=t=in:d={word - start:.3f},"
+                      f"afade=t=out:st={word - start - 0.03:.3f}:d=0.03,adelay={1000 * start:.0f}|{1000 * start:.0f}[o{k}];"
+                      for k, (start, word) in enumerate(spans))
+            + "".join(f"[o{k}]" for k in range(n)) + f"amix=inputs={n}:normalize=0:duration=longest[w]",
+            "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, out)
+    return out, spans
 
 
 def _opening(beat_file: Path, first: float, beat: tuple[float, float], work: Path) -> Path:
@@ -570,20 +793,97 @@ def _opening(beat_file: Path, first: float, beat: tuple[float, float], work: Pat
     return out
 
 
-def _throws(voice: Path, lines: list[tuple[float, float]], length: float, work: Path) -> Path | None:
-    """Броски: последнее слово строки перед самыми длинными паузами — в дилей в темп."""
-    if not lines:
+def _spread(moments: list[tuple[float, float]], gap: float, limit: int = 99) -> list[float]:
+    """Моменты (вес, секунда) — самые весомые первыми, не ближе gap секунд друг
+    к другу, не больше limit."""
+    picked = []
+    for _, t in sorted(moments, reverse=True):
+        if len(picked) < limit and all(abs(t - c) >= gap for c in picked):
+            picked.append(t)
+    return sorted(picked)
+
+
+def _throws(voice: Path, ends: list[float], length: float, work: Path) -> Path | None:
+    """Броски: последнее слово фразы у концов ends — в дилей в темп, каждый второй —
+    на октаву ниже; повторы приседают под голосом."""
+    if not ends:
         return None
-    pauses = [(lines[i + 1][0] if i + 1 < len(lines) else math.inf) - end for i, (_, end) in enumerate(lines)]
-    ends = sorted(end for _, (_, end) in sorted(zip(pauses, lines), reverse=True)[:THROWS])
-    print("  броски: " + ", ".join(f"{end:.1f}" for end in ends) + " с")
-    points = [(0.0, -120.0)]
-    for end in ends:
-        points += [(end - THROW_WORD - 0.01, -120.0), (end - THROW_WORD, 0.0), (end + 0.03, 0.0), (end + 0.04, -120.0)]
-    send = _apply(voice, _gain_track(points, clips.probe_seconds(voice) + 1, work / "throw.wav"), work / "throw-send.wav")
-    out = work / "throws.wav"
-    _ffmpeg("-i", send, "-filter_complex", _tempo_delay(length), "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, out)
+    tracks = []
+    for name, part in (("throw", ends[::2]), ("throw-low", ends[1::2])):
+        points = [(0.0, -120.0)]
+        for end in part:
+            points += [(end - THROW_WORD - 0.01, -120.0), (end - THROW_WORD, 0.0), (end + 0.03, 0.0), (end + 0.04, -120.0)]
+        tracks.append(_gain_track(points, clips.probe_seconds(voice) + 1, work / f"{name}.wav"))
+    send, out = work / "throw-send.wav", work / "throws.wav"
+    _ffmpeg("-i", voice, "-i", tracks[0], "-i", tracks[1], "-filter_complex",
+            f"[1:a]aresample={RATE},pan=stereo|c0=c0|c1=c0[g1];[2:a]aresample={RATE},pan=stereo|c0=c0|c1=c0[g2];"
+            f"[0:a]asplit[a][b];[a][g1]amultiply,volume=2[h];"
+            f"[b][g2]amultiply,volume=2,asetrate={RATE // 2},aresample={RATE},atempo=2[l];"
+            "[h][l]amix=inputs=2:normalize=0:duration=first", *reels.VOICE_CODEC, send)
+    _ffmpeg("-i", send, "-i", voice, "-filter_complex", _tempo_delay(length, loudness(voice)[0], "[1:a]"),
+            "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, out)
     return out
+
+
+def _snap(beat_file: Path, t: float, length: float) -> float:
+    """Доля сетки t — к удару низа (бочке) в пределах четверти доли: живой бит гуляет
+    вокруг сетки на ±60 мс (Coruscate), а вырез должен вернуть бит ровно на удар.
+    Удара рядом нет — остаётся доля сетки."""
+    rise = _rise(beat_file, f"atrim=start={max(0.0, t - length):.3f}:duration={2 * length:.3f},lowpass=f=120,lowpass=f=120,")
+    zero, reach = round(min(t, length) * ENV_RATE), round(length / 4 * ENV_RATE)
+    near = range(max(2, zero - reach), min(len(rise), zero + reach + 1))
+    best = max(near, key=rise.__getitem__, default=zero)
+    # Рост уровня считается по окнам 10 мс через одно: удар начался окном раньше.
+    return t + (best - 1 - zero) / ENV_RATE if near and rise[best] > 3 else t
+
+
+def _cut(beat_file: Path, downs: list[float], length: float, work: Path) -> Path:
+    """Вырез бита на долю перед каждой сильной долей из downs: уходит за 10 мс
+    до доли, возвращается за 5 мс до сильной — её удар целиком."""
+    points = [(0.0, 0.0)]
+    for down in downs:
+        points += [(down - length - 0.03, 0.0), (down - length - 0.01, -120.0), (down - 0.02, -120.0), (down - 0.005, 0.0)]
+    return _apply(beat_file, _gain_track(points, clips.probe_seconds(beat_file) + 1, work / "cut.wav"), work / "beat-cut.wav")
+
+
+def _risers(ends: list[float], length: float, work: Path) -> Path | None:
+    """Подъёмы: стерео белый шум на такт до каждого момента ends — фильтр открывается
+    от RISE_LOW до RISE_HIGH Гц, громкость растёт на RISE_RANGE дБ, в конце обрыв.
+    Один такт синтезируется и ставится копиями."""
+    bar = 4 * length
+    starts = [end - bar for end in ends if end >= bar]
+    if not starts:
+        return None
+    (work / "rise.cmd").write_text("\n".join(f"{n * 0.02:.2f} lowpass@rise f {RISE_LOW * (RISE_HIGH / RISE_LOW) ** (n * 0.02 / bar):.0f};"
+                                             for n in range(int(bar / 0.02))))
+    out = work / "risers.wav"
+    _ffmpeg("-filter_complex",
+            f"anoisesrc=r={RATE}:d={bar:.3f}:c=white:seed=3[n1];anoisesrc=r={RATE}:d={bar:.3f}:c=white:seed=4[n2];"
+            f"[n1][n2]amerge=inputs=2,highpass=f=200,asendcmd=f='{work / 'rise.cmd'}',lowpass@rise=f={RISE_LOW},"
+            f"asetnsamples=256,volume='pow(10,{RISE_RANGE / 20}*(t/{bar:.3f}-1))':eval=frame,"
+            f"afade=t=out:st={bar - 0.01:.3f}:d=0.01,asplit={len(starts)}" + "".join(f"[r{k}]" for k in range(len(starts))) + ";"
+            + "".join(f"[r{k}]adelay={1000 * t:.0f}|{1000 * t:.0f}[d{k}];" for k, t in enumerate(starts))
+            + "".join(f"[d{k}]" for k in range(len(starts))) + f"amix=inputs={len(starts)}:normalize=0:duration=longest",
+            *reels.VOICE_CODEC, out)
+    return out
+
+
+def _audible(bed: Path, parts: list[tuple[str, Path, float, list, list]]) -> str:
+    """Слышимость приёмов: громкость каждого в его окнах к биту в окнах ref, LU —
+    энергетическое среднее окон EBU R128 M (0,4 с), чьи середины лежат в окне.
+    Для выреза шина — сам бит: насколько он тише в вырезе, чем такт до него.
+    Окна, где бит молчит (вдох в вступлении без бита), не в счёт: там не с чем сравнивать."""
+    def level(trace, spans) -> float:
+        hits = [10 ** (m / 10) for t, m, _ in trace if any(a <= t - 0.2 <= b for a, b in spans)]
+        return 10 * math.log10(statistics.fmean(hits)) if hits else -120.0
+    whole, under = reels.meter(bed)
+    report = []
+    for name, path, gain, spans, ref in parts:
+        pairs = [(span, back) for span, back in zip(spans, ref) if level(under, [back]) >= whole - 20]
+        if pairs:
+            spans, ref = zip(*pairs)
+            report.append(f"{name} {level(reels.meter(path)[1] if path != bed else under, spans) + gain - level(under, ref):+.0f}")
+    return ", ".join(report) + " LU к биту"
 
 
 def _stop_at(beat_file: Path, lines: list[tuple[float, float]], beat: tuple[float, float]) -> float | None:
@@ -629,76 +929,32 @@ def _tape_stop(master: Path, at: float, length: float, work: Path) -> None:
     stopped.replace(master)
 
 
-def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
-        voice: float = 0.0, echo: float = 0.0) -> Path:
-    """Склейка в out/skleyka.wav, промежуточное — в out/work. voice — голос к биту,
-    echo — отзвук и дилей к своей доле, оба в дБ: ручки бота «громче/тише» и «эха»."""
-    look, work = STYLES[style], out / "work"
-    work.mkdir(parents=True, exist_ok=True)
-    print(f"  стиль «{style}»: {look['about']}" + (", саунд-дизайн" if design else ""))
+def _glue(total: Path) -> str:
+    """Склейка шины (GLUE) с порогом по замеру: сжатие GLUE дБ по EBU R128."""
+    level = loudness(total)[0]
+    threshold, drop = level - 2 * GLUE, 0.0
+    for _ in range(4):
+        chain = f"acompressor=threshold={10 ** (threshold / 20):.5f}:ratio=2:attack=30:release=200,"
+        drop = level - loudness(total, chain)[0]
+        if abs(drop - GLUE) < 0.2:
+            break
+        threshold -= 2 * (GLUE - drop)
+    print(f"  склейка шины: 2:1, сжатие {drop:.1f} дБ")
+    return chain
 
-    clean = f"{FORMAT},{_center(vocal)}{HIGHPASS}"
-    if look.get("autotune") and (tune := _autotune(beat)):
-        clean += f",{tune}"
-    squeezed, dry = work / "vocal-comp.wav", work / "vocal.wav"
-    _ffmpeg("-i", vocal, "-af", f"{clean},volume={VOCAL_LUFS - loudness(vocal, clean + ',')[0]:.2f}dB,{VOCAL_CHAIN}"
-            + (f",{DENSE}" if look.get("dense") else ""), *reels.VOICE_CODEC, squeezed)
-    _ffmpeg("-i", squeezed, "-af", _equalizer(squeezed) + DEESSER + (f",{look['color']}" if "color" in look else ""),
-            *reels.VOICE_CODEC, dry)
-    sung, lines = loudness(dry)[0], _lines(_envelope(dry))
 
-    # Противофаза — по слышимой полосе: в ультразвуке и на самом низу бывает что угодно.
-    heard = f"{FORMAT},highpass=f=60,lowpass=f=12000,"
-    width = stereo(beat, heard)[0]
-    flip = "pan=stereo|c0=c0|c1=-1*c1," if width < 0 else ""
-    ducked = work / "beat.wav"
-    _ffmpeg("-i", beat, "-i", dry, "-filter_complex",
-            f"[0:a]{FORMAT},{flip}{MS},{_dip(lines, work / 'dip.cmd')}{BEAT_EQ},{LR}[b];"
-            f"[1:a]volume={VOCAL_LUFS - sung:.2f}dB[v];[b][v]{DUCK}",
-            *reels.VOICE_CODEC, ducked)
-    print(f"  бит: корреляция каналов {width:+.2f}" + (", один канал перевёрнут" if flip else ""))
-    ridden = _ride(dry, ducked, loudness(ducked)[0] + VOCAL_OVER_BEAT + voice - sung, work)
-    level = loudness(ridden)[0]
+def _master(total: Path, glue: str, master: Path) -> tuple[float, float, float]:
+    """Мастер: низ в моно, склейка шины, клиппер и ограничитель до MASTER_LUFS —
+    в master. Возвращает громкость, истинный пик и подъём.
 
-    rhythm = grid(beat) if design or look.get("delay", ("",))[0] == "в темп" else None
-    if rhythm:
-        print(f"  темп {60 / rhythm[0]:.1f} ударов в минуту, первая доля {rhythm[1]:.2f} с")
-    sends = []
-    if "reverb" in look:
-        seconds, share = look["reverb"]
-        sends.append(("reverb", _reverb(seconds), share))
-    if "delay" in look:
-        kind, share = look["delay"]
-        sends.append(("delay", reels.DELAY if kind == "коротко" else _tempo_delay(rhythm[0], level), share))
-    if look.get("double") and stereo(dry)[0] > 0.98:
-        sends.append(("double", DOUBLE, DOUBLE_SHARE))
-    wets = []
-    for name, graph, share in sends:
-        wet = work / f"{name}.wav"
-        _ffmpeg("-i", ridden, "-filter_complex", graph, "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
-        wets.append((wet, share if name == "double" else share * 10 ** (echo / 20)))
-    design = design and bool(lines)
-    if design:
-        print(f"  саунд-дизайн: первое слово {lines[0][0]:.2f} с")
-        ducked = _opening(ducked, lines[0][0], rhythm, work)
-        wets += [(wet, share) for wet, share in ((_breath(ridden, lines[0][0], rhythm, work), BREATH_SHARE),
-                                                 (_throws(ridden, lines, rhythm[0], work), THROW_SHARE)) if wet]
-    parts = [(ridden, 0.0), (ducked, 0.0)] + [(wet, level + 20 * math.log10(share) - loudness(wet)[0]) for wet, share in wets]
-    total = work / "sum.wav"
-    _ffmpeg(*(arg for part, _ in parts for arg in ("-i", part)), "-filter_complex",
-            "".join(f"[{n}:a]volume={gain:.2f}dB[s{n}];" for n, (_, gain) in enumerate(parts))
-            + "".join(f"[s{n}]" for n in range(len(parts)))
-            + f"amix=inputs={len(parts)}:duration=longest:normalize=0",
-            *reels.VOICE_CODEC, total)
-
-    # Клиппер и ограничитель съедают часть громкости, поэтому подъём подбирается
-    # замером. Пик волны лежит между отсчётами и на 44,1 кГц выходит до дБ выше
-    # порога, поэтому оба работают на учетверённой частоте. Клиппер режет по нулю,
-    # и сигнал к нему подводится так, чтобы ноль пришёлся на CLIP дБ над порогом.
-    master, push, limit = out / "skleyka.wav", MASTER_LUFS - loudness(total)[0], CEILING - 0.3
+    Клиппер и ограничитель съедают часть громкости, поэтому подъём подбирается
+    замером. Пик волны лежит между отсчётами и на 44,1 кГц выходит до дБ выше
+    порога, поэтому оба работают на учетверённой частоте. Клиппер упирается в ноль,
+    и сигнал к нему подводится так, чтобы ноль пришёлся на CLIP дБ над порогом."""
+    push, limit = MASTER_LUFS - loudness(total, glue)[0], CEILING - 0.3
     for _ in range(6):
         _ffmpeg("-i", total, "-af",
-                f"{LOW_MONO},volume={push - limit - CLIP:.2f}dB,aresample={4 * RATE},asoftclip=type=hard,"
+                f"{LOW_MONO},{glue}volume={push - limit - CLIP:.2f}dB,aresample={4 * RATE},{CLIPPER},"
                 f"volume={limit + CLIP:.2f}dB,"
                 f"alimiter=limit={10 ** (limit / 20):.4f}:attack=5:release=150:asc=1:level=0:latency=1,"
                 f"aresample={RATE}",
@@ -709,7 +965,119 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
         push += MASTER_LUFS - level
         # Ровно на превышение порог сходится к потолку снизу бесконечно — с запасом 0,1 дБ.
         limit -= peak - CEILING + 0.1 if peak > CEILING else 0.0
-    if design and (at := _stop_at(ducked, lines, rhythm)) is not None:
+    return level, peak, push
+
+
+def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
+        voice: float = 0.0, echo: float = 0.0) -> Path:
+    """Склейка в out/skleyka.wav, промежуточное — в out/work.
+
+    Ручки бота: voice — голос к биту, дБ («голос громче / тише» — по ±2): сдвигает
+    и баланс, и цель райдера, иначе в местах, где бит перекрывал голос, райдер
+    съел бы поправку; echo — доля отзвука, дилея и бросков к своей, дБ («эха
+    больше / меньше» — по ±4); дабл не эхо, его не трогает."""
+    look, work = STYLES[style], out / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    print(f"  стиль «{style}»: {look['about']}" + (", саунд-дизайн" if design else "")
+          + (f", голос {voice:+g} дБ" if voice else "") + (f", эхо {echo:+g} дБ" if echo else ""))
+
+    clean = f"{FORMAT},{_center(vocal)}{HIGHPASS}"
+    if look.get("autotune") and (tune := _autotune(beat)):
+        clean += f",{tune}"
+    squeezed, dry = work / "vocal-comp.wav", work / "vocal.wav"
+    _ffmpeg("-i", vocal, "-af", f"{clean},volume={VOCAL_LUFS - loudness(vocal, clean + ',')[0]:.2f}dB,{VOCAL_CHAIN}"
+            + (f",{DENSE}" if look.get("dense") else ""), *reels.VOICE_CODEC, squeezed)
+    lines = _lines(_envelope(squeezed))
+    _ffmpeg("-i", squeezed, "-af", _equalizer(squeezed, lines, work) + DEESSER + (f",{look['color']}" if "color" in look else ""),
+            *reels.VOICE_CODEC, dry)
+    sung = loudness(dry)[0]
+
+    # Противофаза — по слышимой полосе: в ультразвуке и на самом низу бывает что угодно.
+    heard = f"{FORMAT},highpass=f=60,lowpass=f=12000,"
+    width = stereo(beat, heard)[0]
+    flip = "pan=stereo|c0=c0|c1=-1*c1," if width < 0 else ""
+    head = f"{FORMAT},{flip}"
+    print(f"  бит: корреляция каналов {width:+.2f}" + (", один канал перевёрнут" if flip else ""))
+    ducked = _room(beat, dry, head, loudness(beat, head)[0] + VOCAL_OVER_BEAT + voice - sung, lines, work)
+    under = loudness(ducked)[0]
+    ridden = _ride(dry, ducked, under + VOCAL_OVER_BEAT + voice - sung, RIDE_TARGET + voice, work)
+    level = loudness(ridden)[0]
+
+    rhythm = grid(beat) if design or look.get("delay", ("",))[0] == "в темп" else None
+    if rhythm:
+        print(f"  темп {60 / rhythm[0]:.1f} ударов в минуту, сильная доля {rhythm[1]:.2f} с")
+    sends = []
+    if "reverb" in look:
+        seconds, share = look["reverb"]
+        sends.append(("reverb", _reverb(seconds), share))
+    if "delay" in look:
+        kind, share = look["delay"]
+        sends.append(("delay", reels.DELAY if kind == "коротко" else _tempo_delay(rhythm[0], level), share))
+    if look.get("double") and stereo(dry)[0] > 0.98:
+        sends.append(("double", DOUBLE, DOUBLE_SHARE))
+    wets = []  # (шина, громкость в склейке по EBU R128)
+    for name, graph, share in sends:
+        wet = work / f"{name}.wav"
+        _ffmpeg("-i", ridden, "-filter_complex", graph, "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
+        wets.append((wet, level + 20 * math.log10(share) + (0.0 if name == "double" else echo)))
+    bed, tricks = ducked, []
+    if design and lines:
+        length, first = rhythm[0], lines[0][0]
+        phrases, trace = _lines(_envelope(ridden), PHRASE_RANGE, PHRASE_PAUSE), reels.meter(ducked)[1]
+
+        def playing(a: float, b: float) -> bool:
+            """Бит играет в полную силу: без него вырезать нечего, а подъём уходит в тишину."""
+            return max((m for t, m, _ in trace if a <= t - 0.2 <= b), default=-120.0) >= under - 10
+
+        # Вход — не раньше четырёх тактов после первого слова: там своё вступление;
+        # и там, где бит играет и до выреза, и после сильной доли — своя пауза в бите
+        # (у Coruscate на 259 с) вырезу не место.
+        entries, downs = [], []
+        for t in _spread([(nxt[0] - prev[1], nxt[0]) for prev, nxt in zip(phrases, phrases[1:])
+                          if nxt[0] - prev[1] >= ENTRY_BEATS * length and nxt[0] >= first + 16 * length],
+                         ENTRY_BARS * 4 * length):
+            down = _snap(ducked, _on_grid(t, (4 * length, rhythm[1])), length)
+            if playing(down - 2 * length, down - length) and playing(down, down + length):
+                entries.append(t)
+                downs.append(down)
+        ends = _spread([(nxt[0] - prev[1], prev[1]) for prev, nxt in zip(phrases, [*phrases[1:], (math.inf,)])],
+                       THROW_BARS * 4 * length, THROWS)
+        print(f"  саунд-дизайн: первое слово {first:.2f} с, входы " + (", ".join(f"{t:.1f}" for t in entries) or "—")
+              + f" с; бросков {len(ends)}, на октаву ниже {len(ends) // 2}")
+        bed = _opening(ducked, first, rhythm, work)
+        if downs:
+            bed = _cut(bed, downs, length, work)
+            tricks.append(("вырезы", bed, None, [(d - length + 0.2, d - 0.2) for d in downs],
+                           [(d - 5 * length, d - length) for d in downs]))
+        # Бит вступает позже голоса (у Coruscate — на 29,9 с, после акапеллы с 10 с):
+        # в его первую долю — тоже подъём, вырезать там нечего.
+        start = next((t - 0.4 for t, m, _ in trace if m >= under - 10), 0.0)
+        rises = [d - length for d in downs]
+        if start > first + 4 * length:
+            rises.append(_snap(ducked, _on_grid(start, rhythm), length))
+            print(f"  бит вступает на {rises[-1]:.2f} с — подъём в его первую долю")
+        breath, spans = _breaths(ridden, [first, *entries], rhythm, work)
+        tricks += [("вдохи", breath, under + BREATH_DB, spans, spans),
+                   ("подъёмы", _risers(sorted(rises), length, work), under + RISE_DB,
+                    [(d - 2 * length, d - length) for d in downs], [(d - 2 * length, d - length) for d in downs]),
+                   ("броски", _throws(ridden, ends, length, work), under + THROW_DB + echo,
+                    [(e, e + 3 * length) for e in ends], [(e, e + 3 * length) for e in ends])]
+        wets += [(path, target) for _, path, target, _, _ in tricks if path and target is not None]
+    gains = {wet: target - loudness(wet)[0] for wet, target in wets}
+    parts = [(ridden, 0.0), (bed, 0.0), *gains.items()]
+    total = work / "sum.wav"
+    _ffmpeg(*(arg for part, _ in parts for arg in ("-i", part)), "-filter_complex",
+            "".join(f"[{n}:a]volume={gain:.2f}dB[s{n}];" for n, (_, gain) in enumerate(parts))
+            + "".join(f"[s{n}]" for n in range(len(parts)))
+            + f"amix=inputs={len(parts)}:duration=longest:normalize=0",
+            *reels.VOICE_CODEC, total)
+    if tricks:
+        print("  слышно: " + _audible(bed, [(name, path, gains.get(path, 0.0), spans, ref)
+                                            for name, path, _, spans, ref in tricks if path and spans]))
+
+    master = out / "skleyka.wav"
+    level, peak, push = _master(total, _glue(total), master)
+    if design and lines and (at := _stop_at(ducked, lines, rhythm)) is not None:
         _tape_stop(master, at, rhythm[0], work)
         print(f"  остановка плёнки с {at:.2f} с")
     corr, loss = stereo(master)
@@ -776,7 +1144,7 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
         squeezed, dry = work / f"part{n}-comp.wav", work / f"part{n}.wav"
         _ffmpeg("-i", path, "-af", f"{chain},volume={VOCAL_LUFS - loudness(path, chain + ',')[0]:.2f}dB,{VOCAL_CHAIN}",
                 *reels.VOICE_CODEC, squeezed)
-        tone = f"{_equalizer(squeezed)}{look['deess']}"
+        tone = f"{_equalizer(squeezed, _lines(_envelope(squeezed)), work)}{look['deess']}"
         if len(same) == 1 and part != "дабл":
             _ffmpeg("-i", squeezed, "-filter_complex", f"[0:a]{tone}[t];" + DOUBLE.replace("[0:a]", "[t]"),
                     "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, dry)
@@ -1749,7 +2117,9 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=Path("skleyka"), help="папка для результата")
     parser.add_argument("--style", choices=STYLES, default="чисто", help="набор эффектов")
     parser.add_argument("--design", action="store_true",
-                        help="саунд-дизайн: вдох перед первым словом, фильтр на бите, броски, остановка плёнки")
+                        help="саунд-дизайн: вдохи, фильтр и вырезы бита, подъёмы, броски, остановка плёнки")
+    parser.add_argument("--voice", type=float, default=0.0, help="голос к биту, дБ (ручки бота — по ±2)")
+    parser.add_argument("--echo", type=float, default=0.0, help="доля отзвука, дилея и бросков, дБ (ручки бота — по ±4)")
     parser.add_argument("--job", type=Path, metavar="ФАЙЛ", help="склейка заявки из бота (её запускает дежурство)")
     parser.add_argument("--selftest", action="store_true", help="роли, маршрут, заявка, ручки, лимиты — без сети")
     parser.add_argument("--dry-run", action="store_true", help="заявки и склейки в очереди, ничего не делая")
@@ -1768,7 +2138,7 @@ def main() -> int:
             print(f"  {job['id']}: {look(job['knobs'])}" + (" — идёт" if "started" in job else ""))
         return 0
     if args.mix:
-        master = mix(*args.mix, args.out, args.style, args.design)
+        master = mix(*args.mix, args.out, args.style, args.design, args.voice, args.echo)
         compare(*args.mix, master, args.out)
         print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}")
         return 0
