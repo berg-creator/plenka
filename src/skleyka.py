@@ -28,7 +28,8 @@
    сведения. Отзвук, дилей и дабл — шинами, доля к сухому голосу по замеру,
    как в reels.studio.
 6. Саунд-дизайн — по флагу и по всему треку: вдох перевёрнутого отзвука перед
-   первым словом и на входах голоса, бит из-под фильтра до первого слова, на входах
+   первым словом и на входах голоса, бит из-под фильтра до первого слова (если
+   у бита там нет своего дропа), на входах
    после пауз — подъём шума и вырез бита перед сильной долей, броски дилея на концах
    фраз (каждый второй — на октаву ниже), остановка плёнки в конце. Всё синтезом
    ffmpeg, без чужих сэмплов, на доли и такты бита (grid), громкость приёмов — к биту.
@@ -250,6 +251,12 @@ BREATH_DB = -2.0
 FILTER_LOW = 400
 FILTER_BEATS = 8
 OPEN_BEATS = 2
+# Свой дроп бита: низ до 150 Гц (бочка и бас) за это окно вырастает на OWN_DROP дБ
+# и больше — тогда фильтра нет. У Little Chicago's Finest бочка и бас входят на 8 с,
+# за 1,7 с до первого слова (низ −65 → −29 дБ), и фильтр глушил готовый дроп —
+# владелец 22.09: «эффект саунд-дизайна вообще лишний и безвкусный». У остальных
+# четырёх треков низ в окне ровный (±5 дБ) или бит молчит.
+OWN_DROP = 12.0
 # Фразы для саунд-дизайна размечаются строже, чем окна с голосом: эдлибы, подпевки
 # и хвосты отзвука в стеме тише главного голоса на 15 дБ и больше. С общим порогом
 # (VOICE_RANGE) у Little Chicago's Finest на 4:41 выходило 5 строк без единой паузы
@@ -793,13 +800,19 @@ def _breaths(voice: Path, words: list[float], beat: tuple[float, float], work: P
 def _opening(beat_file: Path, first: float, beat: tuple[float, float], work: Path) -> Path:
     """Бит до первого слова — из-под фильтра: за FILTER_BEATS долей закрывается
     до FILTER_LOW Гц за одну долю и за OPEN_BEATS долей открывается к сильной
-    доле первого слова. Слово с первой секунды — бит как есть."""
+    доле первого слова. Слово с первой секунды или свой дроп у бита (OWN_DROP) —
+    бит как есть."""
     length = beat[0]
     opened = _on_grid(first - 0.1, beat, math.ceil)
     sweep = opened - OPEN_BEATS * length
     if sweep < length:
         return beat_file
     shut = max(0.0, _on_grid(opened - FILTER_BEATS * length, beat))
+    low, step = _envelope(beat_file, f"atrim=start={shut:.3f}:end={opened:.3f},lowpass=f=150,lowpass=f=150,"), round(2 * length * ENV_RATE)
+    halves = [statistics.fmean(low[i:i + step]) for i in range(0, len(low), step)]
+    if drop := next((k for k in range(1, len(halves)) if halves[k] - min(halves[:k]) >= OWN_DROP), None):
+        print(f"  у бита свой дроп на {shut + drop * 2 * length:.1f} с — без фильтра до первого слова")
+        return beat_file
     closed = shut + length if shut else 0.0
     steps = []
     for n in range(int((opened - shut) / 0.02)):
