@@ -861,40 +861,6 @@ def fresh_preview(post: dict) -> str:
         return ""
 
 
-def do_backfill_music() -> int:
-    """Дописывает отрывок к постам, которые уже лежат в очереди.
-
-    Посты, написанные до появления музыки в канале, ушли бы немыми — а они
-    про релизы, где звук и есть содержание. Текст не трогаем: меняется только
-    то, чем пост отправится.
-    """
-    touched, skipped = 0, 0
-    for path in sorted(config.QUEUE.glob("*.json")):
-        post = state.read_json(path, {})
-        if post.get("preview") or not post.get("source_url"):
-            continue
-
-        try:
-            lead = _lead_from_url(post["source_url"])
-        except Exception as exc:  # магазин мог не ответить — это не повод падать
-            log.warning("%s: %s", path.name, exc)
-            continue
-
-        # Дозагрузка — про отрывок: трек без него в очереди ничего не меняет.
-        if not lead.get("preview"):
-            skipped += 1
-            continue
-
-        post["preview"] = lead["preview"]
-        post["track"] = lead.get("title", "")
-        state.write_json(path, post)
-        touched += 1
-        print(f"  ✓ {post.get('rubric', ''):<8} {post.get('artist', '')} — {lead.get('title', '')}")
-
-    print(f"\nПостов с музыкой: {touched}. Без неё осталось: {skipped}.")
-    return 0
-
-
 def needs_track(post: dict) -> bool:
     """Музыкальный пост без полного трека, про который владельца ещё не спрашивали."""
     return bool(post.get("artist") and post.get("track")) and not (
@@ -1316,11 +1282,6 @@ def main() -> int:
     parser.add_argument("--fetch", action="store_true", help="забрать готовый батч")
     parser.add_argument("--now", type=int, metavar="N", help="сгенерировать N постов сразу")
     parser.add_argument(
-        "--backfill-music",
-        action="store_true",
-        help="дописать отрывки к постам, которые уже в очереди",
-    )
-    parser.add_argument(
         "--ask-tracks",
         action="store_true",
         help="попросить у владельца полные треки к музыкальным постам очереди (каждый — один раз)",
@@ -1345,8 +1306,6 @@ def main() -> int:
         return _selftest()
     if args.ask_tracks:
         return do_ask_tracks()
-    if args.backfill_music:
-        return do_backfill_music()
     if args.fresh:
         return do_fresh(args.dry_run)
     if args.dry_run:
