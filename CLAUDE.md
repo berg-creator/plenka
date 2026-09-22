@@ -90,6 +90,8 @@ python -m src.collect                  собрать новинки в data/inb
 python -m src.compose --now 5          написать 5 постов сразу (без батча, дороже)
 python -m src.compose --submit         отправить пачку в Batch API (вдвое дешевле)
 python -m src.compose --fetch          забрать готовый батч в очередь
+python -m src.compose --memes 8        пачка мемов владельцу на вердикт, мимо очереди
+                                       (только из Actions: Gemini не отвечает из России)
 python -m src.publish --target admin   следующий пост себе в личку
 python -m src.moderate --serve 55      дежурство: кнопки и разборы, ответ за секунды
 python -m src.clips --preview          собрать клип «ОТКУДА НОГИ», никуда не отправляя

@@ -8,6 +8,10 @@ on:
     - cron: "40 3 * * *"    # раз в сутки ночью — отправка новой пачки
     - cron: "40 7 * * *"    # и через четыре часа — забрать результат
   workflow_dispatch:
+    inputs:
+      memes:
+        description: "Мемов владельцу в личку на вердикт (0 — обычная генерация)"
+        default: "0"
 
 concurrency:
   group: state-write
@@ -31,6 +35,7 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Забрать готовый батч
+        if: inputs.memes == '' || inputs.memes == '0'
         env:
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
           LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
@@ -43,6 +48,7 @@ jobs:
         run: python -m src.compose --fetch
 
       - name: Отправить новую пачку
+        if: inputs.memes == '' || inputs.memes == '0'
         env:
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
           LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
@@ -58,11 +64,26 @@ jobs:
       # (принимает их src/moderate.py). Шаг не должен срывать сохранение:
       # посты этой генерации уже на диске, а неотправленный запрос уйдёт завтра.
       - name: Запросить полные треки
+        if: inputs.memes == '' || inputs.memes == '0'
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
         run: python -m src.compose --ask-tracks
+
+      - name: Пачка мемов владельцу
+        if: inputs.memes != '' && inputs.memes != '0'
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
+          LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
+          GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python -m src.compose --memes ${{ inputs.memes }}
 
       - name: Сохранить состояние
         run: |

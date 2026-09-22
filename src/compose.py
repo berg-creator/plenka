@@ -18,12 +18,13 @@ import argparse
 import logging
 import random
 import re
+import tempfile
 from collections.abc import Iterable
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
-from . import card, collect, config, footage, llm, quality, state, telegram, tracks
+from . import card, collect, config, footage, llm, publish, quality, state, telegram, tracks
 from .sources import deezer, itunes, youtube_comments
 
 log = logging.getLogger("compose")
@@ -438,12 +439,16 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     # а поворот появляется только вместе с текстом.
     catalog = state.read_json(config.MEMES_FILE, {"memes": []})["memes"]
     pictures = [{"key": m["key"], "when": m["when"]} for m in catalog]
-    for _ in range(quota.get("meme", 0)):
+    memes = quota.get("meme", 0)
+    # Каталог тасуется и режется на непересекающиеся доли: модель тянется
+    # к первым строкам списка, и без этого в одной пачке выходили подряд два
+    # мема на одном еноте, а картинки из конца каталога не выпадали никогда.
+    random.shuffle(pictures)
+    avoid = meme_openings() if memes else []
+    for n in range(memes):
         sample = random.sample(artists, min(12, len(artists)))
-        # Каталог тасуется на каждый мем: модель тянется к первым строкам
-        # списка, и картинки из его конца иначе не выпадали бы никогда.
-        shuffled = random.sample(pictures, len(pictures))
-        add("meme", {"scene": [a["name"] for a in sample], "pictures": shuffled}, {})
+        share = pictures[n::memes] or pictures
+        add("meme", {"scene": [a["name"] for a in sample], "pictures": share, "avoid": avoid}, {})
 
     # ОПРОС — тоже из базы артистов.
     for _ in range(quota.get("poll", 0)):
@@ -451,6 +456,21 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
         add("poll", {"artists": [a["name"] for a in sample]}, {})
 
     return jobs[:needed]
+
+
+def meme_openings() -> list[str]:
+    """Первые слова надписей у мемов, которые ещё ждут выхода в очереди.
+
+    Пачка пишется одним батчем и о себе не знает, но следующая видит эту:
+    без такого списка «Слушаю» открывало четыре мема из шести подряд.
+    """
+    words = []
+    for path in sorted(config.QUEUE.glob("*-meme.json")):
+        top = state.read_json(path, {}).get("top", "")
+        first = top.split()[0].strip("«»\"',.!?:—-") if top.split() else ""
+        if first and first not in words:
+            words.append(first)
+    return words
 
 
 def previous_releases(item: dict, inbox: Iterable[dict], artists: dict[str, dict], limit: int = 5) -> list[dict]:
@@ -901,6 +921,51 @@ def where_to_find(post: dict, video: dict | None = None) -> list[list[dict]]:
     return rows
 
 
+def do_memes(count: int) -> int:
+    """Пачка мемов владельцу в личку — на вердикт, мимо очереди.
+
+    Рубрика на паузе (вес 0 в config.RUBRICS), и доводится она так: сессия шлёт
+    пачку целиком, без отбора, владелец отвечает, что смешно, а что нет, — правила
+    в prompts/rubrics/meme.md переписываются по его словам. С Mac владельца
+    запустить это нельзя: Gemini из России отвечает «User location is not
+    supported», а пачка от запасного GigaChat говорит о GigaChat, а не о канале.
+    Поэтому запуск — ручной, из воркфлоу генерации, полем «мемов».
+
+    Запуск: python -m src.compose --memes 8
+    """
+    admin = config.secret("TELEGRAM_ADMIN_ID")
+    artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
+    catalog = state.read_json(config.MEMES_FILE, {"memes": []})["memes"]
+    pictures = [{"key": m["key"], "when": m["when"]} for m in catalog]
+    random.shuffle(pictures)
+    avoid = meme_openings()
+    sent = 0
+    for n in range(count):
+        payload = {
+            "scene": [a["name"] for a in random.sample(artists, min(12, len(artists)))],
+            "pictures": pictures[n::count] or pictures,
+            "avoid": avoid,
+        }
+        result = generate_checked("meme", payload)
+        if result.get("skip"):
+            log.info("Мем %d: модель отказалась — %s", n + 1, result.get("reason", ""))
+            continue
+        post = {
+            "rubric": "meme",
+            "text": _plain(result.get("text")),
+            "top": _plain(result.get("top")),
+            "bottom": _plain(result.get("bottom")),
+            "picture": known_picture(result.get("picture")),
+        }
+        publish.send(post, admin)
+        opening = post["top"].split()
+        if opening:
+            avoid.append(opening[0])
+        sent += 1
+    print(f"Отправлено мемов владельцу: {sent} из {count}")
+    return 0
+
+
 def do_ask_tracks() -> int:
     """Просит владельца прислать полные треки к музыкальным постам очереди.
 
@@ -988,6 +1053,19 @@ def _selftest() -> int:
     assert not stubborn["skip"] and "<code>" not in stubborn["text"], stubborn
     assert len(seen) == 3 and "прошлый_вариант_забракован_за" in seen[-1], seen
     print("брак описи: причина уходит в повтор, пост выходит без строки описи")
+
+    # Мем не повторяет начало надписи за теми, кто ещё ждёт в очереди:
+    # «Слушаю» открывало четыре мема из шести в пачке 11.09.2026.
+    with tempfile.TemporaryDirectory() as tmp:
+        queue, config.QUEUE = config.QUEUE, Path(tmp)
+        try:
+            for name, top in (("1-meme", "«Слушаю» альбом"), ("2-meme", "Знаю все слова"),
+                              ("3-meme", ""), ("4-poll", "Ставлю")):
+                state.write_json(config.QUEUE / f"2026-{name}.json", {"top": top})
+            assert meme_openings() == ["Слушаю", "Знаю"], meme_openings()
+        finally:
+            config.QUEUE = queue
+    print("мем: занятые начала надписей уходят в задание")
 
     def button(url: str, label: str = "Слушать") -> str:
         return f'текст\n\n▸ <a href="{url}">{label}</a>'
@@ -1147,7 +1225,6 @@ def _selftest() -> int:
     print("релиз из новости: точное название и исполнитель в тексте — релиз, иначе ничего")
 
     # Свежесть и дубли — на синтетическом inbox, без сети; пост пишется во временную папку.
-    import tempfile
 
     now = state.now()
     tonight = datetime.combine(now.date(), time(23, 59), tzinfo=timezone.utc)
@@ -1292,6 +1369,10 @@ def main() -> int:
         help="сразу написать посты о свежих релизах, без батча (с --dry-run — только показать)",
     )
     parser.add_argument(
+        "--memes", type=int, metavar="N",
+        help="прислать владельцу N мемов на вердикт, мимо очереди (только из Actions)",
+    )
+    parser.add_argument(
         "--selftest", action="store_true",
         help="проверить подпись кнопки и исполнителя, свежесть и дубли релизов",
     )
@@ -1304,6 +1385,8 @@ def main() -> int:
 
     if args.selftest:
         return _selftest()
+    if args.memes:
+        return do_memes(args.memes)
     if args.ask_tracks:
         return do_ask_tracks()
     if args.fresh:
