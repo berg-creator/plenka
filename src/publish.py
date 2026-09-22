@@ -35,7 +35,7 @@ def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = F
     и ежечасный выход релиза слал ему один и тот же пост каждый час.
 
     Решения владельца от 11.09.2026. Пост о релизе (config.RELEASE_RUBRICS)
-    в четыре обычных слота не идёт: у него свой выход, раз в час по одному,
+    из обычной очереди не берётся: у него свой выход, раз в час по одному,
     самый весомый по score сборщика. Выходит он не раньше чем через
     config.RELEASE_TRACK_WAIT_HOURS после написания — окно на полный трек
     от владельца; трек пришёл — сразу. Дольше не ждёт, если так опоздал бы
@@ -81,12 +81,8 @@ def night(moment: datetime) -> bool:
     return hour >= config.QUIET_FROM_HOUR or hour < config.QUIET_TO_HOUR
 
 
-def releases_today(loud: bool = False) -> int:
-    """Сколько постов о релизах вышло за сегодня. Сутки московские: аудитория русская.
-
-    loud — только вышедшие не в тихие часы: ночной пост молчал и в счёт трёх
-    со звуком не идёт. Объём ленты (due) считает все.
-    """
+def releases_today() -> int:
+    """Сколько постов о релизах вышло за сегодня. Сутки московские: аудитория русская."""
     from .compose import MSK
 
     today = state.now().astimezone(MSK).date()
@@ -94,7 +90,7 @@ def releases_today(loud: bool = False) -> int:
     for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", []):
         published = state._parse(item.get("published_at", ""))
         if (item.get("rubric") in config.RELEASE_RUBRICS and published
-                and published.astimezone(MSK).date() == today and not (loud and night(published))):
+                and published.astimezone(MSK).date() == today):
             count += 1
     return count
 
@@ -103,11 +99,9 @@ def due(post: dict) -> bool:
     """Пора ли публиковать обычный пост — исходя из времени прошлой публикации.
 
     Считаются все публикации, выходы релизов тоже: обычный пост вечнозелёный
-    и уступает слот свежему релизу. А сутки, где постов о релизах больше
-    config.RELEASE_LOUD_PER_DAY, отданы им целиком — одного интервала мало:
-    в пятницу девять выходов кончаются к полудню, и вечерние слоты добавили бы
-    ленте ещё два поста сверх девяти. Решения владельца от 11.09.2026.
-    Годовщину это не касается: завтра она уже не годовщина.
+    и уступает слот свежему релизу — релиз в счёте слотов идёт за обычный пост
+    (владелец 22.09.2026: постов в ленте слишком много). Годовщину это не касается:
+    завтра она уже не годовщина.
 
     Обычных постов за сутки — столько, сколько прошло часов config.PUBLISH_HOURS_MSK:
     дежурство проверяет выход каждые 10 минут, и без этого счёта лента получала бы
@@ -119,12 +113,12 @@ def due(post: dict) -> bool:
     items = posted.get("items", [])
     if post.get("rubric") != "legend":
         now = state.now().astimezone(MSK)
-        if night(now) or releases_today() > config.RELEASE_LOUD_PER_DAY:
+        if night(now):
             return False
         regular = sum(
             1 for item in items
             # Отбор (src/otbor.py) и ролик (src/reels.py) выходят мимо слотов и обычному посту место не занимают.
-            if item.get("rubric") not in (*config.RELEASE_RUBRICS, "news", "otbor", "reel")
+            if item.get("rubric") not in ("news", "otbor", "reel")
             and (moment := state._parse(item.get("published_at", "")))
             and moment.astimezone(MSK).date() == now.date()
         )
@@ -140,13 +134,16 @@ def due(post: dict) -> bool:
 
 
 def release_due() -> bool:
-    """Пора ли выпускать следующий пост о релизе — не чаще раза в час.
+    """Пора ли выпускать следующий пост о релизе — не чаще раза в час
+    и не больше config.RELEASE_PER_DAY за сутки.
 
     Частоту раньше задавал ежечасный крон publish.yml, но он занимал группу
     state-write и вытеснял из очереди ожидающий сбор: у GitHub в группе ждёт
     ровно один запуск. Теперь выход идёт из дежурства (src/moderate.py), а час
     отсчитывается по журналу публикаций — так же, как интервал обычных постов.
     """
+    if releases_today() >= config.RELEASE_PER_DAY:
+        return False
     for item in reversed(state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])):
         if item.get("rubric") not in config.RELEASE_RUBRICS:
             continue
@@ -374,13 +371,8 @@ def send(post: dict, chat_id: str) -> dict | None:
 
     cover = post.get("cover", "")
     text = track_note(listen(text, post.get("artist", ""), release_title(post)), post)
-    # С четвёртого поста о релизе за сутки — без звука: в пятницу их до девяти,
-    # а девять уведомлений подряд отписывают быстрее, чем радуют. В тихие часы
-    # молчит любой пост (config.QUIET_FROM_HOUR).
-    quiet = night(state.now()) or (
-        post.get("rubric") in config.RELEASE_RUBRICS
-        and releases_today(loud=True) >= config.RELEASE_LOUD_PER_DAY
-    )
+    # В тихие часы молчит любой пост (config.QUIET_FROM_HOUR).
+    quiet = night(state.now())
 
     # Пост — всегда одна плитка ленты: картинка в рамке, текст, ссылки на площадки
     # строкой в нём же. Плеера рядом нет (решение владельца 12.09.2026): полный
@@ -605,23 +597,10 @@ def _selftest() -> None:
         assert archived == {**post, "message": {"chat": -100, "message_id": 2, "kind": "caption", "buttons": []}}, archived
         assert not (config.QUEUE / "0-release.json").exists()
 
-        # Четвёртый пост о релизе за московские сутки — молча, и фото, и плеер.
-        # Вчерашний по Москве (22:00 МСК 10.09) в счёт не идёт.
-        release = {**post, "rubric": "release"}
-        posted(("release", ago(hours=20)), ("release", ago(hours=3)), ("verdict", ago(hours=2)))
+        # Днём пост о релизе выходит со звуком, в 00:30 по Москве молчит любой пост.
+        posted(("release", ago(hours=3)), ("verdict", ago(hours=2)))
         sent.clear()
-        send(release, "0")
-        assert sent == [("фото", f"Текст.\n\n{TRACK_ALONE}", False, False)], sent
-        posted(("release", ago(hours=3)), ("verdict", ago(hours=2)), ("release", ago(hours=1)))
-        sent.clear()
-        send(release, "0")
-        assert sent == [("фото", f"Текст.\n\n{TRACK_ALONE}", True, False)], sent
-
-        # Тихие часы: ночные выходы (01:00–03:00 МСК) в счёт трёх со звуком не идут,
-        # а в 00:30 по Москве молчит любой пост.
-        posted(*[("release", ago(hours=h)) for h in (17, 16, 15)])
-        sent.clear()
-        send(release, "0")
+        send({**post, "rubric": "release"}, "0")
         assert sent == [("фото", f"Текст.\n\n{TRACK_ALONE}", False, False)], sent
         state.now = lambda: datetime(2026, 9, 11, 21, 30, tzinfo=timezone.utc)
         sent.clear()
@@ -629,20 +608,18 @@ def _selftest() -> None:
         state.now = lambda: now
         assert sent == [("фото", f"Текст.\n\n{TRACK_ALONE}", True, False)], sent
 
-        # Обычный пост уступает слот свежему релизу; сутки с четырьмя релизами
-        # отданы им целиком, но годовщина ждать не может.
+        # Обычный пост уступает слот свежему релизу: релиз в счёте слотов идёт
+        # за обычный пост, но годовщина ждать не может.
         posted(("meme", ago(hours=5)), ("release", ago(hours=1)))
         assert not due({"rubric": "meme"})
-        posted(*[("release", ago(hours=h)) for h in (7, 6, 5)])
-        assert due({"rubric": "meme"})
-        posted(*[("release", ago(hours=h)) for h in (8, 7, 6, 5)])
+        posted(("release", ago(hours=5)))
         assert not due({"rubric": "meme"}) and due({"rubric": "legend"})
 
-        # Обычные посты — по часам выхода: в 18:00 МСК прошло три часа из четырёх.
-        # Пропущенный наверстывается, лишний ждёт 21:00; новости и вчерашнее не в счёт.
-        posted(("meme", ago(hours=8)), ("news", ago(hours=6)), ("lineage", ago(hours=4)))
+        # Обычные посты — по часам выхода: в 18:00 МСК прошёл один час из двух.
+        # Пропущенный наверстывается, лишний ждёт 19:00; новости, отбор и вчерашнее не в счёт.
+        posted(("news", ago(hours=6)), ("otbor", ago(hours=4)))
         assert due({"rubric": "meme"})
-        posted(("meme", ago(hours=9)), ("meme", ago(hours=6)), ("lineage", ago(hours=4)))
+        posted(("lineage", ago(hours=6)), ("news", ago(hours=4)))
         assert not due({"rubric": "meme"})
         posted(*[("meme", ago(hours=h)) for h in (26, 24, 22, 20)])
         assert due({"rubric": "meme"})
@@ -707,7 +684,13 @@ def _selftest() -> None:
         assert not release_due(), "обычный пост не открывает выход релиза"
         posted(("release", ago(hours=2)), ("meme", ago(minutes=5)))
         assert release_due()
-        print("выходы релизов: сутки, окно на трек, звук у трёх, обычный слот уступает")
+        # Больше config.RELEASE_PER_DAY за московские сутки не выходит; вчерашний
+        # по Москве (22:00 МСК 10.09) в счёт не идёт.
+        posted(("release", ago(hours=20)), ("release", ago(hours=5)), ("verdict", ago(hours=4)))
+        assert release_due()
+        posted(("release", ago(hours=6)), ("release", ago(hours=5)), ("verdict", ago(hours=4)))
+        assert not release_due()
+        print("выходы релизов: сутки, окно на трек, три в день, обычный слот уступает")
     finally:
         (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
          telegram.send_message, state.now, config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real
@@ -815,10 +798,8 @@ def main() -> int:
         print(f"\nФайл: {path.name}")
         print(f"Рубрика: {post.get('rubric')}")
         if post.get("rubric") in config.RELEASE_RUBRICS:
-            count, quiet_hours = releases_today(loud=True), night(state.now())
-            loud = not quiet_hours and count < config.RELEASE_LOUD_PER_DAY
-            print(f"Звук: {'да' if loud else 'нет'} (со звуком за московские сутки: {count}"
-                  f"{', сейчас тихие часы' if quiet_hours else ''})")
+            print(f"Релизов за московские сутки: {releases_today()} из {config.RELEASE_PER_DAY}"
+                  f"{', тихие часы — без звука' if night(state.now()) else ''}")
         # Картинку видно и без сети: имя артиста ищется в тексте тем же поиском,
         # что при отправке скачает фотографию (card.cover → footage.artist_image).
         portrait = "" if post.get("rubric") == "meme" else footage.find_artist(post.get("text", ""))

@@ -267,13 +267,13 @@ def _selftest() -> int:
         ["snippet", "snippet-big", "keef", "scene", "west", "west-old"]
     items.pop()
 
-    # Заход: утренний час прошёл, а запуска после него нет — пора; отменённый не в счёт.
+    # Заход: час захода прошёл, а запуска после него нет — пора; отменённый не в счёт.
     from datetime import datetime, timezone
-    with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 9, 5, tzinfo=timezone.utc)):  # 12:05 МСК
-        assert due([]) and due([{"created_at": "2026-09-16T08:00:00Z", "conclusion": "cancelled"}])
-        assert not due([{"created_at": "2026-09-16T06:10:00Z", "conclusion": None}])
-        assert due([{"created_at": "2026-09-16T05:59:00Z", "conclusion": "success"}])
-    with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 5, 0, tzinfo=timezone.utc)):  # 08:00 МСК
+    with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 11, 5, tzinfo=timezone.utc)):  # 14:05 МСК
+        assert due([]) and due([{"created_at": "2026-09-16T11:02:00Z", "conclusion": "cancelled"}])
+        assert not due([{"created_at": "2026-09-16T11:01:00Z", "conclusion": None}])
+        assert due([{"created_at": "2026-09-16T10:59:00Z", "conclusion": "success"}])
+    with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 9, 0, tzinfo=timezone.utc)):  # 12:00 МСК
         assert not due([])
 
     asked, used = [], []
