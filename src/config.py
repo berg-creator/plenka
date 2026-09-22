@@ -63,6 +63,14 @@ SVED_FILE = PRIVATE / "sved.json"
 SVED_STATE = PRIVATE / "svedenie.json"
 # Разборов в сутки на человека: каждый стоит до 25 запросов к Яндексу.
 SVED_PER_DAY = 3
+# СКЛЕЙКА (src/skleyka.py): заявки с chat_id и номерами сообщений с дорожками —
+# чужой неизданный трек, поэтому только здесь. Склейка — пара минут машины
+# дежурства, на это время очередь стоит: две в сутки на человека, пересборки
+# кнопками — сверх них, но не больше SKLEYKA_TWEAKS на трек.
+SKLEYKA_FILE = PRIVATE / "skleyka.json"
+SKLEYKA_PER_DAY = 2
+SKLEYKA_TWEAKS = 3
+SKLEYKA_MAX_MB = 200
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (gemini — Google, по умолчанию; anthropic — платный Claude; gigachat — Сбер).

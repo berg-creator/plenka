@@ -39,7 +39,7 @@ from datetime import timedelta
 import pathlib
 from pathlib import Path
 
-from . import card, collect, config, llm, otbor, quality, state, stories, svedenie, telegram
+from . import card, collect, config, llm, otbor, quality, skleyka, state, stories, svedenie, telegram
 from .sources import afisha, deezer, itunes, lastfm
 
 log = logging.getLogger("service")
@@ -64,6 +64,8 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "sved_pikabu": "СВЕДЕНИЕ, Пикабу",
            # Приглашение сравнить музыку (?start=sv_<код>): метка одна на все, код сюда не пишется.
            "sv": "СВЕДЕНИЕ, друг позвал сравнить",
+           # СКЛЕЙКА зовут туда, где просят свести трек: ?start=skleyka_chat — из чатов артистов.
+           "skleyka": "СКЛЕЙКА, без площадки", "skleyka_chat": "СКЛЕЙКА, чаты артистов",
            "ad": "реклама, канал не распознан"}
 # Платный пост ведёт в СВЕДЕНИЕ ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
@@ -87,6 +89,7 @@ COMMANDS = {
     "stop": "watchstop", "стоп": "watchstop",
     "gorod": "city", "город": "city",
     "otbor": "otbor", "отбор": "otbor",
+    "skleyka": "skleyka", "склейка": "skleyka",
     "sved": "sved", "сведение": "sved",
     "proyavka": "proyavka", "проявка": "proyavka",
 }
@@ -102,6 +105,7 @@ COMMANDS = {
 MENU = (
     f'Бот канала — <b><a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">ПЛЁНКА</a></b>\n\n'
     "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
+    "🎛 <b>СКЛЕЙКА</b>\nПришли вокал и бит — сведу их в готовый трек.\n\n"
     "🎞 <b>ПРОЯВКА</b>\nПришли артиста, песню или строки из текста — расскажу, откуда это взялось.\n\n"
     "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
     # Площадку называет только INTRO СВЕДЕНИЯ: лайки можно и не кидать, а написать артистов.
@@ -132,6 +136,7 @@ CALLBACK_PREFIX = "s:"
 def menu_buttons() -> list[list[dict]]:
     return [
         [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
+        [{"text": "🎛 СКЛЕЙКА — свести вокал и бит", "callback_data": f"{CALLBACK_PREFIX}skleyka"}],
         [{"text": "🎞 ПРОЯВКА — разобрать музыку", "callback_data": f"{CALLBACK_PREFIX}proyavka"}],
         [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
         [{"text": "🎚 СВЕДЕНИЕ — на сколько ты артист", "callback_data": f"{CALLBACK_PREFIX}sved"}],
@@ -1292,7 +1297,13 @@ def handle_message(message: dict, data: dict) -> bool:
     # открыта, всё присланное идёт туда. Другая команда заявку закрывает —
     # человек передумал и ушёл в разборы, а не прислал трек.
     if kind == "otbor" or text.casefold() in ("отбор", "otbor"):
+        skleyka.cancel(chat_id)
         otbor.start(chat_id, user_id, admin=admin)
+        return False
+    # Заявка СКЛЕЙКИ ждёт файлы (src/skleyka.py): «отмена» её закрывает, а не уходит в разбор.
+    if skleyka.active(chat_id) and text.casefold() in otbor.CANCEL:
+        skleyka.cancel(chat_id)
+        telegram.send_message(chat_id, "Отменил. Захочешь склеить — /skleyka.")
         return False
     if otbor.active(chat_id):
         if not text.startswith("/"):
@@ -1300,6 +1311,12 @@ def handle_message(message: dict, data: dict) -> bool:
             return False
         otbor.cancel(chat_id)
     link, _, slug = body.partition("_")
+    if kind == "skleyka" or kind == "menu" and link == "skleyka":
+        if kind == "menu":
+            count_source(body if body in SOURCES else link)
+        if _subscribed(chat_id, user_id, admin, retry="skleyka"):
+            skleyka.start(chat_id, user_id, admin=admin)
+        return False
     if kind == "menu" and (body == "gorod" or link in ("gorod", "slezhu") and slug):
         # Из ролика, который кончается решением боли (prompts/reels.md): артист зашит
         # в ссылку адресом как в Афише — ?start=gorod_mayot за концертами в городе,
@@ -1488,7 +1505,18 @@ def handle_callback(query: dict, data: dict) -> None:
 
     if action == "otbor":
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        skleyka.cancel(chat_id)
         otbor.callback(chat_id, user_id, subject, admin=admin)
+        return
+
+    if action in ("skleyka", "sk"):
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        # Меню и «Подписался» открывают заявку, кнопки под склейкой — пересборку.
+        if action == "sk":
+            skleyka.callback(chat_id, user_id, subject, admin=admin)
+        elif _subscribed(chat_id, user_id, admin, retry="skleyka"):
+            otbor.cancel(chat_id)
+            skleyka.start(chat_id, user_id, admin=admin)
         return
 
     if action in ("sved", "sravni", "imena", "sv"):
@@ -1683,7 +1711,7 @@ def _selftest() -> None:
         handle_message(incoming("/start", 1), {})
         handle_message(incoming("/start", 2, date=101), {})
         assert deleted == [2] and len(said) == 1, (deleted, said)
-        assert "СЛЕЖУ" in said[0][0] and said[0][1][2][0]["callback_data"] == f"{CALLBACK_PREFIX}slezhu"
+        assert "СЛЕЖУ" in said[0][0] and said[0][1][3][0]["callback_data"] == f"{CALLBACK_PREFIX}slezhu"
         handle_message(incoming("/start", 3, date=200), {})
         assert len(said) == 2, "осознанный /start позже — снова приветствие"
 

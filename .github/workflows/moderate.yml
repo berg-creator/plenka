@@ -69,14 +69,16 @@ jobs:
       - run: pip install -r requirements.txt
 
       # ffmpeg перезаливает присланный владельцем полный трек плеером
-      # (src/moderate.py), а в образе ubuntu-latest его нет. Не встал — смена
-      # всё равно идёт: кнопки и разборы работают, а на трек бот честно ответит,
-      # что принять его не может.
+      # (src/moderate.py) и склеивает вокал с битом (src/skleyka.py), а в образе
+      # ubuntu-latest его нет. x42-plugins — автотюн стиля «мелодично»: ffmpeg из apt
+      # собран с lv2, плагин fat1 — отдельным пакетом, плюс 5 секунд. Не встал —
+      # смена всё равно идёт: кнопки и разборы работают, а на трек бот честно
+      # ответит, что принять его не может.
       - name: Поставить ffmpeg
         continue-on-error: true
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get install -y --no-install-recommends ffmpeg x42-plugins
 
       - name: Представиться для коммитов
         run: |
@@ -112,6 +114,9 @@ jobs:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+          # Служебный вход самого бота (MTProto): дорожки СКЛЕЙКИ больше 20 МБ
+          # Bot API не отдаёт, а WAV больше 50 МБ не принимает (src/telegram.py).
+          TELEGRAM_BOT_SESSION: ${{ secrets.TELEGRAM_BOT_SESSION }}
           # Смена выпускает посты: о свежих релизах — раз в час, мимо слотов,
           # обычные — по часам config.PUBLISH_HOURS_MSK (src/moderate.py,
           # publish_shift). Куда: та же переменная, что у ручного publish.yml.

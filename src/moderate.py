@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from . import comments, config, otbor, publish, quiz, reels, service, state, svedenie, telegram, urgent
+from . import comments, config, otbor, publish, quiz, reels, service, skleyka, state, svedenie, telegram, urgent
 
 log = logging.getLogger("moderate")
 
@@ -48,6 +48,9 @@ POLL_TIMEOUT = 25
 
 # Как часто дежурство отправляет состояние в репозиторий.
 PUSH_EVERY = 600
+
+# Опрос, пока идёт или ждёт склейка (src/skleyka.py): очередь двигается на каждом круге.
+SKLEYKA_POLL = 3
 
 
 def handle(action: str, post_id: str) -> str:
@@ -381,6 +384,18 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                         log.error("Ответ на фразу ролика не принят: %s", exc)
                 continue
 
+            # Дорожки СКЛЕЙКИ (src/skleyka.py): после /skleyka или ответом на её
+            # инструкцию файлы — вокал и бит, а не трек в ОТБОР. Ответ на что-то
+            # другое, например на запрос трека у владельца, идёт дальше своим путём.
+            if skleyka.wants(message):
+                print("  дорожка склейки")
+                if not args.dry_run:
+                    try:
+                        skleyka.take(message)
+                    except Exception as exc:  # noqa: BLE001 — чужой файл не роняет дежурство
+                        log.error("Склейка не приняла дорожку: %s", exc)
+                continue
+
             # Полный трек в ответ на запрос (compose.do_ask_tracks). Разбирается
             # до сервиса: это не просьба о разборе и лимит разборов не тратит.
             # Файл не ответом — тоже сюда: сервис молча пропустил бы его,
@@ -575,6 +590,11 @@ def serve(minutes: int) -> int:
         svedenie.notify_waiting()
     except Exception as exc:  # noqa: BLE001 — рассылка не держит дежурство
         log.error("Ждущие СВЕДЕНИЯ не оповещены: %s", exc)
+    # Склейку, оборванную концом прошлой смены, доделывает эта (src/skleyka.py).
+    try:
+        skleyka.resume()
+    except Exception as exc:  # noqa: BLE001 — склейка не держит дежурство
+        log.error("Склейки прошлой смены не подняты: %s", exc)
     offset = state.read_json(OFFSET_FILE, {"offset": 0}).get("offset", 0)
     limits = service.load_state()
     total_handled, total_served = 0, 0
@@ -584,8 +604,16 @@ def serve(minutes: int) -> int:
     next_push = time.monotonic() + PUSH_EVERY
 
     while time.monotonic() < deadline:
+        # Склейка идёт отдельным процессом: здесь — только очередь. Пока она не пуста,
+        # Telegram опрашивается чаще, иначе готовая склейка ждала бы следующую до 25 секунд.
         try:
-            updates = telegram.get_updates(offset=offset, timeout=POLL_TIMEOUT)
+            skleyka.tick()
+            wait = SKLEYKA_POLL if skleyka.busy() else POLL_TIMEOUT
+        except Exception as exc:  # noqa: BLE001 — склейка не держит дежурство
+            log.error("Очередь склеек сорвалась: %s", exc)
+            wait = POLL_TIMEOUT
+        try:
+            updates = telegram.get_updates(offset=offset, timeout=wait)
         except telegram.TelegramError as exc:
             # Обрыв связи не повод заканчивать дежурство: подождём и вернёмся.
             log.warning("Опрос сорвался: %s", exc)
@@ -609,6 +637,11 @@ def serve(minutes: int) -> int:
                 print("Код бота обновился — смена уступает место свежей.")
                 break
 
+    # Идущую склейку смена дожидается: человек ждёт трек, а следующая смена начнёт её заново.
+    try:
+        skleyka.finish()
+    except Exception as exc:  # noqa: BLE001
+        log.error("Склейка на конце смены не дождалась: %s", exc)
     push_state()
     print(f"Дежурство окончено. Нажатий: {total_handled}. Разборов: {total_served}.")
     return 0

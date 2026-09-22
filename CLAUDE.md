@@ -61,6 +61,9 @@ python -m src.service --match "Bones"  что нашлось в базе, без
 python -m src.service --selftest       слежение: любой артист из магазинов, одна весть на релиз, отписка кнопкой; концерты: одна весть, чужой город молчит; метка /start открывает отбор
 python -m src.service --concerts --dry-run  какие вести о концертах ушли бы подписчикам (нужен STATE_DIR), без записи
 python -m src.sources.afisha --check "Баста"  концерты артиста в Яндекс Афише, без записи
+python -m src.skleyka --selftest        склейка: роли дорожек по имени и звуку, маршрут файлов, заявка, ручки, лимиты, отказы
+python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА [--style мелодично] [--design]  склейка и пара ДО/ПОСЛЕ одной громкости
+python -m src.skleyka --dry-run         заявки и склейки в очереди (нужен STATE_DIR), без записи
 python -m src.svedenie --selftest       сведение: процент по кругу артиста, отказы, снимок без имён; сравнение с другом — итог обоим
 python -m src.svedenie --dry-run       разбор открытой фонотеки Яндекса, без Telegram
 python -m src.sources.yandex_music --check "ССЫЛКА"   что бот прочитает по ссылке на плейлист
@@ -181,6 +184,11 @@ python -m src.clips --selftest         кадров в раскадровке с
 Снимок фонотеки — данные о человеке: только `config.PRIVATE`,
 30 дней, три разбора в сутки. Запросы идут через функцию Яндекс Облака
 (`cloud/yandex_music_proxy.py`): с адресов GitHub Яндекс отвечает 451),
+**[src/skleyka.py](src/skleyka.py)** (СКЛЕЙКА: вокал и бит — в готовый трек, только ffmpeg; `/skleyka`
+открывает заявку, файлы после неё — дорожки, а не трек в ОТБОР (`skleyka.wants`, раньше отбора в `moderate.process`);
+склеивает отдельный процесс `--job`, по одной, очередь двигает `skleyka.tick` на каждом круге дежурства;
+файлы больше 20 МБ и WAV больше 50 МБ — служебным входом бота по MTProto (`telegram.service_login`,
+секрет `TELEGRAM_BOT_SESSION`, открывать только в дежурстве); заявки с chat_id — в `config.SKLEYKA_FILE`),
 **[src/otbor.py](src/otbor.py)** (ОТБОР, главная функция бота: артист присылает свой трек
 ссылкой, «Артист — Трек» или файлом, проверки без владельца — подписка, трек в неделю,
 артист не известен (`data/artists.json` и `config.OTBOR_MAX_FANS` на Deezer), трек выложен,

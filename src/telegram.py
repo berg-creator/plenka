@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import html
 import json
+import os
 import re
 import struct
 from pathlib import Path
@@ -459,6 +461,64 @@ def download_file(file_id: str) -> bytes:
     if response.status_code != 200:
         raise TelegramError(f"файл не скачался (код {response.status_code})")
     return response.content
+
+
+# Больше Bot API от бота не принимает: и sendAudio, и sendDocument — до 50 МБ.
+MAX_UPLOAD = 50 * 1024 * 1024
+
+
+def send_document(chat_id: str, path: Path, caption: str = "", *,
+                  buttons: list[list[dict]] | None = None) -> dict:
+    """Файл документом: WAV плеером не уйдёт — sendAudio берёт только mp3 и m4a."""
+    payload = {"chat_id": chat_id, "caption": clip(sanitize(caption), MAX_CAPTION), "parse_mode": "HTML"}
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    with path.open("rb") as handle:
+        return _call("sendDocument", payload, files={"document": (path.name, handle, "application/octet-stream")})
+
+
+@contextlib.contextmanager
+def service_login():
+    """Служебный вход бота по MTProto — для файлов больше пределов Bot API.
+
+    Bot API отдаёт боту файл до 20 МБ и принимает до 50, а вокал в WAV весит
+    30–100. Тот же бот, вошедший через Telethon (он уже в requirements.txt),
+    качает и шлёт до 2 ГБ. Ключ входа — секрет TELEGRAM_BOT_SESSION: вход заново
+    на каждую склейку упёрся бы в предел Telegram на входы ботов, а ключ,
+    открытый одновременно с двух машин, Telegram гасит насовсем
+    (AuthKeyDuplicated), — поэтому живёт он только в дежурстве, и склейки идут
+    по одной. Обновлений вход не берёт: поллер у бота один (src/moderate.py).
+    Секрета нет — вход по токену только на этот раз.
+    """
+    from telethon.sessions import StringSession
+    from telethon.sync import TelegramClient
+
+    client = TelegramClient(StringSession(os.environ.get("TELEGRAM_BOT_SESSION", "")),
+                            int(config.secret("TELEGRAM_API_ID")), config.secret("TELEGRAM_API_HASH"),
+                            receive_updates=False)
+    client.start(bot_token=config.secret("TELEGRAM_BOT_TOKEN"))
+    try:
+        yield client
+    finally:
+        client.disconnect()
+
+
+def fetch_big(client, message_id: int, dest: Path) -> Path:
+    """Файл из лички бота по номеру сообщения. В личке номер общий на весь
+    аккаунт бота, поэтому ни чат, ни его access_hash знать не нужно."""
+    message = client.get_messages(None, ids=message_id)
+    if not (message and message.file):
+        raise TelegramError("файл по номеру сообщения не найден")
+    return Path(client.download_media(message, file=str(dest)))
+
+
+def send_big(client, chat_id: str | int, path: Path, caption: str, *, via: int) -> int:
+    """Файл документом больше 50 МБ; возвращает номер сообщения. Писать человеку
+    вход может, только узнав его из сообщения: via — номер любого сообщения
+    из этого чата, по нему Telethon запоминает собеседника."""
+    client.get_messages(None, ids=via)
+    return client.send_file(int(chat_id), str(path), caption=clip(sanitize(caption), MAX_CAPTION),
+                            force_document=True, parse_mode="html").id
 
 
 def _thumbnail(cover_url: str) -> bytes | None:

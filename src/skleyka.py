@@ -48,14 +48,21 @@ from __future__ import annotations
 
 import argparse
 import array
+import contextlib
+import json
 import math
 import re
+import secrets
+import shutil
 import statistics
 import subprocess
+import sys
+import tempfile
 import wave
+from datetime import timedelta
 from pathlib import Path
 
-from . import clips, reels
+from . import clips, config, reels, state, telegram
 
 RATE = 44100
 # Любой формат на входе: моно становится стерео, частота — 44,1 кГц. Неслышимое
@@ -731,6 +738,662 @@ def compare(vocal: Path, beat: Path, master: Path, out: Path) -> tuple[Path, Pat
     return pair
 
 
+# ─────────────────────────── бот ───────────────────────────
+#
+# /skleyka или ссылка ?start=skleyka открывает заявку, дорожки приходят файлами —
+# альбомом или по одной. Поллер у бота один (src/moderate.py), и считать сам он
+# не может: пока идёт ffmpeg, бот не отвечал бы никому. Поэтому склейка — отдельный
+# процесс (python -m src.skleyka --job ФАЙЛ): он сам качает дорожки, склеивает
+# и шлёт готовое, а дежурство на каждом круге (tick) смотрит, кончил ли он,
+# и даёт ход следующей заявке. Склейка одна за раз: две разом делили бы машину
+# и шли бы обе вдвое дольше.
+
+MARK = "Пришли две дорожки"
+INTRO = (
+    "🎛 <b>СКЛЕЙКА</b> — сведу твой вокал с битом в готовый трек. Бесплатно.\n\n"
+    f"{MARK}: вокал и бит, выгруженные с одного начала проекта. WAV, FLAC или MP3, "
+    f"до {config.SKLEYKA_MAX_MB} МБ, трек от 1 до 8 минут. Есть по отдельности даблы, бэки, эдлибы, "
+    "барабаны, бас — шли все, назвав файлы по тому, что в них.\n\n"
+    "Это черновая склейка автоматом, а не работа звукорежиссёра. Через несколько минут пришлю трек, "
+    "WAV для площадок и кнопки, чтобы подкрутить."
+)
+ONE_MORE = "Есть «{name}». Теперь {other}."
+ACCEPTED = "Принял: {parts}. Склеиваю — пришлю минут через {minutes}."
+EXPIRED = "Вторая дорожка так и не пришла — заявку закрыл. Начать заново — /skleyka."
+LIMIT = "Склеек в сутки — две на человека. Следующую можно с {time} по Москве."
+TOO_BIG = f"«{{name}}» больше {config.SKLEYKA_MAX_MB} МБ. Пришли FLAC или MP3 320 — они легче."
+NOT_AUDIO = "«{name}» не похож на звук. Пришли WAV, FLAC или MP3."
+BAD = "«{name}» не читается. Пришли WAV, FLAC или MP3 — /skleyka."
+SILENT = "В «{name}» тишина — похоже, выгрузилась пустая дорожка. Пришли заново — /skleyka."
+LENGTH = "Бит длится {length}, а склеиваю треки от 1 до 8 минут. Другой — /skleyka."
+NEED = "Нужны и вокал, и бит, а {what}. Пришли все дорожки заново — /skleyka."
+FAILED = "Не склеилось — что-то сломалось у меня. Попробуй ещё раз: /skleyka. Лимит на сутки не потрачен."
+STALE = "Эта склейка устарела — пришли дорожки заново: /skleyka."
+NO_TWEAKS = "Пересборки этого трека кончились. Новая склейка — /skleyka."
+SAME = "Так уже и есть."
+REBUILD = "Пересобираю: {what}. Пришлю минут через {minutes}."
+READY = ("🎛 <b>Склейка готова</b> — {look}.\n"
+         "Вокал: {vocal}\nБит: {beat}\n{note}"
+         "Громкость как у релизов, пик −2 dBTP. WAV для площадок — следующим файлом.")
+MISMATCH = "Дорожки разной длины ({a} и {b}): если голос уехал от бита — выгрузи обе с самого начала проекта.\n"
+GUESSED = "Где вокал, понял по звуку — если перепутал, жми «↔ поменять».\n"
+TUNE = ("Не так? Подкрути — пересоберу{left}.\n\n"
+        "Выложишь трек на площадки — жми «В ОТБОР»: он выйдет в канале с твоим именем.")
+
+# Альбом в Telegram — до десяти файлов: хватает на вокал, даблы, бэки, эдлибы и бит по частям.
+MAX_PARTS = 10
+# Альбом приходит пачкой, файлы по одному — с паузами на загрузку: заявка уходит в работу,
+# когда QUIET секунд не приходит новых. Одна дорожка и тишина DRAFT_MINUTES — заявка закрыта.
+QUIET = 8
+DRAFT_MINUTES = 15
+# Сколько минут занимает склейка на машине дежурства: скачать, свести, отправить.
+MINUTES = 4
+# Склейку, оборванную концом смены, следующая доделывает, если ей меньше часа;
+# склейку, что идёт дольше JOB_MINUTES, дежурство снимает.
+RESUME_MINUTES = 60
+JOB_MINUTES = 20
+# Кнопки пересборки живут неделю: номера сообщений с дорожками дольше хранить незачем.
+TRACK_DAYS = 7
+# Ручки: голос к биту и доля эха, дБ, — шаг и пределы.
+VOICE_STEP, VOICE_LIMIT = 2.0, 6.0
+ECHO_STEP, ECHO_LIMITS = 4.0, (-12.0, 8.0)
+KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swap": False}
+# Кнопки идут через service.handle_callback: префикс service.CALLBACK_PREFIX
+# и действие sk. Импортировать service отсюда нельзя — он импортирует нас.
+PREFIX = "s:sk:"
+
+# Чья дорожка — по имени файла, как их называют в проектах. Сначала частные роли
+# («бэк», «808»), потом общие («вокал», «бит»): в «lead synth» есть «lead», но это синт.
+# Слово сверяется с началом: «hat» в «whats my name» — не хэт.
+ROLES = (
+    ("эдлиб", ("эдлиб", "адлиб", "adlib", "ad lib", "adl")),
+    ("дабл", ("дабл", "double", "dbl", "dub")),
+    ("бэк", ("бэк", "бек", "back", "bgv", "bvox", "harm", "гармон", "хор", "подпев")),
+    ("барабаны", ("drum", "барабан", "kick", "бочк", "snare", "снейр", "снэр", "clap", "hat", "hihat", "хэт", "хет",
+                  "perc", "перкус")),
+    ("бас", ("808", "bass", "бас", "sub", "саб")),
+    ("музыка", ("melod", "мелод", "keys", "piano", "пиан", "synth", "синт", "pad", "пэд", "guitar", "гитар", "sample",
+                "сэмпл", "семпл", "string", "loop", "луп", "chord", "аккорд", "music", "музык")),
+    ("вокал", ("вокал", "vocal", "vox", "voc", "acapella", "acappella", "a cappella", "акапел", "голос", "lead",
+               "лид", "rap", "рэп", "реп")),
+    ("бит", ("бит", "beat", "минус", "instr", "инстр", "karaoke", "караоке")),
+)
+VOCAL_SIDE = ("вокал", "дабл", "бэк", "эдлиб")
+AUDIO_EXT = (".wav", ".wave", ".flac", ".mp3", ".m4a", ".aac", ".aif", ".aiff", ".ogg", ".opus", ".mp4")
+
+
+def role(name: str) -> str:
+    """Роль дорожки по имени файла; пусто — имя не говорит."""
+    words = re.findall(r"[a-zа-я0-9]+", name.lower().replace("ё", "е"))
+    joined = " ".join(words)
+    return next((part for part, keys in ROLES
+                 if any(key in joined if " " in key else any(w.startswith(key) for w in words) for key in keys)), "")
+
+
+def _low(path: Path) -> float:
+    """Низ ниже 120 Гц к всей громкости, дБ: у бита там бочка и 808, у голоса почти пусто."""
+    mono = f"{FORMAT},pan=mono|c0=0.5*c0+0.5*c1,"
+    return _channels(path, f"{mono}lowpass=f=120,lowpass=f=120,")[0] - _channels(path, mono)[0]
+
+
+def sides(files: list[tuple[str, Path]], swap: bool = False) -> tuple[list[tuple[str, Path, str]], bool]:
+    """Роль каждой дорожки: (имя, путь, роль), и понят ли вокал по звуку, а не по имени.
+
+    Имя не сказало — решает низ: из безымянных вокал та, где его меньше всего, а если
+    вокал назван, безымянные уходят в бит. swap меняет вокал и бит местами — кнопка
+    «поменять», когда их всего две."""
+    parts = [(name, path, role(name)) for name, path in files]
+    guessed = False
+    unknown = [n for n, (*_, part) in enumerate(parts) if not part]
+    if unknown:
+        if not any(part in VOCAL_SIDE for *_, part in parts):
+            first = min(unknown, key=lambda n: _low(parts[n][1]))
+            parts[first] = (*parts[first][:2], "вокал")
+            unknown.remove(first)
+            guessed = True
+        for n in unknown:
+            parts[n] = (*parts[n][:2], "бит")
+    if swap and len(parts) == 2:
+        parts = [(name, path, "бит" if part in VOCAL_SIDE else "вокал") for name, path, part in parts]
+    return parts, guessed
+
+
+def _item(message: dict) -> dict:
+    """Дорожка из сообщения: номер сообщения, file_id, имя и размер; {} — не звук.
+    WAV многие шлют документом без типа, поэтому годится и расширение имени."""
+    document = message.get("document") or {}
+    kind = str(document.get("mime_type", ""))
+    found = message.get("audio") or (document if kind.startswith(("audio/", "video/"))
+                                     or str(document.get("file_name", "")).lower().endswith(AUDIO_EXT) else {})
+    if not found:
+        return {}
+    name = found.get("file_name") or " — ".join(filter(None, (found.get("performer"), found.get("title")))) or "дорожка"
+    return {"m": message["message_id"], "f": found["file_id"], "n": name[:60], "s": found.get("file_size", 0)}
+
+
+def load() -> dict:
+    data = state.read_json(config.SKLEYKA_FILE, {})
+    for key, empty in (("drafts", {}), ("jobs", []), ("tracks", {}), ("used", {})):
+        data.setdefault(key, empty)
+    return data
+
+
+def save(data: dict) -> None:
+    state.write_json(config.SKLEYKA_FILE, data)
+
+
+def _age(stamp: str) -> float:
+    """Сколько секунд прошло с отметки."""
+    moment = state._parse(stamp)
+    return (state.now() - moment).total_seconds() if moment else math.inf
+
+
+def active(chat_id: str | int) -> bool:
+    """Открыта ли у человека заявка: тогда его файлы — дорожки склейки, а не трек в ОТБОР."""
+    draft = load()["drafts"].get(str(chat_id))
+    return bool(draft) and _age(draft["at"]) < DRAFT_MINUTES * 60
+
+
+def cancel(chat_id: str | int) -> None:
+    data = load()
+    if data["drafts"].pop(str(chat_id), None) is not None:
+        save(data)
+
+
+def wants(message: dict) -> bool:
+    """Дорожка ли это склейки: файл в личке ответом на инструкцию или при открытой
+    заявке — но не ответом на что-то другое: запрос трека у владельца и фразы
+    роликов идут своим путём (src/moderate.py)."""
+    if message.get("chat", {}).get("type") != "private" or not _item(message):
+        return False
+    reply = message.get("reply_to_message")
+    return MARK in (reply or {}).get("text", "") or not reply and active(message["chat"]["id"])
+
+
+def _limit(data: dict, chat_id: str) -> str:
+    """Отказ по суточному лимиту; пусто — можно."""
+    recent = sorted(stamp for stamp in data["used"].get(chat_id, []) if _age(stamp) < 86400)
+    if len(recent) < config.SKLEYKA_PER_DAY:
+        return ""
+    from .compose import MSK
+
+    return LIMIT.format(time=(state._parse(recent[0]) + timedelta(days=1)).astimezone(MSK).strftime("%H:%M"))
+
+
+def _open(data: dict, chat_id: str, user_id: str, admin: bool) -> str:
+    """Открывает заявку; отказ по лимиту — вместо неё."""
+    denied = "" if admin else _limit(data, chat_id)
+    if denied:
+        data["drafts"].pop(chat_id, None)
+    else:
+        data["drafts"][chat_id] = {"user": user_id, "admin": admin, "at": state.iso(), "files": []}
+    return denied
+
+
+def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> None:
+    """/skleyka, кнопка меню и ссылка ?start=skleyka. Подписку проверяет service."""
+    chat_id, data = str(chat_id), load()
+    denied = _open(data, chat_id, str(user_id), admin)
+    save(data)
+    telegram.send_message(chat_id, denied or INTRO)
+
+
+def take(message: dict) -> None:
+    """Дорожка в заявку. Ответ на инструкцию после конца заявки открывает новую:
+    человек сделал ровно то, о чём его просили."""
+    chat_id = str(message["chat"]["id"])
+    user_id = str(message.get("from", {}).get("id", ""))
+    admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+    item, data = _item(message), load()
+    if not active(chat_id):
+        from .service import _subscribed
+
+        if not _subscribed(chat_id, user_id, admin, retry="skleyka"):
+            return
+        denied = _open(data, chat_id, user_id, admin)
+        if denied:
+            save(data)
+            telegram.send_message(chat_id, denied)
+            return
+    draft = data["drafts"][chat_id]
+    if item["s"] > config.SKLEYKA_MAX_MB * 2**20:
+        telegram.send_message(chat_id, TOO_BIG.format(name=item["n"]))
+    elif len(draft["files"]) >= MAX_PARTS:
+        telegram.send_message(chat_id, f"Больше {MAX_PARTS} дорожек не беру — «{item['n']}» пропустил.")
+    elif all(known["m"] != item["m"] for known in draft["files"]):
+        draft["files"].append(item)
+    draft["at"] = state.iso()
+    draft.pop("nudged", None)
+    save(data)
+
+
+def _names(names: list[str]) -> str:
+    return ", ".join(f"«{name}»" for name in names)
+
+
+def _enqueue(data: dict, track: str, knobs: dict, tweak: bool = False) -> int:
+    """Склейка трека с этими ручками — в очередь; сколько минут ждать. tweak — пересборка
+    кнопкой: не вышла — возвращается пересборка, а не склейка суток."""
+    data["jobs"].append({"id": secrets.token_hex(3), "track": track, "knobs": knobs, "at": state.iso(), "tweak": tweak})
+    return MINUTES * len(data["jobs"])
+
+
+def _drafts(data: dict) -> bool:
+    """Заявки, где дорожки перестали приходить: две и больше — в работу, одна —
+    напомнить про вторую, а после DRAFT_MINUTES закрыть."""
+    changed = False
+    for chat_id, draft in list(data["drafts"].items()):
+        quiet, files = _age(draft["at"]), draft["files"]
+        if len(files) >= 2 and quiet >= QUIET:
+            track = secrets.token_hex(3)
+            data["tracks"][track] = {"chat": chat_id, "admin": draft.get("admin", False), "files": files,
+                                     "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso()}
+            data["used"].setdefault(chat_id, []).append(state.iso())
+            del data["drafts"][chat_id]
+            minutes = _enqueue(data, track, dict(KNOBS))
+            telegram.send_message(chat_id, ACCEPTED.format(parts=_names([f["n"] for f in files]), minutes=minutes))
+        elif len(files) == 1 and quiet >= QUIET and not draft.get("nudged"):
+            first = role(files[0]["n"])
+            other = "бит" if first in VOCAL_SIDE else "вокал" if first else "вторую дорожку — вокал или бит"
+            telegram.send_message(chat_id, ONE_MORE.format(name=files[0]["n"], other=other))
+            draft["nudged"] = True
+        elif quiet >= DRAFT_MINUTES * 60:
+            del data["drafts"][chat_id]
+            if files:
+                telegram.send_message(chat_id, EXPIRED)
+        else:
+            continue
+        changed = True
+    return changed
+
+
+def buttons(track: str, knobs: dict, swap: bool) -> list[list[dict]]:
+    """Ручки под готовой склейкой: стиль, голос, эхо, саунд-дизайн; «поменять» —
+    когда вокал понят по звуку; «В ОТБОР» — дорога дальше."""
+    def cb(code: str) -> str:
+        return f"{PREFIX}{track}:{code}"
+
+    looks = [{"text": ("• " if knobs["style"] == name else "") + name, "callback_data": cb(f"c{n}")}
+             for n, name in enumerate(STYLES)]
+    rows = [looks[:2], looks[2:],
+            [{"text": "🔊 голос громче", "callback_data": cb("v+")}, {"text": "🔉 голос тише", "callback_data": cb("v-")}],
+            [{"text": "➕ эха", "callback_data": cb("e+")}, {"text": "➖ эха", "callback_data": cb("e-")}],
+            [{"text": "✨ саунд-дизайн: " + ("убрать" if knobs["design"] else "добавить"), "callback_data": cb("d")}]]
+    if swap:
+        rows.append([{"text": "↔ поменять вокал и бит", "callback_data": cb("sw")}])
+    rows.append([{"text": "🎙 Выложил — в ОТБОР", "callback_data": "s:otbor"}])
+    return rows
+
+
+def turn(knobs: dict, code: str) -> dict:
+    """Ручки после нажатия кнопки code."""
+    new = dict(knobs)
+    if code.startswith("c") and code[1:].isdigit() and int(code[1:]) < len(STYLES):
+        new["style"] = list(STYLES)[int(code[1:])]
+    elif code in ("v+", "v-"):
+        new["voice"] = max(-VOICE_LIMIT, min(VOICE_LIMIT, knobs["voice"] + (VOICE_STEP if code == "v+" else -VOICE_STEP)))
+    elif code in ("e+", "e-"):
+        new["echo"] = max(ECHO_LIMITS[0], min(ECHO_LIMITS[1], knobs["echo"] + (ECHO_STEP if code == "e+" else -ECHO_STEP)))
+    elif code == "d":
+        new["design"] = not knobs["design"]
+    elif code == "sw":
+        new["swap"] = not knobs["swap"]
+    return new
+
+
+def look(knobs: dict) -> str:
+    """Что за склейка — словами для человека."""
+    words = [f"«{knobs['style']}»: {STYLES[knobs['style']]['about']}"]
+    if knobs["voice"]:
+        words.append(f"голос {'громче' if knobs['voice'] > 0 else 'тише'} на {abs(knobs['voice']):.0f} дБ")
+    if knobs["echo"]:
+        words.append("эха " + ("больше" if knobs["echo"] > 0 else "меньше"))
+    if knobs["design"]:
+        words.append("с саунд-дизайном")
+    return ", ".join(words)
+
+
+def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: bool = False) -> None:
+    """Кнопка под склейкой: та же склейка с новыми ручками — новой заявкой, файлы
+    снова у Telegram: сами дорожки бот не хранит."""
+    chat_id = str(chat_id)
+    track_id, _, code = subject.partition(":")
+    data = load()
+    track = data["tracks"].get(track_id)
+    if not track or track["chat"] != chat_id:
+        telegram.send_message(chat_id, STALE)
+        return
+    if not (admin or track.get("admin")) and track["tweaks"] >= config.SKLEYKA_TWEAKS:
+        telegram.send_message(chat_id, NO_TWEAKS)
+        return
+    knobs = turn(track["knobs"], code)
+    if knobs == track["knobs"]:
+        telegram.send_message(chat_id, SAME)
+        return
+    track.update(knobs=knobs, tweaks=track["tweaks"] + 1)
+    minutes = _enqueue(data, track_id, knobs, tweak=True)
+    save(data)
+    telegram.send_message(chat_id, REBUILD.format(what=look(knobs), minutes=minutes))
+
+
+# Склейка, что идёт сейчас: (процесс, заявка, папка). Одна на дежурство.
+_RUNNING: tuple[subprocess.Popen, dict, Path] | None = None
+
+
+def busy() -> bool:
+    """Ждёт ли что-то хода: тогда дежурство опрашивает Telegram чаще."""
+    data = load()
+    return bool(_RUNNING or data["jobs"] or data["drafts"])
+
+
+def tick() -> None:
+    """Круг дежурства: заявки — в работу, кончившаяся склейка — прочь из очереди,
+    следующая — в ход. Ошибка здесь не должна ронять дежурство — ловит вызывающий."""
+    global _RUNNING
+    data = load()
+    changed = _drafts(data)
+    if _RUNNING and (_RUNNING[0].poll() is not None or _age(_RUNNING[1]["started"]) > JOB_MINUTES * 60):
+        _finish(data, *_RUNNING)
+        _RUNNING, changed = None, True
+    if not _RUNNING and data["jobs"]:
+        _RUNNING, changed = _spawn(data, data["jobs"][0]), True
+    for track_id, track in list(data["tracks"].items()):
+        if _age(track["at"]) > TRACK_DAYS * 86400:
+            del data["tracks"][track_id]
+            changed = True
+    if changed:
+        save(data)
+
+
+def _spawn(data: dict, job: dict) -> tuple[subprocess.Popen, dict, Path]:
+    """Склейку — в отдельный процесс; заявке — отметку, что пошла."""
+    track = data["tracks"][job["track"]]
+    work = Path(tempfile.mkdtemp(prefix="skleyka-"))
+    spec = {"job": job["id"], "track": job["track"], "chat": track["chat"], "files": track["files"],
+            "knobs": job["knobs"], "left": None if track.get("admin") else config.SKLEYKA_TWEAKS - track["tweaks"]}
+    (work / "job.json").write_text(json.dumps(spec, ensure_ascii=False))
+    job["started"] = state.iso()
+    print(f"  склейка {job['id']}: пошла, в очереди ещё {len(data['jobs']) - 1}")
+    return subprocess.Popen([sys.executable, "-m", "src.skleyka", "--job", str(work / "job.json")],
+                            cwd=config.ROOT), job, work
+
+
+def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> None:
+    """Склейка кончилась или зависла: прочь из очереди. Готового нет — лимит суток
+    человеку возвращается, а если процесс упал молча, ему пишем здесь."""
+    if process.poll() is None:
+        process.kill()
+        process.wait()
+    result = state.read_json(work / "result.json", {})
+    shutil.rmtree(work, ignore_errors=True)
+    data["jobs"] = [queued for queued in data["jobs"] if queued["id"] != job["id"]]
+    track = data["tracks"].get(job["track"], {})
+    print(f"  склейка {job['id']}: {'готова' if result.get('ok') else result.get('why') or 'упала'}")
+    if result.get("ok") or not track:
+        return
+    used = data["used"].get(track["chat"], [])
+    if job.get("tweak"):
+        track["tweaks"] = max(0, track["tweaks"] - 1)
+    elif used:
+        used.pop()
+    if not result:
+        telegram.send_message(track["chat"], FAILED)
+
+
+def resume() -> None:
+    """Начало смены: склейка, оборванная прошлой сменой, снова в очередь, если ей
+    меньше часа, — дорожки снова у Telegram; старше — извиниться и снять."""
+    data = load()
+    for job in list(data["jobs"]):
+        if "started" not in job:
+            continue
+        if _age(job["at"]) < RESUME_MINUTES * 60:
+            del job["started"]
+            continue
+        data["jobs"].remove(job)
+        if track := data["tracks"].get(job["track"]):
+            telegram.send_message(track["chat"], FAILED)
+    save(data)
+
+
+def finish(seconds: int = 300) -> None:
+    """Конец смены: идущую склейку дождаться, но не дольше seconds — иначе её
+    доделает следующая смена (resume)."""
+    global _RUNNING
+    if not _RUNNING:
+        return
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        _RUNNING[0].wait(seconds)
+    if _RUNNING[0].poll() is None:
+        _RUNNING[0].kill()
+        shutil.rmtree(_RUNNING[2], ignore_errors=True)
+    else:
+        data = load()
+        _finish(data, *_RUNNING)
+        save(data)
+    _RUNNING = None
+
+
+def _minutes(seconds: float) -> str:
+    return f"{int(seconds // 60)}:{int(seconds % 60):02d}"
+
+
+def check(parts: list[tuple[str, Path, str]]) -> tuple[str, str]:
+    """(отказ, оговорка): отказ — склейки не будет, оговорка — будет, но с примечанием."""
+    vocal = [name for name, _, part in parts if part in VOCAL_SIDE]
+    if len(vocal) in (0, len(parts)):
+        return NEED.format(what="вокала не нашёл" if not vocal else "бита не нашёл: все дорожки названы голосом"), ""
+    length = {}
+    for name, path, _ in parts:
+        length[name] = clips.probe_seconds(path)
+        if not length[name]:
+            return BAD.format(name=name), ""
+        if loudness(path)[0] < -60:
+            return SILENT.format(name=name), ""
+    voice = max(length[name] for name, _, part in parts if part in VOCAL_SIDE)
+    beat = max(length[name] for name, _, part in parts if part not in VOCAL_SIDE)
+    if not 60 <= beat <= 480:
+        return LENGTH.format(length=_minutes(beat)), ""
+    return "", MISMATCH.format(a=_minutes(voice), b=_minutes(beat)) if abs(voice - beat) > 2 else ""
+
+
+def _bus(parts: list[tuple[str, Path, str]], vocal: bool, dest: Path) -> Path:
+    """Дорожки одной стороны — в одну, как их выгрузил артист: каждая со своим уровнем.
+    Одна — как есть."""
+    paths = [path for _, path, part in parts if (part in VOCAL_SIDE) == vocal]
+    if len(paths) == 1:
+        return paths[0]
+    _ffmpeg(*(arg for path in paths for arg in ("-i", path)), "-filter_complex",
+            "".join(f"[{n}:a]{FORMAT}[i{n}];" for n in range(len(paths))) + "".join(f"[i{n}]" for n in range(len(paths)))
+            + f"amix=inputs={len(paths)}:duration=longest:normalize=0", *reels.VOICE_CODEC, dest)
+    return dest
+
+
+def _service(login: contextlib.ExitStack):
+    """Служебный вход — только если понадобится, и один на всю склейку."""
+    client = []
+
+    def get():
+        if not client:
+            client.append(login.enter_context(telegram.service_login()))
+        return client[0]
+    return get
+
+
+def _fetch(spec: dict, folder: Path, service) -> list[tuple[str, Path]]:
+    """Дорожки у Telegram: до 20 МБ — Bot API, больше — служебным входом. На диске
+    они под номерами: имя файла человека не попадает ни в пути, ни в журнал."""
+    folder.mkdir(parents=True, exist_ok=True)
+    files = []
+    for n, item in enumerate(spec["files"]):
+        suffix = Path(item["n"]).suffix.lower()
+        dest = folder / f"{n}{suffix if suffix in AUDIO_EXT else ''}"
+        if item["s"] and item["s"] <= telegram.MAX_DOWNLOAD:
+            dest.write_bytes(telegram.download_file(item["f"]))
+        else:
+            dest = telegram.fetch_big(service(), item["m"], dest)
+        files.append((item["n"], dest))
+    return files
+
+
+def run_job(spec_path: Path) -> int:
+    """Склейка одной заявки целиком — в отдельном процессе дежурства. Итог — в result.json
+    рядом: дежурство по нему решает, вернуть ли человеку лимит."""
+    spec = json.loads(spec_path.read_text())
+    work, chat, knobs = spec_path.parent, spec["chat"], spec["knobs"]
+    result = {"ok": False}
+    try:
+        with contextlib.ExitStack() as login:
+            service = _service(login)
+            files = _fetch(spec, work / "in", service)
+            parts, guessed = sides(files, knobs.get("swap", False))
+            refusal, note = check(parts)
+            if refusal:
+                telegram.send_message(chat, refusal)
+                result["why"] = "отказ"
+                return 0
+            vocal, beat = _bus(parts, True, work / "vocal.wav"), _bus(parts, False, work / "beat.wav")
+            extra = {key: knobs[key] for key in ("voice", "echo") if knobs.get(key)}
+            master = mix(vocal, beat, work / "out", knobs["style"], knobs["design"], **extra)
+            _send(spec, master, parts, note + (GUESSED if guessed and len(parts) == 2 else ""), service, work)
+            result["ok"] = True
+    except Exception as exc:  # noqa: BLE001 — человеку честный ответ, в журнал — без его данных
+        print(f"  склейка {spec['job']}: сбой {type(exc).__name__}: {str(exc)[:200]}")
+        telegram.send_message(chat, FAILED)
+        result["why"] = "сбой"
+    finally:
+        (work / "result.json").write_text(json.dumps(result))
+    return 0
+
+
+def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path) -> None:
+    """MP3 плеером — его пересылают, WAV документом — его льют на площадки, ручки — отдельным
+    сообщением: кнопки на плеере ушли бы вместе с пересылкой."""
+    chat, knobs = spec["chat"], spec["knobs"]
+    lead = next(name for name, _, part in parts if part in VOCAL_SIDE)
+    title = Path(lead).stem[:60]
+    mp3 = work / "skleyka.mp3"
+    _ffmpeg("-i", master, *MP3, mp3)
+    telegram.send_audio(chat, mp3.read_bytes(), READY.format(
+        look=look(knobs), vocal=_names([name for name, _, part in parts if part in VOCAL_SIDE]),
+        beat=_names([name for name, _, part in parts if part not in VOCAL_SIDE]), note=note),
+        title=title, performer=f"склейка · {config.BOT_HANDLE}")
+    wav = work / f"{title} (склейка).wav"
+    master.replace(wav)
+    if wav.stat().st_size <= telegram.MAX_UPLOAD:
+        telegram.send_document(chat, wav)
+    else:
+        telegram.send_big(service(), chat, wav, "", via=spec["files"][0]["m"])
+    left = spec["left"]
+    telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}"),
+                          buttons=buttons(spec["track"], knobs, swap=len(parts) == 2))
+
+
+def _selftest() -> None:
+    """Без сети: роли по имени и по звуку, куда идёт файл, заявка от дорожек до очереди,
+    ручки и возврат лимита, лимит суток, отказы по тишине и длине."""
+    sent: list[str] = []
+    real = (telegram.send_message, config.SKLEYKA_FILE, config.secret)
+    telegram.send_message = lambda chat, text, **_: sent.append(text) or {}
+    config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
+    tmp = Path(tempfile.mkdtemp(prefix="skleyka-test-"))
+    config.SKLEYKA_FILE = tmp / "skleyka.json"
+    try:
+        for name, want in (("vocal.wav", "вокал"), ("Beat (prod. X).mp3", "бит"), ("whats my name fool.wav", ""),
+                           ("Hi-Hat.wav", "барабаны"), ("808.wav", "бас"), ("lead synth.wav", "музыка"),
+                           ("BGV 1.wav", "бэк"), ("ad-lib.wav", "эдлиб"), ("минусовка.mp3", "бит"), ("Дабл 2.wav", "дабл")):
+            assert role(name) == want, (name, role(name))
+
+        # Роли по звуку: у бита низ, у голоса — середина.
+        low, mid = tmp / "a.wav", tmp / "b.wav"
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=55:d=6", "-f", "lavfi", "-i", "anoisesrc=d=6:a=0.05", "-filter_complex",
+                "amix=inputs=2", low)
+        _ffmpeg("-f", "lavfi", "-i", "anoisesrc=d=6:a=0.3", "-af", "highpass=f=300,lowpass=f=3000", mid)
+        parts, guessed = sides([("take1.wav", low), ("take2.wav", mid)])
+        assert guessed and [part for *_, part in parts] == ["бит", "вокал"], parts
+        assert [part for *_, part in sides([("take1.wav", low), ("take2.wav", mid)], swap=True)[0]] == ["вокал", "бит"]
+        assert not sides([("vocal.wav", low), ("beat.wav", mid)])[1], "имя сильнее звука"
+
+        # Отказы: тишина, короткий бит; разная длина — оговорка, а не отказ.
+        quiet, short, long = tmp / "q.wav", tmp / "s.wav", tmp / "l.wav"
+        _ffmpeg("-f", "lavfi", "-i", "anullsrc=d=70", quiet)
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=220:d=70", long)
+        assert check([("v", quiet, "вокал"), ("b", long, "бит")])[0] == SILENT.format(name="v")
+        assert check([("v", long, "вокал"), ("d", long, "дабл")])[0].startswith("Нужны и вокал, и бит, а бита")
+        assert check([("v", low, "вокал"), ("b", mid, "бит")])[0].startswith("Бит длится 0:06")
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=440:d=66", short)
+        refusal, note = check([("v", short, "вокал"), ("b", long, "бит")])
+        assert not refusal and note.startswith("Дорожки разной длины (1:06 и 1:10)"), note
+
+        # Куда идёт файл: ответ на инструкцию — сюда, файл без заявки — мимо (в ОТБОР),
+        # ответ на другое при открытой заявке — мимо (запрос трека владельца).
+        def file(n: int, name: str, chat: int = 7, reply: str | None = None) -> dict:
+            message = {"message_id": n, "chat": {"id": chat, "type": "private"}, "from": {"id": chat},
+                       "document": {"file_id": f"f{n}", "file_name": name, "file_size": 1000, "mime_type": "audio/wav"}}
+            if reply is not None:
+                message["reply_to_message"] = {"message_id": 1, "text": reply}
+            return message
+
+        assert wants(file(2, "vocal.wav", reply=INTRO)) and not wants(file(2, "vocal.wav"))
+        start(7, 7)
+        assert sent[-1] == INTRO and wants(file(3, "vocal.wav")) and not wants(file(3, "v.wav", reply="Пришли трек"))
+        assert not wants({"message_id": 4, "chat": {"id": 7, "type": "private"}, "text": "привет"})
+
+        # Две дорожки — в очередь, когда перестали приходить; одна — напоминание про вторую.
+        take(file(3, "vocal.wav"))
+        data = load()
+        data["drafts"]["7"]["at"] = state.iso(state.now() - timedelta(seconds=QUIET + 1))
+        _drafts(data)
+        assert sent[-1] == ONE_MORE.format(name="vocal.wav", other="бит")
+        save(data)
+        take(file(5, "beat.wav"))
+        take(file(5, "beat.wav"))  # повтор того же сообщения — дорожка одна
+        data = load()
+        assert len(data["drafts"]["7"]["files"]) == 2
+        data["drafts"]["7"]["at"] = state.iso(state.now() - timedelta(seconds=QUIET + 1))
+        _drafts(data)
+        assert sent[-1].startswith("Принял: «vocal.wav», «beat.wav»") and len(data["jobs"]) == 1 and not data["drafts"]
+        track = data["jobs"][0]["track"]
+        save(data)
+
+        # Ручки: голос громче — новая заявка той же склейки; нажатие без перемены — «уже так».
+        callback(7, 7, f"{track}:v+")
+        data = load()
+        assert data["jobs"][-1]["knobs"]["voice"] == VOICE_STEP and data["tracks"][track]["tweaks"] == 1
+        callback(7, 7, f"{track}:c0")
+        assert sent[-1] == SAME
+        callback(8, 8, f"{track}:v+")
+        assert sent[-1] == STALE, "чужая склейка"
+        for _ in range(config.SKLEYKA_TWEAKS):
+            callback(7, 7, f"{track}:v-")
+        assert sent[-1] == NO_TWEAKS
+        assert [row[0]["callback_data"] for row in buttons(track, KNOBS, swap=True)][-2:] == [f"{PREFIX}{track}:sw", "s:otbor"]
+
+        # Не склеилось молча — извиниться и вернуть склейку суток; упала пересборка — вернуть её.
+        data = load()
+        for job in data["jobs"][:2]:
+            gone = subprocess.Popen(["true"])
+            gone.wait()
+            (tmp / job["id"]).mkdir()
+            _finish(data, gone, job, tmp / job["id"])
+        assert sent[-1] == FAILED and data["used"]["7"] == [] and data["tracks"][track]["tweaks"] == 2
+        save(data)
+
+        # Лимит суток: две склейки — третья завтра; владельцу лимита нет.
+        data["used"]["7"] = [state.iso(), state.iso()]
+        save(data)
+        start(7, 7)
+        assert sent[-1].startswith("Склеек в сутки — две"), sent[-1]
+        start(1, 1, admin=True)
+        assert sent[-1] == INTRO
+        assert turn(KNOBS, "e+")["echo"] == ECHO_STEP and turn(dict(KNOBS, voice=VOICE_LIMIT), "v+")["voice"] == VOICE_LIMIT
+        assert "с саунд-дизайном" in look(turn(KNOBS, "d")) and turn(KNOBS, "c1")["style"] == "мелодично"
+    finally:
+        telegram.send_message, config.SKLEYKA_FILE, config.secret = real
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("skleyka: роли по имени и звуку, маршрут файлов, заявка, ручки, лимиты, отказы — ок")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="СКЛЕЙКА: вокал и бит в черновой трек")
     parser.add_argument("--mix", nargs=2, type=Path, metavar=("ВОКАЛ", "БИТ"),
@@ -739,7 +1402,23 @@ def main() -> int:
     parser.add_argument("--style", choices=STYLES, default="чисто", help="набор эффектов")
     parser.add_argument("--design", action="store_true",
                         help="саунд-дизайн: вдох перед первым словом, фильтр на бите, броски, остановка плёнки")
+    parser.add_argument("--job", type=Path, metavar="ФАЙЛ", help="склейка заявки из бота (её запускает дежурство)")
+    parser.add_argument("--selftest", action="store_true", help="роли, маршрут, заявка, ручки, лимиты — без сети")
+    parser.add_argument("--dry-run", action="store_true", help="заявки и склейки в очереди, ничего не делая")
     args = parser.parse_args()
+    config.load_dotenv()
+    if args.selftest:
+        _selftest()
+        return 0
+    if args.job:
+        return run_job(args.job)
+    if args.dry_run:
+        data = load()
+        print(f"Заявок открыто: {len(data['drafts'])}, склеек в очереди: {len(data['jobs'])}, "
+              f"треков с ручками: {len(data['tracks'])}")
+        for job in data["jobs"]:
+            print(f"  {job['id']}: {look(job['knobs'])}" + (" — идёт" if "started" in job else ""))
+        return 0
     if args.mix:
         master = mix(*args.mix, args.out, args.style, args.design)
         compare(*args.mix, master, args.out)
