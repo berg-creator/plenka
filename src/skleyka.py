@@ -629,8 +629,10 @@ def _tape_stop(master: Path, at: float, length: float, work: Path) -> None:
     stopped.replace(master)
 
 
-def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False) -> Path:
-    """Склейка в out/skleyka.wav, промежуточное — в out/work."""
+def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
+        voice: float = 0.0, echo: float = 0.0) -> Path:
+    """Склейка в out/skleyka.wav, промежуточное — в out/work. voice — голос к биту,
+    echo — отзвук и дилей к своей доле, оба в дБ: ручки бота «громче/тише» и «эха»."""
     look, work = STYLES[style], out / "work"
     work.mkdir(parents=True, exist_ok=True)
     print(f"  стиль «{style}»: {look['about']}" + (", саунд-дизайн" if design else ""))
@@ -643,7 +645,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
             + (f",{DENSE}" if look.get("dense") else ""), *reels.VOICE_CODEC, squeezed)
     _ffmpeg("-i", squeezed, "-af", _equalizer(squeezed) + DEESSER + (f",{look['color']}" if "color" in look else ""),
             *reels.VOICE_CODEC, dry)
-    voice, lines = loudness(dry)[0], _lines(_envelope(dry))
+    sung, lines = loudness(dry)[0], _lines(_envelope(dry))
 
     # Противофаза — по слышимой полосе: в ультразвуке и на самом низу бывает что угодно.
     heard = f"{FORMAT},highpass=f=60,lowpass=f=12000,"
@@ -652,10 +654,10 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     ducked = work / "beat.wav"
     _ffmpeg("-i", beat, "-i", dry, "-filter_complex",
             f"[0:a]{FORMAT},{flip}{MS},{_dip(lines, work / 'dip.cmd')}{BEAT_EQ},{LR}[b];"
-            f"[1:a]volume={VOCAL_LUFS - voice:.2f}dB[v];[b][v]{DUCK}",
+            f"[1:a]volume={VOCAL_LUFS - sung:.2f}dB[v];[b][v]{DUCK}",
             *reels.VOICE_CODEC, ducked)
     print(f"  бит: корреляция каналов {width:+.2f}" + (", один канал перевёрнут" if flip else ""))
-    ridden = _ride(dry, ducked, loudness(ducked)[0] + VOCAL_OVER_BEAT - voice, work)
+    ridden = _ride(dry, ducked, loudness(ducked)[0] + VOCAL_OVER_BEAT + voice - sung, work)
     level = loudness(ridden)[0]
 
     rhythm = grid(beat) if design or look.get("delay", ("",))[0] == "в темп" else None
@@ -674,7 +676,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     for name, graph, share in sends:
         wet = work / f"{name}.wav"
         _ffmpeg("-i", ridden, "-filter_complex", graph, "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
-        wets.append((wet, share))
+        wets.append((wet, share if name == "double" else share * 10 ** (echo / 20)))
     design = design and bool(lines)
     if design:
         print(f"  саунд-дизайн: первое слово {lines[0][0]:.2f} с")
