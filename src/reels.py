@@ -1080,7 +1080,7 @@ def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> 
     return shots
 
 
-def _meter(path: Path, before: str = "") -> tuple[float, list[tuple[float, float, float]]]:
+def meter(path: Path, before: str = "") -> tuple[float, list[tuple[float, float, float]]]:
     """Громкость по EBU R128: общая в LUFS и ход по времени — (t, M, S).
 
     M меряется окном 0,4 с, S — тремя секундами. Звука нет — -70, как у тишины.
@@ -1109,7 +1109,7 @@ def beat_start(track: Path) -> float:
     громкого места, и берётся самый длинный такой кусок. Трёхсекундное окно
     замечает его с опозданием, поэтому сама доля ищется коротким.
     """
-    _, trace = _meter(track, "lowpass=f=120,")
+    _, trace = meter(track, "lowpass=f=120,")
     if not trace:
         return 0.0
     loud = sorted(s for _, _, s in trace)[int(len(trace) * 0.9)] - 6
@@ -1163,7 +1163,7 @@ def _trimmed(script: dict, voices: Path | None, work: Path) -> Path:
         if take is None:
             continue
         # Больше чем на 20 дБ не поднимаем: пустой дубль превратился бы в рёв шума.
-        gain = min(VOICE_LUFS - _meter(take, f"{DENOISE},")[0], 20.0)
+        gain = min(VOICE_LUFS - meter(take, f"{DENOISE},")[0], 20.0)
         clean = work / f"clean-{frame}.wav"
         clips.run([
             clips.ffmpeg(), "-y", "-i", str(take), "-af", f"{DENOISE},volume={gain:.1f}dB",
@@ -1196,11 +1196,11 @@ def studio(voice: Path, work: Path, room: Path | None = None) -> Path:
     dry = work / "voice-dry.wav"
     clips.run([clips.ffmpeg(), "-y", "-i", str(voice), "-af", f"{VOICE_CHAIN},aformat=channel_layouts=stereo",
                *VOICE_CODEC, str(dry)])
-    level, sends = _meter(dry)[0], []
+    level, sends = meter(dry)[0], []
     for name, graph, share in (("reverb", REVERB, REVERB_SHARE), ("delay", DELAY, DELAY_SHARE)):
         wet = work / f"voice-{name}.wav"
         clips.run([clips.ffmpeg(), "-y", "-i", str(dry), "-filter_complex", graph, "-map", "[w]", *VOICE_CODEC, str(wet)])
-        sends.append((wet, level + 20 * math.log10(share) - _meter(wet)[0]))
+        sends.append((wet, level + 20 * math.log10(share) - meter(wet)[0]))
     inputs = [arg for wet, _ in sends for arg in ("-i", str(wet))]
     if room:
         inputs += ["-stream_loop", "-1", "-i", str(room)]
@@ -1257,7 +1257,7 @@ def _beat(script: dict, total: float, work: Path) -> Path:
         return _silence(total, work)
     start, raw = beat_start(track), work / "beat-raw.wav"
     clips.run([clips.ffmpeg(), "-y", "-ss", f"{start:.2f}", "-i", str(track), "-t", f"{total + 1:.2f}", str(raw)])
-    gain = BEAT_LUFS - _meter(raw)[0]
+    gain = BEAT_LUFS - meter(raw)[0]
     clips.run([clips.ffmpeg(), "-y", "-i", str(raw), "-af", f"volume={gain:.1f}dB", str(music)])
     print(f"  бит: {track.name} с {start:.1f} с, {gain:+.1f} дБ")
     return music
@@ -1295,7 +1295,7 @@ def _excerpt(track: dict, dest: Path) -> Path | None:
                "-af", f"afade=t=in:d=0.02,afade=t=out:st={max(length - 0.05, 0):.3f}:d=0.05",
                "-ar", "48000", "-ac", "2", str(cut)])
     # Громкость меряется окном 0,4 с: у секундного отрывка другой не будет, а тишина дала бы -70.
-    gain = min(TRACK_LUFS - _meter(cut)[0], 12.0)
+    gain = min(TRACK_LUFS - meter(cut)[0], 12.0)
     out = dest.with_name(f"{dest.stem}-level.wav")
     clips.run([clips.ffmpeg(), "-y", "-i", str(cut), "-af", f"volume={gain:.1f}dB", str(out)])
     return out
