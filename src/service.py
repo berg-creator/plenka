@@ -1513,7 +1513,8 @@ def handle_callback(query: dict, data: dict) -> None:
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
         # Меню и «Подписался» открывают заявку, кнопки под склейкой — пересборку.
         if action == "sk":
-            skleyka.callback(chat_id, user_id, subject, admin=admin)
+            skleyka.callback(chat_id, user_id, subject, admin=admin,
+                             message_id=query.get("message", {}).get("message_id"))
         elif _subscribed(chat_id, user_id, admin, retry="skleyka"):
             otbor.cancel(chat_id)
             skleyka.start(chat_id, user_id, admin=admin)
