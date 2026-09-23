@@ -54,8 +54,8 @@ Shorts показывают ролик тем, кто этот звук уже �
 гифку и одним числом говорит, где в ней герой.
 
 Эффектов нет: голос робота и «слетевшую пластинку» владелец послушал на keef3
-15.09.2026 и отверг оба. Бит — поле сценария `music`, без него любимый бит
-владельца (BEAT), и только когда нет и его — случайный. `"music": null` — бита
+15.09.2026 и отверг оба. Бит — поле сценария `music`, без него
+свой у каждого ролика: жребий по `id` из библиотеки битов. `"music": null` — бита
 нет ни в одной версии: ролику-передаче музыку дают отбивки ток-шоу, сведённые
 в фон зала (`room`), а хип-хоп под ведущим спорил бы с ними (владелец, 21.09.2026).
 
@@ -1237,14 +1237,18 @@ def bed(script: dict) -> Path | None:
     if "music" in script and script["music"] is None:
         return None
     folders = [folder for folder in (config.PRIVATE / "audio", clips.AUDIO_DIR) if folder.is_dir()]
-    for name in (script.get("music"), BEAT):
+    for name in (script.get("music"),):
         found = next((folder / name for folder in folders if name and (folder / name).is_file()), None)
         if found:
             return found
         if name:
             log.warning("Бита %s нет ни в %s, ни в assets/audio", name, config.PRIVATE / "audio")
+    # Своего бита у сценария нет — берём из библиотеки по жребию от id ролика,
+    # а не один и тот же на все: с BEAT по умолчанию все ролики звучали одинаково
+    # (владелец, 23.09.2026). Жребий от id, а не слепой: пересборка того же
+    # ролика не должна менять музыку под уже записанным голосом.
     tracks = sorted(p for folder in folders for p in folder.glob("*") if p.suffix in {".mp3", ".wav"})
-    return random.choice(tracks) if tracks else None
+    return random.Random(script.get("id", "")).choice(tracks) if tracks else None
 
 
 def _beat(script: dict, total: float, work: Path) -> Path:
