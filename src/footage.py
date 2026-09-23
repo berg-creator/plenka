@@ -331,6 +331,15 @@ def artist_images(name: str):
                 continue
             path = _run_dir() / f"artist-{abs(hash(url)) % 10**8}.jpg"
             path.write_bytes(response.content)
+            # Заглушка Deezer вместо портрета — почти одноцветный квадрат:
+            # у Канье фотографии в Deezer нет вовсе, и кадр `face` в ролике
+            # выходил чёрным (23.09.2026). Порог тот же, что у постов, он
+            # и подобран по этой заглушке.
+            from .card import MIN_SHARPNESS, _open, sharpness
+
+            photo = _open(path)
+            if photo is None or sharpness(photo) < MIN_SHARPNESS:
+                continue
             yield path
 
 
