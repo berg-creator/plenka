@@ -86,8 +86,8 @@ Shorts показывают ролик тем, кто этот звук уже �
 Ролик ведёт в канал. По ходу всего основного ролика в левом верхнем углу висит метка:
 значок Telegram и config.CHANNEL_HANDLE. В конце — плашка: крутящийся аватар канала
 (avatar-wheel), адрес со значком и под ним строка-приманка — решение боли, о которой
-ролик: BAIT (прислать свой трек в ОТБОР), BAIT_GOROD (свой город — за концертами) или
-BAIT_SLEZHU (за релизами) — по ссылке на бота в описании, бит на ней затухает. Зовёт
+ролик: BAIT (прислать свой трек в ОТБОР), BAIT_GOROD (свой город — за концертами),
+BAIT_SLEZHU (за релизами) или BAIT_SKLEYKA (вокал с битом — в трек) — по ссылке на бота в описании, бит на ней затухает. Зовёт
 последняя строка в канал («…в канале ПЛЁНКА») — плашка встаёт на куске субтитров с этим
 словом и голос идёт поверх неё: голос называет место, и на экране само место (владелец,
 17.09.2026). После голоса плашка держится PLATE_SECONDS; не зовёт — встаёт после
@@ -245,6 +245,10 @@ BAIT_SLEZHU = "скажем, когда выйдет"
 # было на 50 точек шире зоны, «кинь лайки — посчитаем» — на 26.
 BAIT_SVED = "кинь лайки — сверим"
 SVED_LINK = f"{BOT_LINK}?start=sved"
+# СКЛЕЙКА (src/skleyka.py): бот бесплатно сводит вокал с битом — ?start=skleyka.
+# «вокал и бит» в приманку не лезет (775 точек при 648), про бит скажет описание.
+BAIT_SKLEYKA = "кидай вокал — сведём"
+SKLEYKA_LINK = f"{BOT_LINK}?start=skleyka"
 GOROD_LINK = f"{BOT_LINK}?start=gorod_"
 SLEZHU_LINK = f"{BOT_LINK}?start=slezhu_"
 WATCH_LINK = re.compile(re.escape(BOT_LINK) + r"\?start=(gorod|slezhu)_([\w-]*)")
@@ -1526,10 +1530,13 @@ def artist_by_slug(slug: str) -> str:
 
 
 def bait(script: dict) -> str:
-    """Строка-приманка на концовке — по ссылке в описании: за сведением, городом, релизом или за треком."""
-    if SVED_LINK in script.get("description", ""):
+    """Строка-приманка на концовке — по ссылке в описании: за склейкой, процентом, городом, релизом или за треком."""
+    description = script.get("description", "")
+    if SKLEYKA_LINK in description:
+        return BAIT_SKLEYKA
+    if SVED_LINK in description:
         return BAIT_SVED
-    watch = WATCH_LINK.search(script.get("description", ""))
+    watch = WATCH_LINK.search(description)
     return {"gorod": BAIT_GOROD, "slezhu": BAIT_SLEZHU}[watch.group(1)] if watch else BAIT
 
 
@@ -1782,7 +1789,8 @@ def package(script: dict) -> str:
         # Сценарий пишет одну ссылку, а по метке бот считает приходы с каждой площадки.
         text = re.sub(re.escape(BOT_LINK) + r"(?:\?start=(?:yt|tt|vk)(?![\w-]))?(?!\?start=)",
                       f"{BOT_LINK}?start={label}", script["description"])
-        text = re.sub(re.escape(SVED_LINK) + r"_(?:yt|tt|vk)(?![\w-])", f"{SVED_LINK}_{label}", text)
+        text = re.sub(re.escape(BOT_LINK) + r"\?start=(sved|skleyka)_(?:yt|tt|vk)(?![\w-])",
+                      rf"{BOT_LINK}?start=\1_{label}", text)
         if label != "vk":
             # В Shorts и TikTok ссылка в описании не нажимается (владелец, 17.09.2026):
             # имя набирают в поиске Telegram. Ссылка на пост остаётся — её не набрать.
@@ -1841,7 +1849,7 @@ def channel_text(script: dict) -> str:
     """Подпись ролика в канале: название и, если ролик зовёт в бота, ссылка с той же приманкой."""
     description = script.get("description", "")
     watch = WATCH_LINK.search(description)
-    link = SVED_LINK if SVED_LINK in description else watch.group(0) if watch else ""
+    link = next((l for l in (SKLEYKA_LINK, SVED_LINK) if l in description), "") or (watch.group(0) if watch else "")
     title = f"<b>{html.escape(script['title'], quote=False)}</b>"
     if not link:
         return title
@@ -1946,18 +1954,19 @@ def _selftest() -> None:
     sved = {**good, "description": f"Сравни свою музыку с другом: {SVED_LINK}_yt Канал: t.me/plenka_fm #рэп"}
     assert problems(sved, good["id"]) == [] and bait(sved) == BAIT_SVED, "ДВОЙНИК — своя приманка"
     assert f"{SVED_LINK}_vk Канал" in package(sved), "ВКонтакте — метка sved_vk"
+    skl = {**good, "description": f"Кидай вокал и бит: {SKLEYKA_LINK}_yt Канал: t.me/plenka_fm #рэп"}
+    assert problems(skl, good["id"]) == [] and bait(skl) == BAIT_SKLEYKA, "СКЛЕЙКА — своя приманка"
+    assert f"{SKLEYKA_LINK}_vk Канал" in package(skl), "ВКонтакте — метка skleyka_vk"
     from . import stories
 
     # Приманка с обводкой по три точки с боков — в ширину SAFE_TEXT: правее — колонка кнопок.
-    for text in (BAIT, BAIT_GOROD, BAIT_SLEZHU, BAIT_SVED):
+    for text in (BAIT, BAIT_GOROD, BAIT_SLEZHU, BAIT_SVED, BAIT_SKLEYKA):
         assert stories.font(64, 600).getlength(text) + 6 <= SAFE_TEXT * 1080, (text, "приманка шире зоны")
     assert package(gorod).count(f"{config.BOT_HANDLE} Канал: t.me/plenka_fm/144 {config.CHANNEL_HANDLE} #рэп") == 2, "пост — ссылкой"
     assert bait(gorod) == BAIT_GOROD and bait(good) == BAIT
     assert bait({**good, "description": f"Не пропусти: {SLEZHU_LINK}bones #рэп"}) == BAIT_SLEZHU
     broken("artists.json", description=f"Строка {GOROD_LINK}nobody #фонк")
     broken("artists.json", description=f"Строка {SLEZHU_LINK}nobody #фонк")
-    from . import stories
-    assert all(stories.font(64, 600).getlength(t) <= SAFE_TEXT * 1080 for t in (BAIT, BAIT_GOROD, BAIT_SLEZHU)), "приманка шире зоны"
     # Отрывок трека: строка без голоса длится ровно length, с голосом — не меньше фразы.
     clip = {"track": {"id": 1440818839, "start": 12, "length": 2}, "screen": {"kind": "stock", "query": "crowd"}}
     assert problems({**good, "lines": [*good["lines"], clip, {**clip, "say": "Поверх", "track": {"query": "a — b", "length": 1}}]},

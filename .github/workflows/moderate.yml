@@ -47,7 +47,11 @@ concurrency:
 
 jobs:
   serve:
-    runs-on: ubuntu-latest
+    # Образ закреплён: СКЛЕЙКА сведена и проверена на ffmpeg 6.1 из Ubuntu 24.04,
+    # а с 19.10.2026 ubuntu-latest — это Ubuntu 26, где ни версия ffmpeg,
+    # ни пакет x42-plugins (автотюн) не проверены. Молчаливо отвалившийся
+    # автотюн хуже открытой поломки: склейка выйдет мимо нот.
+    runs-on: ubuntu-24.04
     # Предел GitHub для одной задачи — шесть часов.
     timeout-minutes: 360
     permissions:
