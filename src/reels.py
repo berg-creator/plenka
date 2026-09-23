@@ -352,8 +352,9 @@ DELAY = (
 )
 VOICE_CODEC = ["-c:a", "pcm_f32le"]
 # Громкость бита до приглушения. Выше голоса по среднему: в паузах бит должен
-# качать в полную силу, а разборчивость под речью держит сайдчейн.
-BEAT_LUFS = -15.0
+# качать в полную силу, а разборчивость под речью держит сайдчейн. -12, а не -15:
+# на -15 бит слышно фоном, а он держит ритм ролика (владелец, 23.09.2026).
+BEAT_LUFS = -12.0
 DUCK = "sidechaincompress=threshold=0.03:ratio=6:attack=10:release=250"
 
 
@@ -1130,6 +1131,47 @@ def beat_start(track: Path) -> float:
     return max(0.0, onset)
 
 
+def beat_period(track: Path, start: float, work: Path) -> float:
+    """Длина доли бита в секундах. 0 — не разобрать.
+
+    Считается по низу (бочка и 808) автокорреляцией громкости: окно 10 мс,
+    лаги от 0,25 до 0,9 с — это 66…240 ударов в минуту. Трассы `meter` для
+    этого мало: её шаг 0,1 с, а окно 0,4 с сглаживает саму долю.
+    """
+    from . import clips
+
+    mono = work / "beat-mono.wav"
+    clips.run([clips.ffmpeg(), "-y", "-ss", f"{start:.2f}", "-t", "20", "-i", str(track),
+               "-ac", "1", "-ar", "8000", "-af", "lowpass=f=150", str(mono)])
+    with wave.open(str(mono)) as raw:
+        data = array.array("h", raw.readframes(raw.getnframes()))
+    step = 80  # 10 мс при 8 кГц
+    env = [sum(abs(v) for v in data[i:i + step]) / step for i in range(0, len(data) - step, step)]
+    if len(env) < 200:
+        return 0.0
+    mid = sum(env) / len(env)
+    env = [v - mid for v in env]
+    scores = [
+        (sum(env[i] * env[i + lag] for i in range(len(env) - lag)) / (len(env) - lag), lag)
+        for lag in range(25, 91)
+    ]
+    return max(scores)[1] * step / 8000
+
+
+def _phase(cuts: list[float], period: float) -> float:
+    """На сколько отмотать бит назад, чтобы смены кадров попадали на долю.
+
+    Длины кадров задаёт голос, менять их нельзя, а фаза бита свободна: сдвиг
+    в пределах одной доли ставит бочку под склейку, и ролик монтируется в такт
+    (владелец, 23.09.2026). Перебором в 1/60 доли: считать точку минимума
+    аналитически у суммы модулей смысла нет.
+    """
+    def away(shift: float) -> float:
+        return sum(min((cut - shift) % period, period - (cut - shift) % period) for cut in cuts)
+
+    return min((away(i * period / 60), i * period / 60) for i in range(60))[1]
+
+
 def _speech(path: Path) -> tuple[float, float]:
     """Где в чистом дубле речь: начало и конец, секунды. Речи нет — весь файл."""
     with wave.open(str(path)) as take:
@@ -1251,11 +1293,13 @@ def bed(script: dict) -> Path | None:
     return random.Random(script.get("id", "")).choice(tracks) if tracks else None
 
 
-def _beat(script: dict, total: float, work: Path) -> Path:
+def _beat(script: dict, total: float, work: Path, cuts: list[float] = ()) -> Path:
     """Кусок бита на весь ролик, с сильной доли и нужной громкости.
 
     Громкость меряется на самом куске, а не на треке: тихое вступление
     занижало бы среднее, и бит выходил бы громче задуманного.
+
+    `cuts` — секунды смены кадров: под них подгоняется фаза бита (`_phase`).
     """
     from . import clips
 
@@ -1266,6 +1310,12 @@ def _beat(script: dict, total: float, work: Path) -> Path:
             log.warning("Подложки нет ни в %s, ни в assets/audio — ролик без музыки", config.PRIVATE / "audio")
         return _silence(total, work)
     start, raw = beat_start(track), work / "beat-raw.wav"
+    period = beat_period(track, start, work) if len(cuts) else 0.0
+    if period:
+        start -= _phase(list(cuts), period)
+        if start < 0:
+            start += period
+        print(f"  доля {period:.2f} с, бит сдвинут под склейки")
     clips.run([clips.ffmpeg(), "-y", "-ss", f"{start:.2f}", "-i", str(track), "-t", f"{total + 1:.2f}", str(raw)])
     gain = BEAT_LUFS - meter(raw)[0]
     clips.run([clips.ffmpeg(), "-y", "-i", str(raw), "-af", f"volume={gain:.1f}dB", str(music)])
@@ -1760,7 +1810,8 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         # Свести дважды: с битом — для канала, на тишине — для площадок, где музыку
         # владелец добавит при загрузке. Видео склейка копирует потоком, второй раз дёшево.
         bare = work / "bare.mp4"
-        for bed_track, out in ((_beat(script, total, work), video), (_silence(total, work), bare)):
+        cuts = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots) - 1)]
+        for bed_track, out in ((_beat(script, total, work, cuts), video), (_silence(total, work), bare)):
             clips.assemble(
                 parts, _under_tracks(bed_track, pieces, work, overlays), total, out, work, voice, 0.0,
                 voice_grade="anull", duck=DUCK,
@@ -2095,7 +2146,10 @@ def _selftest() -> None:
             for name in (BEAT, "other.mp3"):
                 (Path(tmp) / "audio" / name).touch()
             assert bed({"music": "other.mp3"}).name == "other.mp3"
-            assert bed({}).name == BEAT and bed({"music": "gone.mp3"}).name == BEAT
+            # Своего бита нет — жребий от id: тот же id даёт тот же бит, разные — разные.
+            assert bed({"music": "gone.mp3"}).suffix in {".mp3", ".wav"}
+            assert bed({"id": "x"}) == bed({"id": "x"})
+            assert len({bed({"id": str(n)}) for n in range(8)}) > 1
             assert bed({"music": None}) is None
             (Path(tmp) / "audio" / BEAT).unlink()
             assert bed({}).parent.name == "audio"
@@ -2310,6 +2364,15 @@ def _selftest() -> None:
         clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=60:d=30",
                    "-af", "volume='if(lt(t,7),0.01,0.8)':eval=frame", str(track)])
         assert abs(beat_start(track) - 7.0) < 0.5, beat_start(track)
+
+        # Доля бита и фаза под склейки: удар каждые 0,5 с — доля 0,5 с,
+        # а склейки на 1,2 и 2,2 с отматывают бит на 0,2 с.
+        pulse = Path(tmp) / "pulse.wav"
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "sine=f=60:d=20",
+                   "-af", "volume='0.02+0.98*exp(-40*mod(t,0.5))':eval=frame", str(pulse)])
+        assert abs(beat_period(pulse, 0.0, Path(tmp)) - 0.5) < 0.03, beat_period(pulse, 0.0, Path(tmp))
+        assert abs(_phase([1.2, 2.2, 3.2], 0.5) - 0.2) < 0.02, _phase([1.2, 2.2, 3.2], 0.5)
+        assert _phase([1.0, 2.5, 4.0], 0.5) < 0.02, "склейки уже на доле — сдвига нет"
 
         # Отрывок трека: из превью вырезан свой кусок, в бите звучит в своё время, бит под ним тише.
         def tone(at: float, path: Path, window: tuple[float, float], hz: int) -> float:
