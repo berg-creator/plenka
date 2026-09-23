@@ -253,8 +253,6 @@ GOROD_LINK = f"{BOT_LINK}?start=gorod_"
 SLEZHU_LINK = f"{BOT_LINK}?start=slezhu_"
 WATCH_LINK = re.compile(re.escape(BOT_LINK) + r"\?start=(gorod|slezhu)_([\w-]*)")
 BAIT_Y = 0.735
-# Слово последней строки, с которого встаёт плашка: голос называет канал — на экране он сам.
-CHANNEL_WORD = re.compile(r"пл[её]нк", re.IGNORECASE)
 # Метка — левый верхний угол безопасной зоны: правее среза и ниже панели.
 BADGE_XY = (round(SAFE_LEFT * 1080), round(SAFE_TOP * 1920))
 BADGE_HEIGHT = 80
@@ -275,9 +273,13 @@ CAPTION_SIZES = ((150, 1), (128, 1), (112, 1), (96, 1), (88, 1), (112, 2), (96, 
 # длину куска скакал от куска к куску. Ширина — SAFE_TEXT, и кусок, который
 # в две строки не лезет, режет chunks (SUB_LETTERS), а не мельчит шрифт:
 # 88 точек и 18 букв — ни одного куска в три строки на всех сценариях 16.09.2026.
-SUB_WORDS = 4
-SUB_LETTERS = 18
-SUB_SIZE = 88
+# Golos 900 шире Oswald, поэтому кусок короче: три слова и 13 букв. Короткий кусок
+# крупным жирным шрифтом — то, что владелец назвал «дороже» в ролике-образце (23.09.2026).
+SUB_WORDS = 3
+SUB_LETTERS = 13
+# 80: у Golos 900 самое длинное слово сценариев («общественной») при 88 вылезало
+# за безопасную зону, а буквы этого шрифта и так крупнее узкого Oswald.
+SUB_SIZE = 80
 # Белые буквы на белом (логотип GTA, футболка) сливались: обводка вдвое толще мемной
 # и мягкий тёмный ореол под буквами, ~60% черноты. Кадр целиком не темнеет —
 # картинка по решению владельца чистая.
@@ -1004,7 +1006,10 @@ def caption(layer, text: str, sizes=CAPTION_SIZES, stroke: int = 0, halo: int = 
     # области Юникода — он не пробел и шире пробела, так что строка не вылезет.
     glued = text.strip().replace(" —", "\ue000—")
     for size, most in sizes:
-        font, outline = stories.font(size, 600), stroke or max(4, size // 16)
+        # Широкий жирный гротеск с плотной обводкой: узкий Oswald 600 в ленте
+        # читался тонко и дёшево рядом с роликами, которые владелец взял
+        # за образец (23.09.2026). Golos 900 шире, поэтому кусок иногда идёт в две строки.
+        font, outline = stories.font(size, 900, text=True), stroke or max(6, size // 10)
         lines = [line.replace("\ue000", " ") for line in card._wrap(draw, glued, font, layer.width * SAFE_TEXT - 2 * outline)]
         if len(lines) <= most:
             break
@@ -1442,7 +1447,9 @@ def chunks(say: str) -> list[str]:
     words: list[str] = []
     glue = False
     for word in say.split():
-        if words and (glue or not any(ch.isalnum() for ch in word)):
+        # Склейка кавычек — только пока пара короткая: «сразу «спасибо, Чикаго,»
+        # жирным шрифтом уходил в три строки (23.09.2026).
+        if words and (glue or not any(ch.isalnum() for ch in word)) and len(words[-1]) + len(word) <= SUB_LETTERS:
             words[-1] += f" {word}"
             glue = False
         else:
@@ -1634,19 +1641,6 @@ def plate(work: Path, seconds: float = PLATE_SECONDS) -> Path:
     return out
 
 
-def plate_start(script: dict, seconds: list[float], timing: list[tuple[str, float, float]]) -> float | None:
-    """Секунда, с которой плашка встаёт поверх последней строки: первый её кусок субтитров
-    со словом «ПЛЁНКА». None — последняя фраза канал не называет, плашка идёт после неё.
-
-    `seconds` — длины строк, `timing` — куски субтитров из cues.
-    """
-    spoken = [index for index, line in enumerate(script["lines"]) if "say" in line]
-    if not spoken:
-        return None
-    begin = sum(seconds[:spoken[-1]])
-    return next((first for text, first, _ in timing if first >= begin and CHANNEL_WORD.search(text)), None)
-
-
 def tiktok(video: Path) -> Path:
     return video.with_name(f"{video.stem}-tiktok.mp4")
 
@@ -1668,7 +1662,7 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
     один вход: список кадров с длительностями (concat), пустой прозрачный кадр
     закрывает паузы; тридцать картинок-входов ffmpeg не тянул и вставал.
-    `ending_at` — конец голоса, `plate_at` — где встаёт концовка (plate_start), по умолчанию
+    `ending_at` — конец голоса, `plate_at` — где встаёт концовка, по умолчанию
     там же. Метка до `plate_at` и концовка после — только в основном файле: плашка ложится
     поверх последней строки целиком, со своим адресом, и субтитров под ней не видно.
     TikTok-версия кончается на `ending_at` — фраза договорена на своих кадрах, со звуком,
@@ -1807,24 +1801,24 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
                      float(line["overlay"].get("beat", 1)))
                     for line, at in zip(script["lines"], starts)
                     if "overlay" in line and voices and (voices / line["overlay"]["file"]).is_file()]
-        # Свести дважды: с битом — для канала, на тишине — для площадок, где музыку
-        # владелец добавит при загрузке. Видео склейка копирует потоком, второй раз дёшево.
-        bare = work / "bare.mp4"
+        # Бит во всех четырёх версиях. Раньше площадкам отдавалась тишина под трендовый
+        # звук, но в ролике-образце музыка подобрана под картинку, и владелец 23.09.2026
+        # выбрал так же: своя музыка под визуал вместо чужого тренда. Вернуть тишину —
+        # снова свести на _silence и передать burn(bare=...).
         cuts = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots) - 1)]
-        for bed_track, out in ((_beat(script, total, work, cuts), video), (_silence(total, work), bare)):
-            clips.assemble(
-                parts, _under_tracks(bed_track, pieces, work, overlays), total, out, work, voice, 0.0,
-                voice_grade="anull", duck=DUCK,
-            )
+        clips.assemble(
+            parts, _under_tracks(_beat(script, total, work, cuts), pieces, work, overlays), total, video, work,
+            voice, 0.0, voice_grade="anull", duck=DUCK,
+        )
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
         seconds = [shot.seconds for shot in timed]
         timing = cues(script, seconds, lengths)
         placed = place(timing, flat, ends)
-        plate_at = plate_start(script, seconds, timing)
-        burn(video, placed, work, ending_at=total - PLATE_SECONDS, text=bait(script), plate_at=plate_at, bare=bare)
-        if plate_at is not None:
-            print(f"  концовка: со слов о канале, с {plate_at:.1f} с")
+        # Плашка — только после голоса. Пока она вставала со слова «ПЛЁНКА», а оно
+        # стоит в начале последней фразы, она накрывала последний кадр целиком:
+        # скриншот работающего бота в ролике о СКЛЕЙКЕ никто не увидел (владелец, 23.09.2026).
+        burn(video, placed, work, ending_at=total - PLATE_SECONDS, text=bait(script))
         print(f"  субтитры: {len(placed)} кусков, наверху {sum(p[3] for p in placed)}")
 
     # Превью вынимается из готового ролика, а не рисуется отдельно: так оно
@@ -2195,11 +2189,6 @@ def _selftest() -> None:
     shown = place([("а", 0.1, 0.9), ("б", 1.2, 1.8), ("в", 2.1, 2.9)],
                   [{"kind": "stock"}, {"kind": PIC, "path": "нет.jpg", "nosub": True}, {"kind": "stock"}], [1.0, 2.0, 3.0])
     assert [(text, up) for text, _, _, up in shown] == [("а", False), ("в", False)], shown
-    # Концовка встаёт на куске последней фразы со словом «ПЛЁНКА», не раньше и не в другой фразе.
-    calls = {"lines": [{"say": "В ПЛЁНКЕ был бит."}, {"say": "Послушать трек — в канале ПЛЁНКА."}, {"pause": 1.0}]}
-    timing = cues(calls, [2.0, 3.0, 1.0], {1: 2.0, 2: 3.0})
-    assert plate_start(calls, [2.0, 3.0, 1.0], timing) == next(a for text, a, _ in timing if text == "в канале ПЛЁНКА."), timing
-    assert plate_start(calls | {"lines": calls["lines"][:1] + [{"say": "Ну и всё."}]}, [2.0, 3.0], timing[:1]) is None
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "2.top").touch()
         marked = {"kind": PIC, "path": str(Path(tmp) / "2.jpg")}
