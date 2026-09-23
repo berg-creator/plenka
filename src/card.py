@@ -21,7 +21,7 @@ from io import BytesIO
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
 
 from . import config, footage, stories
 
@@ -111,7 +111,11 @@ def _open(source: str | Path) -> Image.Image | None:
             if response.status_code != 200:
                 return None
             data = response.content
-        return Image.open(BytesIO(data)).convert("RGB")
+        photo = Image.open(BytesIO(data)).convert("RGB")
+        # Одноцветный квадрат картинкой не считается: у Канье портрета в Deezer
+        # нет, и вместо силуэта с известным адресом (deezer.EMPTY_PICTURE) он
+        # отдал сплошную черноту — 23.09.2026 она вышла в канал кадром новости.
+        return None if max(ImageStat.Stat(photo.convert("L")).stddev) < 1 else photo
     except Exception:  # noqa: BLE001 — без картинки вызывающий уйдёт запасным путём
         return None
 

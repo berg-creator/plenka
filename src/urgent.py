@@ -94,6 +94,10 @@ def with_portrait(item: dict) -> dict:
     под новостью хуже, чем новость без лица, поэтому не нашли никого —
     пост уходит текстом, как раньше.
     """
+    # Своя картинка издания важнее портрета: 23.09.2026 портрет Канье
+    # (чёрный квадрат Deezer) затёр кадр новости из Telegram-канала.
+    if item.get("cover"):
+        return item
     for name in item.get("artists") or []:
         try:
             picture = deezer.artist_picture(name)
