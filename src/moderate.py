@@ -384,7 +384,8 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                 continue
 
             # Ответ владельца на фразу ролика (src/reels.py): голосовое или аудио —
-            # дубль, фото или картинка файлом — кадр, «собери» — сборка. Раньше
+            # дубль, фото или картинка файлом — кадр, «собери» — сборка, прочий
+            # текст — правка черновика для Мака (reels.note). Раньше
             # трека — аудиофайл ответом на фразу иначе пошёл бы искать пост,
             # и раньше сервиса — фото и текст ушли бы в разборы. Кадр ищется
             # по message_id, как пост у трека; не нашёлся — сообщение идёт дальше
@@ -397,7 +398,7 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                 )
                 and (reel := reels.line_of(message["reply_to_message"]["message_id"]))
             ):
-                what = {"voice": "дубль", "picture": "картинка", "build": "«собери»"}[reel_reply]
+                what = {"voice": "дубль", "picture": "картинка", "build": "«собери»", "comment": "правка"}[reel_reply]
                 print(f"  {what} ролика {reel[0]}, кадр {reel[1]}")
                 if not args.dry_run:
                     try:
@@ -531,12 +532,15 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
 
         message = query.get("message", {})
         # «📺 В канал» под роликом (src/reels.py): выходит видео того сообщения, где нажали.
-        result = reels.to_channel(post_id, message) if action == reels.CALLBACK else handle(action, post_id)
+        # «Всё ок» и «Исправить» под черновиком с Мака — записываются для Мака (reels.verdict).
+        result = (reels.to_channel(post_id, message) if action == reels.CALLBACK
+                  else reels.verdict(action, post_id, admin) if action in (reels.OK, reels.FIX)
+                  else handle(action, post_id))
         telegram.answer_callback(query["id"], result)
         # Вышедший или удалённый пост — в git сразу, а не через десять минут:
         # ежечасный выход релизов (publish --releases) берёт очередь из git
         # и иначе выпустил бы тот же пост второй раз или удалённый.
-        if action in ("pub", "del", reels.CALLBACK):
+        if action in ("pub", "del", reels.CALLBACK, reels.OK, reels.FIX):
             push_state()
 
         # Не вышло — кнопки остаются: нажать ещё раз проще, чем искать пост заново.

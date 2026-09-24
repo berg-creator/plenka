@@ -100,6 +100,9 @@ python -m src.clips --preview --news   собрать клип из свежей
 python -m src.clips --news --from data/news_clip.json --voice assets/voice/news-guf/ --preview
                                        ролик руками: свой текст и записанный голос, без модели и синтеза
 python -m src.clips --selftest         кадров в раскадровке столько же, сколько фраз
+python -m src.reels --preview ФАЙЛ --voice ПАПКА --draft   рисованный ролик с Мака владельцу черновиком:
+                                       «✅ Всё ок» / «✏️ Исправить» и текст правки дежурство пишет
+                                       в reels/<id>/feedback.jsonl приватного хранилища, Мак его ждёт
 ```
 
 `.env` (по образцу `.env.example`) читает собственная `config.load_dotenv()` —

@@ -685,13 +685,15 @@ def take_picture(message: dict) -> dict:
 
 
 def reply_kind(message: dict) -> str:
-    """Что пришло ответом на фразу: voice, picture, build или пустая строка."""
+    """Что пришло ответом на фразу: voice, picture, build, comment или пустая строка."""
     if take_file(message):
         return "voice"
     if take_picture(message):
         return "picture"
     if str(message.get("text", "")).strip(" .!").lower() == BUILD_WORD:
         return "build"
+    if str(message.get("text", "")).strip():
+        return "comment"
     return ""
 
 
@@ -823,6 +825,12 @@ def accept(message: dict, reel: tuple[str, int], admin: str, push) -> None:
         reply = "Собираю" if start_build(reel_id) else (
             f"Сборка не запустилась. Actions → «Ролики» → Run workflow, id <code>{reel_id}</code>")
         telegram.send_message(admin, reply, reply_to=message["message_id"])
+        return
+
+    if kind == "comment":
+        note(reel_id, "comment", message["text"], frame)
+        push()
+        telegram.send_message(admin, "Записал — поправлю и пришлю новую версию", reply_to=message["message_id"])
         return
 
     if kind == "picture":
@@ -1895,6 +1903,41 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
 # Кнопка «📺 В канал» под TikTok-версией в пакете; ловит её дежурство (src/moderate.py).
 CALLBACK = "reel"
 
+# Кнопки под черновиком рисованного ролика (`--preview … --draft`). Кадры рисует Mac владельца,
+# а нажатия ловит дежурство в Actions: второй опросчик на Маке воровал бы у него события
+# (offset getUpdates один на бота). Поэтому решение и правки едут к Маку строками
+# feedback.jsonl ролика в приватном хранилище, а Мак раз в минуту смотрит этот файл через GitHub.
+OK, FIX = "reelok", "reelfix"
+
+
+def note(reel_id: str, kind: str, text: str = "", frame: int = 0) -> None:
+    """Строка решения владельца в feedback.jsonl ролика: ok, fix или comment с текстом."""
+    state.append_jsonl(config.PRIVATE / "reels" / reel_id / "feedback.jsonl",
+                       [{"at": state.iso(), "kind": kind, "frame": frame, "text": text}])
+
+
+def verdict(action: str, reel_id: str, admin: str) -> str:
+    """«✅ Всё ок» или «✏️ Исправить» под черновиком. Возвращает текст всплывашки.
+
+    На «Исправить» бот просит правку ответом (force_reply), и это сообщение ложится
+    в sent.json кадром 0: ответ на него дежурство находит тем же поиском, что дубль на фразу.
+    """
+    from . import telegram
+
+    folder = config.PRIVATE / "reels" / reel_id
+    if not ID_FORMAT.fullmatch(reel_id) or not (folder / "sent.json").exists():
+        return f"Ошибка: нет ролика {reel_id}"
+    if action == OK:
+        note(reel_id, "ok")
+        return "Принял — пришлю всё для площадок"
+    note(reel_id, "fix")
+    ask = telegram.send_message(admin, "Что поправить? Напиши ответом на это сообщение — можно несколькими.",
+                                ask="Что поправить")
+    sent = state.read_json(folder / "sent.json", {})
+    sent.setdefault("lines", {})[str(ask["message_id"])] = 0
+    state.write_json(folder / "sent.json", sent)
+    return "Жду правки"
+
 
 def channel_text(script: dict) -> str:
     """Подпись ролика в канале: название и, если ролик зовёт в бота, ссылка с той же приманкой."""
@@ -2479,7 +2522,7 @@ def _selftest() -> None:
             assert take_picture(photo)["file_id"] == "l" and reply_kind(photo) == "picture"
             assert reply_kind({"document": {"file_id": "p", "mime_type": "image/png"}}) == "picture"
             build_word = {**voice, "voice": None, "text": "Собери!"}
-            assert reply_kind(build_word) == "build" and reply_kind({**build_word, "text": "собери ролик"}) == ""
+            assert reply_kind(build_word) == "build" and reply_kind({**build_word, "text": "собери ролик"}) == "comment"
             assert f"картинка ролика {good['id']}, кадр 4" in routed(photo)
             assert f"«собери» ролика {good['id']}, кадр 4" in routed(build_word)
 
@@ -2511,6 +2554,18 @@ def _selftest() -> None:
                 assert "не открывается" in replies[-1] and not (folder / "pics" / "4-3.jpg").exists()
                 accept(build_word, (good["id"], 4), "1", lambda: pushed.append(1))
                 assert pushed == [1] and built == [good["id"]] and replies[-1] == "Собираю"
+
+                # Черновик с Мака: «Исправить» просит правку ответом и помнит вопрос кадром 0,
+                # ответ текстом ложится в feedback.jsonl, которого ждёт Мак; «Всё ок» — туда же.
+                telegram.send_message = lambda chat, text, **kw: replies.append(text) or {"message_id": 900}
+                state.write_json(folder / "sent.json", {"lines": {"10": 4}})
+                assert verdict(FIX, good["id"], "1") == "Жду правки"
+                assert state.read_json(folder / "sent.json", {})["lines"]["900"] == 0
+                accept({"message_id": 5, "text": "бабушка пусть вяжет"}, (good["id"], 0), "1", lambda: pushed.append(1))
+                assert verdict(OK, good["id"], "1").startswith("Принял") and verdict(OK, "../x", "1").startswith("Ошибка")
+                notes = list(state.read_jsonl(folder / "feedback.jsonl"))
+                assert [n["kind"] for n in notes] == ["fix", "comment", "ok"] and notes[1]["text"] == "бабушка пусть вяжет", notes
+                assert pushed == [1, 1] and replies[-1].startswith("Записал")
             finally:
                 telegram.download_file, telegram.send_message, globals()["start_build"] = real
 
@@ -2559,6 +2614,8 @@ def main() -> int:
     parser.add_argument("--build", metavar="ID", help="собрать из дублей приватного хранилища и прислать пакет")
     parser.add_argument("--preview", metavar="ФАЙЛ", help="собрать ролик из файла, никуда не отправляя")
     parser.add_argument("--voice", metavar="ПАПКА", help="дубли для --preview: 1.ogg, 2.m4a… по номеру строки, картинки владельца в pics/")
+    parser.add_argument("--draft", action="store_true",
+                        help="с --preview: прислать ролик владельцу черновиком с кнопками «Всё ок» и «Исправить»")
     parser.add_argument("--dry-run", action="store_true", help="ничего не писать и не отправлять, показать")
     parser.add_argument("--selftest", action="store_true", help="валидатор, раскадровка и разбор ответа без сети")
     args = parser.parse_args()
@@ -2614,6 +2671,16 @@ def main() -> int:
     size = video.stat().st_size / 1024 / 1024
     print(f"Готов: {video.relative_to(config.ROOT)} ({size:.1f} МБ), превью {cover.relative_to(config.ROOT)}")
 
+    if args.draft and not args.dry_run:
+        from . import telegram
+
+        telegram.send_video_file(
+            config.secret("TELEGRAM_ADMIN_ID"), video,
+            f"<b>{html.escape(script['topic'], quote=False)}</b>\nчерновик: всё ок — пришлю версии для площадок",
+            buttons=[[{"text": "✅ Всё ок", "callback_data": f"{OK}:{script['id']}"},
+                      {"text": "✏️ Исправить", "callback_data": f"{FIX}:{script['id']}"}]])
+        print("Черновик ушёл владельцу.")
+        return 0
     if args.preview or args.dry_run:
         print(f"\nПакет владельцу — ролик, превью файлом и текст:\n\n{package(script)}")
         return 0
