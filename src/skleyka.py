@@ -56,7 +56,9 @@
 это подписка на канал и настоящие дорожки. «Больше склеек» — счёт в звёздах Telegram:
 цифровой товар Telegram пускает только за звёзды (XTR), и платёжный провайдер для них
 не нужен — ни договора, ни ключа, provider_token пустой; возврат по просьбе покупателя —
-правило Telegram, поэтому /vozvrat владельца. За звёзды — только число склеек.
+правило Telegram, поэтому /vozvrat владельца, а /paysupport покупателя (его Telegram
+тоже требует) шлёт владельцу вопрос вместе с номерами платежей: переписываться
+вручную не нужно. За звёзды — только число склеек.
 Коды, бонусы и номера платежей — в SKLEYKA_FILE, приватном хранилище.
 
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   склейка и пара ДО/ПОСЛЕ одной громкости
@@ -1638,10 +1640,23 @@ def refund(charge: str) -> str:
                 return f"Не вернул: {exc}"
             data["paid"][chat].remove(p)
             save(data)
+            telegram.send_message(chat, f"Вернули {p['stars']} ⭐️ за «{STARS.get(p['item'], p['item'])}».")
             return f"Вернул {p['stars']} ⭐️, «{STARS.get(p['item'], p['item'])}» снято."
     lines = [f"{p['at'][:16]} · {STARS.get(p['item'], p['item'])} · {p['stars']} ⭐️\n<code>{p['charge']}</code>"
              for p, _ in payments[-5:]]
     return ("Такого платежа нет. " if charge else "") + ("Последние:\n" + "\n".join(lines) if lines else "Платежей нет.")
+
+
+def support(chat_id: str | int, text: str) -> str:
+    """/paysupport — вопрос об оплате владельцу, с номерами платежей для /vozvrat."""
+    chat = str(chat_id)
+    own = [f"<code>{p['charge']}</code> · {p['stars']} ⭐️" for p in load()["paid"].get(chat, [])]
+    telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), "\n".join(
+        ["💫 Вопрос об оплате: " + (text or "без текста"), *own] if own else
+        ["💫 Вопрос об оплате: " + (text or "без текста"), "Платежей у человека нет."]))
+    return ("Передал владельцу. Если нужен возврат звёзд — вернём, об этом придёт сообщение сюда."
+            if own else "Передал владельцу. Платежей звёздами от тебя не вижу — если платил, пришли "
+            "/paysupport и номер транзакции из истории звёзд.")
 
 
 def _invoices(chat_id: str) -> None:
@@ -2574,6 +2589,8 @@ def _selftest() -> None:
         assert refund("c9").startswith("Такого платежа нет") and "c2" in refund("")
         assert refund("c2").startswith("Вернул") and calls[-1] == (
             "refundStarPayment", {"user_id": "7", "telegram_payment_charge_id": "c2"}) and _limit(load(), "7")
+        assert sent[-2].startswith("Вернули 4") and support("7", "не пришло").startswith("Передал") \
+            and "c1" in sent[-1] and "не пришло" in sent[-1], "вопрос об оплате — владельцу с номером"
         assert turn(KNOBS, "e+")["echo"] == ECHO_STEP and turn(dict(KNOBS, voice=VOICE_LIMIT), "v+")["voice"] == VOICE_LIMIT
         assert "с саунд-дизайном" in look(turn(KNOBS, "d")) and turn(KNOBS, "c1")["style"] == "мелодично"
         # Эдлибы: выкрики по очереди лево и право, точка меняется в паузе, а не на звуке.

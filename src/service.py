@@ -1331,6 +1331,9 @@ def handle_message(message: dict, data: dict) -> bool:
         # Возврат звёзд по просьбе покупателя — правило Telegram (src/skleyka.py).
         telegram.send_message(chat_id, skleyka.refund(text.partition(" ")[2].strip()))
         return False
+    if text.startswith("/paysupport"):
+        telegram.send_message(chat_id, skleyka.support(chat_id, text.partition(" ")[2].strip()))
+        return False
     kind, body = parse_command(text)
     # Отбор ведёт разговор в несколько сообщений (src/otbor.py): пока заявка
     # открыта, всё присланное идёт туда. Другая команда заявку закрывает —
