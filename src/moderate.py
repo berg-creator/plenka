@@ -329,11 +329,33 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
     last_id = offset
     args = argparse.Namespace(dry_run=dry_run)
 
-    for update in updates:
+    # Оплату звёздами Telegram отменяет, если за 10 секунд не ответить «да», — такие
+    # события вперёд пачки: разбор перед ними может идти дольше.
+    for update in sorted(updates, key=lambda update: "pre_checkout_query" not in update):
         last_id = max(last_id, update.get("update_id", 0) + 1)
+
+        # Оплата звёздами (src/skleyka.py): товар — только склейки, проверять перед
+        # списанием нечего, поэтому «да» сразу.
+        checkout = update.get("pre_checkout_query")
+        if checkout:
+            print(f"  оплата звёздами: {checkout.get('invoice_payload')}")
+            if not args.dry_run:
+                try:
+                    telegram.answer_pre_checkout(checkout["id"])
+                except telegram.TelegramError as exc:  # опоздали — Telegram платёж уже отменил
+                    log.error("Оплата звёздами не подтверждена: %s", exc)
+            continue
 
         # Личное сообщение — это запрос к сервису разборов.
         message = update.get("message")
+        if message and message.get("successful_payment"):
+            print("  звёзды получены")
+            if not args.dry_run:
+                try:
+                    skleyka.paid(message)
+                except Exception as exc:  # noqa: BLE001 — сбой начисления не роняет дежурство
+                    log.error("Звёзды не начислены: %s", exc)
+            continue
         if message:
             # Пост, пересланный Telegram в чат обсуждений, — повод открыть ветку
             # комментариев первым. Под прослушкой первой идёт сама викторина

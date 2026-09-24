@@ -49,6 +49,16 @@
 Проверка — на слух: ДО (простая сумма дорожек) и ПОСЛЕ одной громкости по LUFS.
 Громкое всегда кажется лучше, и без этого сравнение нечестное.
 
+Выход из лимита суток — только тому, кто в него упёрся: две кнопки под отказом,
+бесплатная функция остаётся бесплатной. «Позвать артиста» — личная ссылка
+?start=skleyka_r<код>, и склейка сверх лимита даётся за первую готовую склейку
+приглашённого, а не за переход: переход второй аккаунт накрутит за минуту, склейка —
+это подписка на канал и настоящие дорожки. «Больше склеек» — счёт в звёздах Telegram:
+цифровой товар Telegram пускает только за звёзды (XTR), и платёжный провайдер для них
+не нужен — ни договора, ни ключа, provider_token пустой; возврат по просьбе покупателя —
+правило Telegram, поэтому /vozvrat владельца. За звёзды — только число склеек.
+Коды, бонусы и номера платежей — в SKLEYKA_FILE, приватном хранилище.
+
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   склейка и пара ДО/ПОСЛЕ одной громкости
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --style грязно --design
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --voice 2 --echo -4   ручки «голос громче», «эха меньше»
@@ -1351,7 +1361,12 @@ ACCEPTED = "Принял: {parts}. Склеиваю — пришлю минут 
 EXPIRED = "Дорожки не пришли до конца — заявку закрыл. Начать заново — /skleyka."
 OLD = "Эта заявка уже закрыта. Начать заново — /skleyka."
 CANCELLED = "Отменил. Захочешь склеить — /skleyka."
-LIMIT = "Склеек в сутки — две на человека. Следующую можно с {time} по Москве."
+LIMIT = "Склеек в сутки — {count}. Следующую можно с {time} по Москве."
+INVITE = ("Твоя ссылка для артиста:\n{link}\n\nПридёт по ней и склеит свой трек — получишь склейку "
+          f"сверх лимита. Живёт {config.SKLEYKA_BONUS_DAYS} дней.")
+BONUS = "👥 Артист по твоей ссылке склеил трек — у тебя склейка сверх лимита. Жми /skleyka."
+BONUS_SENT = "Тот, кто позвал тебя в СКЛЕЙКУ, получил за твою склейку ещё одну."
+THANKS = "Спасибо! {what} — жми /skleyka."
 TOO_BIG = f"«{{name}}» больше {config.SKLEYKA_MAX_MB} МБ. Пришли FLAC или MP3 320 — они легче."
 BAD = "«{name}» не читается. Пришли WAV, FLAC или MP3 — /skleyka."
 SILENT = "В «{name}» тишина — похоже, выгрузилась пустая дорожка. Пришли заново — /skleyka."
@@ -1391,6 +1406,13 @@ KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swa
 # Кнопки идут через service.handle_callback: префикс service.CALLBACK_PREFIX
 # и действие sk. Импортировать service отсюда нельзя — он импортирует нас.
 PREFIX = "s:sk:"
+# Два выхода — только под отказом по лимиту: платное предложение в первом же ответе
+# отпугнуло бы тех, у кого нет денег на звукаря, а бесплатная функция остаётся бесплатной.
+WAYS = [[{"text": "👥 Позвать артиста", "callback_data": f"{PREFIX}r"}],
+        [{"text": "⭐️ Больше склеек", "callback_data": f"{PREFIX}s"}]]
+# Товары за звёзды: payload счёта → название (до 32 знаков).
+STARS = {"pack": f"+{config.SKLEYKA_PACK} склейки на сутки",
+         "month": f"30 дней по {config.SKLEYKA_MONTH_PER_DAY} склеек в сутки"}
 MODES = [[{"text": "🎤 Вокал + бит", "callback_data": f"{PREFIX}m:1"}],
          [{"text": "🎚 По дорожкам — даблы, бэки, инструменты", "callback_data": f"{PREFIX}m:2"}]]
 # Части в том порядке, в каком бот их спрашивает; что можно прислать несколькими файлами.
@@ -1483,7 +1505,8 @@ def _item(message: dict) -> dict:
 
 def load() -> dict:
     data = state.read_json(config.SKLEYKA_FILE, {})
-    for key, empty in (("drafts", {}), ("jobs", []), ("tracks", {}), ("used", {})):
+    for key, empty in (("drafts", {}), ("jobs", []), ("tracks", {}), ("used", {}), ("invite", {}), ("invited_by", {}),
+                       ("bonus", {}), ("paid", {})):
         data.setdefault(key, empty)
     return data
 
@@ -1527,14 +1550,28 @@ def wants(message: dict) -> bool:
     return active(message["chat"]["id"])
 
 
-def _limit(data: dict, chat_id: str) -> str:
-    """Отказ по суточному лимиту; пусто — можно."""
+def _allowance(data: dict, chat_id: str) -> tuple[list[str], int, list[str]]:
+    """(склейки за сутки, лимит суток с купленным, живые бонусы за приглашённых)."""
     recent = sorted(stamp for stamp in data["used"].get(chat_id, []) if _age(stamp) < 86400)
-    if len(recent) < config.SKLEYKA_PER_DAY:
+    paid = data["paid"].get(chat_id, [])
+    month = any(p["item"] == "month" and _age(p["at"]) < 30 * 86400 for p in paid)
+    base = (config.SKLEYKA_MONTH_PER_DAY if month else config.SKLEYKA_PER_DAY) \
+        + config.SKLEYKA_PACK * sum(p["item"] == "pack" and _age(p["at"]) < 86400 for p in paid)
+    bonus = [stamp for stamp in data["bonus"].get(chat_id, []) if _age(stamp) < config.SKLEYKA_BONUS_DAYS * 86400]
+    return recent, base, bonus
+
+
+def _limit(data: dict, chat_id: str) -> str:
+    """Отказ по суточному лимиту; пусто — можно. Бонусы сверх лимита — не больше
+    SKLEYKA_BONUS_MAX за сутки: потраченные уже сидят в recent."""
+    recent, base, bonus = _allowance(data, chat_id)
+    allowed = base + min(len(bonus), config.SKLEYKA_BONUS_MAX)
+    if len(recent) < allowed:
         return ""
     from .compose import MSK
 
-    return LIMIT.format(time=(state._parse(recent[0]) + timedelta(days=1)).astimezone(MSK).strftime("%H:%M"))
+    free = state._parse(recent[len(recent) - allowed]) + timedelta(days=1)
+    return LIMIT.format(count=allowed, time=free.astimezone(MSK).strftime("%H:%M"))
 
 
 def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> None:
@@ -1545,12 +1582,73 @@ def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> Non
     if denied:
         data["drafts"].pop(chat_id, None)
         save(data)
-        telegram.send_message(chat_id, denied)
+        telegram.send_message(chat_id, denied, buttons=WAYS)
         return
     data["drafts"][chat_id] = {"user": str(user_id), "admin": admin, "at": state.iso(), "plan": None,
                                "step": 0, "files": []}
     save(data)
     telegram.send_message(chat_id, INTRO, buttons=MODES)
+
+
+def invited(chat_id: str | int, code: str) -> None:
+    """Пришёл по ?start=skleyka_r<код>: запомнить, кто позвал. Бонус — не за переход,
+    а за первую готовую склейку (_finish): переход второй аккаунт накрутит за минуту.
+    Кто уже склеивал, приглашённым не считается — иначе знакомые менялись бы ссылками."""
+    chat, data = str(chat_id), load()
+    inviter = next((who for who, mine in data["invite"].items() if code and mine == code), None)
+    if inviter and inviter != chat and chat not in data["used"]:
+        data["invited_by"][chat] = inviter
+        save(data)
+
+
+def _reward(data: dict, track: dict) -> None:
+    """Первая готовая склейка приглашённого — пригласившему бонус, обоим строка."""
+    inviter = data["invited_by"].pop(track["chat"], None)
+    if not inviter:
+        return
+    alive = [stamp for stamp in data["bonus"].get(inviter, []) if _age(stamp) < config.SKLEYKA_BONUS_DAYS * 86400]
+    data["bonus"][inviter] = [*alive, state.iso()]
+    telegram.send_message(inviter, BONUS)
+    telegram.send_message(track["chat"], BONUS_SENT)
+
+
+def paid(message: dict) -> None:
+    """Оплата звёздами прошла. Повтор того же платежа ничего не добавляет."""
+    payment, chat, data = message["successful_payment"], str(message["chat"]["id"]), load()
+    charge = payment["telegram_payment_charge_id"]
+    if any(p["charge"] == charge for payments in data["paid"].values() for p in payments):
+        return
+    item = payment.get("invoice_payload")
+    data["paid"].setdefault(chat, []).append({"item": item, "charge": charge, "stars": payment.get("total_amount"),
+                                              "at": state.iso()})
+    save(data)
+    telegram.send_message(chat, THANKS.format(what=STARS.get(item, "склейки добавил")))
+
+
+def refund(charge: str) -> str:
+    """/vozvrat <номер транзакции> — звёзды назад, купленное снимается. Без номера —
+    последние платежи: номер человек видит у себя в истории звёзд."""
+    data = load()
+    payments = sorted(((p, chat) for chat, ps in data["paid"].items() for p in ps), key=lambda pair: pair[0]["at"])
+    for p, chat in payments:
+        if charge and p["charge"] == charge:
+            try:
+                telegram.refund_stars(chat, charge)
+            except telegram.TelegramError as exc:
+                return f"Не вернул: {exc}"
+            data["paid"][chat].remove(p)
+            save(data)
+            return f"Вернул {p['stars']} ⭐️, «{STARS.get(p['item'], p['item'])}» снято."
+    lines = [f"{p['at'][:16]} · {STARS.get(p['item'], p['item'])} · {p['stars']} ⭐️\n<code>{p['charge']}</code>"
+             for p, _ in payments[-5:]]
+    return ("Такого платежа нет. " if charge else "") + ("Последние:\n" + "\n".join(lines) if lines else "Платежей нет.")
+
+
+def _invoices(chat_id: str) -> None:
+    """Оба счёта сразу: экран выбора между двумя товарами был бы лишним шагом."""
+    about = "Больше склеек — и только: стиль, ручки и саунд-дизайн те же, что бесплатно."
+    for item, stars in (("pack", config.SKLEYKA_STARS_PACK), ("month", config.SKLEYKA_STARS_MONTH)):
+        telegram.send_invoice(chat_id, STARS[item], about, item, stars)
 
 
 def _ask(chat_id: str, draft: dict) -> None:
@@ -1650,6 +1748,11 @@ def _queue(data: dict, chat_id: str, draft: dict) -> None:
     knobs = draft.get("knobs") or dict(KNOBS)
     data["tracks"][track] = {"chat": chat_id, "admin": draft.get("admin", False), "files": files,
                              "knobs": knobs, "tweaks": 0, "at": state.iso()}
+    recent, base, bonus = _allowance(data, chat_id)
+    if len(recent) >= base and bonus:
+        # Сверх лимита — тратится бонус, ближайший к сгоранию; не склеилось — вернётся (_finish).
+        data["bonus"][chat_id].remove(min(bonus))
+        data["tracks"][track]["bonus"] = min(bonus)
     data["used"].setdefault(chat_id, []).append(state.iso())
     del data["drafts"][chat_id]
     minutes = _enqueue(data, track, dict(knobs))
@@ -1751,6 +1854,15 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     if head == "x":
         cancel(chat_id)
         telegram.send_message(chat_id, CANCELLED)
+        return
+    if head == "r":
+        link = f"https://t.me/{config.BOT_HANDLE.lstrip('@')}?start=skleyka_r"
+        link += data["invite"].setdefault(chat_id, secrets.token_hex(4))
+        save(data)
+        telegram.send_message(chat_id, INVITE.format(link=link))
+        return
+    if head == "s":
+        _invoices(chat_id)
         return
     draft = _draft(data, chat_id)
     if not draft:
@@ -1946,13 +2058,19 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     data["jobs"] = [queued for queued in data["jobs"] if queued["id"] != job["id"]]
     track = data["tracks"].get(job["track"], {})
     print(f"  склейка {job['id']}: {'готова' if result.get('ok') else result.get('why') or 'упала'}")
-    if result.get("ok") or not track:
+    if not track:
+        return
+    if result.get("ok"):
+        if not job.get("tweak"):
+            _reward(data, track)
         return
     used = data["used"].get(track["chat"], [])
     if job.get("tweak"):
         track["tweaks"] = max(0, track["tweaks"] - 1)
     elif used:
         used.pop()
+        if "bonus" in track:
+            data["bonus"].setdefault(track["chat"], []).append(track.pop("bonus"))
     if not result:
         telegram.send_message(track["chat"], FAILED)
 
@@ -2183,9 +2301,13 @@ def _selftest() -> None:
     """Без сети: роли по имени и по звуку, куда идёт файл, заявка от дорожек до очереди,
     ручки и возврат лимита, лимит суток, отказы по тишине и длине."""
     sent: list[str] = []
+    keys: list = []
+    calls: list[tuple[str, dict]] = []
     real = (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
-            itunes.find_song)
-    telegram.send_message = lambda chat, text, **_: sent.append(text) or {"message_id": len(sent)}
+            itunes.find_song, telegram._call)
+    telegram.send_message = lambda chat, text, buttons=None, **_: sent.append(text) or keys.append(buttons) \
+        or {"message_id": len(sent)}
+    telegram._call = lambda method, payload, files=None: calls.append((method, payload)) or {}
     telegram.edit_markup = lambda chat, message, markup: None
     config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
     tmp = Path(tempfile.mkdtemp(prefix="skleyka-test-"))
@@ -2390,9 +2512,68 @@ def _selftest() -> None:
         data["used"]["7"] = [state.iso(), state.iso()]
         save(data)
         start(7, 7)
-        assert sent[-1].startswith("Склеек в сутки — две"), sent[-1]
+        assert sent[-1].startswith("Склеек в сутки — 2.") and keys[-1] == WAYS, "упёрся — два выхода кнопками"
         start(1, 1, admin=True)
-        assert sent[-1] == INTRO
+        assert sent[-1] == INTRO and keys[-1] == MODES
+
+        # Позвал артиста: бонус не за переход, а за его первую готовую склейку, и один раз.
+        callback(7, 7, "r")
+        code = load()["invite"]["7"]
+        assert sent[-1].startswith("Твоя ссылка") and f"t.me/plenka_fm_bot?start=skleyka_r{code}" in sent[-1]
+        for chat, by in ((7, code), (40, code), (41, "чужой")):
+            invited(chat, by)
+        data = load()
+        assert data["invited_by"] == {"40": "7"}, "сам себя и кто уже склеивал — не приглашённые"
+        data["tracks"]["t40"] = {"chat": "40", "files": [], "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso()}
+        data["used"]["40"] = [state.iso()]
+        for n in range(2):
+            done = subprocess.Popen(["true"])
+            done.wait()
+            (tmp / f"ok{n}").mkdir()
+            (tmp / f"ok{n}" / "result.json").write_text('{"ok": true}')
+            _finish(data, done, {"id": f"j{n}", "track": "t40"}, tmp / f"ok{n}")
+        assert len(data["bonus"]["7"]) == 1 and sent[-2:] == [BONUS, BONUS_SENT], "второй раз бонуса нет"
+        save(data)
+        invited(40, code)
+        assert not load()["invited_by"], "склеивший по ссылке второй раз не приглашённый"
+        assert not _limit(data, "7"), "бонус — склейка сверх лимита"
+        start(7, 7)
+        data = load()
+        _queue(data, "7", data["drafts"]["7"])
+        assert data["bonus"]["7"] == [] and _limit(data, "7"), "бонус потрачен"
+        data["bonus"]["7"] = [state.iso(state.now() - timedelta(days=config.SKLEYKA_BONUS_DAYS + 1))]
+        assert _limit(data, "7"), "бонус сгорел"
+        save(data)
+
+        # Звёзды: два счёта в XTR без провайдера; «да» перед списанием — сразу и первым;
+        # платёж поднимает лимит, повтор того же платежа — нет; возврат снимает купленное.
+        callback(7, 7, "s")
+        invoices = [payload for method, payload in calls if method == "sendInvoice"]
+        assert [(i["payload"], i["currency"], i["provider_token"]) for i in invoices] == \
+            [("pack", "XTR", ""), ("month", "XTR", "")], invoices
+
+        def payment(charge: str, n: int, item: str = "pack") -> dict:
+            return {"update_id": n, "message": {"message_id": n, "chat": {"id": 7, "type": "private"}, "from": {"id": 7},
+                    "successful_payment": {"currency": "XTR", "total_amount": 30, "invoice_payload": item,
+                                           "telegram_payment_charge_id": charge}}}
+
+        from . import moderate
+
+        calls.clear()
+        moderate.process([payment("c1", 1), {"update_id": 2, "pre_checkout_query": {"id": "q1"}}], {}, "1", False, 0)
+        assert calls == [("answerPreCheckoutQuery", {"pre_checkout_query_id": "q1", "ok": True})], calls
+        assert sent[-1].startswith("Спасибо! +3") and not _limit(load(), "7"), "пакет поднял лимит"
+        data = load()
+        data["used"]["7"] += [state.iso()] * 2
+        save(data)
+        assert _limit(data, "7").startswith("Склеек в сутки — 5.")
+        paid(payment("c1", 3)["message"])
+        assert _limit(load(), "7"), "повтор платежа"
+        paid(payment("c2", 4, "month")["message"])
+        assert not _limit(load(), "7"), "месяц — десять в сутки"
+        assert refund("c9").startswith("Такого платежа нет") and "c2" in refund("")
+        assert refund("c2").startswith("Вернул") and calls[-1] == (
+            "refundStarPayment", {"user_id": "7", "telegram_payment_charge_id": "c2"}) and _limit(load(), "7")
         assert turn(KNOBS, "e+")["echo"] == ECHO_STEP and turn(dict(KNOBS, voice=VOICE_LIMIT), "v+")["voice"] == VOICE_LIMIT
         assert "с саунд-дизайном" in look(turn(KNOBS, "d")) and turn(KNOBS, "c1")["style"] == "мелодично"
         # Эдлибы: выкрики по очереди лево и право, точка меняется в паузе, а не на звуке.
@@ -2401,10 +2582,11 @@ def _selftest() -> None:
         assert all(1.5 < t < 2.0 for t, _ in left[1:3]) and len(left) == len(right) == 5
     finally:
         (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
-         itunes.find_song) = real
+         itunes.find_song, telegram._call) = real
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, звук до склейки, "
-          "ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме — ок")
+          "ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
+          "реферал за склейку и звёзды — ок")
 
 
 def main() -> int:

@@ -217,11 +217,29 @@ def get_updates(offset: int = 0, timeout: int = 0) -> list[dict]:
         {
             "offset": offset,
             "timeout": timeout,
-            # poll_answer — голоса в неанонимной прослушке под постом (src/quiz.py):
-            # без него Telegram их боту не присылает вовсе.
-            "allowed_updates": json.dumps(["callback_query", "message", "poll_answer"]),
+            # poll_answer — голоса в неанонимной прослушке под постом (src/quiz.py),
+            # pre_checkout_query — оплата звёздами (src/skleyka.py): без них в списке
+            # Telegram их боту не присылает вовсе, и платёж отменился бы сам.
+            "allowed_updates": json.dumps(["callback_query", "message", "poll_answer", "pre_checkout_query"]),
         },
     )
+
+
+def send_invoice(chat_id: str, title: str, description: str, payload: str, stars: int) -> dict:
+    """Счёт в звёздах Telegram. Цифровой товар идёт в валюте XTR без платёжного
+    провайдера: provider_token пустой, подключать ничего не надо."""
+    return _call("sendInvoice", {"chat_id": chat_id, "title": title, "description": description, "payload": payload,
+                                 "provider_token": "", "currency": "XTR",
+                                 "prices": json.dumps([{"label": title, "amount": stars}])})
+
+
+def answer_pre_checkout(query_id: str) -> None:
+    """Последнее «да» перед списанием: не ответить за 10 секунд — платёж отменится."""
+    _call("answerPreCheckoutQuery", {"pre_checkout_query_id": query_id, "ok": True})
+
+
+def refund_stars(user_id: str | int, charge_id: str) -> None:
+    _call("refundStarPayment", {"user_id": user_id, "telegram_payment_charge_id": charge_id})
 
 
 def answer_callback(callback_id: str, text: str = "") -> None:

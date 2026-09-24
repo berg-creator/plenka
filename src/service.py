@@ -66,6 +66,8 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "sv": "ДВОЙНИК, друг позвал сравнить",
            # СКЛЕЙКА зовут туда, где просят свести трек: ?start=skleyka_chat — из чатов артистов.
            "skleyka": "СКЛЕЙКА, без площадки", "skleyka_chat": "СКЛЕЙКА, чаты артистов",
+           # Артист позвал артиста из-под лимита склеек (?start=skleyka_r<код>): код сюда не пишется.
+           "skleyka_ref": "СКЛЕЙКА, позвал артист",
            # В СКЛЕЙКУ зовёт шестая боль роликов (prompts/reels.md): ?start=skleyka_yt — из ролика.
            "skleyka_yt": "СКЛЕЙКА, YouTube", "skleyka_tt": "СКЛЕЙКА, TikTok", "skleyka_vk": "СКЛЕЙКА, ВКонтакте",
            # Ответы владельца там, где просят свести трек (docs/launch/2026-09-23-skleyka-mesta.md).
@@ -1325,6 +1327,10 @@ def handle_message(message: dict, data: dict) -> bool:
             telegram.send_message(chat_id, city_set(chat_id, text), buttons=watch_buttons())
         return False
 
+    if admin and text.startswith("/vozvrat"):
+        # Возврат звёзд по просьбе покупателя — правило Telegram (src/skleyka.py).
+        telegram.send_message(chat_id, skleyka.refund(text.partition(" ")[2].strip()))
+        return False
     kind, body = parse_command(text)
     # Отбор ведёт разговор в несколько сообщений (src/otbor.py): пока заявка
     # открыта, всё присланное идёт туда. Другая команда заявку закрывает —
@@ -1345,8 +1351,12 @@ def handle_message(message: dict, data: dict) -> bool:
         otbor.cancel(chat_id)
     link, _, slug = body.partition("_")
     if kind == "skleyka" or kind == "menu" and link == "skleyka":
+        ref = kind == "menu" and body not in SOURCES and slug.startswith("r")
         if kind == "menu":
-            count_source(body if body in SOURCES else link)
+            count_source("skleyka_ref" if ref else body if body in SOURCES else link)
+        if ref:
+            # До проверки подписки: «Подписался» кода не несёт, и приглашение потерялось бы.
+            skleyka.invited(chat_id, slug[1:17])
         if _subscribed(chat_id, user_id, admin, retry="skleyka"):
             skleyka.start(chat_id, user_id, admin=admin)
         return False
@@ -1952,13 +1962,24 @@ def _selftest() -> None:
         assert replies[-3][0] == VKLADYSH_NEXT and replies[-3][1][1][0]["callback_data"] == _cb("razbor", "Bones")
         assert [text for text, _ in replies[-2:]] == [VKLADYSH] * 2, replies[-2:]
         assert state.read_json(SOURCES_FILE, {})[_today()]["vkladysh"] == 1
+        # Артист позвал артиста из-под лимита склеек: метка одна, код — в приглашение.
+        real_sk = skleyka.start, skleyka.invited
+        skleyka.start, skleyka.invited = (lambda *a, **kw: None), (lambda chat, code: invited.append((chat, code)))
+        try:
+            handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "message_id": 200,
+                            "date": 20000, "text": "/start skleyka_rab12cd34"}, {})
+        finally:
+            skleyka.start, skleyka.invited = real_sk
+        assert invited[-1] == ("55501", "ab12cd34") and "ab12cd34" not in SOURCES_FILE.read_text()
+        assert state.read_json(SOURCES_FILE, {})[_today()]["skleyka_ref"] == 1
     finally:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
         tmp.cleanup()
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню шесть разделов; "
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
-          "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал")
+          "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал; "
+          "skleyka_r<код> — метка skleyka_ref, код в приглашение")
 
 
 # ─────────────────────────── командная строка ───────────────────────────

@@ -71,6 +71,16 @@ SKLEYKA_FILE = PRIVATE / "skleyka.json"
 SKLEYKA_PER_DAY = 2
 SKLEYKA_TWEAKS = 3
 SKLEYKA_MAX_MB = 200
+# Выход из лимита — только тому, кто в него упёрся. Бонус за артиста, который пришёл
+# по личной ссылке и склеил свой трек, живёт SKLEYKA_BONUS_DAYS дней, а сверх лимита
+# суток бонусных не больше SKLEYKA_BONUS_MAX: склеивает машина дежурства, не сервер.
+SKLEYKA_BONUS_DAYS = 30
+SKLEYKA_BONUS_MAX = 3
+# Звёзды Telegram: цены — здесь. За звёзды — только больше склеек, всё остальное есть и так.
+SKLEYKA_STARS_PACK = 30      # SKLEYKA_PACK склеек сверх лимита на сутки
+SKLEYKA_PACK = 3
+SKLEYKA_STARS_MONTH = 150    # 30 дней по SKLEYKA_MONTH_PER_DAY склеек в сутки
+SKLEYKA_MONTH_PER_DAY = 10
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (gemini — Google, по умолчанию; anthropic — платный Claude; gigachat — Сбер).
