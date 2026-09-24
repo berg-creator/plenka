@@ -1510,10 +1510,13 @@ def cues(script: dict, seconds: list[float], takes: dict[int, float]) -> list[tu
 def place(timing: list[tuple[str, float, float]], flat: list[dict], ends: list[float]) -> list[tuple[str, float, float, bool]]:
     """Куски субтитров с высотой: наверх, если хоть один кадр под куском с надписью внизу
     (кусок переходит через склейку — на пилоте «14 лет концерт» лёг бы на его книжку).
-    Под кадром с nosub в начале куска — без субтитра."""
+    Под кадром с nosub в начале куска — без субтитра, а кусок, заезжающий на такой кадр,
+    обрывается на склейке: владелец просил переписку в концовке чистой, а «сведёт за пару»
+    начиналось на кадре раньше и ложилось поверх неё."""
     placed = []
+    starts = [0.0, *ends[:-1]]
     for text, first, end in timing:
-        starts = [0.0, *ends[:-1]]
+        end = min([end] + [a for screen, a in zip(flat, starts) if screen.get("nosub") and first < a < end])
         under = [screen for screen, a, b in zip(flat, starts, ends) if a < end and first < b] or flat[-1:]
         if not under[0].get("nosub"):
             placed.append((text, first, end, any(map(high, under))))
@@ -2232,6 +2235,8 @@ def _selftest() -> None:
     shown = place([("а", 0.1, 0.9), ("б", 1.2, 1.8), ("в", 2.1, 2.9)],
                   [{"kind": "stock"}, {"kind": PIC, "path": "нет.jpg", "nosub": True}, {"kind": "stock"}], [1.0, 2.0, 3.0])
     assert [(text, up) for text, _, _, up in shown] == [("а", False), ("в", False)], shown
+    assert place([("г", 0.6, 1.4)], [{"kind": "stock"}, {"kind": PIC, "path": "нет.jpg", "nosub": True}],
+                 [1.0, 2.0]) == [("г", 0.6, 1.0, False)]
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "2.top").touch()
         marked = {"kind": PIC, "path": str(Path(tmp) / "2.jpg")}
