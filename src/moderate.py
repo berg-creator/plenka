@@ -407,6 +407,20 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                         log.error("Ответ на фразу ролика не принят: %s", exc)
                 continue
 
+            # Правка черновика ролика не ответом на «Что поправить?» (reels.fixing):
+            # после «Исправить» текст владельца — правка, а не разбор сервиса.
+            if (
+                str(admin) == str(message.get("from", {}).get("id")) == str(message.get("chat", {}).get("id"))
+                and (reel_id := reels.fixing(message))
+            ):
+                print(f"  правка ролика {reel_id}")
+                if not args.dry_run:
+                    try:
+                        reels.accept(message, (reel_id, 0), admin, push_state)
+                    except Exception as exc:  # noqa: BLE001 — сбой приёма не роняет дежурство
+                        log.error("Правка ролика не принята: %s", exc)
+                continue
+
             # Дорожки СКЛЕЙКИ (src/skleyka.py): после /skleyka или ответом на её
             # инструкцию файлы — вокал и бит, а не трек в ОТБОР. Ответ на что-то
             # другое, например на запрос трека у владельца, идёт дальше своим путём.

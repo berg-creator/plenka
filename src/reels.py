@@ -150,7 +150,7 @@ import re
 import subprocess
 import tempfile
 import wave
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Только лёгкое на уровне модуля: --check зовёт облачный автор перед пушем,
@@ -1919,6 +1919,30 @@ def note(reel_id: str, kind: str, text: str = "", frame: int = 0) -> None:
                        [{"at": state.iso(), "kind": kind, "frame": frame, "text": text}])
 
 
+# Сколько после «Исправить» текст владельца мимо ответа ещё считается правкой ролика.
+FIX_WINDOW = timedelta(hours=3)
+
+
+def fixing(message: dict) -> str:
+    """Ролик, к которому этот текст владельца — правка; пустая строка — не правка.
+
+    Правкой считался только ответ на «Что поправить?», и 24.09 правки, отправленные
+    обычным сообщением, пропали. Теперь после «Исправить» и до «Всё ок», не дольше
+    FIX_WINDOW, правка — любой текст без ответа или ответом на само видео черновика.
+    Несколько сообщений подряд — несколько строк. Ответ на что-то другое и команды
+    идут своим путём: это не правка.
+    """
+    text, reply = str(message.get("text", "")).strip(), message.get("reply_to_message")
+    if not text or text.startswith("/") or (reply and "video" not in reply):
+        return ""
+    since = state.now() - FIX_WINDOW
+    for path in sorted((config.PRIVATE / "reels").glob("*/feedback.jsonl"), reverse=True):
+        last = [n for n in state.read_jsonl(path) if n.get("kind") in ("ok", "fix")][-1:]
+        if last and last[0]["kind"] == "fix" and datetime.fromisoformat(last[0]["at"]) > since:
+            return path.parent.name
+    return ""
+
+
 def verdict(action: str, reel_id: str, admin: str) -> str:
     """«✅ Всё ок» или «✏️ Исправить» под черновиком. Возвращает текст всплывашки.
 
@@ -2571,6 +2595,16 @@ def _selftest() -> None:
                 notes = list(state.read_jsonl(folder / "feedback.jsonl"))
                 assert [n["kind"] for n in notes] == ["fix", "comment", "ok"] and notes[1]["text"] == "бабушка пусть вяжет", notes
                 assert pushed == [1, 1] and replies[-1].startswith("Записал")
+                # Правка мимо ответа: после «Исправить» — текст без ответа или ответом на видео
+                # черновика; ответ на другое, команда и «Всё ок» — не правка.
+                assert fixing({"text": "руки спокойнее"}) == ""
+                verdict(FIX, good["id"], "1")
+                assert fixing({"text": "руки спокойнее"}) == good["id"]
+                assert fixing({"text": "тоже", "reply_to_message": {"video": {}}}) == good["id"]
+                assert fixing({"text": "тоже", "reply_to_message": {"text": "трек?"}}) == ""
+                assert fixing({"text": "/start"}) == "" and fixing({"photo": [{}]}) == ""
+                verdict(OK, good["id"], "1")
+                assert fixing({"text": "руки спокойнее"}) == ""
             finally:
                 telegram.download_file, telegram.send_message, globals()["start_build"] = real
 
