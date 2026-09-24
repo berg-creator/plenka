@@ -1820,7 +1820,8 @@ def buttons(track: str, knobs: dict, swap: bool) -> list[list[dict]]:
             [{"text": "✨ саунд-дизайн: " + ("убрать" if knobs["design"] else "добавить"), "callback_data": cb("d")}]]
     if swap:
         rows.append([{"text": "↔ поменять вокал и бит", "callback_data": cb("sw")}])
-    rows.append([{"text": "🎙 Выложил — в ОТБОР", "callback_data": "s:otbor"}])
+    # Метка skleyka доходит до поста отбора: под ним строка про СКЛЕЙКУ (otbor.build_post).
+    rows.append([{"text": "🎙 Выложил — в ОТБОР", "callback_data": "s:otbor:skleyka"}])
     return rows
 
 
@@ -2456,7 +2457,7 @@ def _selftest() -> None:
         for _ in range(config.SKLEYKA_TWEAKS):
             callback(7, 7, f"{track}:v-")
         assert sent[-1] == NO_TWEAKS
-        assert [row[0]["callback_data"] for row in buttons(track, KNOBS, swap=True)][-2:] == [f"{PREFIX}{track}:sw", "s:otbor"]
+        assert [row[0]["callback_data"] for row in buttons(track, KNOBS, swap=True)][-2:] == [f"{PREFIX}{track}:sw", "s:otbor:skleyka"]
         assert _roles([{"r": "вокал", "g": "a"}, {"r": "бит", "g": "a"}], [("take1.wav", low), ("take2.wav", mid)],
                       False) == ([("take1.wav", low, "бит"), ("take2.wav", mid, "вокал")], True), "альбом — по звуку"
 

@@ -98,7 +98,8 @@ NO_LINK = ("Эту ссылку не разобрал — VK и Звук без 
 ASK_LINK = ("Файл принял. Теперь ссылку, где трек уже выложен, или <i>Артист — Трек</i>: "
             "канал выпускает только то, что вышло на площадке.")
 NOT_FOUND = ("Не нашёл «{name}» ни в Apple Music, ни в Deezer. Пришли ссылку, где трек "
-             "выложен: Spotify, Яндекс, YouTube или SoundCloud.")
+             "выложен: Spotify, Яндекс, YouTube или SoundCloud.\n\n"
+             "Ещё не выложен и лежит вокалом и битом — склею: /skleyka")
 NEED_FILE = ("Нашёл «{name}», но площадка не отдаёт даже отрывка — под постом было бы "
              "нечего слушать. Пришли сам трек файлом: mp3 или m4a до 20 МБ.")
 TOO_BIG = "Файл больше 20 МБ — Telegram не отдаёт такие ботам. Пришли mp3 полегче."
@@ -423,15 +424,16 @@ def refusal(data: dict, chat_id: str, user_id: str, *, admin: bool) -> str:
     return ""
 
 
-def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> None:
-    """Открывает заявку: /otbor, кнопка меню и ссылка с меткой из ролика (service.SOURCES)."""
+def start(chat_id: str | int, user_id: str | int, *, admin: bool = False, skleyka: bool = False) -> None:
+    """Открывает заявку: /otbor, кнопка меню, ссылка с меткой из ролика (service.SOURCES)
+    и кнопка под готовой склейкой — тогда заявка помнит, что трек сводил бот."""
     chat_id, user_id = str(chat_id), str(user_id)
     data = load()
     denied = refusal(data, chat_id, user_id, admin=admin)
     if denied:
         data["drafts"].pop(chat_id, None)
     else:
-        data["drafts"][chat_id] = {"stage": "track", "user": user_id}
+        data["drafts"][chat_id] = {"stage": "track", "user": user_id, **({"skleyka": True} if skleyka else {})}
     save(data)
     telegram.send_message(chat_id, denied or HINT, buttons=None if denied else CANCEL_BUTTONS)
 
@@ -579,8 +581,8 @@ def take_words(draft: dict, text: str) -> tuple[str, list[list[dict]]]:
 def callback(chat_id: str | int, user_id: str | int, choice: str, *, admin: bool = False) -> None:
     """Кнопки отбора: пустой выбор — открыть заявку, cancel — закрыть, quiet — без слов, yes/no — ролик."""
     chat_id = str(chat_id)
-    if not choice:
-        start(chat_id, user_id, admin=admin)
+    if choice in ("", "skleyka"):
+        start(chat_id, user_id, admin=admin, skleyka=bool(choice))
         return
     if choice == "cancel":
         telegram.send_message(chat_id, CANCELLED if active(chat_id) else CLOSED)
@@ -598,7 +600,7 @@ def callback(chat_id: str | int, user_id: str | int, choice: str, *, admin: bool
         telegram.send_message(chat_id, CLOSED)
 
 
-FIELDS = ("artist", "title", "url", "cover", "track_file_id", "seconds", "quote", *PAGES)
+FIELDS = ("artist", "title", "url", "cover", "track_file_id", "seconds", "quote", "skleyka", *PAGES)
 
 
 def submit(data: dict, chat_id: str, user_id: str, *, reel: bool, admin: bool) -> None:
@@ -637,6 +639,11 @@ def build_post(application: dict) -> dict:
         links.append(f'▸ <a href="{esc(application["url"])}">Слушать</a>')
     if links:
         parts.append("\n".join(links))
+    if application.get("skleyka"):
+        # Артист нажал «Выложил — в ОТБОР» под своей склейкой (владелец, 24.09.2026):
+        # читатель канала видит живой трек из бота, а не рекламу бота.
+        parts.append(f'Вокал с битом свёл бот канала — <a href="https://t.me/{config.BOT_HANDLE.lstrip("@")}'
+                     f'?start=skleyka_otbor">СКЛЕЙКА</a>.')
     parts.append(f"Пришли свой — {config.BOT_HANDLE}")
     return {
         "rubric": "otbor",
@@ -846,6 +853,7 @@ def _selftest() -> None:
         text = build_post(queued)["text"]
         assert text.startswith("<b>NOBODY HOME — «NIGHT DRIVE»</b>")
         assert "Со слов артиста:\n<blockquote>Записал" in text and text.endswith(f"Пришли свой — {config.BOT_HANDLE}")
+        assert "skleyka_otbor" not in text and "?start=skleyka_otbor\">СКЛЕЙКА</a>" in build_post({**queued, "skleyka": True})["text"]
         assert ('▸ Артист — <a href="https://vk.com/nobodyhome">ВКонтакте</a> · '
                 '<a href="https://t.me/nobodyhome_music">Telegram</a>') in text and publish._LISTEN_LINE.search(text)
         # Площадки разворачиваются, а зов в бота остаётся отдельным абзацем.

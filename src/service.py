@@ -82,12 +82,16 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "skleyka_predlozhka": "СКЛЕЙКА, платно: Ищу Битмейкера | Артиста",
            "skleyka_kenty": "СКЛЕЙКА, КЕНТЫ СКВАД: турнир треков",
            "skleyka_bandlink": "СКЛЕЙКА, BandLink: тред релизов",
+           "skleyka_pin": "СКЛЕЙКА, закреп канала", "skleyka_otbor": "СКЛЕЙКА, пост ОТБОРА",
            # Ссылка в подписи вкладыша: пересланная карточка привела нового человека.
            "vkladysh": "ВКЛАДЫШ, пересланная карточка",
            "ad": "реклама, канал не распознан"}
 # Платный пост ведёт в ДВОЙНИКА ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
 AD_LABEL = re.compile(r"ad_[a-z0-9_]{1,32}")
+# Битмейкер ставит в описание бита ?start=skleyka_bm_<имя> — «свести вокал с этим битом».
+# Имя и есть метка, как у платного поста: список битмейкеров наперёд не известен.
+BEAT_LABEL = re.compile(r"skleyka_bm_[a-z0-9_]{1,24}")
 
 CARD_DIR = config.ROOT / "assets" / "cards"
 
@@ -1356,7 +1360,7 @@ def handle_message(message: dict, data: dict) -> bool:
     if kind == "skleyka" or kind == "menu" and link == "skleyka":
         ref = kind == "menu" and body not in SOURCES and slug.startswith("r")
         if kind == "menu":
-            count_source("skleyka_ref" if ref else body if body in SOURCES else link)
+            count_source("skleyka_ref" if ref else body if body in SOURCES or BEAT_LABEL.fullmatch(body) else link)
         if ref:
             # До проверки подписки: «Подписался» кода не несёт, и приглашение потерялось бы.
             skleyka.invited(chat_id, slug[1:17])
