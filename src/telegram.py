@@ -350,6 +350,33 @@ def send_video_file(
         return _call("sendVideo", payload, files={"video": (path.name, handle, "video/mp4")})
 
 
+def edit_video(
+    chat_id: str | int, message_id: int, path: Path, caption: str, *, entities: list | None = None,
+    seconds: int = 0, width: int = 0, height: int = 0, buttons: list[list[dict]] | None = None,
+) -> dict:
+    """Меняет картинку вышедшего поста на ролик с диска, подпись остаётся той же.
+
+    `entities` — разметка подписи как её отдал Telegram (caption_entities
+    пересылки): так подпись возвращается слово в слово, а не собирается заново.
+    Без них подпись читается как HTML. Кнопки — заново: правка без reply_markup
+    их снимает.
+    """
+    media: dict[str, Any] = {"type": "video", "media": "attach://video", "supports_streaming": True,
+                             "caption": caption}
+    if entities:
+        media["caption_entities"] = entities
+    else:
+        media.update(caption=clip(sanitize(caption), MAX_CAPTION), parse_mode="HTML")
+    for key, value in (("duration", seconds), ("width", width), ("height", height)):
+        if value:
+            media[key] = value
+    payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "media": json.dumps(media)}
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    with path.open("rb") as handle:
+        return _call("editMessageMedia", payload, files={"video": (path.name, handle, "video/mp4")})
+
+
 def send_video_url(
     chat_id: str, url: str, caption: str, *, reply_to: int | None = None, width: int = 0, height: int = 0,
     quiet: bool = False,

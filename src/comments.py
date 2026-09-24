@@ -20,12 +20,15 @@
 плавающим — есть трек, два сообщения; нет, одно (решение владельца 12.09.2026).
 В ветке он и открывает обсуждение, и даёт послушать, не уводя из канала.
 
-Под постом о сниппете этой репликой идёт сам кусок трека — ролик из паблика,
-откуда пришёл инфоповод. Своего файла у канала тут нет и быть не может: трек
-неизданный, взять его негде. Ссылку Telegram отдаёт с временным ключом, поэтому
-файл качается в момент отправки (telegram_web.preview_video), а не при сборе.
-Большого ролика превью не отдаёт вовсе — его качает аккаунт владельца, а не вышло
-и так — под постом остаётся вопрос.
+У поста о сниппете сам кусок трека — ролик из паблика, откуда пришёл инфоповод, —
+встаёт в пост вместо фото (into_post, владелец 24.09.2026): комментарий из ленты
+не видно, и пост читался как «сниппета нет». Здесь, а не при выходе, потому что
+большой ролик качает только аккаунт владельца, а его ключ живёт в дежурстве.
+Своего файла у канала тут нет и быть не может: трек неизданный, взять его негде.
+Ссылку Telegram отдаёт с временным ключом, поэтому файл качается в момент
+отправки (telegram_web.preview_video), а не при сборе. Большого ролика превью
+не отдаёт вовсе — его качает аккаунт владельца. Пост без фото ролик не примет —
+тогда он идёт первым комментарием; не скачался вовсе — под постом остаётся вопрос.
 
 Под постом о релизе без трека вопроса нет: «кому первому включаете, Крису
 или Блэку?» под постом, где включать нечего, владелец назвал бредом (18.09.2026).
@@ -242,6 +245,8 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
         try:
             if track:
                 telegram.send_audio(chat_id, track, ask(post, rubric, "трек"), reply_to=message_id)
+            elif snippet and into_post(post, snippet, message):
+                telegram.send_message(chat_id, ask(post, "snippet", "сниппет"), reply_to=message_id)
             elif snippet:
                 telegram.send_video_file(chat_id, snippet["path"], ask(post, "snippet", "сниппет"),
                                          seconds=snippet["seconds"], width=snippet["width"],
@@ -262,6 +267,27 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
             return False
 
     log.info("Первый комментарий под постом рубрики «%s»", rubric or "неизвестной")
+    return True
+
+
+def into_post(post: dict, snippet: dict, message: dict) -> bool:
+    """Ставит сниппет в сам пост вместо фото. True — встал.
+
+    Первым комментарием ролик из ленты не видно, и пост «показали сниппет»
+    с картинкой читался как пост без сниппета (владелец, 24.09.2026). Подпись
+    берётся из пересылки вместе с разметкой — слово в слово как в канале.
+    Текстовый пост ролик не примет: Telegram меняет медиа только на медиа.
+    """
+    where = post.get("message") or {}
+    if not (message.get("photo") and where.get("chat") and where.get("message_id")):
+        return False
+    try:
+        telegram.edit_video(where["chat"], where["message_id"], snippet["path"], message.get("caption", ""),
+                            entities=message.get("caption_entities"), seconds=snippet["seconds"],
+                            width=snippet["width"], height=snippet["height"], buttons=where.get("buttons"))
+    except telegram.TelegramError as exc:
+        log.warning("Сниппет в пост не встал, уходит комментарием: %s", exc)
+        return False
     return True
 
 
@@ -287,24 +313,30 @@ def _selftest() -> None:
         assert last_post() == {}
     finally:
         state.read_json = real_read
-    # Под сниппетом первым комментарием идёт ролик из паблика, и файл качается
+    # Сниппет встаёт в пост ролик из паблика, и файл качается
     # в момент отправки: при сборе ключ в ссылке был бы уже просроченным.
     sent: list[tuple] = []
     posted = [{"file": "s.json", "rubric": "news", "published_at": state.iso()}]
-    snippet = {"message": {"message_id": 200}, "snippet": True,
+    snippet = {"message": {"chat": -200, "message_id": 200}, "snippet": True,
                "source_url": "https://t.me/rapsmi/1"}
     state.read_json = lambda path, default=None: (
         {"items": posted} if path == real_posted else snippet)
     real_video, real_msg = telegram_web.preview_video, telegram.send_message
     real_account, real_file = telegram_web.account_video, telegram.send_video_file
-    real_comment = llm.generate_comment
+    real_comment, real_edit = llm.generate_comment, telegram.edit_video
     llm.generate_comment = lambda payload: {"skip": True}
+    telegram.edit_video = lambda chat, msg, path, caption, **_: sent.append(("в пост", path.name, caption))
     telegram_web.preview_video = lambda url, folder: {
         "path": folder / "preview.mp4", "seconds": 11, "width": 576, "height": 768}
     telegram.send_message = lambda chat, text, reply_to=None, **_: sent.append(("вопрос", text))
     telegram.send_video_file = lambda chat, path, caption, reply_to=None, **_: sent.append(("файл", path.name))
     forwarded = {"chat": {"id": -100}, "message_id": 5, "forward_from_message_id": 200}
     try:
+        # Пост с фото: ролик встаёт вместо фото, подпись та же, в комментарии — вопрос.
+        assert seed({**forwarded, "photo": [{}], "caption": "Подпись"})
+        assert sent[0] == ("в пост", "preview.mp4", "Подпись") and sent[1][0] == "вопрос", sent
+        # Текстовый пост медиа не примет — ролик уходит комментарием.
+        sent.clear()
         assert seed(forwarded)
         assert sent == [("файл", "preview.mp4")], sent
         # Большого ролика превью не отдаёт — его качает аккаунт, а без аккаунта
@@ -321,7 +353,7 @@ def _selftest() -> None:
         state.read_json = real_read
         telegram_web.preview_video = real_video
         telegram_web.account_video, telegram.send_video_file = real_account, real_file
-        telegram.send_message = real_msg
+        telegram.send_message, telegram.edit_video = real_msg, real_edit
         llm.generate_comment = real_comment
 
     # Вопрос пишет модель по посту; брак ответа и отказ сети уводят в набор рубрики.
