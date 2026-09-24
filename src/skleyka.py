@@ -2589,8 +2589,9 @@ def _selftest() -> None:
         assert refund("c9").startswith("Такого платежа нет") and "c2" in refund("")
         assert refund("c2").startswith("Вернул") and calls[-1] == (
             "refundStarPayment", {"user_id": "7", "telegram_payment_charge_id": "c2"}) and _limit(load(), "7")
-        assert sent[-2].startswith("Вернули 4") and support("7", "не пришло").startswith("Передал") \
-            and "c1" in sent[-1] and "не пришло" in sent[-1], "вопрос об оплате — владельцу с номером"
+        assert sent[-1].startswith("Вернули"), "о возврате пишем покупателю"
+        assert support("7", "не пришло").startswith("Передал") and "c1" in sent[-1] and "не пришло" in sent[-1], \
+            "вопрос об оплате — владельцу с номером"
         assert turn(KNOBS, "e+")["echo"] == ECHO_STEP and turn(dict(KNOBS, voice=VOICE_LIMIT), "v+")["voice"] == VOICE_LIMIT
         assert "с саунд-дизайном" in look(turn(KNOBS, "d")) and turn(KNOBS, "c1")["style"] == "мелодично"
         # Эдлибы: выкрики по очереди лево и право, точка меняется в паузе, а не на звуке.
