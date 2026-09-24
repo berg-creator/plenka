@@ -286,7 +286,7 @@ TikTok сам метит ИИ-контент, а канал уже сносил�
 
 ```
 Проект «ПЛЁНКА», ~/ПЛЕНКА, по-русски. Прочитай CLAUDE.md, раздел 31 в NEXT.md,
-в src/clips.py — segment (наезд zoompan), в src/reels.py — build, STILL_ZOOM
+в src/clips.py — segment и push (наезд perspective), в src/reels.py — build, ZOOM_RATE
 и --selftest. Работай в чистой копии от origin/main; приватное хранилище —
 клон berg-creator/plenka-state, STATE_DIR на него.
 

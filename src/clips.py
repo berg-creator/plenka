@@ -635,8 +635,9 @@ def segment(
     grade: str = GRADE,
     fit: str = "crop",
     focus: float = 0.5,
-    zoom_out: bool = False,
     zoom: float = 0.12,
+    rate: float = 0.0,
+    settle: float = 0.0,
 ) -> str:
     """Один отрезок: изображение или видео снизу, надпись сверху.
 
@@ -654,10 +655,12 @@ def segment(
     герой редко стоит посередине. `fit="blur"` — исходник целиком по ширине
     поверх своей размытой копии: горизонтальная вставка в вертикальном
     ролике выглядит чужой, поэтому ролики зовут его только для панорам,
-    от которых обрезка оставила бы узкую щель. `zoom_out` — наезд наоборот,
-    от 1+zoom к 1.0: ролики чередуют направление, чтобы подряд идущие картинки
-    не ехали одинаково. `zoom` — насколько наезжать: ролики берут меньше, чтобы
-    надпись у края картинки не уезжала за кадр.
+    от которых обрезка оставила бы узкую щель. `zoom` — насколько наезжать
+    на картинку за отрезок.
+
+    `rate` — наезд роликов вместо этого: доля увеличения в секунду, у картинки
+    и у видео одинаково (push), `settle` — насколько крупнее кадр входит
+    и оседает за SETTLE_SECONDS (после вспышки на склейке).
     """
     png = work / f"{out.stem}.png"
     shot.layer.save(png, "PNG")
@@ -682,22 +685,21 @@ def segment(
             kind = "фон"
             source = footage.procedural(work / f"{out.stem}-bg.mp4", shot.seconds, ffmpeg())
 
-    speed = hold = ""
+    speed = hold = motion = ""
     if still is not None:
         feed = ["-loop", "1", "-framerate", str(FPS), "-i", str(source)]
-        # Наезд от 1.0 к 1.12 за отрезок: медленно, чтобы не отвлекать
-        # от надписи, но достаточно, чтобы кадр не выглядел замершим.
-        step = zoom / (shot.seconds * FPS)
-        # От номера кадра `on`, а не от прошлого `zoom`: у картинки, поданной
-        # петлёй, zoom на каждом входном кадре сбрасывался в 1, и наезда не было.
-        top = 1 + zoom
-        zoom = f"max({top:.3f}-{step:.6f}*on,1)" if zoom_out else f"min(1+{step:.6f}*on,{top:.3f})"
-        motion = (
-            f"scale={WIDTH * 2}:-2,"
-            f"zoompan=z='{zoom}'"
-            f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-            f":d=1:s={WIDTH}x{HEIGHT}:fps={FPS},"
-        )
+        if not rate:
+            # Наезд от 1.0 к 1.12 за отрезок: медленно, чтобы не отвлекать
+            # от надписи, но достаточно, чтобы кадр не выглядел замершим.
+            step = zoom / (shot.seconds * FPS)
+            # От номера кадра `on`, а не от прошлого `zoom`: у картинки, поданной
+            # петлёй, zoom на каждом входном кадре сбрасывался в 1, и наезда не было.
+            motion = (
+                f"scale={WIDTH * 2}:-2,"
+                f"zoompan=z='min(1+{step:.6f}*on,{1 + zoom:.3f})'"
+                f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                f":d=1:s={WIDTH}x{HEIGHT}:fps={FPS}"
+            )
     else:
         # Ролики стока часто начинаются с выхода из чёрного: без отступа
         # кадр первые полторы секунды стоял тёмным, а карточка на его
@@ -706,12 +708,11 @@ def segment(
         length = probe_seconds(source)
         skip = min(STOCK_SKIP, max(0.0, length - shot.seconds)) if kind == "сток" else 0.0
         feed = ["-ss", f"{skip:.2f}", "-i", str(source)]
-        motion = ""
         # Короткое видео не крутится по кругу: тот же кусок дважды владелец
         # заметил в ролике rhyno 17.09.2026. Оно замедляется до SLOWEST раз,
         # а остаток кадра держит последний кадр.
         if 0 < length - skip < shot.seconds:
-            speed = f"setpts=PTS*{min(SLOWEST, shot.seconds / (length - skip)):.3f},"
+            speed = f"setpts=PTS*{min(SLOWEST, shot.seconds / (length - skip)):.3f}"
         hold = f"tpad=stop_mode=clone:stop_duration={shot.seconds:.2f}"
 
     # Выход из чёрного — мягкая склейка между кадрами. Первому кадру ролика
@@ -719,20 +720,27 @@ def segment(
     # кадра, вышла бы чёрной.
     fade = "fade=t=in:st=0:d=0.12," if fade_in else ""
 
-    cover = (
-        f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={WIDTH}:{HEIGHT}:x='min(iw-ow,max(0,iw*{focus:.3f}-ow/2))'"
-    )
+    def cover(center: str = "") -> str:
+        # Наезд ролика — до обрезки, вокруг точки focus: она остаётся на месте,
+        # у какого бы края картинки ни стояла после обрезки.
+        return ",".join(step for step in (
+            f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase", center,
+            f"crop={WIDTH}:{HEIGHT}:x='min(iw-ow,max(0,iw*{focus:.3f}-ow/2))'",
+        ) if step)
+
+    # Частота и удержание — до наезда: push считает кадры, и 24 кадра исходника
+    # или удержанный последний кадр иначе ехали бы медленнее или стояли.
+    lead = ",".join(step for step in (speed, f"fps={FPS}", hold) if step)
     if fit == "blur":
         # Кадр чуть выше середины: снизу надпись, ей нужно место.
         base = (
-            f"[0:v]{speed}split[front][back];[back]{cover},gblur=sigma=40[blurred];"
+            f"[0:v]{lead},split[front][back];[back]{cover()},gblur=sigma=40[blurred];"
             f"[front]scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease:force_divisible_by=2[fitted];"
-            f"[blurred][fitted]overlay=(W-w)/2:(H-h)*0.4"
+            f"[blurred][fitted]overlay=(W-w)/2:(H-h)*0.4" + (f",{push(rate, settle, 0.5)}" if rate else "")
         )
     else:
-        base = f"[0:v]{speed}{cover}"
-    look = ",".join(step for step in (f"setsar=1,fps={FPS}", motion.rstrip(","), grade, hold) if step)
+        base = f"[0:v]{lead},{cover(push(rate, settle, focus) if rate else '')}"
+    look = ",".join(step for step in ("setsar=1", motion, grade) if step)
 
     run([
         ffmpeg(), "-y", *feed,
@@ -743,14 +751,37 @@ def segment(
             f"{base},{look}[bg];"
             f"[bg][1:v]overlay=0:0,{fade}format=yuv420p[v]"
         ),
-        "-map", "[v]", "-an",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-        "-maxrate", "6M", "-bufsize", "12M",
-        "-g", str(FPS * 2), "-keyint_min", str(FPS),
+        "-map", "[v]", "-an", *PART_CODEC,
         str(out),
     ])
     png.unlink(missing_ok=True)
     return kind
+
+
+# Сжатие отрезков: assemble склеивает их потоком без пережатия, поэтому всё,
+# что встаёт между ними (переходы роликов), жмётся так же.
+PART_CODEC = [
+    "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+    "-maxrate", "6M", "-bufsize", "12M",
+    "-g", str(FPS * 2), "-keyint_min", str(FPS),
+]
+SETTLE_SECONDS = 0.3
+
+
+def push(rate: float, settle: float, focus: float) -> str:
+    """Плавный наезд: увеличение на `rate` в секунду вокруг точки (focus, середина высоты).
+
+    perspective, а не zoompan: zoompan режет кадр по целым точкам, и медленный
+    наезд дрожит — рамка прыгает на точку то раньше, то позже. perspective
+    пересчитывает каждую точку с дробным сдвигом и едет ровно. Счёт — по номеру
+    кадра `in`, поэтому до фильтра частота уже FPS. `settle` — кадр входит
+    крупнее на эту долю и оседает к обычному наезду за SETTLE_SECONDS, мягко.
+    """
+    zoom = f"(1+{rate / FPS:.6f}*in+{settle:.3f}*pow(max(0,1-in/{SETTLE_SECONDS * FPS:.1f}),2))"
+    left, right = f"W*{focus:.3f}*(1-1/{zoom})", f"W*{focus:.3f}+W*{1 - focus:.3f}/{zoom}"
+    top, bottom = f"H/2*(1-1/{zoom})", f"H/2*(1+1/{zoom})"
+    return (f"perspective=x0='{left}':y0='{top}':x1='{right}':y1='{top}'"
+            f":x2='{left}':y2='{bottom}':x3='{right}':y3='{bottom}':interpolation=cubic:eval=frame")
 
 
 # Небольшая задержка фразы от начала кадра: кадр должен смениться раньше,

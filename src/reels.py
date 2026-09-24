@@ -68,9 +68,9 @@ Shorts показывают ролик тем, кто этот звук уже �
 
 Субтитры ставятся сами: многие смотрят ролик без звука. Текст — `subtitle` строки,
 а без него `say` как есть (в `subtitle` числа цифрами: «14 лет», голосу нужны
-слова), кусками по 2–4 слова, время кусков — по буквам внутри речи строки,
+слова), по одному слову с пружинкой появления, время слов — по буквам внутри речи строки,
 найденной по дублю. Распознавание речи отвергнуто: оно тянет тяжёлую
-зависимость, а текст и так известен дословно. Субтитр стоит на 68% высоты,
+зависимость, а текст и так известен дословно. Субтитр стоит на 75% высоты,
 кеглем одним на весь ролик, толстой обводкой и мягким тёмным ореолом —
 белое на белом иначе не читалось; где внизу картинки своя надпись (пустой файл-метка
 `<кадр>-<n>.top` рядом), он уходит наверх, под метку канала. Метка
@@ -119,8 +119,8 @@ TikTok ссылки на чужие площадки режет в охвате,
 секунда от начала строки) начинается ровно тогда: так короткая вставка
 попадает на своё слово, а кадры до неё делят время до метки.
 
-Статичная картинка не стоит мёртвой: наезд на 7% за кадр (больше — надписи
-у края картинки уезжают за кадр), направление чередуется от кадра к кадру.
+Кадр не стоит мёртвым: камера ровно наезжает в каждом, и на картинку, и на видео,
+на каждой склейке тихий свуш, а каждая третья — вспышка в белое или растворение (как в образце).
 
 Кадры меняются каждые две-три секунды: у одной фразы их может быть до трёх.
 Видео-мемы берутся с GIPHY по запросу при сборке — просьба владельца. Чистой
@@ -140,6 +140,8 @@ from __future__ import annotations
 
 import argparse
 import array
+import dataclasses
+import functools
 import html
 import json
 import logging
@@ -206,7 +208,35 @@ TODAY = "сегодня до 21:00 МСК"
 # Нижняя граница кадра под фразой. Настоящую длину задаёт дубль (clips.narrate),
 # эта нужна, чтобы и без дубля кадр было видно в превью.
 SAY_SECONDS = 1.5
-STILL_ZOOM = 0.07
+# Сборка как в ролике-образце (владелец, 25.09.2026). Камера в каждом кадре,
+# у картинки и у видео одинаково, ровно наезжает от центра (от focus): 3,5%
+# в секунду, за план 9–23%. Раньше ехали только картинки, на 7% за план
+# туда-обратно, а видео стояли, и склейка статичных планов читалась слайд-шоу.
+ZOOM_RATE = 0.035
+# Каждая третья склейка — переход, не подряд и не первая: вспышка в белое
+# и растворение по очереди. Переход съедает поровну у соседей — ролик не длиннее,
+# границы кадров, голос и субтитры на месте. Длина — чётное число кадров
+# (0,2 с = 6 кадров): каждый сосед отдаёт ровно три. План после перехода входит
+# крупнее на SETTLE и оседает за clips.SETTLE_SECONDS. Растворение — xfade fade,
+# а не dissolve: тот рассыпает кадр случайными точками, а не смешивает.
+FLASH_EVERY = 3
+FLASHES = ("fadewhite", "fade")
+FLASH_SECONDS = 0.2
+SETTLE = 0.04
+# Звук склеек, как в образце: тихий свуш на каждой, кроме концовки, пик через
+# 30 мс после склейки (нарастание 0,15 с кончается там). На вспышке под ним
+# мягкий низкий удар через 60 мс. Синтез, а не файлы: в репозитории ни одного
+# звука, и длину, полосу и громкость видно здесь же.
+WHOOSH = ("anoisesrc=c=pink:d=0.3:r=48000,highpass=f=2000,lowpass=f=14000,"
+          "afade=t=in:d=0.15:curve=exp,afade=t=out:st=0.15:d=0.15")
+WHOOSH_PEAK = 0.12
+BOOM = "aevalsrc=sin(2*PI*(70-40*t)*t)*exp(-8*t):d=0.4:s=48000"
+BOOM_DELAY = 0.06
+# Громкость — по замеру к голосу после studio: он выровнен (VOICE_LUFS, VOICE_CHAIN)
+# и на дублях skleyka-3 дал -11 LUFS. Свуш без усиления — -27 по окну 0,4 с, удар — -14,4;
+# с этими поправками свуш на 20 дБ тише голоса (слышно, но не громко), удар — на 12.
+WHOOSH_DB = -4.0
+BOOM_DB = -9.0
 
 # Безопасная зона кадра, доли ширины и высоты: всё своё текстовое и метка — внутри.
 # Замер по записи экрана iPhone с опубликованным keef3 в Shorts, 16.09.2026:
@@ -268,26 +298,27 @@ BLUR_WIDER = 2.4
 CAPTION_TOP = 350
 CAPTION_SIZES = ((150, 1), (128, 1), (112, 1), (96, 1), (88, 1), (112, 2), (96, 2), (80, 3))
 
-# Субтитры: слов в куске, центр по высоте кадра — обычно и когда внизу своя
-# надпись (тогда ниже метки). Кегль один на весь ролик: на keef3 кегль под
-# длину куска скакал от куска к куску. Ширина — SAFE_TEXT, и кусок, который
-# в две строки не лезет, режет chunks (SUB_LETTERS), а не мельчит шрифт:
-# 88 точек и 18 букв — ни одного куска в три строки на всех сценариях 16.09.2026.
-# Golos 900 шире Oswald, поэтому кусок короче: три слова и 13 букв. Короткий кусок
-# крупным жирным шрифтом — то, что владелец назвал «дороже» в ролике-образце (23.09.2026).
-SUB_WORDS = 3
+# Субтитры — по слову, как в ролике-образце (владелец, 25.09.2026; до того куски
+# по три слова). Кегль один на весь ролик: на keef3 кегль под длину куска скакал
+# от куска к куску. Короткое закавыченное и тире держатся при слове (chunks), но
+# не длиннее SUB_LETTERS: иначе кусок уходил в две строки.
 SUB_LETTERS = 13
-# 80: у Golos 900 самое длинное слово сценариев («общественной») при 88 вылезало
-# за безопасную зону, а буквы этого шрифта и так крупнее узкого Oswald.
-SUB_SIZE = 80
+# Мельче прежних 80: в образце буквы ~1,7% высоты кадра, но у нас их читают
+# с телефона, поэтому 58 — чуть крупнее образца.
+SUB_SIZE = 58
 # Белые буквы на белом (логотип GTA, футболка) сливались: обводка вдвое толще мемной
-# и мягкий тёмный ореол под буквами, ~60% черноты. Кадр целиком не темнеет —
-# картинка по решению владельца чистая.
+# и мягкий тёмный ореол под буквами. Кадр целиком не темнеет — картинка по решению
+# владельца чистая. Ореол тоньше прежних 24: под одним мелким словом широкое
+# пятно читалось плашкой.
 SUB_STROKE = 9
-SUB_HALO = 24
+SUB_HALO = 12
 SUB_HALO_ALPHA = 150
-SUB_LOW = 0.68
+# Центр по высоте: ниже груди героя (было 0,68), но низ букв не ниже SAFE_BOTTOM —
+# у слишком высокого куска subtitle поднимает его.
+SUB_LOW = 0.75
 SUB_HIGH = 0.25
+# Слово появляется с пружинкой: масштаб по кадрам, потом 100%.
+SUB_POP = (1.15, 1.11, 1.07, 1.03)
 TOP_MARK = ".top"
 
 GIPHY_SEARCH = "https://api.giphy.com/v1/gifs/search"
@@ -1444,9 +1475,8 @@ def fit(screen: dict, backdrop: str) -> str:
 
 
 def chunks(say: str) -> list[str]:
-    """Фраза кусками по 2–4 слова. Режется после трёх слов или на знаке
-    препинания после двух, но одинокое последнее слово не остаётся — оно
-    прирастает к куску. Тире отдельным «словом» не считается.
+    """Фраза кусками по слову, как в ролике-образце. Тире отдельным «словом»
+    не считается и висит при прошлом.
 
     Короткое закавыченное держится вместе: «Мне нравится» — название папки
     Яндекса, и разорванное на два субтитра оно читается как обрывок фразы
@@ -1463,23 +1493,7 @@ def chunks(say: str) -> list[str]:
         else:
             words.append(word)
             glue = "«" in word and "»" not in word
-    out, current = [], []
-    for index, word in enumerate(words):
-        current.append(word)
-        left = len(words) - index - 1
-        # Длинные слова режутся раньше: «общественной безопасности» четырьмя
-        # словами не влезают и в две строки SUB_SIZE, а кегль не мельчает.
-        # Конец предложения держит кусок при себе: «сентября. После» — два разных смысла.
-        ends = word.rstrip("»")[-1:] in ".!?"
-        after = words[index + 1] if left else ""
-        longer = left and len(current) >= 2 and sum(map(len, current + [after])) > SUB_LETTERS \
-            and not after.rstrip("»")[-1:] in ".!?"
-        if not left or len(current) == SUB_WORDS or (
-            left != 1 and (ends or longer or len(current) == 3 or (len(current) == 2 and word[-1] in ",:;—"))
-        ):
-            out.append(" ".join(current))
-            current = []
-    return out
+    return words
 
 
 def cues(script: dict, seconds: list[float], takes: dict[int, float]) -> list[tuple[str, float, float]]:
@@ -1528,18 +1542,34 @@ def high(screen: dict) -> bool:
     return screen["kind"] == PIC and Path(screen["path"]).with_suffix(TOP_MARK).exists()
 
 
-def subtitle(text: str, up: bool):
-    """Кадр субтитра: прозрачный 1080×1920, кусок стоит на своей высоте, кегль SUB_SIZE до двух строк."""
+@functools.lru_cache(maxsize=4)
+def _sub_ink(text: str):
+    """Буквы куска с обводкой и ореолом, обрезанные по краю: кадры пружинки берут их, а не рисуют заново."""
     from PIL import Image
 
     from . import clips
 
     ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), text, sizes=((SUB_SIZE, 2),),
                   stroke=SUB_STROKE, halo=SUB_HALO)
-    left, top, right, bottom = ink.getbbox()
-    frame = Image.new("RGBA", ink.size)
-    frame.alpha_composite(ink.crop((0, top, clips.WIDTH, bottom)),
-                          (0, round(clips.HEIGHT * (SUB_HIGH if up else SUB_LOW) - (bottom - top) / 2)))
+    return ink.crop(ink.getbbox())
+
+
+def subtitle(text: str, up: bool, scale: float = 1.0):
+    """Кадр субтитра: прозрачный 1080×1920, кусок стоит на своей высоте, кегль SUB_SIZE до двух строк.
+
+    `scale` — кадр пружинки (SUB_POP): кусок крупнее вокруг того же центра, но низ
+    вместе с ореолом не ниже SAFE_BOTTOM — там подпись площадки.
+    """
+    from PIL import Image
+
+    from . import clips
+
+    ink = _sub_ink(text)
+    if scale != 1:
+        ink = ink.resize((round(ink.width * scale), round(ink.height * scale)), Image.LANCZOS)
+    top = min(clips.HEIGHT * (SUB_HIGH if up else SUB_LOW) - ink.height / 2, clips.HEIGHT * SAFE_BOTTOM - ink.height)
+    frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
+    frame.alpha_composite(ink, (round((clips.WIDTH - ink.width) / 2), round(top)))
     return frame
 
 
@@ -1665,6 +1695,55 @@ def vk(video: Path) -> Path:
     return video.with_name(f"{video.stem}-vk.mp4")
 
 
+def flash_cuts(shots: int) -> dict[int, str]:
+    """Склейки с переходом: номер склейки (после кадра с этим номером) → вид xfade.
+
+    Каждая FLASH_EVERY-я, не первая и не подряд; склейка на концовку — всегда встык:
+    плашку и так накрывает burn, а переход в неё мигал бы белым перед адресом.
+    """
+    return {cut: FLASHES[number % len(FLASHES)]
+            for number, cut in enumerate(range(FLASH_EVERY - 1, shots - 2, FLASH_EVERY))}
+
+
+def flash(first: Path, second: Path, kind: str, seconds: float, out: Path) -> None:
+    """Два соседних отрезка — в один с переходом `kind` посередине их склейки.
+
+    Отрезки длиннее своих кадров на полперехода (build), поэтому итог длиной ровно
+    в два кадра: переход идёт с `seconds - FLASH_SECONDS / 2` первого, где кадр
+    кончился бы встык, и сдвига голоса и субтитров нет.
+    """
+    from . import clips
+
+    clips.run([
+        clips.ffmpeg(), "-y", "-i", str(first), "-i", str(second), "-filter_complex",
+        f"[0:v]settb=AVTB,fps={clips.FPS},format=yuv420p,setsar=1[a];"
+        f"[1:v]settb=AVTB,fps={clips.FPS},format=yuv420p,setsar=1[b];"
+        f"[a][b]xfade=transition={kind}:duration={FLASH_SECONDS}:offset={seconds - FLASH_SECONDS / 2:.4f},"
+        f"format=yuv420p[v]",
+        "-map", "[v]", "-an", *clips.PART_CODEC, str(out),
+    ])
+
+
+def cut_sounds(track: Path, cuts: list[float], flashes: list[float], work: Path) -> Path:
+    """Дорожка со звуками склеек поверх: свуш на каждой из `cuts`, удар — на `flashes`."""
+    from . import clips
+
+    sounds = ([(f"{WHOOSH},volume={WHOOSH_DB}dB", cut - WHOOSH_PEAK) for cut in cuts]
+              + [(f"{BOOM},volume={BOOM_DB}dB", cut + BOOM_DELAY) for cut in flashes])
+    if not sounds:
+        return track
+    stereo = "aformat=sample_rates=48000:channel_layouts=stereo"
+    out = work / f"{track.stem}-cuts.wav"
+    clips.run([
+        clips.ffmpeg(), "-y", "-i", str(track), "-filter_complex",
+        "".join(f"{sound},{stereo},adelay={max(at, 0) * 1000:.0f}:all=1[c{n}];" for n, (sound, at) in enumerate(sounds))
+        + f"[0:a]{stereo}[t];[t]{''.join(f'[c{n}]' for n in range(len(sounds)))}"
+        f"amix=inputs={len(sounds) + 1}:duration=first:normalize=0",
+        *VOICE_CODEC, str(out),
+    ])
+    return out
+
+
 def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float,
          text: str = BAIT, plate_at: float | None = None, bare: Path | None = None) -> None:
     """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет четыре файла: YouTube, TikTok,
@@ -1701,14 +1780,23 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
         # кадр нулевой длины сбивал concat, и субтитры до конца ролика пропадали.
         if first - now > 0.02:
             entries.append((blank, first - now))
+        # Пружинка — по кадру на масштаб, и хотя бы кадр слова остаётся ровным.
+        start = max(first, now)
+        pops = SUB_POP[:max(0, int((end - start) * clips.FPS) - 1)]
+        for step, scale in enumerate(pops):
+            path = work / f"sub-{number}-{step}.png"
+            subtitle(text, up, scale).save(path)
+            entries.append((path, 1 / clips.FPS))
         path = work / f"sub-{number}.png"
         subtitle(text, up).save(path)
-        entries.append((path, end - max(first, now)))
+        entries.append((path, end - start - len(pops) / clips.FPS))
         now = end
     entries.append((blank, 1.0))
     listing = work / "subs.txt"
     # Последний файл повторён без длительности — так concat учитывает длительность предпоследнего.
-    listing.write_text("".join(f"file '{p}'\nduration {d:.3f}\n" for p, d in entries) + f"file '{blank}'\n",
+    # Шесть знаков, а не три: у сотни кадров пружинки по 0,033 вместо 1/30 к концу
+    # ролика набиралась бы десятая секунды отставания субтитров от голоса.
+    listing.write_text("".join(f"file '{p}'\nduration {d:.6f}\n" for p, d in entries) + f"file '{blank}'\n",
                        encoding="utf-8")
     raw = work / "no-subs.mp4"
     video.replace(raw)
@@ -1781,20 +1869,29 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
                                 backdrop=str(plate(work))))
         flat.append({"kind": "plate"})
         total = sum(shot.seconds for shot in shots)
+        cuts = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots) - 1)]
+        flashes = flash_cuts(len(shots))
 
         parts, used = [], []
         for index, (shot, screen) in enumerate(zip(shots, flat)):
             parts.append(work / f"part-{index}.mp4")
             # Склейки встык, без выхода из чёрного: при смене кадра каждые
-            # две-три секунды он мигал бы темнотой.
+            # две-три секунды он мигал бы темнотой. Соседи перехода длиннее
+            # на полперехода: это время он у них и съедает.
+            entering = index - 1 in flashes
+            longer = FLASH_SECONDS / 2 if index in flashes or entering else 0.0
             used.append(f"{screen['kind']}→" + clips.segment(
-                shot, parts[-1], work, fade_in=False,
+                dataclasses.replace(shot, seconds=shot.seconds + longer), parts[-1], work, fade_in=False,
                 grade="",
                 fit=fit(screen, shot.backdrop),
                 focus=float(screen.get("focus", 0.5)),
-                zoom_out=bool(index % 2), zoom=STILL_ZOOM,
+                rate=ZOOM_RATE, settle=SETTLE if entering else 0.0,
             ))
-        print("  кадры:", ", ".join(used))
+        for cut, kind in sorted(flashes.items(), reverse=True):
+            merged = work / f"flash-{cut}.mp4"
+            flash(parts[cut], parts[cut + 1], kind, shots[cut].seconds, merged)
+            parts[cut:cut + 2] = [merged]
+        print("  кадры:", ", ".join(used), f"| переходы: {len(flashes)}")
         print(f"  голос: {'есть' if voice else 'нет'}, длина {total:.1f} с")
 
         if voice:
@@ -1805,6 +1902,9 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
             # Хвост отзвука звенит в этой тишине, а не обрезается с концом дубля.
             room = voices / script["room"] if voices and "room" in script and (voices / script["room"]).is_file() else None
             voice = studio(padded, work, room)
+            # Звук склеек — к голосу, а не к биту: бит голос проседает сайдчейном,
+            # и свуш под словом пропадал бы, а в паузе гремел.
+            voice = cut_sounds(voice, cuts[:-1], [cuts[cut] for cut in flashes], work)
         starts = [sum(shot.seconds for shot in timed[:index]) for index in range(len(timed))]
         pieces = [(piece, at, line["track"]["length"]) for index, (line, at) in enumerate(zip(script["lines"], starts))
                   if "track" in line and (piece := _excerpt(line["track"], work / f"track-{index}.m4a"))]
@@ -1816,7 +1916,6 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         # звук, но в ролике-образце музыка подобрана под картинку, и владелец 23.09.2026
         # выбрал так же: своя музыка под визуал вместо чужого тренда. Вернуть тишину —
         # снова свести на _silence и передать burn(bare=...).
-        cuts = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots) - 1)]
         clips.assemble(
             parts, _under_tracks(_beat(script, total, work, cuts), pieces, work, overlays), total, video, work,
             voice, 0.0, voice_grade="anull", duck=DUCK,
@@ -2246,8 +2345,9 @@ def _selftest() -> None:
         if "say" not in line:
             continue
         parts = chunks(line["say"])
-        assert all(1 <= len(part.split()) <= SUB_WORDS for part in parts), parts
-        assert " ".join(parts).split() == line["say"].split() and len(parts[-1].split()) > 1, parts
+        # По слову; вдвоём — только тире при слове и короткое закавыченное.
+        assert all(len(part.split()) == 1 or part.endswith("—") or part.startswith("«") for part in parts), parts
+        assert " ".join(parts).split() == line["say"].split(), parts
         mine = [(a, b) for text, a, b in timing if text in parts and starts[number] <= a < starts[number] + 4.5]
         assert len(mine) == len(parts), (mine, parts)
         begin, end = starts[number] + BEFORE_SPEECH, starts[number] + {1: 4.3, 3: 3.6, 4: 2.7}[number] - AFTER_SPEECH
@@ -2255,7 +2355,7 @@ def _selftest() -> None:
     assert all(a < b <= c for (_, a, b), (_, c, _) in zip(timing, timing[1:])), timing
     # subtitle подменяет say; под кадром с nosub куска нет, под кадром с .top он наверху.
     numbers = {"lines": [{"say": "После четырнадцати лет", "subtitle": "После 14 лет"}]}
-    assert [text for text, *_ in cues(numbers, [2.0], {1: 1.8})] == ["После 14 лет"]
+    assert [text for text, *_ in cues(numbers, [2.0], {1: 1.8})] == ["После", "14", "лет"]
     shown = place([("а", 0.1, 0.9), ("б", 1.2, 1.8), ("в", 2.1, 2.9)],
                   [{"kind": "stock"}, {"kind": PIC, "path": "нет.jpg", "nosub": True}, {"kind": "stock"}], [1.0, 2.0, 3.0])
     assert [(text, up) for text, _, _, up in shown] == [("а", False), ("в", False)], shown
@@ -2266,8 +2366,8 @@ def _selftest() -> None:
         marked = {"kind": PIC, "path": str(Path(tmp) / "2.jpg")}
         shown = place([("через склейку", 0.8, 1.3), ("до", 0.1, 0.5)], [{"kind": "stock"}, marked], [1.0, 2.0])
         assert [up for *_, up in shown] == [True, False], shown
-    assert chunks("Пишет: это был не я.") == ["Пишет: это был", "не я."] and chunks("Одно") == ["Одно"]
-    assert chunks("Её включили в соседнем городе — полиция остановила шоу почти сразу.")[1] == "соседнем городе —"
+    assert chunks("Пишет: это был не я.") == ["Пишет:", "это", "был", "не", "я."] and chunks("Одно") == ["Одно"]
+    assert chunks("Её включили в соседнем городе — полиция остановила шоу почти сразу.")[4] == "городе —"
     # Наверх — только над надписью внизу картинки (метка .top); ярлыки сценария больше не рисуются.
     assert not high({"kind": "face", "name": "Bones"}) and not high({"kind": "card", "text": "т"})
     assert not high({"kind": "gif", "query": "bye", "caption": "я боюсь"})
@@ -2289,14 +2389,18 @@ def _selftest() -> None:
     bottom = inked(dash)[3]
     last = inked(dash.crop((0, bottom - SUB_SIZE // 2, 1080, bottom)))
     assert last[2] - last[0] > 2 * SUB_SIZE, last
+    # Пружинка: первый кадр слова крупнее, с тем же центром и не ниже безопасной зоны.
+    calm, popped = inked(subtitle("Куплет", False)), inked(subtitle("Куплет", False, SUB_POP[0]))
+    assert 1.1 < (popped[2] - popped[0]) / (calm[2] - calm[0]) < 1.2 and popped[3] <= SAFE_BOTTOM * 1920, (calm, popped)
+    assert abs(popped[0] + popped[2] - calm[0] - calm[2]) <= 2, (calm, popped)
     # Белое на белом читается: вокруг букв на белом кадре тёмный ореол, а не только тонкая обводка.
     from PIL import Image
 
     sub = subtitle("Как угрозу", False)
     box, on_white = inked(sub), Image.alpha_composite(Image.new("RGBA", sub.size, (255, 255, 255, 255)), sub).convert("L")
-    # В 20–28 точках от белых букв: у обводки в 4 точки или без ореола там уже светлее 100.
-    assert on_white.crop((box[0], box[1] - 28, box[2], box[1] - 20)).getextrema()[0] < 100, "ореола над буквами нет"
-    assert on_white.crop((box[2] + 20, box[1], box[2] + 28, box[3])).getextrema()[0] < 100, "ореола справа от букв нет"
+    # В 14–18 точках от белых букв, за обводкой: без ореола там уже светлее 100.
+    assert on_white.crop((box[0], box[1] - 18, box[2], box[1] - 14)).getextrema()[0] < 100, "ореола над буквами нет"
+    assert on_white.crop((box[2] + 14, box[1], box[2] + 18, box[3])).getextrema()[0] < 100, "ореола справа от букв нет"
 
     # Вжигание: кусок виден в своё время и на своей высоте, в паузе кадр чистый.
     with tempfile.TemporaryDirectory() as tmp:
@@ -2499,18 +2603,43 @@ def _selftest() -> None:
         half.paste((0, 0, 255), (800, 0, 1600, 900))
         half.save(Path(tmp) / "half.png")
         empty = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
-        # Статичная картинка движется: первый и последний кадр отрезка разные, в обе стороны.
+        # Камера наезжает и на картинку, и на видео (24 кадра, как у рисованных клипов):
+        # верхний край кадра к концу отрезка съезжает к середине градиента.
         ramp = Image.linear_gradient("L").resize((1080, 1920)).convert("RGB")
         ramp.save(Path(tmp) / "ramp.png")
-        for out in (False, True):
-            part = Path(tmp) / f"zoom-{out}.mp4"
-            clips.segment(clips.Shot(empty, 0.5, "", "", backdrop=str(Path(tmp) / "ramp.png")), part, Path(tmp),
-                          fade_in=False, grade="", zoom_out=out, zoom=STILL_ZOOM)
+        clips.run([clips.ffmpeg(), "-y", "-loop", "1", "-i", str(Path(tmp) / "ramp.png"), "-t", "2", "-r", "24",
+                   "-pix_fmt", "yuv420p", str(Path(tmp) / "ramp.mp4")])
+        for source in ("ramp.png", "ramp.mp4"):
+            part = Path(tmp) / f"zoom-{source}.mp4"
+            clips.segment(clips.Shot(empty, 2.0, "", "", backdrop=str(Path(tmp) / source)), part, Path(tmp),
+                          fade_in=False, grade="", rate=ZOOM_RATE)
             edges = []
-            for at in ("0", "0.45"):
+            for at in ("0", "1.9"):
                 clips.run([clips.ffmpeg(), "-y", "-ss", at, "-i", str(part), "-frames:v", "1", str(Path(tmp) / "z.png")])
                 edges.append(Image.open(Path(tmp) / "z.png").convert("L").getpixel((540, 5)))
-            assert abs(edges[0] - edges[1]) > 4 and (edges[0] < edges[1]) == (not out), (out, edges)
+            assert edges[1] - edges[0] > 4, (source, edges)
+        # Переход не удлиняет ролик: два кадра по секунде с запасом в полперехода — ровно
+        # две секунды, на склейке белое, по бокам свои кадры.
+        for name, color in (("red", "0xff0000"), ("blue", "0x0000ff")):
+            clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", f"color=c={color}:s=1080x1920:r=30",
+                       "-t", f"{1 + FLASH_SECONDS / 2}", "-pix_fmt", "yuv420p", *clips.PART_CODEC, str(Path(tmp) / f"{name}.mp4")])
+        flashed = Path(tmp) / "flash.mp4"
+        flash(Path(tmp) / "red.mp4", Path(tmp) / "blue.mp4", "fadewhite", 1.0, flashed)
+        assert abs(clips.probe_seconds(flashed) - 2.0) < 0.5 / clips.FPS, clips.probe_seconds(flashed)
+        seen = []
+        for at in ("0.5", "0.94", "1.5"):
+            clips.run([clips.ffmpeg(), "-y", "-ss", at, "-i", str(flashed), "-frames:v", "1", str(Path(tmp) / "f.png")])
+            seen.append(Image.open(Path(tmp) / "f.png").convert("RGB").getpixel((540, 960)))
+        assert seen[0][0] > 200 > seen[0][2] and min(seen[1]) > 200 and seen[2][2] > 200 > seen[2][0], seen
+        assert flash_cuts(12) == {2: "fadewhite", 5: "fade", 8: "fadewhite"} and flash_cuts(4) == {}
+        # Свуш на склейке слышен около неё, в стороне тишина, и тихий: по окну 0,4 с
+        # около -31 LUFS — на 20 дБ ниже голоса после studio (-11).
+        silent = Path(tmp) / "silent.wav"
+        clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "3", str(silent)])
+        trace = meter(cut_sounds(silent, [1.5], [], Path(tmp)))[1]
+        loudest = max(trace, key=lambda point: point[1])
+        assert 1.4 < loudest[0] < 2.0 and -33 < loudest[1] < -29, loudest
+        assert max(m for t, m, _ in trace if t < 1.2) < -60, "свуш не на склейке"
         for focus, color in ((0.0, 0), (1.0, 2)):
             part = Path(tmp) / f"focus-{focus}.mp4"
             clips.segment(clips.Shot(empty, 0.2, "", "", backdrop=str(Path(tmp) / "half.png")), part, Path(tmp),
