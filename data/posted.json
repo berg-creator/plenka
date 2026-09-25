@@ -887,6 +887,12 @@
       "file": "20260925-050847-4818-release.json",
       "published_at": "2026-09-25T06:32:20+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20260925-051028-6770-release.json",
+      "published_at": "2026-09-25T07:34:00+00:00",
+      "rubric": "release"
     }
   ],
   "photos": [
@@ -1007,6 +1013,7 @@
     "db77d96dd0e550e9b988fa48f060996494a83491333530c118b38637c0f664dc",
     "67fdbe07387833c0339fd31fd0ff98e0ded0ce506f487f943fda7fe87ff67ff9",
     "e034da3068c0762226c904e318c7189d5095589bb69b120f19cf39cfc7174e13",
-    "086f009f013f026d045d14df0e5f0d3f246b164a01f808c7009e009b017f007e"
+    "086f009f013f026d045d14df0e5f0d3f246b164a01f808c7009e009b017f007e",
+    "b31cb33e266266f346bde618de14d6d496cab7cea5ce249e669f739f31d71d1b"
   ]
 }
