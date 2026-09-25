@@ -172,6 +172,10 @@ PIC = "pic"
 BEAT = "sound4stock-underground-urban-hip-hop-beat-464280.mp3"
 MUSIC_FORMAT = re.compile(r"[\w.-]+\.(mp3|wav)")
 BUILD_WORD = "собери"
+# Как снимать фразы с лицом (подача ЗА СТОЛОМ): узнавание держит место, а не лицо,
+# поэтому оно одно во всех роликах. «Кружочек» квадратный и мелкий — не годится.
+FACE_HOWTO = ("всегда одно место — тот же стол, свет и наушники, на столе кассета; телефон вертикально, "
+              "на уровне глаз; отправляй обычным видео, не кружочком и не файлом. Одна фраза — одно видео.")
 # Кадров на фразу. Больше трёх на две-три секунды речи — уже мельтешение,
 # глаз не успевает понять ни одного.
 SCREENS_MAX = 3
@@ -570,6 +574,8 @@ def problems(script, name: str = "") -> list[str]:
             errors += _overlay_problems(line["overlay"], where)
         if not isinstance(line.get("hint", ""), str):
             errors.append(f"{where}: hint — строка")
+        if "face" in line and not (line["face"] is True and "say" in line):
+            errors.append(f"{where}: face — true у фразы с say: её владелец снимает на видео")
         if "subtitle" in line and not ("say" in line and _filled(line["subtitle"])):
             errors.append(f"{where}: subtitle — непустая строка у фразы: её текст в субтитрах, числа цифрами")
         errors += _screens_problems(line.get("screen"), where, sources if isinstance(sources, list) else [])
@@ -656,7 +662,8 @@ def header(script: dict) -> str:
         "полсекунды после последнего слова, иначе его конец обрежется. "
         "Не понравился дубль — "
         "ответь на ту же фразу ещё раз.\n\n"
-        "Картинки к фразе — тоже ответом на неё, фото или файлом: встанут вместо "
+        + (f"Фразы с 🎥 — видео, а не голосовым: {FACE_HOWTO}\n\n" if any(line.get("face") for line in script["lines"]) else "")
+        + "Картинки к фразе — тоже ответом на неё, фото или файлом: встанут вместо "
         "кадров по порядку. В подписи к фото можно написать, как её переделать, — "
         "в кадр подпись не попадёт. Прислал картинки — ответь на любую фразу "
         "словом «собери».\n\n"
@@ -670,6 +677,8 @@ def line_text(number: int, total: int, line: dict) -> str:
     text = f"<b>{number}/{total}</b> — {html.escape(line['say'], quote=False)}"
     if "track" in line:
         text += "\n<i>поверх отрывка трека</i>"
+    if line.get("face"):
+        text += "\n🎥 <i>с лицом: ответь видео</i>"
     if _filled(line.get("hint")):
         text += f"\n<i>{html.escape(line['hint'], quote=False)}</i>"
     return text
@@ -716,11 +725,16 @@ def send(script: dict, dry_run: bool) -> int:
 
 
 def take_file(message: dict) -> dict:
-    """Голосовое, аудио или аудиофайл документом. Пустой словарь — голоса нет."""
+    """Дубль: голосовое, аудио, видео или они же документом. Пустой словарь — дубля нет.
+
+    Видео — подача ЗА СТОЛОМ: голос берётся из него же (ffmpeg читает звук из mp4
+    так же, как из ogg), а у фразы с `face` оно встаёт в кадр. «Кружочек» (video_note)
+    не берём: он квадратный и мелкий, вертикального лица из него не вырезать.
+    """
     document = message.get("document") or {}
-    if str(document.get("mime_type", "")).startswith("audio/"):
+    if str(document.get("mime_type", "")).startswith(("audio/", "video/")):
         return document
-    return message.get("voice") or message.get("audio") or {}
+    return message.get("voice") or message.get("audio") or message.get("video") or {}
 
 
 def take_picture(message: dict) -> dict:
@@ -893,6 +907,13 @@ def accept(message: dict, reel: tuple[str, int], admin: str, push) -> None:
         return
 
     take = take_file(message)
+    # Видео с телефона бывает больше, чем Bot API отдаёт боту. Отправленное «видео»
+    # Telegram сжимает, и фраза в 10 секунд влезает; файлом — нет.
+    if take.get("file_size", 0) > telegram.MAX_DOWNLOAD:
+        telegram.send_message(admin, f"Дубль {number} не принят: больше 20 МБ — Telegram не отдаёт боту такие. "
+                              "Пришли короче и обычным видео, не файлом: так Telegram его сожмёт.",
+                              reply_to=message["message_id"])
+        return
     try:
         data = telegram.download_file(take["file_id"])
     except telegram.TelegramError as exc:
@@ -902,8 +923,11 @@ def accept(message: dict, reel: tuple[str, int], admin: str, push) -> None:
     # первый по алфавиту файл, то есть, возможно, старый.
     for old in folder.glob(f"{frame}.*"):
         old.unlink()
-    # Расширение — для глаз: ffmpeg узнаёт формат по содержимому.
-    (folder / f"{frame}{Path(take.get('file_name', 'take.ogg')).suffix or '.ogg'}").write_bytes(data)
+    # Расширение — для глаз и для сборки: звук ffmpeg узнаёт по содержимому,
+    # а видео ли это, сборка смотрит по расширению (_trimmed).
+    video = str(take.get("mime_type", "")).startswith("video/")
+    suffix = Path(take.get("file_name", "")).suffix.lower() or (".mp4" if video else ".ogg")
+    (folder / f"{frame}{suffix}").write_bytes(data)
 
     if any(not any(folder.glob(f"{n}.*")) for n in frames):
         reply = f"{'Перезаписал' if again else 'Принял'} {number}"
@@ -1113,7 +1137,7 @@ def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> 
     ролика, а не у каждого кадра отдельно: на двух десятках склеек погрешность
     иначе копилась бы, и голос к концу уезжал от картинки.
 
-    Карточка берёт соседний кадр — прежний, а у первой строки следующий.
+    Карточка берёт соседний кадр — прежний, а у первой строки следующий, кроме лица владельца.
     Надписей `text` и `label` нет: их заменили субтитры.
     """
     from PIL import Image
@@ -1135,7 +1159,8 @@ def storyboard(script: dict, work: Path, seconds: list[float] | None = None) -> 
             line_start += lengths[index - 1]
         end = round((line_start + ends[index][part]) * clips.FPS) / clips.FPS
         nearest = list(range(number - 1, -1, -1)) + list(range(number + 1, len(plan)))
-        fill = fills[number] or next((fills[i] for i in nearest if fills[i]), {})
+        # Лицо владельца (sync) карточке не одалживается: губы шли бы под чужую фразу.
+        fill = fills[number] or next((fills[i] for i in nearest if fills[i] and not plan[i][3].get("sync")), {})
         layer = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
         if _filled(screen.get("caption")):
             layer = caption(layer, screen["caption"])
@@ -1278,12 +1303,35 @@ def _trimmed(script: dict, voices: Path | None, work: Path) -> Path:
             "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(clean),
         ])
         start, end = _speech(clean)
-        clips.run([
-            clips.ffmpeg(), "-y", "-i", str(clean),
-            "-af", f"atrim=start={max(0.0, start - BEFORE_SPEECH):.3f}:end={end + AFTER_SPEECH:.3f}",
-            str(out / f"{frame}.wav"),
-        ])
+        cut = f"start={max(0.0, start - BEFORE_SPEECH):.3f}:end={end + AFTER_SPEECH:.3f}"
+        clips.run([clips.ffmpeg(), "-y", "-i", str(clean), "-af", f"atrim={cut}", str(out / f"{frame}.wav")])
+        if script["lines"][frame - 1].get("face") and take.suffix.lower() in clips.VIDEO_SUFFIXES:
+            # Картинка режется теми же отметками, что и звук, иначе губы разойдутся с голосом.
+            # Хвост держит последний кадр: строка длиннее дубля на TAIL, а видео короче
+            # строки segment замедлил бы целиком — и губы уехали бы тоже.
+            # ponytail: начало звука и картинки считаем общим (setpts от нуля); телефон,
+            # пишущий звук со сдвигом, даст тот же сдвиг губ — тогда брать start_time из ffprobe.
+            faces = work / "faces"
+            faces.mkdir(exist_ok=True)
+            clips.run([
+                clips.ffmpeg(), "-y", "-i", str(take), "-an", "-vf",
+                f"setpts=PTS-STARTPTS,trim={cut},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=2",
+                *clips.PART_CODEC, str(faces / f"{frame}.mp4"),
+            ])
     return out
+
+
+def with_faces(script: dict, faces: Path) -> dict:
+    """Копия сценария, где у фраз с `face` кадр — видео владельца из дубля (_trimmed).
+
+    Прислал к такой фразе голосовое, а не видео — остаются кадры автора.
+    `sync` — кадр идёт вровень с голосом: в него не входят вспышкой (build).
+    """
+    return {**script, "lines": [
+        {**line, "screen": {"kind": PIC, "path": str(video), "sync": True}}
+        if line.get("face") and (video := faces / f"{number}.mp4").exists() else line
+        for number, line in enumerate(script["lines"], 1)
+    ]}
 
 
 def studio(voice: Path, work: Path, room: Path | None = None) -> Path:
@@ -1892,6 +1940,7 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         work = Path(tmp)
         # Сперва голос: длина строки — это длина её дубля, а кадры делят её потом.
         takes = _trimmed(script, voices, work)
+        script = with_faces(script, work / "faces")
         lines = [clips.Shot(None, line_seconds(line), "", "") for line in script["lines"]]
         timed, voice = clips.narrate(lines, script, work, kind="reels", voices=takes, lead=0.0, tail=TAIL)
         shots = storyboard(script, work, [shot.seconds for shot in timed])
@@ -1905,7 +1954,9 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         flat.append({"kind": "plate"})
         total = sum(shot.seconds for shot in shots)
         cuts = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots) - 1)]
-        flashes = flash_cuts(len(shots))
+        # Вспышка показывает следующий кадр на полперехода раньше склейки: у лица
+        # губы шли бы на 0,1 с впереди голоса, поэтому в него входят встык.
+        flashes = {cut: kind for cut, kind in flash_cuts(len(shots)).items() if not flat[cut + 1].get("sync")}
 
         parts, used = [], []
         for index, (shot, screen) in enumerate(zip(shots, flat)):
@@ -2253,6 +2304,16 @@ def _selftest() -> None:
     broken("music", music="beat.ogg")
     assert not problems({**good, "music": None}), "music: null — ролик без бита"
     broken("subtitle", lines=[{"say": "Фраза", "subtitle": "", "screen": {"kind": "card", "text": "т"}}])
+    # ЗА СТОЛОМ: лицо — у фразы, флажком true; кадр автора остаётся на случай голосового.
+    broken("face", lines=[{"say": "Фраза", "face": "да", "screen": {"kind": "card", "text": "т"}}])
+    broken("face", lines=[{"pause": 1.0, "face": True, "screen": {"kind": "card", "text": "т"}}])
+    faced = {**good, "lines": [{**good["lines"][0], "face": True}, *good["lines"][1:]]}
+    assert problems(faced, good["id"]) == [] and "🎥" in line_text(1, 2, faced["lines"][0]) and FACE_HOWTO in header(faced)
+    with tempfile.TemporaryDirectory() as tmp:
+        assert with_faces(faced, Path(tmp)) == faced, "голосовым вместо видео — кадры автора"
+        (Path(tmp) / "1.mp4").write_bytes(b"")
+        assert screens(with_faces(faced, Path(tmp))["lines"][0]) == [{"kind": PIC, "path": str(Path(tmp) / "1.mp4"), "sync": True}]
+        assert with_faces(good, Path(tmp)) == good, "без face видео в кадр не идёт"
     assert problems({**good, "lines": [{"say": "Четырнадцать лет", "subtitle": "14 лет",
                                         "screen": {"kind": "card"}}]}, good["id"]) == []
     photo = {"kind": "photo", "url": good["sources"][0], "query": "concert crowd"}
@@ -2706,6 +2767,9 @@ def _selftest() -> None:
             assert take_file(voice)["file_id"] == "v" and reply_kind(voice) == "voice"
             assert take_file({"document": {"file_id": "d", "mime_type": "audio/mp4"}})["file_id"] == "d"
             assert not take_file({"document": {"file_id": "p", "mime_type": "application/pdf"}})
+            assert reply_kind({**voice, "voice": None, "video": {"file_id": "m"}}) == "voice"
+            assert take_file({"document": {"file_id": "q", "mime_type": "video/quicktime"}})["file_id"] == "q"
+            assert not take_file({"video_note": {"file_id": "o"}}), "кружочек — не дубль"
             assert line_of(562) == (good["id"], 4)
             assert line_of(563) is None
 
@@ -2757,6 +2821,14 @@ def _selftest() -> None:
                 accept({**photo, "photo": None, "document": {"file_id": "x", "mime_type": "image/heic"}},
                        (good["id"], 4), "1", lambda: None)
                 assert "не открывается" in replies[-1] and not (folder / "pics" / "4-3.jpg").exists()
+                # Видео — дубль с картинкой (ЗА СТОЛОМ): ложится .mp4, больше 20 МБ — «пришли короче».
+                clip = {**photo, "photo": None, "video": {"file_id": "v", "mime_type": "video/mp4", "file_size": 5}}
+                accept({**clip, "video": {**clip["video"], "file_size": telegram.MAX_DOWNLOAD + 1}}, (good["id"], 4), "1", lambda: None)
+                assert "Пришли короче" in replies[-1] and not list(folder.glob("4.*")), replies[-1]
+                telegram.download_file = lambda file_id: b"mp4"
+                accept(clip, (good["id"], 4), "1", lambda: None)
+                assert (folder / "4.mp4").read_bytes() == b"mp4" and replies[-1] == "Принял 3/3", replies[-1]
+                (folder / "4.mp4").unlink()
                 accept(build_word, (good["id"], 4), "1", lambda: pushed.append(1))
                 assert pushed == [1] and built == [good["id"]] and replies[-1] == "Собираю"
 

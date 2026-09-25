@@ -383,7 +383,7 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     comments.seed(message, refresh=push_state)
                 continue
 
-            # Ответ владельца на фразу ролика (src/reels.py): голосовое или аудио —
+            # Ответ владельца на фразу ролика (src/reels.py): голосовое, аудио или видео —
             # дубль, фото или картинка файлом — кадр, «собери» — сборка, прочий
             # текст — правка черновика для Мака (reels.note). Раньше
             # трека — аудиофайл ответом на фразу иначе пошёл бы искать пост,
