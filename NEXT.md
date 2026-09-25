@@ -72,14 +72,19 @@ docs/research/ — только если задача велит. Агентов
 старая правка оставляла кисти на пульте и вторую пару наушников на шее). Все 8 клипов проверены полным кадром на 0/12/24/30/36/48 —
 по две руки у каждого. Четыре версии ушли снова 25.09 в 23:36 (`build/b1..b4/`), версия 4 — черновиком с кнопками.
 
+**26.09 в 01:34 владелец прислал три других бита** (`~/Downloads/бит1..3.mp3` → `data/private/audio/own-bit1..3.mp3`)
+и сам назвал, с какой секунды каждый: бит1 с 16, бит2 с 7, бит3 с 25. Для этого у сценария поле `music_from` —
+секунда бита, поиск сильной доли и подгонка под склейки её не двигают. Три версии — `build/b5..b7/`, клипы те же; ушли 26.09 в 01:40, версия бит3 — с кнопками.
+
 Промпт:
 > Проект ~/ПЛЕНКА. Ролик `20260923-skleyka-3`, кадры — `~/.cache/imggen/keef/` (`run.sh`, `anim.sh`, `merge.py`, `freeze.py`).
 > Правила — память `reels-visual-style.md`, `local-video-gen.md`, `reels-self-review.md`.
 > Ответ владельца: `gh api -H "Accept: application/vnd.github.raw"
 > repos/berg-creator/plenka-state/contents/reels/20260923-skleyka-3/feedback.jsonl | grep '^{'` — было 3 строки.
 > Новой нет — `~/.cache/imggen/keef/wait_feedback.sh 20260923-skleyka-3 3` и `caffeinate -ims -t 14400` фоном.
-> «версия N» или «бит N» — `music` в `build/20260923-skleyka-3.json`: 1 `own-bitlo.mp3`, 2 `own-eshval.mp3`,
-> 3 `own-eshval2.mp3`, 4–8 `keef-organ-1..5.mp3`. Другие правки — кадр, оживление, проверка кропами, черновик `--draft`
+> Бит — `music` и `music_from` в `build/20260923-skleyka-3.json`. «Бит 1/2/3» после 26.09 — новые:
+> `own-bit1.mp3` с 16, `own-bit2.mp3` с 7, `own-bit3.mp3` с 25 (версии 5–7); прежние версии 1–4 — `own-bitlo`,
+> `own-eshval`, `own-eshval2`, `keef-organ-1`, без `music_from`. Другие правки — кадр, оживление, проверка кропами, черновик `--draft`
 > из чистой копии (ссылки на `.env`, `.venv`, `data/private`, `assets/audio/*.mp3` из ~/ПЛЕНКА):
 > `.venv/bin/python -m src.reels --preview ~/.cache/imggen/keef/build/20260923-skleyka-3.json --voice ~/.cache/imggen/keef/build/ --draft`.
 > `ok` — то же без `--draft`, прислать пакет (`reels.deliver`). Ждать в фоне не через `pgrep -f`: он находит сам себя.

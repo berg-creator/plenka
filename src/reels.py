@@ -58,6 +58,8 @@ Shorts показывают ролик тем, кто этот звук уже �
 свой у каждого ролика: жребий по `id` из библиотеки битов. `"music": null` — бита
 нет ни в одной версии: ролику-передаче музыку дают отбивки ток-шоу, сведённые
 в фон зала (`room`), а хип-хоп под ведущим спорил бы с ними (владелец, 21.09.2026).
+`music_from` — секунда бита, с которой он идёт: владелец свой бит знает лучше
+поиска сильной доли и называет её сам (26.09.2026).
 
 Картинки к фразе владелец может прислать сам — ответом на фразу, как голос.
 Они заменяют кадры строки целиком, по порядку прихода, и режутся по центру
@@ -549,6 +551,8 @@ def problems(script, name: str = "") -> list[str]:
     # которого у облачного автора нет. Нет файла — сборка возьмёт BEAT.
     if "music" in script and script["music"] is not None and not (isinstance(script["music"], str) and MUSIC_FORMAT.fullmatch(script["music"])):
         errors.append(f"music: имя файла бита из plenka-state/audio, например {BEAT}, или null — без бита")
+    if "music_from" in script and not (isinstance(script["music_from"], (int, float)) and script["music_from"] >= 0):
+        errors.append("music_from: секунда бита, с которой он идёт, число от 0")
     # Имя с цифры сборка приняла бы за дубль — как у overlay.
     if "room" in script and not (isinstance(script["room"], str) and MUSIC_FORMAT.fullmatch(script["room"])
                                  and not script["room"][:1].isdigit()):
@@ -1417,8 +1421,10 @@ def _beat(script: dict, total: float, work: Path, cuts: list[float] = ()) -> Pat
         if "music" not in script or script["music"] is not None:
             log.warning("Подложки нет ни в %s, ни в assets/audio — ролик без музыки", config.PRIVATE / "audio")
         return _silence(total, work)
-    start, raw = beat_start(track), work / "beat-raw.wav"
-    period = beat_period(track, start, work) if len(cuts) else 0.0
+    start = script["music_from"] if "music_from" in script else beat_start(track)
+    raw = work / "beat-raw.wav"
+    # Секунду назвал владелец — её не двигаем ни поиском доли, ни под склейки.
+    period = beat_period(track, start, work) if len(cuts) and "music_from" not in script else 0.0
     if period:
         start -= _phase(list(cuts), period)
         if start < 0:
@@ -2288,6 +2294,9 @@ def _selftest() -> None:
         broken("overlay", lines=[{**over, "overlay": overlay}])
     assert problems({**good, "room": "zal.wav"}, good["id"]) == []
     broken("room", room="1.wav")
+    broken("music_from", music_from=-1)
+    broken("music_from", music_from="16")
+    assert not problems({**good, "music_from": 16}, good["id"]), "music_from: секунда бита"
     broken("room", room="zal.txt")
     assert spoken_frames({"lines": [clip, {"say": "ф"}]}) == [2] and "поверх отрывка" in line_text(1, 1, {**clip, "say": "ф"})
     for track, word in (({"id": 5, "length": 11}, "length"), ({"id": 5, "start": 25, "length": 6}, "start + length"),
