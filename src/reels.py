@@ -237,11 +237,11 @@ CHIME = ("aevalsrc=(0.6*sin(2*PI*2093*t)+0.25*sin(2*PI*3136*t)+0.15*sin(2*PI*418
 BOOM = "aevalsrc=sin(2*PI*(70-40*t)*t)*exp(-8*t):d=0.4:s=48000"
 BOOM_DELAY = 0.06
 # Громкость — по замеру к голосу после studio: он выровнен (VOICE_LUFS, VOICE_CHAIN)
-# и на дублях skleyka-3 дал -11 LUFS. Удар без усиления — -14,4 по окну 0,4 с;
-# с поправкой он на 9 дБ тише голоса (владелец 25.09: в образце склейку слышно).
-# Блик — на 19 дБ тише голоса: звон слышнее шума той же громкости.
-CHIME_DB = -10.0
-BOOM_DB = -6.0
+# и на дублях skleyka-3 дал -11 LUFS. Удар без усиления — -14,4 по окну 0,4 с.
+# Блик — на 24 дБ тише голоса, удар — на 14: звон слышнее шума той же громкости,
+# а владелец 25.09 вечером попросил переходы тише, бит громче.
+CHIME_DB = -15.0
+BOOM_DB = -11.0
 
 # Безопасная зона кадра, доли ширины и высоты: всё своё текстовое и метка — внутри.
 # Замер по записи экрана iPhone с опубликованным keef3 в Shorts, 16.09.2026:
@@ -394,11 +394,13 @@ DELAY = (
     "aecho=in_gain=0:out_gain=1:delays=120|240:decays=1|0.35,adelay=0|30[w]"
 )
 VOICE_CODEC = ["-c:a", "pcm_f32le"]
-# Громкость бита до приглушения. Выше голоса по среднему: в паузах бит должен
-# качать в полную силу, а разборчивость под речью держит сайдчейн. -12, а не -15:
-# на -15 бит слышно фоном, а он держит ритм ролика (владелец, 23.09.2026).
-BEAT_LUFS = -12.0
-DUCK = "sidechaincompress=threshold=0.03:ratio=6:attack=10:release=250"
+# Громкость бита. Раньше -12 и сайдчейн 6:1 на весь бит: голос звучит почти весь
+# ролик, и на skleyka-3 бит сидел на -17 при голосе -11 — 808 проседала вместе
+# с серединой, и владелец 25.09 бита не услышал вовсе. Теперь бит не приседает
+# целиком: место голосу делается как в СКЛЕЙКЕ (`carve`), по полосам выше 120 Гц
+# и только пока голос звучит, а бочка и 808 играют ровно. Сам бит — на 2 дБ
+# тише голоса, чтобы голос вёл («бит звучал, но голос лидирующий», владелец).
+BEAT_LUFS = -13.0
 
 
 # --- проверка -------------------------------------------------------------
@@ -1377,6 +1379,20 @@ def _beat(script: dict, total: float, work: Path, cuts: list[float] = ()) -> Pat
     return music
 
 
+def carve(bed: Path, voice: Path, work: Path) -> Path:
+    """Место голосу в подложке, как в СКЛЕЙКЕ (`skleyka._room`): середина бита по
+    полосам 120 Гц – 8 кГц приседает ключом от тех же полос голоса и ровно настолько,
+    насколько бит его перекрывает; ниже 120 Гц и края стерео не трогаются.
+    Звукорежиссёр делает так же динамическим эквалайзером на шине музыки, а не
+    сайдчейном на весь бит: тот качал бы и бочку."""
+    from . import skleyka
+
+    folder = work / "carve"
+    folder.mkdir(exist_ok=True)
+    lines = skleyka._lines(skleyka._envelope(voice))
+    return skleyka._room(bed, voice, "anull,", 0.0, lines, folder) if lines else bed
+
+
 def _silence(total: float, work: Path) -> Path:
     """Тишина на весь ролик вместо бита — чтобы склейка шла тем же путём.
 
@@ -1427,8 +1443,8 @@ def _under_tracks(beat: Path, pieces: list[tuple[Path, float, float]], work: Pat
     от голоса (gta6, 16.09.2026). В бите он ещё и проседает под голосом владельца,
     как подложка, и остаётся стерео.
 
-    Сведение до assemble, а не в нём: там голос сайдчейном проседает подложку,
-    и отрывок под голосом строки проседает так же — голос остаётся сверху.
+    Сведение до assemble, а не в нём: место голосу (`carve`) делается во всей
+    подложке, и отрывок под голосом строки уступает ему так же — голос сверху.
     """
     if not pieces and not overlays:
         return beat
@@ -1917,8 +1933,9 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
             # Хвост отзвука звенит в этой тишине, а не обрезается с концом дубля.
             room = voices / script["room"] if voices and "room" in script and (voices / script["room"]).is_file() else None
             voice = studio(padded, work, room)
-            # Звук склеек — к голосу, а не к биту: бит голос проседает сайдчейном,
-            # и блик под словом пропадал бы, а в паузе гремел.
+            said = voice
+            # Звук склеек — к голосу, а не к биту: блик под словом не должен
+            # проседать вместе с серединой бита.
             voice = cut_sounds(voice, cuts[:-1], [cuts[cut] for cut in flashes], work)
         starts = [sum(shot.seconds for shot in timed[:index]) for index in range(len(timed))]
         pieces = [(piece, at, line["track"]["length"]) for index, (line, at) in enumerate(zip(script["lines"], starts))
@@ -1931,10 +1948,9 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
         # звук, но в ролике-образце музыка подобрана под картинку, и владелец 23.09.2026
         # выбрал так же: своя музыка под визуал вместо чужого тренда. Вернуть тишину —
         # снова свести на _silence и передать burn(bare=...).
-        clips.assemble(
-            parts, _under_tracks(_beat(script, total, work, cuts), pieces, work, overlays), total, video, work,
-            voice, 0.0, voice_grade="anull", duck=DUCK,
-        )
+        under = _under_tracks(_beat(script, total, work, cuts), pieces, work, overlays)
+        clips.assemble(parts, carve(under, said, work) if voice else under, total, video, work,
+                       voice, 0.0, voice_grade="anull", bed_level=1.0)
         ends = [sum(shot.seconds for shot in shots[:index + 1]) for index in range(len(shots))]
         lengths = {int(take.stem): clips.probe_seconds(take) for take in takes.glob("*.wav")}
         seconds = [shot.seconds for shot in timed]
@@ -2660,12 +2676,12 @@ def _selftest() -> None:
         assert seen[0][0] > 200 > seen[0][2] and min(seen[1]) > 200 and seen[2][2] > 200 > seen[2][0], seen
         assert flash_cuts(12) == {2: "fadewhite", 5: "fade", 8: "fadewhite"} and flash_cuts(4) == {}
         # Блик на склейке слышен около неё, в стороне тишина, и тихий: по окну 0,4 с
-        # около -30 LUFS — на 19 дБ ниже голоса после studio (-11).
+        # около -35 LUFS — на 24 дБ ниже голоса после studio (-11).
         silent = Path(tmp) / "silent.wav"
         clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "3", str(silent)])
         trace = meter(cut_sounds(silent, [1.5], [], Path(tmp)))[1]
         loudest = max(trace, key=lambda point: point[1])
-        assert 1.5 < loudest[0] < 2.0 and -32 < loudest[1] < -28, loudest
+        assert 1.5 < loudest[0] < 2.0 and -37 < loudest[1] < -33, loudest
         assert max(m for t, m, _ in trace if t < 1.2) < -60, "блик не на склейке"
         for focus, color in ((0.0, 0), (1.0, 2)):
             part = Path(tmp) / f"focus-{focus}.mp4"

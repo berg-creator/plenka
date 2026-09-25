@@ -902,8 +902,10 @@ def assemble(
     louder_at: float = 0.0,
     voice_grade: str = VOICE_GRADE,
     duck: str = "",
+    bed_level: float | None = None,
 ) -> None:
-    """Склейка отрезков и звук.
+    """Склейка отрезков и звук. `bed_level` — громкость подложки, уже сведённой
+    под голос заранее (ролики с живым голосом, `reels.carve`): без приглушения.
 
     Видео копируется потоком: обработка и надписи уже вжжены в отрезки,
     пережимать второй раз — терять качество на ровном месте.
@@ -932,7 +934,7 @@ def assemble(
     # На финале подложка выходит вперёд: слов там меньше, а последние секунды
     # решают, подпишется человек или пролистнёт. Ступенькой, а не наплывом —
     # музыка после паузы входит уже громче, и перехода не слышно.
-    quiet = 1.0 if duck else 0.24 if voice else 0.85
+    quiet = bed_level if bed_level is not None else 1.0 if duck else 0.24 if voice else 0.85
     level = (
         f"volume='if(gte(t,{louder_at:.2f}),{quiet * 1.35:.2f},{quiet:.2f})':eval=frame"
         if louder_at
