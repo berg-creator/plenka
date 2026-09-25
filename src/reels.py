@@ -122,7 +122,7 @@ TikTok ссылки на чужие площадки режет в охвате,
 попадает на своё слово, а кадры до неё делят время до метки.
 
 Кадр не стоит мёртвым: камера ровно наезжает в каждом, и на картинку, и на видео,
-на каждой склейке тихий свуш, а каждая третья — вспышка в белое или растворение (как в образце).
+на каждой склейке тихий блик, а каждая третья — вспышка в белое или растворение (как в образце).
 
 Кадры меняются каждые две-три секунды: у одной фразы их может быть до трёх.
 Видео-мемы берутся с GIPHY по запросу при сборке — просьба владельца. Чистой
@@ -225,21 +225,22 @@ FLASH_EVERY = 3
 FLASHES = ("fadewhite", "fade")
 FLASH_SECONDS = 0.2
 SETTLE = 0.04
-# Звук склеек, как в образце: тихий свуш на каждой, кроме концовки, пик через
-# 30 мс после склейки (нарастание 0,15 с кончается там). На вспышке под ним
+# Звук склеек: на каждой, кроме концовки, тихий блик — короткий звон в две октавы
+# до с квинтой, как отблеск вспышки. Шумовой свуш владелец 25.09 назвал шуршанием
+# и кринжем: попросил тонкое, почти незаметное и приятное уху. До — тоника двух его
+# битов (до минор), в чужой тональности верх без терции не спорит с гармонией.
+# Звон начинается ровно на склейке, хвост — эхо 45 и 90 мс. На вспышке под ним
 # мягкий низкий удар через 60 мс. Синтез, а не файлы: в репозитории ни одного
-# звука, и длину, полосу и громкость видно здесь же.
-WHOOSH = ("anoisesrc=c=pink:d=0.3:r=48000,highpass=f=2000,lowpass=f=14000,"
-          "afade=t=in:d=0.15:curve=exp,afade=t=out:st=0.15:d=0.15")
-WHOOSH_PEAK = 0.12
+# звука, и высоту, длину и громкость видно здесь же.
+CHIME = ("aevalsrc=(0.6*sin(2*PI*2093*t)+0.25*sin(2*PI*3136*t)+0.15*sin(2*PI*4186*t))"
+         "*(1-exp(-300*t))*exp(-14*t):d=0.4:s=48000,aecho=0.8:0.6:45|90:0.3|0.15")
 BOOM = "aevalsrc=sin(2*PI*(70-40*t)*t)*exp(-8*t):d=0.4:s=48000"
 BOOM_DELAY = 0.06
 # Громкость — по замеру к голосу после studio: он выровнен (VOICE_LUFS, VOICE_CHAIN)
-# и на дублях skleyka-3 дал -11 LUFS. Свуш без усиления — -27 по окну 0,4 с, удар — -14,4.
-# Было -4 и -9 (свуш на 20 дБ тише голоса) — владелец 25.09 переходов не услышал:
-# в образце склейка поднимает громкость на 4–5 дБ, у нас поднимала на 1–2.
-# Теперь свуш на 16 дБ тише голоса, удар — на 9.
-WHOOSH_DB = 0.0
+# и на дублях skleyka-3 дал -11 LUFS. Удар без усиления — -14,4 по окну 0,4 с;
+# с поправкой он на 9 дБ тише голоса (владелец 25.09: в образце склейку слышно).
+# Блик — на 19 дБ тише голоса: звон слышнее шума той же громкости.
+CHIME_DB = -10.0
 BOOM_DB = -6.0
 
 # Безопасная зона кадра, доли ширины и высоты: всё своё текстовое и метка — внутри.
@@ -1739,10 +1740,10 @@ def flash(first: Path, second: Path, kind: str, seconds: float, out: Path) -> No
 
 
 def cut_sounds(track: Path, cuts: list[float], flashes: list[float], work: Path) -> Path:
-    """Дорожка со звуками склеек поверх: свуш на каждой из `cuts`, удар — на `flashes`."""
+    """Дорожка со звуками склеек поверх: блик на каждой из `cuts`, удар — на `flashes`."""
     from . import clips
 
-    sounds = ([(f"{WHOOSH},volume={WHOOSH_DB}dB", cut - WHOOSH_PEAK) for cut in cuts]
+    sounds = ([(f"{CHIME},volume={CHIME_DB}dB", cut) for cut in cuts]
               + [(f"{BOOM},volume={BOOM_DB}dB", cut + BOOM_DELAY) for cut in flashes])
     if not sounds:
         return track
@@ -1917,7 +1918,7 @@ def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
             room = voices / script["room"] if voices and "room" in script and (voices / script["room"]).is_file() else None
             voice = studio(padded, work, room)
             # Звук склеек — к голосу, а не к биту: бит голос проседает сайдчейном,
-            # и свуш под словом пропадал бы, а в паузе гремел.
+            # и блик под словом пропадал бы, а в паузе гремел.
             voice = cut_sounds(voice, cuts[:-1], [cuts[cut] for cut in flashes], work)
         starts = [sum(shot.seconds for shot in timed[:index]) for index in range(len(timed))]
         pieces = [(piece, at, line["track"]["length"]) for index, (line, at) in enumerate(zip(script["lines"], starts))
@@ -2658,14 +2659,14 @@ def _selftest() -> None:
             seen.append(Image.open(Path(tmp) / "f.png").convert("RGB").getpixel((540, 960)))
         assert seen[0][0] > 200 > seen[0][2] and min(seen[1]) > 200 and seen[2][2] > 200 > seen[2][0], seen
         assert flash_cuts(12) == {2: "fadewhite", 5: "fade", 8: "fadewhite"} and flash_cuts(4) == {}
-        # Свуш на склейке слышен около неё, в стороне тишина, и не громкий: по окну 0,4 с
-        # около -27 LUFS — на 16 дБ ниже голоса после studio (-11).
+        # Блик на склейке слышен около неё, в стороне тишина, и тихий: по окну 0,4 с
+        # около -30 LUFS — на 19 дБ ниже голоса после studio (-11).
         silent = Path(tmp) / "silent.wav"
         clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "3", str(silent)])
         trace = meter(cut_sounds(silent, [1.5], [], Path(tmp)))[1]
         loudest = max(trace, key=lambda point: point[1])
-        assert 1.4 < loudest[0] < 2.0 and -29 < loudest[1] < -25, loudest
-        assert max(m for t, m, _ in trace if t < 1.2) < -60, "свуш не на склейке"
+        assert 1.5 < loudest[0] < 2.0 and -32 < loudest[1] < -28, loudest
+        assert max(m for t, m, _ in trace if t < 1.2) < -60, "блик не на склейке"
         for focus, color in ((0.0, 0), (1.0, 2)):
             part = Path(tmp) / f"focus-{focus}.mp4"
             clips.segment(clips.Shot(empty, 0.2, "", "", backdrop=str(Path(tmp) / "half.png")), part, Path(tmp),
