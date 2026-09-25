@@ -75,7 +75,9 @@ Shorts показывают ролик тем, кто этот звук уже �
 белое на белом иначе не читалось; где внизу картинки своя надпись (пустой файл-метка
 `<кадр>-<n>.top` рядом), он уходит наверх, под метку канала. Метка
 `<кадр>-<n>.nosub` у картинки выключает субтитры, пока она на экране: кадр сам
-говорит текст (вырезки поста, заголовок статьи).
+говорит текст (вырезки поста, заголовок статьи). Имя героя при первом
+упоминании берут в `subtitle` в звёздочки — «*Chief Keef* записал…»: оно выходит
+одним куском, красным, крупно и заглавными, как «TRAVIS SCOTT» в образце.
 
 Поэтому ярлыков `text` и `label` в кадре больше нет, хотя сценарий их ещё
 пишет: они повторяли речь, и текста в кадре было втрое больше, чем читается
@@ -233,10 +235,12 @@ WHOOSH_PEAK = 0.12
 BOOM = "aevalsrc=sin(2*PI*(70-40*t)*t)*exp(-8*t):d=0.4:s=48000"
 BOOM_DELAY = 0.06
 # Громкость — по замеру к голосу после studio: он выровнен (VOICE_LUFS, VOICE_CHAIN)
-# и на дублях skleyka-3 дал -11 LUFS. Свуш без усиления — -27 по окну 0,4 с, удар — -14,4;
-# с этими поправками свуш на 20 дБ тише голоса (слышно, но не громко), удар — на 12.
-WHOOSH_DB = -4.0
-BOOM_DB = -9.0
+# и на дублях skleyka-3 дал -11 LUFS. Свуш без усиления — -27 по окну 0,4 с, удар — -14,4.
+# Было -4 и -9 (свуш на 20 дБ тише голоса) — владелец 25.09 переходов не услышал:
+# в образце склейка поднимает громкость на 4–5 дБ, у нас поднимала на 1–2.
+# Теперь свуш на 16 дБ тише голоса, удар — на 9.
+WHOOSH_DB = 0.0
+BOOM_DB = -6.0
 
 # Безопасная зона кадра, доли ширины и высоты: всё своё текстовое и метка — внутри.
 # Замер по записи экрана iPhone с опубликованным keef3 в Shorts, 16.09.2026:
@@ -319,6 +323,11 @@ SUB_LOW = 0.75
 SUB_HIGH = 0.25
 # Слово появляется с пружинкой: масштаб по кадрам, потом 100%.
 SUB_POP = (1.15, 1.11, 1.07, 1.03)
+# Имя героя — красным, крупнее и заглавными, один раз: в образце «ЭТО / TRAVIS SCOTT» —
+# единственное цветное место ролика (владелец, 25.09.2026). В `subtitle` оно в звёздочках.
+KEY_MARK = "*"
+KEY_SIZE = 96
+KEY_RED = (235, 30, 30, 255)
 TOP_MARK = ".top"
 
 GIPHY_SEARCH = "https://api.giphy.com/v1/gifs/search"
@@ -1021,7 +1030,7 @@ def _fill(screen: dict, work: Path) -> dict:
     return {"query": screen.get("query", "")}
 
 
-def caption(layer, text: str, sizes=CAPTION_SIZES, stroke: int = 0, halo: int = 0):
+def caption(layer, text: str, sizes=CAPTION_SIZES, stroke: int = 0, halo: int = 0, fill=(255, 255, 255, 255)):
     """Мемная надпись сверху кадра: белые буквы с чёрной обводкой и тенью.
 
     Узкий жирный Oswald, а не Arimo мемов канала (card.render_meme): поверх
@@ -1054,7 +1063,7 @@ def caption(layer, text: str, sizes=CAPTION_SIZES, stroke: int = 0, halo: int = 
             break
     for number, line in enumerate(lines):
         draw.text(
-            (layer.width / 2, CAPTION_TOP + number * size * 1.1), line, font=font, fill=(255, 255, 255, 255),
+            (layer.width / 2, CAPTION_TOP + number * size * 1.1), line, font=font, fill=fill,
             anchor="ma", stroke_width=outline, stroke_fill=(0, 0, 0, 255),
         )
     shade = Image.new("RGBA", layer.size, (0, 0, 0, 0))
@@ -1484,7 +1493,8 @@ def chunks(say: str) -> list[str]:
     в кусок не влезает и ломает кегль."""
     words: list[str] = []
     glue = False
-    for word in say.split():
+    # Имя в звёздочках — одно «слово»: «*Chief Keef*» не рвётся на два субтитра.
+    for word in re.findall(rf"\{KEY_MARK}[^{KEY_MARK}]+\{KEY_MARK}\S*|\S+", say):
         # Склейка кавычек — только пока пара короткая: «сразу «спасибо, Чикаго,»
         # жирным шрифтом уходил в три строки (23.09.2026).
         if words and (glue or not any(ch.isalnum() for ch in word)) and len(words[-1]) + len(word) <= SUB_LETTERS:
@@ -1549,8 +1559,12 @@ def _sub_ink(text: str):
 
     from . import clips
 
-    ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), text, sizes=((SUB_SIZE, 2),),
-                  stroke=SUB_STROKE, halo=SUB_HALO)
+    if text.startswith(KEY_MARK):
+        ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), text.replace(KEY_MARK, "").upper(),
+                      sizes=((KEY_SIZE, 2),), stroke=SUB_STROKE, halo=SUB_HALO, fill=KEY_RED)
+    else:
+        ink = caption(Image.new("RGBA", (clips.WIDTH, clips.HEIGHT)), text, sizes=((SUB_SIZE, 2),),
+                      stroke=SUB_STROKE, halo=SUB_HALO)
     return ink.crop(ink.getbbox())
 
 
@@ -2393,6 +2407,18 @@ def _selftest() -> None:
     calm, popped = inked(subtitle("Куплет", False)), inked(subtitle("Куплет", False, SUB_POP[0]))
     assert 1.1 < (popped[2] - popped[0]) / (calm[2] - calm[0]) < 1.2 and popped[3] <= SAFE_BOTTOM * 1920, (calm, popped)
     assert abs(popped[0] + popped[2] - calm[0] - calm[2]) <= 2, (calm, popped)
+    # Имя героя в звёздочках — одним куском, красное, крупнее слова и в безопасной зоне.
+    assert chunks("*Chief Keef* записал куплет") == ["*Chief Keef*", "записал", "куплет"]
+    from PIL import ImageChops
+
+    red, green, _, alpha = subtitle("*Chief Keef*", False).split()
+    letters = ImageChops.multiply(ImageChops.multiply(red.point(lambda v: 255 if v > 200 else 0),
+                                                      green.point(lambda v: 255 if v < 80 else 0)),
+                                  alpha.point(lambda v: 255 if v > 200 else 0))
+    box = letters.getbbox()
+    assert box and letters.histogram()[255] > 5000, "имя не красное"
+    assert box[3] - box[1] > 1.3 * (inked(subtitle("KEEF", False))[3] - inked(subtitle("KEEF", False))[1]), box
+    assert box[3] <= SAFE_BOTTOM * 1920 and SAFE_LEFT * 1080 <= box[0] and box[2] <= SAFE_RIGHT * 1080, box
     # Белое на белом читается: вокруг букв на белом кадре тёмный ореол, а не только тонкая обводка.
     from PIL import Image
 
@@ -2632,13 +2658,13 @@ def _selftest() -> None:
             seen.append(Image.open(Path(tmp) / "f.png").convert("RGB").getpixel((540, 960)))
         assert seen[0][0] > 200 > seen[0][2] and min(seen[1]) > 200 and seen[2][2] > 200 > seen[2][0], seen
         assert flash_cuts(12) == {2: "fadewhite", 5: "fade", 8: "fadewhite"} and flash_cuts(4) == {}
-        # Свуш на склейке слышен около неё, в стороне тишина, и тихий: по окну 0,4 с
-        # около -31 LUFS — на 20 дБ ниже голоса после studio (-11).
+        # Свуш на склейке слышен около неё, в стороне тишина, и не громкий: по окну 0,4 с
+        # около -27 LUFS — на 16 дБ ниже голоса после studio (-11).
         silent = Path(tmp) / "silent.wav"
         clips.run([clips.ffmpeg(), "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "3", str(silent)])
         trace = meter(cut_sounds(silent, [1.5], [], Path(tmp)))[1]
         loudest = max(trace, key=lambda point: point[1])
-        assert 1.4 < loudest[0] < 2.0 and -33 < loudest[1] < -29, loudest
+        assert 1.4 < loudest[0] < 2.0 and -29 < loudest[1] < -25, loudest
         assert max(m for t, m, _ in trace if t < 1.2) < -60, "свуш не на склейке"
         for focus, color in ((0.0, 0), (1.0, 2)):
             part = Path(tmp) / f"focus-{focus}.mp4"
