@@ -2632,7 +2632,7 @@ def _selftest() -> None:
 
         llm.generate_skleyka = model
         props = llm.SKLEYKA_SCHEMA["properties"]
-        assert set(props) == {*TALK_KNOBS, "like", "reply"} and all(name in props["style"]["description"] for name in STYLES)
+        assert set(props) == {*TALK_KNOBS, "like", "reply", "skip"} and all(name in props["style"]["description"] for name in STYLES)
         assert TALK_MARK in TUNE
         data["tracks"]["t1"] = {"chat": "7", "files": [], "knobs": dict(KNOBS), "tweaks": 0,
                                 "at": state.iso(state.now() + timedelta(minutes=1))}
@@ -2784,9 +2784,10 @@ def talk_check() -> list[str]:
              ("верни голос как было в файле", 12.94, None), ("голос чуть громче", None, None)]
     misses = []
     for text, at, want in cases:
-        got = understood(dict(KNOBS, at=at), text, timing)[0]["at"]
+        knobs, words = understood(dict(KNOBS, at=at), text, timing)
+        got = knobs["at"]
         ok = got == want or None not in (got, want) and abs(got - want) < 0.05
-        print(f"  {'ок' if ok else 'ПРОМАХ'}: «{text}» → at {got} (ждали {want})")
+        print(f"  {'ок' if ok else 'ПРОМАХ'}: «{text}» → at {got} (ждали {want}); ответ: {words}")
         misses += [] if ok else [text]
     return misses
 
