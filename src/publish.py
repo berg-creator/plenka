@@ -81,16 +81,26 @@ def night(moment: datetime) -> bool:
     return hour >= config.QUIET_FROM_HOUR or hour < config.QUIET_TO_HOUR
 
 
-def releases_today() -> int:
-    """Сколько постов о релизах вышло за сегодня. Сутки московские: аудитория русская."""
+def feed_day(moment: datetime):
+    """Сутки ленты: по Москве, но с конца тихих часов, а не с полуночи.
+
+    Ночной пост — хвост вчерашнего дня. С полуночной границей пятничные релизы
+    сверх config.RELEASE_PER_DAY вышли в 00:04–02:08 субботы, съели её лимит
+    и слоты, и субботняя лента днём молчала (26.09.2026).
+    """
     from .compose import MSK
 
-    today = state.now().astimezone(MSK).date()
+    return (moment.astimezone(MSK) - timedelta(hours=config.QUIET_TO_HOUR)).date()
+
+
+def releases_today() -> int:
+    """Сколько постов о релизах вышло за сутки ленты (feed_day)."""
+    today = feed_day(state.now())
     count = 0
     for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", []):
         published = state._parse(item.get("published_at", ""))
         if (item.get("rubric") in config.RELEASE_RUBRICS and published
-                and published.astimezone(MSK).date() == today):
+                and feed_day(published) == today):
             count += 1
     return count
 
@@ -120,7 +130,7 @@ def due(post: dict) -> bool:
             # Отбор (src/otbor.py) и ролик (src/reels.py) выходят мимо слотов и обычному посту место не занимают.
             if item.get("rubric") not in ("news", "otbor", "reel")
             and (moment := state._parse(item.get("published_at", "")))
-            and moment.astimezone(MSK).date() == now.date()
+            and feed_day(moment) == feed_day(now)
         )
         if regular >= sum(hour <= now.hour for hour in config.PUBLISH_HOURS_MSK):
             return False
@@ -710,6 +720,10 @@ def _selftest() -> None:
         assert release_due()
         posted(("release", ago(hours=6)), ("release", ago(hours=5)), ("verdict", ago(hours=4)))
         assert not release_due()
+        # Ночные выходы (01:00–03:00 МСК) — хвост вчерашних суток: ни лимит релизов,
+        # ни дневные слоты не съедают (26.09.2026 лента из-за них молчала весь день).
+        posted(("release", ago(hours=17)), ("release", ago(hours=16)), ("verdict", ago(hours=15)))
+        assert release_due() and due({"rubric": "meme"})
         print("выходы релизов: сутки, окно на трек, три в день, обычный слот уступает")
     finally:
         (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
