@@ -1714,8 +1714,13 @@ def _invoices(chat_id: str) -> None:
 
 def _ask(chat_id: str, draft: dict) -> None:
     """Вопрос шага: «Шаг 1 из 2 · пришли вокал». Ответом Telegram сам открывает ответ
-    на это сообщение, в поле ввода — подсказка. Шаги кончились — вопрос о звуке."""
-    plan, step = draft["plan"], draft["step"]
+    на это сообщение, в поле ввода — подсказка. Шаги кончились — вопрос о звуке.
+    Шаг, чья дорожка уже пришла по имени, не спрашивается; у даблов, бэков и инструментов
+    вместо подсказки — «пропустить»: отметил лишнее — иначе заявка встала бы до протухания."""
+    plan = draft["plan"]
+    while draft["step"] < len(plan) and any(f["r"] == plan[draft["step"]] for f in draft["files"]):
+        draft["step"] += 1
+    step = draft["step"]
     if step >= len(plan):
         draft["asked"], draft["knobs"] = "style", dict(KNOBS)
         telegram.send_message(chat_id, STYLE, buttons=_styles(draft["knobs"]))
@@ -1724,7 +1729,9 @@ def _ask(chat_id: str, draft: dict) -> None:
     what = "лид-вокал — главный голос" if part == "вокал" and len(plan) > 2 else ASKS[part]
     telegram.send_message(chat_id, f"<b>Шаг {step + 1} из {len(plan)}</b> {ASK_MARK} {what}"
                           + ("; можно несколькими файлами" if part in MULTI else "") + "."
-                          + (FROM_START if step == 0 else ""), ask="Прикрепи файл")
+                          + (FROM_START if step == 0 else ""), ask="Прикрепи файл",
+                          buttons=[[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]]
+                          if part in MULTI else None)
     draft["asked"] = step
 
 
@@ -1766,7 +1773,11 @@ def toggle(pick: list[str], code: str) -> list[str]:
 def take(message: dict) -> None:
     """Дорожка в заявку: её роль — шаг, на котором она пришла. Прислал файлы, не выбрав
     режим, — это «вокал + бит» по порядку. Одиночный шаг кончается файлом, в шаге
-    с несколькими файлами дальше ведёт кнопка."""
+    с несколькими файлами дальше ведёт кнопка.
+
+    Имя сильнее шага: дорожки шлют все разом, и шаг отстаёт от файлов — 26.09 бит
+    уходил в даблы, а «1-Бит» в «вокал + бит» вставал голосом. Вторая дорожка одиночной
+    роли («vocal 2») идёт по шагу: это скорее дабл."""
     chat_id = str(message["chat"]["id"])
     item, data = _item(message), load()
     draft = _draft(data, chat_id)
@@ -1777,13 +1788,18 @@ def take(message: dict) -> None:
         telegram.send_message(chat_id, TOO_BIG.format(name=item["n"]))
         return
     if draft["plan"] is None:
-        draft.update(plan=["вокал", "бит"], step=0, asked=0)
+        # Файлы до «Дальше» под галочками — план из галочек, иначе лишние дорожки пропали бы молча.
+        draft.update(plan=draft.get("pick") or ["вокал", "бит"], step=0, asked=0)
+        if draft.get("menu"):
+            telegram.edit_markup(chat_id, draft["menu"], None)
     if draft["step"] >= len(draft["plan"]) or len(draft["files"]) >= MAX_PARTS \
             or any(known["m"] == item["m"] for known in draft["files"]):
         return
-    part = draft["plan"][draft["step"]]
+    plan, named = draft["plan"], role(item["n"])
+    part = named if named in plan and (named in MULTI or all(f["r"] != named for f in draft["files"])) \
+        else plan[draft["step"]]
     draft["files"].append(dict(item, r=part))
-    if part not in MULTI:
+    if part == plan[draft["step"]] and part not in MULTI:
         draft["step"] += 1
     draft["at"] = state.iso()
     save(data)
@@ -1967,6 +1983,9 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
             draft["knobs"]["style"] = list(STYLES)[int(code)]
         telegram.edit_markup(chat_id, message_id, None)
         _queue(data, chat_id, draft)
+    elif head == "p" and draft["plan"] and code == str(draft["step"]):
+        draft.update(step=draft["step"] + 1, acked=0)
+        _ask(chat_id, draft)
     elif head == "n" and draft["plan"] and draft["step"] < len(draft["plan"]) \
             and any(f["r"] == draft["plan"][draft["step"]] for f in draft["files"]):
         draft.update(step=draft["step"] + 1, acked=0)
@@ -2588,6 +2607,30 @@ def _selftest() -> None:
         assert sent[-1].startswith("Принял: вокал «x.wav», даблы «d1.wav» и «d2.wav», барабаны «kick.wav», бас «808.wav»")
         callback(9, 9, "n")
         assert sent[-1] == OLD, "закрытая заявка"
+
+        # Всё разом после «Дальше» — по именам; до «Дальше» — план из галочек; лишняя галочка — пропуск.
+        start(9, 9)
+        callback(9, 9, "m:2")
+        for code in ("d", "b", "a"):
+            callback(9, 9, f"t:{code}")
+        callback(9, 9, "n")
+        for n, name in enumerate(("Lead.wav", "Double.wav", "Backs.wav", "Beat.wav")):
+            take(file(40 + n, name, chat=9))
+        later("9")
+        assert sent[-1].startswith("<b>Шаг 4 из 5</b> · пришли эдлибы") and keys[-1][0][0]["callback_data"] == f"{PREFIX}p:3"
+        callback(9, 9, "p:1")  # старая кнопка чужой шаг не пропускает
+        callback(9, 9, "p:3")
+        assert sent[-1] == STYLE, sent[-1]
+        callback(9, 9, "y:-")
+        assert sent[-1].startswith("Принял: вокал «Lead.wav», даблы «Double.wav», бэки «Backs.wav», бит «Beat.wav»")
+        start(13, 13)
+        callback(13, 13, "m:2")
+        callback(13, 13, "t:d")
+        for n, name in enumerate(("1-Бит.wav", "2-Голос.wav", "3-Голос дабл.wav")):
+            take(file(50 + n, name, chat=13))
+        assert [(f["n"], f["r"]) for f in load()["drafts"]["13"]["files"]] == \
+            [("1-Бит.wav", "бит"), ("2-Голос.wav", "вокал"), ("3-Голос дабл.wav", "дабл")]
+        cancel(13)
         start(12, 12)
         callback(12, 12, "x")
         assert sent[-1] == CANCELLED and not active(12)
