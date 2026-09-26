@@ -1351,9 +1351,8 @@ def handle_message(message: dict, data: dict) -> bool:
         skleyka.cancel(chat_id)
         telegram.send_message(chat_id, "Отменил. Захочешь склеить — /skleyka.")
         return False
-    if skleyka.active(chat_id) and not text.startswith("/"):
-        # Просьба словами до склейки — «голос входит на дропе»: в заявку, а не в разбор.
-        skleyka.wish(chat_id, text)
+    if not text.startswith("/") and skleyka.wish(chat_id, text):
+        # Просьба словами до склейки — «голос входит на дропе»: в заявку или трек в очереди, а не в разбор.
         return False
     if otbor.active(chat_id):
         if not text.startswith("/"):
@@ -1930,7 +1929,7 @@ def _selftest() -> None:
         assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU] + [intro] * 5, \
             "старая ссылка и /proyavka — в ПРОЯВКУ, метки sved и ad — что прислать"
         assert links == ["https://music.yandex.ru/users/x/playlists/3?utm_source=share"], links
-        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎙", "🎛", "🎞", "🔔", "🪞", "📼"], "в меню шесть разделов"
+        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎛", "🎙", "📼", "🔔", "🪞", "🎞"], "в меню шесть разделов"
         # Кнопка «следить» под ответом ДВОЙНИКА — кнопка сервиса: подписывает watch_add,
         # второго пути к тому же списку нет.
         assert svedenie.buttons("Toxi$")[1][0]["callback_data"] == _cb("watch", "Toxi$")

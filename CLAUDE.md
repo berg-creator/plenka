@@ -65,6 +65,7 @@ python -m src.sources.afisha --check "Баста"  концерты артист
 python -m src.skleyka --selftest        склейка: роли дорожек по имени и звуку, маршрут файлов, заявка, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, реферал за склейку и звёзды
 python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА [--style мелодично] [--design] [--like ТРЕК] [--part эдлиб ФАЙЛ]  склейка и пара ДО/ПОСЛЕ одной громкости
 python -m src.skleyka --dry-run         заявки и склейки в очереди (нужен STATE_DIR), без записи
+python -m src.skleyka --talk-check      куда генератор ставит голос по просьбам словами — только из Actions (health.yml)
 python -m src.svedenie --selftest       двойник: процент по кругу артиста, отказы, снимок без имён; сравнение с другом — итог обоим
 python -m src.svedenie --dry-run       разбор открытой фонотеки Яндекса, без Telegram
 python -m src.sources.yandex_music --check "ССЫЛКА"   что бот прочитает по ссылке на плейлист

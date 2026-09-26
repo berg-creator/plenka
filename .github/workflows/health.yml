@@ -32,3 +32,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         # --quiet: писать только если что-то сломалось, а не каждый день
         run: python -m src.health --quiet
+
+      # Просьбы о месте голоса в СКЛЕЙКЕ разбирает генератор, а из России Gemini не отвечает —
+      # поэтому здесь: промах генератора красит запуск, и сторож назавтра пишет о нём строку.
+      - name: Проверить, как генератор понимает просьбы склейки
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
+          LLM_FALLBACK: ${{ vars.LLM_FALLBACK || 'gigachat' }}
+          GIGACHAT_CREDENTIALS: ${{ secrets.GIGACHAT_CREDENTIALS }}
+          GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL || 'GigaChat-Pro' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: python -m src.skleyka --talk-check

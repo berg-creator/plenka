@@ -1391,6 +1391,9 @@ INTRO = ("🎛 <b>СКЛЕЙКА</b> — сведу вокал с битом в 
          "✏️ Важно, где входит голос или какой нужен звук, — напиши словами в любой момент до склейки.\n\n"
          "Как пришлёшь?")
 PICK = "Отметь, что у тебя есть отдельно, — потом попрошу каждую дорожку по очереди."
+# Дорожки, выгруженные с начала проекта, встают по местам сами, с затактом: где у голоса «раз»,
+# по звуку не узнать — слог перед сильной долей и слог сразу после неё звучат одинаково (26.09).
+FROM_START = "\n\nВыгружай все дорожки с начала проекта — тогда голос встанет в бит ровно так, как в проекте."
 # Характер звука — до склейки: его выбирают, не слыша результата. Громкость голоса и эхо —
 # поправки «чуть громче, чем сейчас», их без прослушки не выбрать: они кнопками под треком.
 STYLE = ("Дорожки есть. Какой звук?\n\n✏️ Голос выгружен не с начала проекта или важно что-то ещё — "
@@ -1399,6 +1402,7 @@ STYLE = ("Дорожки есть. Какой звук?\n\n✏️ Голос в�
 STYLE_WAIT = 180
 MORE = "Есть: {names}. Ещё файл — или дальше."
 WISHED = "✏️ Записал — учту при склейке."
+WISH_LATE = "✏️ Склейка уже идёт — поправишь словами под готовым треком."
 WISH_FAILED = "✏️ Просьбу словами разобрать не вышло — склеил как есть. Поправь кнопками или словами ниже.\n"
 ACCEPTED = "Принял: {parts}. Склеиваю — пришлю минут через {minutes}."
 EXPIRED = "Дорожки не пришли до конца — заявку закрыл. Начать заново — /skleyka."
@@ -1719,7 +1723,8 @@ def _ask(chat_id: str, draft: dict) -> None:
     part = plan[step]
     what = "лид-вокал — главный голос" if part == "вокал" and len(plan) > 2 else ASKS[part]
     telegram.send_message(chat_id, f"<b>Шаг {step + 1} из {len(plan)}</b> {ASK_MARK} {what}"
-                          + ("; можно несколькими файлами" if part in MULTI else "") + ".", ask="Прикрепи файл")
+                          + ("; можно несколькими файлами" if part in MULTI else "") + "."
+                          + (FROM_START if step == 0 else ""), ask="Прикрепи файл")
     draft["asked"] = step
 
 
@@ -2057,17 +2062,26 @@ def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
     return new, words
 
 
-def wish(chat_id: str | int, text: str) -> None:
+def wish(chat_id: str | int, text: str) -> bool:
     """Просьба словами до склейки: копится в заявке, а разбирает её сама склейка —
-    там уже известны дропы бита и первое слово голоса (run_job)."""
+    там уже известны дропы бита и первое слово голоса (run_job). Заявка закрыта, а склейка
+    ещё ждёт в очереди — просьба дописывается треку; уже склеивается — человеку сказано,
+    где поправить. Ни заявки, ни склейки — текст не к склейке (False), он идёт в разборы."""
     chat_id, data = str(chat_id), load()
-    draft = _draft(data, chat_id)
-    if not draft:
-        return
+    job = next((job for job in data["jobs"] if data["tracks"].get(job["track"], {}).get("chat") == chat_id), None)
+    if draft := _draft(data, chat_id):
+        draft["at"] = state.iso()  # человек пишет — вопрос о звуке не закрывается сам (STYLE_WAIT)
+    elif not job:
+        return False
+    elif job.get("started") or job.get("tweak"):
+        telegram.send_message(chat_id, WISH_LATE)
+        return True
+    else:
+        draft = data["tracks"][job["track"]]
     draft["wish"] = f"{draft.get('wish', '')}\n{text[:500]}".strip()[-1000:]
-    draft["at"] = state.iso()  # человек пишет — вопрос о звуке не закрывается сам (STYLE_WAIT)
     save(data)
     telegram.send_message(chat_id, WISHED)
+    return True
 
 
 def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> None:
@@ -2524,6 +2538,13 @@ def _selftest() -> None:
         assert data["tracks"][track]["knobs"] == dict(KNOBS, style="мелодично", design=True)
         assert [f["r"] for f in data["tracks"][track]["files"]] == ["вокал", "бит"]
         assert data["tracks"][track]["wish"] == "голос входит на дропе"
+        # Склейка ждёт очереди — текст дописывается к треку; уже идёт — где поправить; нет ничего — в разборы.
+        assert wish(7, "на втором дропе") and load()["tracks"][track]["wish"] == "голос входит на дропе\nна втором дропе"
+        data = load()
+        data["jobs"][0]["started"] = state.iso()
+        save(data)
+        assert wish(7, "погромче") and sent[-1] == WISH_LATE and "погромче" not in load()["tracks"][track]["wish"]
+        assert not wish(8, "Bones")
 
         # Не выбрал звук — склейка идёт как лучше, человек не ждёт зря.
         start(11, 11)
@@ -2753,6 +2774,23 @@ def _selftest() -> None:
           "реферал за склейку и звёзды — ок")
 
 
+def talk_check() -> list[str]:
+    """Просьбы о месте голоса — живой генератор (prompts/skleyka.md): куда он ставит `at`
+    по замеру 26.09 (первое слово на 2,75 с, дропы 12,94 и 45,2, доля 0,43). Из России
+    Gemini не отвечает, поэтому проверка идёт в Actions (health.yml). Итог — промахи."""
+    timing = {"sent": 2.75, "drops": [12.94, 45.2], "beat": 0.43, "length": 153.0}
+    cases = [("голос должен входить на дропе", None, 12.94), ("первое слово на 0:20", None, 20.0),
+             ("голос на втором дропе", None, 45.2), ("сделай голос на долю позже", 12.94, 13.37),
+             ("верни голос как было в файле", 12.94, None), ("голос чуть громче", None, None)]
+    misses = []
+    for text, at, want in cases:
+        got = understood(dict(KNOBS, at=at), text, timing)[0]["at"]
+        ok = got == want or None not in (got, want) and abs(got - want) < 0.05
+        print(f"  {'ок' if ok else 'ПРОМАХ'}: «{text}» → at {got} (ждали {want})")
+        misses += [] if ok else [text]
+    return misses
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="СКЛЕЙКА: вокал и бит в черновой трек")
     parser.add_argument("--mix", nargs=2, type=Path, metavar=("ВОКАЛ", "БИТ"),
@@ -2770,11 +2808,15 @@ def main() -> int:
     parser.add_argument("--job", type=Path, metavar="ФАЙЛ", help="склейка заявки из бота (её запускает дежурство)")
     parser.add_argument("--selftest", action="store_true", help="роли, маршрут, заявка, ручки, лимиты — без сети")
     parser.add_argument("--dry-run", action="store_true", help="заявки и склейки в очереди, ничего не делая")
+    parser.add_argument("--talk-check", action="store_true",
+                        help="просьбы о месте голоса — живому генератору: куда он ставит голос (только из Actions)")
     args = parser.parse_args()
     config.load_dotenv()
     if args.selftest:
         _selftest()
         return 0
+    if args.talk_check:
+        return 1 if talk_check() else 0
     if args.job:
         return run_job(args.job)
     if args.dry_run:
