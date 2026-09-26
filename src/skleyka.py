@@ -847,6 +847,43 @@ def _opening(beat_file: Path, first: float, beat: tuple[float, float], work: Pat
     return out
 
 
+# Где голос встаёт на бит. Оба файла склейка кладёт от нуля, и вокал, выгруженный
+# не с начала проекта, уезжает: 26.09 у вокала на 34 с первое слово было на 2,8 с,
+# а бас в бите на 2:33 входил на 13 с — голос звучал на вступлении, и человек
+# написал, что он «не попадает в дроп». Где голос стоял в проекте, по звуку не узнать:
+# читать на вступлении тоже можно. Поэтому сама склейка голос не двигает, а называет
+# дроп и даёт его кнопкой (DROP_NOTE), и место голоса можно сказать словами (ручка at).
+def drops(beat: Path, rhythm: tuple[float, float]) -> list[float]:
+    """Дропы бита: доли, где низ до 120 Гц (бочка и бас) за такт после становится
+    громче такта до на OWN_DROP дБ. Порог громкости после — на 20 дБ ниже громкой
+    части, а не на 10: в первом такте после дропа у 808 бывают провалы."""
+    _, trace = reels.meter(beat, "lowpass=f=120,")
+    level = [m for _, m, _ in trace]
+    n = max(1, round(4 * rhythm[0] / (trace[1][0] - trace[0][0])))
+    loud = sorted(level)[int(0.9 * len(level))]
+    rise = {i: statistics.fmean(level[i:i + n]) - statistics.fmean(level[i - n:i])
+            for i in range(n, len(level) - n) if statistics.fmean(level[i:i + n]) >= loud - 20}
+    found = []
+    for i, r in rise.items():
+        if r >= OWN_DROP and r >= max(rise.get(j, r) for j in range(i - n, i + n + 1)) and (not found or i - found[-1] > n):
+            found.append(i)
+    # Громкость M меряется окном 0,4 с: край дропа — на полокна раньше.
+    return [round(_on_grid(trace[i][0] - 0.2, rhythm), 2) for i in found]
+
+
+def first_word(vocal: Path) -> float:
+    """Секунда первого слова в файле голоса."""
+    lines = _lines(_envelope(vocal, f"{FORMAT},"))
+    return round(lines[0][0], 2) if lines else 0.0
+
+
+def _moved(path: Path, shift: float, dest: Path) -> Path:
+    """Дорожка голоса на shift секунд позже (тишиной в начале) или раньше (срезом начала)."""
+    _ffmpeg("-i", path, "-af", f"adelay=delays={1000 * shift:.0f}:all=1" if shift > 0
+            else f"atrim=start={-shift:.3f},asetpts=PTS-STARTPTS", *reels.VOICE_CODEC, dest)
+    return dest
+
+
 def _spread(moments: list[tuple[float, float]], gap: float, limit: int = 99) -> list[float]:
     """Моменты (вес, секунда) — самые весомые первыми, не ближе gap секунд друг
     к другу, не больше limit."""
@@ -1351,14 +1388,18 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
 # под готовым треком.
 ASK_MARK = "· пришли"
 INTRO = ("🎛 <b>СКЛЕЙКА</b> — сведу вокал с битом в готовый трек. Бесплатно, автоматом, за несколько минут.\n\n"
+         "✏️ Важно, где входит голос или какой нужен звук, — напиши словами в любой момент до склейки.\n\n"
          "Как пришлёшь?")
 PICK = "Отметь, что у тебя есть отдельно, — потом попрошу каждую дорожку по очереди."
 # Характер звука — до склейки: его выбирают, не слыша результата. Громкость голоса и эхо —
 # поправки «чуть громче, чем сейчас», их без прослушки не выбрать: они кнопками под треком.
-STYLE = "Дорожки есть. Какой звук?"
+STYLE = ("Дорожки есть. Какой звук?\n\n✏️ Голос выгружен не с начала проекта или важно что-то ещё — "
+         "напиши словами до выбора: «голос входит на дропе», «первое слово на 0:20».")
 # Не ответил на вопрос о звуке — склейка идёт как лучше, чтобы человек не ждал зря.
 STYLE_WAIT = 180
 MORE = "Есть: {names}. Ещё файл — или дальше."
+WISHED = "✏️ Записал — учту при склейке."
+WISH_FAILED = "✏️ Просьбу словами разобрать не вышло — склеил как есть. Поправь кнопками или словами ниже.\n"
 ACCEPTED = "Принял: {parts}. Склеиваю — пришлю минут через {minutes}."
 EXPIRED = "Дорожки не пришли до конца — заявку закрыл. Начать заново — /skleyka."
 OLD = "Эта заявка уже закрыта. Начать заново — /skleyka."
@@ -1383,8 +1424,8 @@ READY = ("🎛 <b>Склейка готова</b> — {look}.\n{parts}.\n{note}"
          "Это черновая склейка автоматом, не студия. Громкость как у релизов; WAV для площадок — следующим файлом.")
 MISMATCH = "Дорожки разной длины ({a} и {b}): если голос уехал от бита — выгрузи обе с самого начала проекта.\n"
 GUESSED = "Вокал и бит пришли одним альбомом — где что, понял по звуку. Перепутал — жми «↔ поменять».\n"
-TUNE = ("Не так? Подкрути — пересоберу{left}. Или напиши словами, что поменять, — ответом "
-        "на это сообщение: «голос тише, эха больше».\n\n"
+TUNE = ("Не так? Подкрути — пересоберу{left}. Или напиши словами, что поменять и где должен входить голос, — "
+        "кнопкой «✏️ Написать словами» или ответом на это сообщение.\n\n"
         "Выложишь трек на площадки — жми «В ОТБОР»: он выйдет в канале с твоим именем.")
 
 # Альбом в Telegram — до десяти файлов: хватает на вокал, даблы, бэки, эдлибы и бит по частям.
@@ -1404,7 +1445,8 @@ TRACK_DAYS = 7
 # Ручки: голос к биту и доля эха, дБ, — шаг и пределы.
 VOICE_STEP, VOICE_LIMIT = 2.0, 6.0
 ECHO_STEP, ECHO_LIMITS = 4.0, (-12.0, 8.0)
-KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swap": False, "like": None}
+# at — с какой секунды бита входит первое слово; None — как в присланном файле (_moved).
+KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swap": False, "like": None, "at": None}
 # Кнопки идут через service.handle_callback: префикс service.CALLBACK_PREFIX
 # и действие sk. Импортировать service отсюда нельзя — он импортирует нас.
 PREFIX = "s:sk:"
@@ -1762,7 +1804,8 @@ def _queue(data: dict, chat_id: str, draft: dict) -> None:
     track, files = secrets.token_hex(3), draft["files"]
     knobs = draft.get("knobs") or dict(KNOBS)
     data["tracks"][track] = {"chat": chat_id, "admin": draft.get("admin", False), "files": files,
-                             "knobs": knobs, "tweaks": 0, "at": state.iso()}
+                             "knobs": knobs, "tweaks": 0, "at": state.iso(),
+                             **({"wish": draft["wish"]} if draft.get("wish") else {})}
     recent, base, bonus = _allowance(data, chat_id)
     if len(recent) >= base and bonus:
         # Сверх лимита — тратится бонус, ближайший к сгоранию; не склеилось — вернётся (_finish).
@@ -1806,15 +1849,19 @@ def _drafts(data: dict) -> bool:
     return changed
 
 
-def buttons(track: str, knobs: dict, swap: bool) -> list[list[dict]]:
-    """Ручки под готовой склейкой: стиль, голос, эхо, саунд-дизайн; «поменять» —
-    когда вокал понят по звуку; «В ОТБОР» — дорога дальше."""
+def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None) -> list[list[dict]]:
+    """Ручки под готовой склейкой: просьба словами первой — 26.09 из семи склеек ни одной
+    не поправили словами, о подсказке в тексте не знали; голос с дропа, если он входит
+    раньше (DROP_NOTE); стиль, голос, эхо, саунд-дизайн; «поменять» — когда вокал понят
+    по звуку; «В ОТБОР» — дорога дальше."""
     def cb(code: str) -> str:
         return f"{PREFIX}{track}:{code}"
 
     looks = [{"text": ("• " if knobs["style"] == name else "") + name, "callback_data": cb(f"c{n}")}
              for n, name in enumerate(STYLES)]
-    rows = [looks[:2], looks[2:],
+    rows = [[{"text": "✏️ Написать словами", "callback_data": cb("w")}],
+            *([[{"text": f"🎯 голос с {_minutes(drop)} — на дроп", "callback_data": cb(f"a{drop:.2f}")}]] if drop else []),
+            looks[:2], looks[2:],
             [{"text": "🔊 голос громче", "callback_data": cb("v+")}, {"text": "🔉 голос тише", "callback_data": cb("v-")}],
             [{"text": "➕ эха", "callback_data": cb("e+")}, {"text": "➖ эха", "callback_data": cb("e-")}],
             [{"text": "✨ саунд-дизайн: " + ("убрать" if knobs["design"] else "добавить"), "callback_data": cb("d")}]]
@@ -1838,6 +1885,9 @@ def turn(knobs: dict, code: str) -> dict:
         new["design"] = not knobs["design"]
     elif code == "sw":
         new["swap"] = not knobs["swap"]
+    elif code.startswith("a"):
+        with contextlib.suppress(ValueError):
+            new["at"] = round(float(code[1:]), 2)
     return new
 
 
@@ -1852,6 +1902,8 @@ def look(knobs: dict) -> str:
         words.append("с саунд-дизайном")
     if knobs.get("like"):
         words.append(f"тембр, ширина и громкость — к «{knobs['like']['title']}»")
+    if knobs.get("at") is not None:
+        words.append(f"голос с {_minutes(knobs['at'])}")
     return ", ".join(words)
 
 
@@ -1864,6 +1916,10 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     chat_id = str(chat_id)
     head, _, code = subject.partition(":")
     data = load()
+    if len(head) != 1 and code == "w":
+        # Telegram сам открывает ответ на этот вопрос, а метка в нём ведёт ответ в talk.
+        telegram.send_message(chat_id, TALK_ASK, ask="голос входит на дропе")
+        return
     if len(head) != 1:
         _tweak(data, chat_id, head, code, admin)
         return
@@ -1948,7 +2004,10 @@ TALK_FAILED = "Не разобрал — подкрути кнопками вы�
 TALKED = "Поговорили про этот трек достаточно — дальше кнопками выше."
 LIKE_MISSING = "«{name}» в магазинах не нашёл — звук ни к чему не подтягивал."
 LIKE_LOST = "Отрывок «{name}» не скачался — звук к нему не подтягивал.\n"
-TALK_KNOBS = ("style", "design", "voice", "echo")
+TALK_KNOBS = ("style", "design", "voice", "echo", "at")
+TALK_ASK = ("✏️ Что поменять — напиши словами ответом на это сообщение: «голос входит на дропе», "
+            "«голос на долю позже», «эха меньше», «погрязнее».")
+DROP_NOTE = "Голос входит на {voice}, а бас в бите — на {drop}. Если голос уехал — жми «🎯 голос с {drop}».\n"
 
 
 def heard(knobs: dict, answer: dict) -> dict:
@@ -1961,7 +2020,54 @@ def heard(knobs: dict, answer: dict) -> dict:
     for key, (low, high) in (("voice", (-VOICE_LIMIT, VOICE_LIMIT)), ("echo", ECHO_LIMITS)):
         with contextlib.suppress(KeyError, TypeError, ValueError):
             new[key] = float(max(low, min(high, round(float(answer[key])))))
+    with contextlib.suppress(KeyError, TypeError, ValueError):
+        at = float(answer["at"])
+        new["at"] = None if at <= 0 else round(at, 2)  # 0 модель пишет и «не трогать»: безопаснее как в файле
     return new
+
+
+def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
+    """Просьба словами — в ручки и ответ человеку (prompts/skleyka.md). timing — замер
+    склейки (run_job): где первое слово в присланном файле, дропы бита, длина доли;
+    по нему модель ставит голос «на дроп» или «на долю позже». До первой склейки
+    замера нет в дежурстве, поэтому просьбу до склейки разбирает сама склейка."""
+    now = {key: knobs.get(key) for key in TALK_KNOBS}
+    now["at"] = -1 if now["at"] is None else now["at"]
+    answer = llm.generate_skleyka({
+        "request": text[:1000],
+        "knobs": {**now, "like": (knobs.get("like") or {}).get("title", "")},
+        "limits": {"voice": [-VOICE_LIMIT, VOICE_LIMIT], "echo": list(ECHO_LIMITS),
+                   "style": {name: kind["about"] for name, kind in STYLES.items()}},
+        "timing": timing and {**timing, "voice": timing["sent"] if knobs.get("at") is None else knobs["at"]}})
+    new = heard(knobs, answer)
+    words = html.escape(str(answer.get("reply", "")).strip())[:400]
+    # «Как у <артиста>»: модель называет, чей трек, а сам трек ищет код — в магазине,
+    # с превью и тем же исполнителем. Не нашёлся — подгонки нет, и человеку это сказано.
+    asked, was = str(answer.get("like") or "").strip()[:100], knobs.get("like")
+    if not asked:
+        new["like"] = None
+    elif not was or asked.casefold() != was["title"].casefold():
+        try:
+            new["like"] = itunes.find_song(asked) or was
+        except Exception as exc:  # noqa: BLE001 — магазин недоступен, остальные ручки работают
+            print(f"  склейка: трек для подгонки не нашёлся: {type(exc).__name__}")
+            new["like"] = was
+        if new["like"] is was:
+            words = (f"{words}\n" if words else "") + LIKE_MISSING.format(name=html.escape(asked))
+    return new, words
+
+
+def wish(chat_id: str | int, text: str) -> None:
+    """Просьба словами до склейки: копится в заявке, а разбирает её сама склейка —
+    там уже известны дропы бита и первое слово голоса (run_job)."""
+    chat_id, data = str(chat_id), load()
+    draft = _draft(data, chat_id)
+    if not draft:
+        return
+    draft["wish"] = f"{draft.get('wish', '')}\n{text[:500]}".strip()[-1000:]
+    draft["at"] = state.iso()  # человек пишет — вопрос о звуке не закрывается сам (STYLE_WAIT)
+    save(data)
+    telegram.send_message(chat_id, WISHED)
 
 
 def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> None:
@@ -1987,31 +2093,11 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
     track["talks"] = track.get("talks", 0) + 1
     save(data)
     try:
-        answer = llm.generate_skleyka({
-            "request": text[:500],
-            "knobs": {**{key: track["knobs"][key] for key in TALK_KNOBS},
-                      "like": (track["knobs"].get("like") or {}).get("title", "")},
-            "limits": {"voice": [-VOICE_LIMIT, VOICE_LIMIT], "echo": list(ECHO_LIMITS),
-                       "style": {name: kind["about"] for name, kind in STYLES.items()}}})
+        knobs, words = understood(track["knobs"], text, track.get("timing"))
     except Exception as exc:  # noqa: BLE001 — генератор недоступен, кнопки остаются
         print(f"  склейка: разговор не вышел: {type(exc).__name__}")
         telegram.send_message(chat_id, TALK_FAILED)
         return
-    knobs = heard(track["knobs"], answer)
-    words = html.escape(str(answer.get("reply", "")).strip())[:400]
-    # «Как у <артиста>»: модель называет, чей трек, а сам трек ищет код — в магазине,
-    # с превью и тем же исполнителем. Не нашёлся — подгонки нет, и человеку это сказано.
-    asked, now = str(answer.get("like") or "").strip()[:100], track["knobs"].get("like")
-    if not asked:
-        knobs["like"] = None
-    elif not now or asked.casefold() != now["title"].casefold():
-        try:
-            knobs["like"] = itunes.find_song(asked) or now
-        except Exception as exc:  # noqa: BLE001 — магазин недоступен, остальные ручки работают
-            print(f"  склейка: трек для подгонки не нашёлся: {type(exc).__name__}")
-            knobs["like"] = now
-        if knobs["like"] is now:
-            words = (f"{words}\n" if words else "") + LIKE_MISSING.format(name=html.escape(asked))
     if knobs == track["knobs"]:
         telegram.send_message(chat_id, words or TALK_FAILED)
         return
@@ -2055,7 +2141,8 @@ def _spawn(data: dict, job: dict) -> tuple[subprocess.Popen, dict, Path]:
     track = data["tracks"][job["track"]]
     work = Path(tempfile.mkdtemp(prefix="skleyka-"))
     spec = {"job": job["id"], "track": job["track"], "chat": track["chat"], "files": track["files"],
-            "knobs": job["knobs"], "left": None if track.get("admin") else config.SKLEYKA_TWEAKS - track["tweaks"]}
+            "knobs": job["knobs"], "left": None if track.get("admin") else config.SKLEYKA_TWEAKS - track["tweaks"],
+            "wish": None if job.get("tweak") else track.get("wish")}
     (work / "job.json").write_text(json.dumps(spec, ensure_ascii=False))
     job["started"] = state.iso()
     print(f"  склейка {job['id']}: пошла, в очереди ещё {len(data['jobs']) - 1}")
@@ -2077,6 +2164,7 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     if not track:
         return
     if result.get("ok"):
+        track.update({key: result[key] for key in ("timing", "knobs") if result.get(key)})
         if not job.get("tweak"):
             _reward(data, track)
         return
@@ -2126,7 +2214,8 @@ def finish(seconds: int = 300) -> None:
 
 
 def _minutes(seconds: float) -> str:
-    return f"{int(seconds // 60)}:{int(seconds % 60):02d}"
+    seconds = round(seconds)
+    return f"{seconds // 60}:{seconds % 60:02d}"
 
 
 def check(parts: list[tuple[str, Path, str]]) -> tuple[str, str]:
@@ -2210,6 +2299,32 @@ def run_job(spec_path: Path) -> int:
                 result["why"] = "отказ"
                 return 0
             vocal, beat = _bus(parts, True, work / "vocal.wav"), _bus(parts, False, work / "beat.wav")
+            rhythm = grid(beat)
+            timing = {"sent": first_word(vocal), "drops": drops(beat, rhythm), "beat": round(rhythm[0], 3),
+                      "length": round(clips.probe_seconds(beat), 1)}
+            result["timing"] = timing
+            if spec.get("wish"):
+                try:
+                    knobs, words = understood(knobs, spec["wish"], timing)
+                    note = (f"✏️ {words}\n" if words else "") + note
+                    spec["knobs"] = result["knobs"] = knobs
+                except Exception as exc:  # noqa: BLE001 — генератор недоступен, склейка идёт как есть
+                    print(f"  склейка {spec['job']}: просьба не разобрана: {type(exc).__name__}")
+                    note = WISH_FAILED + note
+            voice = timing["sent"]
+            if knobs.get("at") is not None:
+                # Первое слово — на секунду at: все дорожки голоса сдвигаются вместе.
+                voice = max(0.0, min(knobs["at"], timing["length"] - 1))
+                shift = voice - timing["sent"]
+                if abs(shift) >= 0.01:
+                    print(f"  голос: первое слово {timing['sent']:.2f} → {voice:.2f} с")
+                    parts = [(name, _moved(path, shift, work / f"moved{n}.wav") if part in VOCAL_SIDE else path, part)
+                             for n, (name, path, part) in enumerate(parts)]
+                    vocal = _bus(parts, True, work / "vocal.wav")
+            # Голос входит больше чем за такт до первого дропа — назвать дроп и дать его кнопкой.
+            drop = timing["drops"][0] if timing["drops"] and voice < timing["drops"][0] - 4 * rhythm[0] else None
+            if drop:
+                note += DROP_NOTE.format(voice=_minutes(voice), drop=_minutes(drop))
             lead = [p for p in parts if p[2] == "вокал"] or [p for p in parts if p[2] in VOCAL_SIDE]
             extra = {key: knobs[key] for key in ("voice", "echo") if knobs.get(key)}
             if like := knobs.get("like"):
@@ -2224,7 +2339,7 @@ def run_job(spec_path: Path) -> int:
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
                 print(f"  склейка {spec['job']}: ролик не собрался: {type(exc).__name__}")
                 movie = None
-            _send(spec, master, parts, note + (GUESSED if guessed else ""), service, work, movie, swap=guessed)
+            _send(spec, master, parts, note + (GUESSED if guessed else ""), service, work, movie, swap=guessed, drop=drop)
             result["ok"] = True
     except Exception as exc:  # noqa: BLE001 — человеку честный ответ, в журнал — без его данных
         print(f"  склейка {spec['job']}: сбой {type(exc).__name__}: {str(exc)[:200]}")
@@ -2289,7 +2404,7 @@ def story(vocal: Path, beat: Path, master: Path, work: Path) -> Path:
 
 
 def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path, movie: Path | None,
-          swap: bool = False) -> None:
+          swap: bool = False, drop: float | None = None) -> None:
     """MP3 плеером — его пересылают, WAV документом — его льют на площадки, ручки — отдельным
     сообщением: кнопки на плеере ушли бы вместе с пересылкой."""
     chat, knobs = spec["chat"], spec["knobs"]
@@ -2310,7 +2425,7 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
         telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(2 * STORY_HALF))
     left = spec["left"]
     telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}"),
-                          buttons=buttons(spec["track"], knobs, swap=swap))
+                          buttons=buttons(spec["track"], knobs, swap=swap, drop=drop))
 
 
 def _selftest() -> None:
@@ -2355,6 +2470,16 @@ def _selftest() -> None:
         refusal, note = check([("v", short, "вокал"), ("b", long, "бит")])
         assert not refusal and note.startswith("Дорожки разной длины (1:06 и 1:10)"), note
 
+        # Место голоса: первое слово сдвигается вместе с файлом; дроп — где входит низ.
+        voice, beat = tmp / "voice.wav", tmp / "drop.wav"
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=440:d=3", "-af", "adelay=1000:all=1", voice)
+        assert abs(first_word(voice) - 1.0) < 0.05, first_word(voice)
+        assert abs(first_word(_moved(voice, 0.5, tmp / "later.wav")) - 1.5) < 0.05
+        assert abs(first_word(_moved(voice, -0.5, tmp / "sooner.wav")) - 0.5) < 0.05
+        _ffmpeg("-f", "lavfi", "-i", "anoisesrc=d=12:a=0.1", "-f", "lavfi", "-i", "sine=f=55:d=8", "-filter_complex",
+                "[0:a]highpass=f=2000[h];[1:a]adelay=4000:all=1[s];[h][s]amix=inputs=2:duration=longest", beat)
+        assert drops(beat, (0.5, 0.0)) == [4.0], drops(beat, (0.5, 0.0))
+
         # Куда идёт файл: при открытой заявке и ответом на вопрос склейки — сюда; без заявки
         # и ответом на другое (запрос трека владельца) — мимо, в ОТБОР и attach_track.
         def file(n: int, name: str, chat: int = 7, reply: str | None = None, album: str = "") -> dict:
@@ -2388,6 +2513,8 @@ def _selftest() -> None:
         take(file(5, "take 2.wav"))
         later("7")
         assert sent[-1] == STYLE and load()["drafts"]["7"]["asked"] == "style"
+        wish(7, "голос входит на дропе")  # текст при открытой заявке — просьба, а не разбор
+        assert sent[-1] == WISHED and load()["drafts"]["7"]["wish"] == "голос входит на дропе"
         callback(7, 7, "e")
         assert load()["drafts"]["7"]["knobs"]["design"]
         callback(7, 7, "y:1")
@@ -2396,6 +2523,7 @@ def _selftest() -> None:
         track = data["jobs"][0]["track"]
         assert data["tracks"][track]["knobs"] == dict(KNOBS, style="мелодично", design=True)
         assert [f["r"] for f in data["tracks"][track]["files"]] == ["вокал", "бит"]
+        assert data["tracks"][track]["wish"] == "голос входит на дропе"
 
         # Не выбрал звук — склейка идёт как лучше, человек не ждёт зря.
         start(11, 11)
@@ -2512,6 +2640,17 @@ def _selftest() -> None:
         assert load()["tracks"]["t1"]["knobs"]["like"] is None and load()["tracks"]["t1"]["tweaks"] == 3
         data = load()
         data["tracks"]["t1"]["tweaks"] = 1
+        data["tracks"]["t1"]["timing"] = {"sent": 2.75, "drops": [12.95], "beat": 0.857, "length": 153.0}
+        save(data)
+        payloads: list = []
+        llm.generate_skleyka = lambda payload: payloads.append(payload) or answers.pop(0)
+        answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "at": 12.95, "like": "", "reply": "На дроп."}]
+        talk(7, "голос раньше дропа", menu)
+        assert payloads[-1]["timing"]["voice"] == 2.75 and payloads[-1]["knobs"]["at"] == -1, payloads[-1]
+        assert load()["tracks"]["t1"]["knobs"]["at"] == 12.95 and "голос с 0:13" in sent[-1], sent[-1]
+        llm.generate_skleyka = model
+        data = load()
+        data["tracks"]["t1"].update(tweaks=1, talks=0)
         save(data)
         answers[:] = [RuntimeError("сеть")]
         talk(7, "эха", menu)
@@ -2595,6 +2734,12 @@ def _selftest() -> None:
             "вопрос об оплате — владельцу с номером"
         assert turn(KNOBS, "e+")["echo"] == ECHO_STEP and turn(dict(KNOBS, voice=VOICE_LIMIT), "v+")["voice"] == VOICE_LIMIT
         assert "с саунд-дизайном" in look(turn(KNOBS, "d")) and turn(KNOBS, "c1")["style"] == "мелодично"
+        assert turn(KNOBS, "a12.95")["at"] == 12.95 and "голос с 0:13" in look(turn(KNOBS, "a12.95"))
+        assert heard(KNOBS, {"at": 13})["at"] == 13 and heard(dict(KNOBS, at=13), {"at": -1})["at"] is None
+        rows = buttons("t1", KNOBS, swap=False, drop=12.95)
+        assert [rows[0][0]["callback_data"], rows[1][0]["callback_data"]] == [f"{PREFIX}t1:w", f"{PREFIX}t1:a12.95"]
+        callback(7, 7, "t1:w")
+        assert sent[-1] == TALK_ASK and TALK_MARK in TALK_ASK
         # Эдлибы: выкрики по очереди лево и право, точка меняется в паузе, а не на звуке.
         left, right = _scatter([(1.0, 1.5), (2.0, 2.3), (4.0, 4.2)])
         assert left[0][1] > right[0][1] and left[-1][1] > right[-1][1] and left[2][1] < right[2][1], (left, right)

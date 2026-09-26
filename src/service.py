@@ -1351,6 +1351,10 @@ def handle_message(message: dict, data: dict) -> bool:
         skleyka.cancel(chat_id)
         telegram.send_message(chat_id, "Отменил. Захочешь склеить — /skleyka.")
         return False
+    if skleyka.active(chat_id) and not text.startswith("/"):
+        # Просьба словами до склейки — «голос входит на дропе»: в заявку, а не в разбор.
+        skleyka.wish(chat_id, text)
+        return False
     if otbor.active(chat_id):
         if not text.startswith("/"):
             otbor.handle(message, admin=admin)
