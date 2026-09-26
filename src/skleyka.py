@@ -1388,7 +1388,8 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
 # под готовым треком.
 ASK_MARK = "· пришли"
 INTRO = ("🎛 <b>СКЛЕЙКА</b> — сведу вокал с битом в готовый трек. Бесплатно, автоматом, за несколько минут.\n\n"
-         "✏️ Важно, где входит голос или какой нужен звук, — напиши словами в любой момент до склейки.\n\n"
+         "✏️ В сведении разбираться не нужно — пиши мне обычными словами, как другу: «голос входит на дропе», "
+         "«хочу погрязнее», «как у Travis Scott». Напишешь до склейки — учту сразу, после — пересоберу.\n\n"
          "Как пришлёшь?")
 PICK = "Отметь, что у тебя есть отдельно, — потом попрошу каждую дорожку по очереди."
 # Дорожки, выгруженные с начала проекта, встают по местам сами, с затактом: где у голоса «раз»,
@@ -1428,8 +1429,8 @@ READY = ("🎛 <b>Склейка готова</b> — {look}.\n{parts}.\n{note}"
          "Это черновая склейка автоматом, не студия. Громкость как у релизов; WAV для площадок — следующим файлом.")
 MISMATCH = "Дорожки разной длины ({a} и {b}): если голос уехал от бита — выгрузи обе с самого начала проекта.\n"
 GUESSED = "Вокал и бит пришли одним альбомом — где что, понял по звуку. Перепутал — жми «↔ поменять».\n"
-TUNE = ("Не так? Подкрути — пересоберу{left}. Или напиши словами, что поменять и где должен входить голос, — "
-        "кнопкой «✏️ Написать словами» или ответом на это сообщение.\n\n"
+TUNE = ("Не так? Подкрути — пересоберу{left}. Или просто напиши словами, что поменять, как другу: "
+        "«слов не слышно», «погрязнее», «эха меньше», «голос на дропе», «как у Travis Scott».\n\n"
         "Выложишь трек на площадки — жми «В ОТБОР»: он выйдет в канале с твоим именем.")
 
 # Альбом в Telegram — до десяти файлов: хватает на вокал, даблы, бэки, эдлибы и бит по частям.
@@ -2029,8 +2030,8 @@ TALKED = "Поговорили про этот трек достаточно —
 LIKE_MISSING = "«{name}» в магазинах не нашёл — звук ни к чему не подтягивал."
 LIKE_LOST = "Отрывок «{name}» не скачался — звук к нему не подтягивал.\n"
 TALK_KNOBS = ("style", "design", "voice", "echo", "at")
-TALK_ASK = ("✏️ Что поменять — напиши словами ответом на это сообщение: «голос входит на дропе», "
-            "«голос на долю позже», «эха меньше», «погрязнее».")
+TALK_ASK = ("✏️ Что поменять — напиши словами, как другу: «слов не слышно», «голос входит на дропе», "
+            "«голос на долю позже», «эха меньше», «погрязнее», «как у Travis Scott».")
 DROP_NOTE = "Голос входит на {voice}, а бас в бите — на {drop}. Если голос уехал — жми «🎯 голос с {drop}».\n"
 
 
@@ -2079,6 +2080,19 @@ def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
         if new["like"] is was:
             words = (f"{words}\n" if words else "") + LIKE_MISSING.format(name=html.escape(asked))
     return new, words
+
+
+# Час после готовой склейки простой текст — к ней, а не в разбор: ответом на сообщение
+# с ручками почти не пишут, и «сделай голос громче» получал в ПРОЯВКЕ ответ не про свой трек.
+TALK_WINDOW = 3600
+
+
+def fresh(chat_id: str | int) -> str:
+    """Трек человека, готовый меньше TALK_WINDOW назад, — к нему просьба без ответа на сообщение."""
+    chat_id, tracks = str(chat_id), load()["tracks"]
+    ready = [key for key, track in tracks.items()
+             if track["chat"] == chat_id and _age(track.get("done", "")) < TALK_WINDOW]
+    return max(ready, key=lambda key: tracks[key]["done"], default="")
 
 
 def wish(chat_id: str | int, text: str) -> bool:
@@ -2197,7 +2211,7 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     if not track:
         return
     if result.get("ok"):
-        track.update({key: result[key] for key in ("timing", "knobs") if result.get(key)})
+        track.update({key: result[key] for key in ("timing", "knobs") if result.get(key)}, done=state.iso())
         if not job.get("tweak"):
             _reward(data, track)
         return
@@ -2753,6 +2767,7 @@ def _selftest() -> None:
             _finish(data, done, {"id": f"j{n}", "track": "t40"}, tmp / f"ok{n}")
         assert len(data["bonus"]["7"]) == 1 and sent[-2:] == [BONUS, BONUS_SENT], "второй раз бонуса нет"
         save(data)
+        assert fresh(40) == "t40" and not fresh(41), "час после готовой склейки простой текст — к ней"
         invited(40, code)
         assert not load()["invited_by"], "склеивший по ссылке второй раз не приглашённый"
         assert not _limit(data, "7"), "бонус — склейка сверх лимита"

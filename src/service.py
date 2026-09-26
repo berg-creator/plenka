@@ -1424,6 +1424,10 @@ def handle_message(message: dict, data: dict) -> bool:
         # прежний разбор по имени; /proyavka с текстом идёт в разбор сразу.
         _vkladysh(chat_id, track)
         return False
+    if not kind and skleyka.fresh(chat_id):
+        # Простой текст в первый час после склейки — просьба к ней: «сделай голос громче».
+        skleyka.talk(chat_id, text, {}, admin=admin)
+        return False
     if kind == "proyavka" and body:
         kind, text = "", body
     if kind == "proyavka" or kind == "menu" and body in PROYAVKA_KEYS:
