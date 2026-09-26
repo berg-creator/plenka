@@ -76,6 +76,9 @@ docs/research/ — только если задача велит. Агентов
 и сам назвал, с какой секунды каждый: бит1 с 16, бит2 с 7, бит3 с 25. Для этого у сценария поле `music_from` —
 секунда бита, поиск сильной доли и подгонка под склейки её не двигают. Три версии — `build/b5..b7/`, клипы те же; ушли 26.09 в 01:40, версия бит3 — с кнопками.
 В 01:56 владелец: «биты чуть тише» — `reels.BEAT_LUFS` -10 → -12 (на 1 дБ тише голоса), b5..b7 пересобраны и ушли в 02:00.
+В 12:20 владелец: «биты оттуда же, откуда для прошлых роликов» (это Pixabay, `assets/audio/SOURCES.md`) и «всё-таки
+чуть тише» — `BEAT_LUFS` -14 (на 3 дБ тише голоса), три бита Pixabay серии JayStacksBeats с тегом Chief Keef и без Content ID
+(`px-chiraq`, `px-extendo`, `px-purplestash` в `data/private/audio/`, начало ищет `beat_start`) — версии `build/b8..b10/` ушли в 12:30, последняя с кнопками.
 
 Промпт:
 > Проект ~/ПЛЕНКА. Ролик `20260923-skleyka-3`, кадры — `~/.cache/imggen/keef/` (`run.sh`, `anim.sh`, `merge.py`, `freeze.py`).
@@ -84,7 +87,7 @@ docs/research/ — только если задача велит. Агентов
 > repos/berg-creator/plenka-state/contents/reels/20260923-skleyka-3/feedback.jsonl | grep '^{'` — было 3 строки.
 > Новой нет — `~/.cache/imggen/keef/wait_feedback.sh 20260923-skleyka-3 3` и `caffeinate -ims -t 14400` фоном.
 > Бит — `music` и `music_from` в `build/20260923-skleyka-3.json`. «Бит 1/2/3» после 26.09 — новые:
-> `own-bit1.mp3` с 16, `own-bit2.mp3` с 7, `own-bit3.mp3` с 25 (версии 5–7); прежние версии 1–4 — `own-bitlo`,
+> `own-bit1.mp3` с 16, `own-bit2.mp3` с 7, `own-bit3.mp3` с 25 (версии 5–7); «Pixabay 1/2/3» или Chiraq/Extendo/Purple Stash — `px-chiraq`, `px-extendo`, `px-purplestash` (версии 8–10); прежние версии 1–4 — `own-bitlo`,
 > `own-eshval`, `own-eshval2`, `keef-organ-1`, без `music_from`. Другие правки — кадр, оживление, проверка кропами, черновик `--draft`
 > из чистой копии (ссылки на `.env`, `.venv`, `data/private`, `assets/audio/*.mp3` из ~/ПЛЕНКА):
 > `.venv/bin/python -m src.reels --preview ~/.cache/imggen/keef/build/20260923-skleyka-3.json --voice ~/.cache/imggen/keef/build/ --draft`.

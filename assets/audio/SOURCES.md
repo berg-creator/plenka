@@ -63,3 +63,18 @@
 4. **`aggressive-04`** и **`nostalgic-02`** — два фонковых, проверить
    на глянец
 5. Остальные — по порядку
+
+## Биты роликов в `data/private/audio/px-*`
+
+Взяты 26.09.2026 под ролик `20260923-skleyka-3` (владелец: «биты оттуда же, откуда
+для прошлых роликов»). Все три — серия JayStacksBeats «Futuristic Trap x Hard Trap
+Instrumental», теги Chief Keef и Chicago drill, отметки Content ID нет. Треки с отметкой
+«Content ID Registered» (например, «Bouncy Flute and Keys» у onesevenbeatxs) не брать:
+YouTube заберёт ролик под чужую монетизацию. Сайт с GitHub и из curl отвечает 403 —
+искать через браузер, файл полного трека отдаёт `cdn.pixabay.com/audio/…` без входа.
+
+| Файл | Исходное имя |
+|---|---|
+| `px-chiraq.mp3` | `trap-chiraq-futuristic-trap-x-hard-trap-instrumental-584076` |
+| `px-extendo.mp3` | `trap-extendo-futuristic-trap-x-hard-trap-instrumental-584074` |
+| `px-purplestash.mp3` | `trap-purple-stash-futuristic-trap-x-hard-trap-instrumental-584070` |
