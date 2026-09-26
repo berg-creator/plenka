@@ -1,11 +1,16 @@
 {
   "day": "2026-09-26",
-  "total": 0,
+  "total": 1,
   "users": {
     "1d0ec4cc6dd7e460": {
       "count": 1,
       "day": "2026-09-25",
       "total": 20
+    },
+    "ab742d28d70a0b37": {
+      "count": 1,
+      "day": "2026-09-26",
+      "total": 1
     }
   }
 }
