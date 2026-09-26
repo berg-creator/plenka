@@ -713,6 +713,10 @@ def segment(
         # а остаток кадра держит последний кадр.
         if 0 < length - skip < shot.seconds:
             speed = f"setpts=PTS*{min(SLOWEST, shot.seconds / (length - skip)):.3f}"
+            # Стоп-кадр — брак (владелец 27.09.2026: «в один миг застывает»): в skleyka-3 клип 4-1
+            # в 2 с стоял на строке 6,2 с, и последние 2 с кадр не двигался. На листах кадров его не видно.
+            if (still := shot.seconds - SLOWEST * (length - skip)) > 0.25:
+                print(f"  ⚠ стоп-кадр {still:.1f} с: {source.name} короче кадра, нужен клип длиннее или продолжение")
         hold = f"tpad=stop_mode=clone:stop_duration={shot.seconds:.2f}"
 
     # Выход из чёрного — мягкая склейка между кадрами. Первому кадру ролика
