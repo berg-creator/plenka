@@ -9,6 +9,10 @@ name: Слепая прослушка
 #
 # Запуск держит группу до десяти минут: отрывок уходит в канал, а опрос под ним
 # вешает дежурство (src/moderate.py), и викторина ждёт, пока оно это сделает.
+#
+# По воскресеньям вместо «угадай артиста» — «где ИИ» (src/quiz_ai.py): видео
+# из раунда, который заранее собрал Mac владельца. Раунд и ответ лежат только
+# в приватном хранилище; в этот лог ответ не пишется.
 on:
   schedule:
     # 12:00 UTC — 15:00 по Москве, между дневной и вечерней публикациями.
@@ -20,6 +24,10 @@ on:
         type: choice
         options: [admin, channel]
         default: admin
+      ai:
+        description: "«Где ИИ» из запаса в любой день"
+        type: boolean
+        default: false
 
 concurrency:
   group: state-write
@@ -67,15 +75,31 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           echo "STATE_DIR=${GITHUB_WORKSPACE}/private-state" >> "$GITHUB_ENV"
 
+      # Видео «где ИИ» собирает ffmpeg — только в воскресенье по Москве
+      # или по кнопке: в будни он не нужен, а ставится с полминуты.
+      - name: Поставить ffmpeg
+        env:
+          AI: ${{ inputs.ai }}
+        run: |
+          if [ "$(TZ=Europe/Moscow date +%u)" = 7 ] || [ "$AI" = "true" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+
       - name: Отправить викторину
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          # Метку ИИ у Яндекса «где ИИ» сверяет перед выходом: с адресов
+          # GitHub Яндекс отвечает 451, поэтому — через функцию Облака.
+          YANDEX_FUNCTION_URL: ${{ secrets.YANDEX_FUNCTION_URL }}
+          YANDEX_FUNCTION_KEY: ${{ secrets.YANDEX_FUNCTION_KEY }}
           # Пока PUBLISH_TARGET стоит admin, викторина приходит владельцу
           # в личку — как и остальные посты. Канал ничего не замечает.
           TARGET: ${{ inputs.target || vars.PUBLISH_TARGET || 'admin' }}
-        run: python -m src.quiz --target "$TARGET"
+          AI: ${{ inputs.ai }}
+        run: python -m src.quiz --target "$TARGET" $([ "$AI" = "true" ] && echo --ai)
 
       # always: титулы раздаются до поиска трека, и если трек не нашёлся,
       # раздачу всё равно надо записать — иначе завтра она повторится.
@@ -87,6 +111,7 @@ jobs:
           git pull --rebase --autostash origin ${{ github.ref_name }}
           git push
 
+      # Сюда же уходит вышедший или выброшенный раунд «где ИИ»: -A видит удалённую папку.
       - name: Сохранить список угадавших
         if: always()
         run: |
