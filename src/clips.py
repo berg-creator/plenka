@@ -712,11 +712,15 @@ def segment(
         # заметил в ролике rhyno 17.09.2026. Оно замедляется до SLOWEST раз,
         # а остаток кадра держит последний кадр.
         if 0 < length - skip < shot.seconds:
-            speed = f"setpts=PTS*{min(SLOWEST, shot.seconds / (length - skip)):.3f}"
+            slow = shot.seconds / (length - skip)
+            speed = f"setpts=PTS*{min(SLOWEST, slow):.3f}"
             # Стоп-кадр — брак (владелец 27.09.2026: «в один миг застывает»), а на листах кадров,
             # которыми проверяются рисованные клипы, его не видно — поэтому о нём строкой в логе.
+            # Заметное замедление — тоже: ×1,8 владелец в тот же день назвал «слоу-мо», ×1,2 прошло.
             if (still := shot.seconds - SLOWEST * (length - skip)) > 0.25:
                 print(f"  ⚠ стоп-кадр {still:.1f} с: {source.name} короче кадра, нужен клип длиннее или продолжение")
+            elif slow > 1.25:
+                print(f"  ⚠ слоу-мо ×{slow:.1f}: {source.name} короче кадра, нужен клип длиннее или продолжение")
         hold = f"tpad=stop_mode=clone:stop_duration={shot.seconds:.2f}"
 
     # Выход из чёрного — мягкая склейка между кадрами. Первому кадру ролика
