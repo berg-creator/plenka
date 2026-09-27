@@ -99,7 +99,7 @@ ASK_LINK = ("Файл принял. Теперь ссылку, где трек �
             "канал выпускает только то, что вышло на площадке.")
 NOT_FOUND = ("Не нашёл «{name}» ни в Apple Music, ни в Deezer. Пришли ссылку, где трек "
              "выложен: Spotify, Яндекс, YouTube или SoundCloud.\n\n"
-             "Ещё не выложен и лежит вокалом и битом — склею: /skleyka")
+             "Ещё не выложен и лежит вокалом и битом — сведу: /skleyka")
 NEED_FILE = ("Нашёл «{name}», но площадка не отдаёт даже отрывка — под постом было бы "
              "нечего слушать. Пришли сам трек файлом: mp3 или m4a до 20 МБ.")
 TOO_BIG = "Файл больше 20 МБ — Telegram не отдаёт такие ботам. Пришли mp3 полегче."
@@ -426,7 +426,7 @@ def refusal(data: dict, chat_id: str, user_id: str, *, admin: bool) -> str:
 
 def start(chat_id: str | int, user_id: str | int, *, admin: bool = False, skleyka: bool = False) -> None:
     """Открывает заявку: /otbor, кнопка меню, ссылка с меткой из ролика (service.SOURCES)
-    и кнопка под готовой склейкой — тогда заявка помнит, что трек сводил бот."""
+    и кнопка под готовым треком СВЕДЕНИЯ — тогда заявка помнит, что трек сводил бот."""
     chat_id, user_id = str(chat_id), str(user_id)
     data = load()
     denied = refusal(data, chat_id, user_id, admin=admin)
@@ -640,10 +640,10 @@ def build_post(application: dict) -> dict:
     if links:
         parts.append("\n".join(links))
     if application.get("skleyka"):
-        # Артист нажал «Выложил — в ОТБОР» под своей склейкой (владелец, 24.09.2026):
+        # Артист нажал «Выложил — в ОТБОР» под своим треком из СВЕДЕНИЯ (владелец, 24.09.2026):
         # читатель канала видит живой трек из бота, а не рекламу бота.
         parts.append(f'Вокал с битом свёл бот канала — <a href="https://t.me/{config.BOT_HANDLE.lstrip("@")}'
-                     f'?start=skleyka_otbor">СКЛЕЙКА</a>.')
+                     f'?start=skleyka_otbor">СВЕДЕНИЕ</a>.')
     parts.append(f"Пришли свой — {config.BOT_HANDLE}")
     return {
         "rubric": "otbor",
@@ -853,7 +853,7 @@ def _selftest() -> None:
         text = build_post(queued)["text"]
         assert text.startswith("<b>NOBODY HOME — «NIGHT DRIVE»</b>")
         assert "Со слов артиста:\n<blockquote>Записал" in text and text.endswith(f"Пришли свой — {config.BOT_HANDLE}")
-        assert "skleyka_otbor" not in text and "?start=skleyka_otbor\">СКЛЕЙКА</a>" in build_post({**queued, "skleyka": True})["text"]
+        assert "skleyka_otbor" not in text and "?start=skleyka_otbor\">СВЕДЕНИЕ</a>" in build_post({**queued, "skleyka": True})["text"]
         assert ('▸ Артист — <a href="https://vk.com/nobodyhome">ВКонтакте</a> · '
                 '<a href="https://t.me/nobodyhome_music">Telegram</a>') in text and publish._LISTEN_LINE.search(text)
         # Площадки разворачиваются, а зов в бота остаётся отдельным абзацем.

@@ -49,7 +49,7 @@ POLL_TIMEOUT = 25
 # Как часто дежурство отправляет состояние в репозиторий.
 PUSH_EVERY = 600
 
-# Опрос, пока идёт или ждёт склейка (src/skleyka.py): очередь двигается на каждом круге.
+# Опрос, пока идёт или ждёт сведение (src/skleyka.py): очередь двигается на каждом круге.
 SKLEYKA_POLL = 3
 
 
@@ -334,7 +334,7 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
     for update in sorted(updates, key=lambda update: "pre_checkout_query" not in update):
         last_id = max(last_id, update.get("update_id", 0) + 1)
 
-        # Оплата звёздами (src/skleyka.py): товар — только склейки, проверять перед
+        # Оплата звёздами (src/skleyka.py): товар — только треки СВЕДЕНИЯ сверх лимита, проверять перед
         # списанием нечего, поэтому «да» сразу.
         checkout = update.get("pre_checkout_query")
         if checkout:
@@ -421,16 +421,16 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                         log.error("Правка ролика не принята: %s", exc)
                 continue
 
-            # Дорожки СКЛЕЙКИ (src/skleyka.py): после /skleyka или ответом на её
+            # Дорожки СВЕДЕНИЯ (src/skleyka.py): после /skleyka или ответом на её
             # инструкцию файлы — вокал и бит, а не трек в ОТБОР. Ответ на что-то
             # другое, например на запрос трека у владельца, идёт дальше своим путём.
             if skleyka.wants(message):
-                print("  дорожка склейки")
+                print("  дорожка сведения")
                 if not args.dry_run:
                     try:
                         skleyka.take(message)
                     except Exception as exc:  # noqa: BLE001 — чужой файл не роняет дежурство
-                        log.error("Склейка не приняла дорожку: %s", exc)
+                        log.error("Сведение не приняло дорожку: %s", exc)
                 continue
 
             # Полный трек в ответ на запрос (compose.do_ask_tracks). Разбирается
@@ -630,11 +630,11 @@ def serve(minutes: int) -> int:
         svedenie.notify_waiting()
     except Exception as exc:  # noqa: BLE001 — рассылка не держит дежурство
         log.error("Ждущие ДВОЙНИКА не оповещены: %s", exc)
-    # Склейку, оборванную концом прошлой смены, доделывает эта (src/skleyka.py).
+    # Сведение, оборванное концом прошлой смены, доделывает эта (src/skleyka.py).
     try:
         skleyka.resume()
-    except Exception as exc:  # noqa: BLE001 — склейка не держит дежурство
-        log.error("Склейки прошлой смены не подняты: %s", exc)
+    except Exception as exc:  # noqa: BLE001 — сведение не держит дежурство
+        log.error("Сведение прошлой смены не поднято: %s", exc)
     offset = state.read_json(OFFSET_FILE, {"offset": 0}).get("offset", 0)
     limits = service.load_state()
     total_handled, total_served = 0, 0
@@ -644,13 +644,13 @@ def serve(minutes: int) -> int:
     next_push = time.monotonic() + PUSH_EVERY
 
     while time.monotonic() < deadline:
-        # Склейка идёт отдельным процессом: здесь — только очередь. Пока она не пуста,
-        # Telegram опрашивается чаще, иначе готовая склейка ждала бы следующую до 25 секунд.
+        # Сведение идёт отдельным процессом: здесь — только очередь. Пока она не пуста,
+        # Telegram опрашивается чаще, иначе готовый трек ждал бы следующую до 25 секунд.
         try:
             skleyka.tick()
             wait = SKLEYKA_POLL if skleyka.busy() else POLL_TIMEOUT
-        except Exception as exc:  # noqa: BLE001 — склейка не держит дежурство
-            log.error("Очередь склеек сорвалась: %s", exc)
+        except Exception as exc:  # noqa: BLE001 — сведение не держит дежурство
+            log.error("Очередь сведения сорвалась: %s", exc)
             wait = POLL_TIMEOUT
         try:
             updates = telegram.get_updates(offset=offset, timeout=wait)
@@ -677,11 +677,11 @@ def serve(minutes: int) -> int:
                 print("Код бота обновился — смена уступает место свежей.")
                 break
 
-    # Идущую склейку смена дожидается: человек ждёт трек, а следующая смена начнёт её заново.
+    # Идущее сведение смена дожидается: человек ждёт трек, а следующая смена начнёт его заново.
     try:
         skleyka.finish()
     except Exception as exc:  # noqa: BLE001
-        log.error("Склейка на конце смены не дождалась: %s", exc)
+        log.error("Сведение на конце смены не дождалось: %s", exc)
     push_state()
     print(f"Дежурство окончено. Нажатий: {total_handled}. Разборов: {total_served}.")
     return 0

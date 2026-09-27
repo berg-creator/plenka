@@ -111,7 +111,7 @@ MEME_SCHEMA = {
     "additionalProperties": False,
 }
 
-# СКЛЕЙКА (src/skleyka.py): просьба словами — в значения тех же ручек, что у кнопок.
+# СВЕДЕНИЕ (src/skleyka.py): просьба словами — в значения тех же ручек, что у кнопок.
 # Пределы код держит сам (skleyka.heard), здесь они — подсказка модели: ГигаЧат
 # строгих схем не принимает и видит только описания полей.
 SKLEYKA_SCHEMA = {
@@ -275,7 +275,7 @@ def generate_clip(payload: dict) -> dict:
 
 
 def generate_skleyka(payload: dict) -> dict:
-    """Просьба человека к готовой склейке — в новые значения ручек (prompts/skleyka.md)."""
+    """Просьба человека к готовому треку СВЕДЕНИЯ — в новые значения ручек (prompts/skleyka.md)."""
     return _generate(
         f"{(config.PROMPTS / 'skleyka.md').read_text(encoding='utf-8')}\n\n"
         f"## Данные\n\n"

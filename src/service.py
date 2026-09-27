@@ -64,25 +64,25 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "sved_pikabu": "ДВОЙНИК, Пикабу",
            # Приглашение сравнить музыку (?start=sv_<код>): метка одна на все, код сюда не пишется.
            "sv": "ДВОЙНИК, друг позвал сравнить",
-           # СКЛЕЙКА зовут туда, где просят свести трек: ?start=skleyka_chat — из чатов артистов.
-           "skleyka": "СКЛЕЙКА, без площадки", "skleyka_chat": "СКЛЕЙКА, чаты артистов",
-           # Артист позвал артиста из-под лимита склеек (?start=skleyka_r<код>): код сюда не пишется.
-           "skleyka_ref": "СКЛЕЙКА, позвал артист",
-           # В СКЛЕЙКУ зовёт шестая боль роликов (prompts/reels.md): ?start=skleyka_yt — из ролика.
-           "skleyka_yt": "СКЛЕЙКА, YouTube", "skleyka_tt": "СКЛЕЙКА, TikTok", "skleyka_vk": "СКЛЕЙКА, ВКонтакте",
+           # В СВЕДЕНИЕ зовут туда, где просят свести трек: ?start=skleyka_chat — из чатов артистов.
+           "skleyka": "СВЕДЕНИЕ, без площадки", "skleyka_chat": "СВЕДЕНИЕ, чаты артистов",
+           # Артист позвал артиста из-под лимита треков (?start=skleyka_r<код>): код сюда не пишется.
+           "skleyka_ref": "СВЕДЕНИЕ, позвал артист",
+           # В СВЕДЕНИЕ зовёт шестая боль роликов (prompts/reels.md): ?start=skleyka_yt — из ролика.
+           "skleyka_yt": "СВЕДЕНИЕ, YouTube", "skleyka_tt": "СВЕДЕНИЕ, TikTok", "skleyka_vk": "СВЕДЕНИЕ, ВКонтакте",
            # Ответы владельца там, где просят свести трек (docs/launch/2026-09-23-skleyka-mesta.md).
            # Метка на место, а не на площадку: иначе не видно, какое из них сработало.
-           "skleyka_vksved": "СКЛЕЙКА, ВК: Бесплатное Сведение",
-           "skleyka_vkbeat": "СКЛЕЙКА, ВК: Ищу битмейкера",
-           "skleyka_bmr": "СКЛЕЙКА, чат Битмейкерской",
-           # Платный посев под склейку (docs/launch/2026-09-23-skleyka-mesta.md): метка
+           "skleyka_vksved": "СВЕДЕНИЕ, ВК: Бесплатное Сведение",
+           "skleyka_vkbeat": "СВЕДЕНИЕ, ВК: Ищу битмейкера",
+           "skleyka_bmr": "СВЕДЕНИЕ, чат Битмейкерской",
+           # Платный посев под СВЕДЕНИЕ (docs/launch/2026-09-23-skleyka-mesta.md): метка
            # на канал, чтобы было видно, какая покупка окупилась. Заводится до оплаты —
            # незнакомая метка посчиталась бы как «без площадки».
-           "skleyka_text4free": "СКЛЕЙКА, платно: TEXT4FREE",
-           "skleyka_predlozhka": "СКЛЕЙКА, платно: Ищу Битмейкера | Артиста",
-           "skleyka_kenty": "СКЛЕЙКА, КЕНТЫ СКВАД: турнир треков",
-           "skleyka_bandlink": "СКЛЕЙКА, BandLink: тред релизов",
-           "skleyka_pin": "СКЛЕЙКА, закреп канала", "skleyka_otbor": "СКЛЕЙКА, пост ОТБОРА",
+           "skleyka_text4free": "СВЕДЕНИЕ, платно: TEXT4FREE",
+           "skleyka_predlozhka": "СВЕДЕНИЕ, платно: Ищу Битмейкера | Артиста",
+           "skleyka_kenty": "СВЕДЕНИЕ, КЕНТЫ СКВАД: турнир треков",
+           "skleyka_bandlink": "СВЕДЕНИЕ, BandLink: тред релизов",
+           "skleyka_pin": "СВЕДЕНИЕ, закреп канала", "skleyka_otbor": "СВЕДЕНИЕ, пост ОТБОРА",
            # Ссылка в подписи вкладыша: пересланная карточка привела нового человека.
            "vkladysh": "ВКЛАДЫШ, пересланная карточка",
            "ad": "реклама, канал не распознан"}
@@ -127,7 +127,7 @@ COMMANDS = {
 # Порядок — по силе боли, как в меню «/» (setup.BOT_COMMANDS, владелец 25.09.2026).
 MENU = (
     f'Бот канала — <b><a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">ПЛЁНКА</a></b>\n\n'
-    "🎛 <b>СКЛЕЙКА</b>\nПришли вокал и бит — сведу их в готовый трек.\n\n"
+    "🎛 <b>СВЕДЕНИЕ</b>\nПришли вокал и бит — сведу их в готовый трек.\n\n"
     "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
     "📼 <b>ВКЛАДЫШ</b>\nКинь ссылку на трек — пришлю карточку со всеми площадками для друга.\n\n"
     "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
@@ -169,7 +169,7 @@ CALLBACK_PREFIX = "s:"
 
 def menu_buttons() -> list[list[dict]]:
     return [
-        [{"text": "🎛 СКЛЕЙКА — свести вокал и бит", "callback_data": f"{CALLBACK_PREFIX}skleyka"}],
+        [{"text": "🎛 СВЕДЕНИЕ — вокал и бит в трек", "callback_data": f"{CALLBACK_PREFIX}skleyka"}],
         [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
         [{"text": "📼 ВКЛАДЫШ — трек для друга", "callback_data": f"{CALLBACK_PREFIX}vkladysh"}],
         [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
@@ -1312,7 +1312,7 @@ def handle_message(message: dict, data: dict) -> bool:
             svedenie.compare(chat_id, text)
         return False
     if not text.startswith("/") and skleyka.TALK_MARK in asked:
-        # Ответ словами на ручки готовой склейки (src/skleyka.py): пересборка, а не разбор.
+        # Ответ словами на ручки готового трека СВЕДЕНИЯ (src/skleyka.py): пересборка, а не разбор.
         skleyka.talk(chat_id, text, message["reply_to_message"], admin=admin)
         return False
     if not text.startswith("/") and (svedenie.INTRO_MARK in asked or svedenie.NAMES_MARK in asked):
@@ -1346,13 +1346,13 @@ def handle_message(message: dict, data: dict) -> bool:
         skleyka.cancel(chat_id)
         otbor.start(chat_id, user_id, admin=admin)
         return False
-    # Заявка СКЛЕЙКИ ждёт файлы (src/skleyka.py): «отмена» её закрывает, а не уходит в разбор.
+    # Заявка СВЕДЕНИЯ ждёт файлы (src/skleyka.py): «отмена» её закрывает, а не уходит в разбор.
     if skleyka.active(chat_id) and text.casefold() in otbor.CANCEL:
         skleyka.cancel(chat_id)
-        telegram.send_message(chat_id, "Отменил. Захочешь склеить — /skleyka.")
+        telegram.send_message(chat_id, skleyka.CANCELLED)
         return False
     if not text.startswith("/") and skleyka.wish(chat_id, text):
-        # Просьба словами до склейки — «голос входит на дропе»: в заявку или трек в очереди, а не в разбор.
+        # Просьба словами заранее — «голос входит на дропе»: в заявку или трек в очереди, а не в разбор.
         return False
     if otbor.active(chat_id):
         if not text.startswith("/"):
@@ -1425,7 +1425,7 @@ def handle_message(message: dict, data: dict) -> bool:
         _vkladysh(chat_id, track)
         return False
     if not kind and skleyka.fresh(chat_id):
-        # Простой текст в первый час после склейки — просьба к ней: «сделай голос громче».
+        # Простой текст в первый час после сведения — просьба к нему: «сделай голос громче».
         skleyka.talk(chat_id, text, {}, admin=admin)
         return False
     if kind == "proyavka" and body:
@@ -1592,7 +1592,7 @@ def handle_callback(query: dict, data: dict) -> None:
 
     if action in ("skleyka", "sk"):
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
-        # Меню и «Подписался» открывают заявку, кнопки под склейкой — пересборку.
+        # Меню и «Подписался» открывают заявку, кнопки под готовым треком — пересборку.
         if action == "sk":
             skleyka.callback(chat_id, user_id, subject, admin=admin,
                              message_id=query.get("message", {}).get("message_id"))
@@ -1976,7 +1976,7 @@ def _selftest() -> None:
         assert replies[-3][0] == VKLADYSH_NEXT and replies[-3][1][1][0]["callback_data"] == _cb("razbor", "Bones")
         assert [text for text, _ in replies[-2:]] == [VKLADYSH] * 2, replies[-2:]
         assert state.read_json(SOURCES_FILE, {})[_today()]["vkladysh"] == 1
-        # Артист позвал артиста из-под лимита склеек: метка одна, код — в приглашение.
+        # Артист позвал артиста из-под лимита треков: метка одна, код — в приглашение.
         real_sk = skleyka.start, skleyka.invited
         skleyka.start, skleyka.invited = (lambda *a, **kw: None), (lambda chat, code: invited.append((chat, code)))
         try:
