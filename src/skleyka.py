@@ -17,7 +17,9 @@
 
 1. Вокал приводится к VOCAL_LUFS, и только потом компрессия VOCAL_CHAIN — её пороги
    отсчитаны от этого уровня. Иначе тихая запись прошла бы мимо компрессора,
-   а громкая сплющилась. Голос, записанный в один канал стерео, встаёт в центр.
+   а громкая сплющилась. Вторая ступень — не больше, чем нужно до плотности
+   голоса релизов (VOCAL_SWING): уже сведённый голос второй раз не сжимается.
+   Голос, записанный в один канал стерео, встаёт в центр.
 2. Тембр вокала выравнивается к сведённому рэп-вокалу (TONE) по замеру октав —
    на весь трек и по ходу трека: домашние записи расходятся на 10 дБ, а куски
    одной записи — на 6–7, и одна полка на всех не годится.
@@ -25,9 +27,10 @@
    в сайдчейне: середина бита приседает по полосам выше 120 Гц ключом от тех же
    полос голоса, глубже всего в 1–4 кГц и только пока голос звучит (ROOM_*).
    Низ и края не тронуты: бочка и 808 качают, бит остаётся широким.
-4. Баланс — вровень по EBU R128, а у дорожек из одного проекта — как у артиста
-   (SAME_PROJECT); по ходу трека голос ведёт райдер: где бит его перекрывает,
-   голос плавно поднимается. Один баланс на весь трек владелец услышал с первой
+4. Баланс — как у релизов по EBU R128 (голос на 2 дБ тише бита), а у дорожек
+   из одного проекта — как у артиста (SAME_PROJECT); по ходу трека голос ведёт
+   райдер: где бит его перекрывает глубже, чем бывает в релизах, голос плавно
+   поднимается. Один баланс на весь трек владелец услышал с первой
    прослушки: «где-то будто слишком громкий бит».
 5. Стиль (STYLES) — набор эффектов, названный словом, понятным без знания
    сведения. Отзвук, дилей и дабл — шинами, доля к сухому голосу по замеру,
@@ -120,10 +123,27 @@ LOPSIDED = 6.0
 # Компрессия плотнее дикторской (reels.VOICE_CHAIN, ratio 3 почти вхолостую):
 # быстрый ловит пики (порог −16 дБ), второй ровняет строку (−26 дБ, ratio 3).
 # При VOCAL_LUFS голос в строке идёт около −20 дБ, и второй давит 3–4 дБ постоянно.
+# Второй — по замеру: подмешивается параллельно той долей из LEVEL_STEPS, при которой
+# размах голоса внутри строк (swing) не мельче VOCAL_SWING — медианы 420 голосов
+# релизов, разделённых demucs (квартили 20,2…27,7 дБ). Экзамен на 40 релизах
+# 28.09.2026 (src/ekzamen.py): уже сведённый голос обе ступени целиком сжимали ещё
+# на 4,6 дБ размаха (квартили −6,1…−3,7) — тихое между слогами, вдохи и шум
+# поднимались к слову; с долей по замеру — на 2,0, почти одна первая ступень (1,6).
+# Сырой голос владельца («Асапчик», размах 27,6 и 29,1 дБ) выходит на 24,5 и 24,0 —
+# медиана релизов, — а не на 22,2 и 22,7, как с обеими ступенями целиком.
 VOCAL_CHAIN = (
-    "acompressor=threshold=0.158:ratio=4:attack=1:release=60,"
-    "acompressor=threshold=0.05:ratio=3:attack=10:release=150:knee=4"
+    "acompressor=threshold=0.158:ratio=4:attack=1:release=60",
+    "acompressor=threshold=0.05:ratio=3:attack=10:release=150:knee=4",
 )
+VOCAL_SWING = 23.9
+LEVEL_STEPS = (1.0, 0.75, 0.5, 0.25, 0.0)
+# Сжатый голос — на SQUEEZED_LUFS, сколько бы ни сжала вторая ступень: де-эссер,
+# перегруз DIRT и третья ступень DENSE зависят от громкости входа и настроены на ту,
+# с которой голос выходил из обеих ступеней целиком (медиана 40 релизов −24,8 LUFS).
+# Без этого голос, сжатый слабее, приходил к де-эссеру на 5 дБ громче, и тот резал
+# 8 кГц у уже сведённого голоса на 3,7 дБ вместо 2,3 (экзамен 28.09.2026: тембр
+# голоса в 8 кГц −2,8 дБ к релизу против −0,5 до правки; на −25 — −0,7).
+SQUEEZED_LUFS = -25.0
 # Тембр — после компрессии и по замеру, а не одной полкой на всех: домашние
 # записи расходятся на 10 дБ. У конденсатора вплотную середина бубнит (у Little
 # Chicago's Finest полоса 250 Гц на 5 дБ выше 1 кГц), у телефона её нет вовсе,
@@ -190,8 +210,11 @@ ROOM_RATIO = 1.25
 
 # --- баланс -----------------------------------------------------------------
 # Вокал к биту по EBU R128. Бит без пауз, а у вокала паузы отсекает сам замер,
-# так что 0 — голос в строке вровень с битом.
-VOCAL_OVER_BEAT = 0.0
+# так что 0 — голос в строке вровень с битом. −2 — медиана релизов (у 447 треков,
+# разделённых demucs, −1,9 дБ). До 28.09.2026 стоял 0, и вместе с райдером голос
+# выходил на 3,2 дБ громче, чем в своём же релизе (экзамен на 40 релизах, квартили
+# +0,6…+4,7): «голос не лежит в бите». С −2 и RIDE_TARGET — +0,1 (−2,3…+1,3).
+VOCAL_OVER_BEAT = -2.0
 # Голос и бит одной длины (расходятся не больше SAME_PROJECT с) выгружены из одного
 # проекта — так просит FROM_START, — и баланс между ними поставил артист: он и остаётся,
 # как и тембр голоса (TONE).
@@ -204,15 +227,22 @@ VOCAL_OVER_BEAT = 0.0
 SAME_PROJECT = 2.0
 BALANCE_RANGE = (-9.0, 3.0)
 # Райдер — как звукорежиссёр с фейдером голоса: громкость голоса окнами 0,4 с
-# (EBU R128 M) против бита в те же окна. Где голос отстаёт от бита больше чем
-# на RIDE_TARGET, он поднимается до RIDE_MAX дБ (у Waves Vocal Rider по умолчанию
+# (EBU R128 M) против бита в те же окна. Где голос отстаёт от своего баланса больше
+# чем на RIDE_TARGET, он поднимается до RIDE_MAX дБ (у Waves Vocal Rider по умолчанию
 # те же ±6); подъём держится RIDE_HOLD и сглажен на RIDE_SMOOTH, чтобы голос
 # не прыгал по слогам, а в паузах голоса возвращается к нулю — иначе поднятыми
 # остались бы вдохи и шум. Вниз не ведём: громкие места ровняют компрессоры.
 # С одним балансом на весь трек бит перекрывал голос больше чем на 2 дБ в 21–23%
 # окон на трёх рэп-треках учебной библиотеки, с райдером — в 3–5%. Простое
 # среднее без удержания сглаживало подъём на провале и оставляло 9–13%.
-RIDE_TARGET = 0.0
+# Но и у релизов бит перекрывает голос больше чем на 2 дБ в трети окон (медиана
+# 40 релизов 33%, квартили 12…61%), а в десятой части окон голос на 3,9 дБ тише
+# своего баланса (квартили −4,7…−3,2). До 28.09.2026 райдер тянул каждое окно
+# к самому балансу, и голос выходил громче, чем его свёл артист: на 1,3 дБ у дорожек
+# из проекта, с перекрытием в 10% окон против 33% у релиза. RIDE_TARGET −4 — только
+# провалы глубже, чем бывают в релизах: у дорожек из проекта голос громче релиза
+# на 0,3 дБ, перекрытых окон на 5 меньше, чем у релиза, а не на 19.
+RIDE_TARGET = -4.0
 RIDE_MAX = 6.0
 RIDE_HOLD = 0.5
 RIDE_SMOOTH = 1.0
@@ -336,7 +366,15 @@ LOW_MONO = f"{MS},highpass=f=120:c=FR,highpass=f=120:c=FR,{LR}"
 # Громкость — в ряду рэп-мастеров (−10…−6 LUFS у инженеров из Mix With
 # The Masters и Sound On Sound). Пик −2 dBTP: Spotify требует его от мастера
 # громче −14 LUFS, иначе при выравнивании громкости трек исказится.
-MASTER_LUFS = -10.0
+# С этим потолком громкость и удар спорят: пик к громкости (PLR) не больше
+# CEILING − MASTER_LUFS. У релизов PLR 9,8 дБ (40 релизов, квартили 9,2…10,8)
+# при −9,8 LUFS (−11,6…−9,1), а мастер на −10 давал 8,1: сведение выходило сжатее
+# своего релиза на 1,75 дБ (экзамен 28.09.2026, квартили −2,9…−1,1) — клиппер
+# и ограничитель срезали удар. −11 — ещё в ряду релизов, а удару 1 дБ возвращается;
+# площадки с выравниванием громкости (Spotify, Apple Music, YouTube) всё равно
+# приводят трек к −14, и там тише не станет. На −11 сведение сжатее релиза на 0,85 дБ
+# (квартили −2,0…−0,3).
+MASTER_LUFS = -11.0
 CEILING = -2.0
 # Сырые барабаны выше громкости на 15–17 дБ, и один ограничитель давил бы
 # на ударах по 6 дБ и больше — насосом на весь трек. Верхушки ударов до CLIP дБ
@@ -602,6 +640,33 @@ def _lines(level: list[float], below: float = VOICE_RANGE, pause: float = 0.4) -
         else:
             lines.append([i, i + 1])
     return [(a / ENV_RATE, b / ENV_RATE) for a, b in lines if b - a >= 0.1 * ENV_RATE]
+
+
+def swing(path: Path) -> float:
+    """Размах голоса внутри строк, дБ: p90 − p10 уровня по 10 мс. Компрессия его
+    съедает — тихое между слогами, вдохи и шум поднимаются к слову. Только внутри
+    строк: тишина между куплетами иначе дала бы размах в сто дБ у любого голоса."""
+    level = _envelope(path)
+    inside = sorted(level[i] for a, b in _lines(level) for i in range(int(a * ENV_RATE), int(b * ENV_RATE)))
+    return inside[int(0.9 * (len(inside) - 1))] - inside[int(0.1 * (len(inside) - 1))] if inside else 0.0
+
+
+def _squeeze(source: Path, before: str, dest: Path, after: str = "") -> Path:
+    """Голос через VOCAL_CHAIN в dest на SQUEEZED_LUFS: before — цепочка до компрессии
+    (срез и громкость к VOCAL_LUFS), after — после. Вторая ступень подмешивается
+    параллельно самой большой долей из LEVEL_STEPS, при которой размах голоса
+    не мельче VOCAL_SWING."""
+    peaks, leveler = VOCAL_CHAIN
+    probe = dest.with_name(dest.stem + "-probe.wav")
+    for share in LEVEL_STEPS:
+        _ffmpeg("-i", source, "-filter_complex", f"[0:a]{before},{peaks},asplit[d][c];[c]{leveler}[l];"
+                f"[d][l]amix=inputs=2:weights={1 - share:g} {share:g}:normalize=0", *reels.VOICE_CODEC, probe)
+        if not share or (got := swing(probe)) >= VOCAL_SWING:
+            break
+    print(f"  компрессия: вторая ступень на {share:.0%}" + (f", размах голоса {got:.1f} дБ" if share else ""))
+    _ffmpeg("-i", probe, "-af", f"volume={SQUEEZED_LUFS - loudness(probe)[0]:.2f}dB{after}", *reels.VOICE_CODEC, dest)
+    probe.unlink()
+    return dest
 
 
 def _gain_track(points: list[tuple[float, float]], seconds: float, path: Path) -> Path:
@@ -1120,8 +1185,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     if tune := look.get("autotune") and _autotune(beat):
         clean += f",{tune}"
     squeezed, dry, raw = work / "vocal-comp.wav", work / "vocal.wav", loudness(vocal, clean + ",")[0]
-    _ffmpeg("-i", vocal, "-af", f"{clean},volume={VOCAL_LUFS - raw:.2f}dB,{VOCAL_CHAIN}"
-            + (f",{DENSE}" if look.get("dense") else ""), *reels.VOICE_CODEC, squeezed)
+    _squeeze(vocal, f"{clean},volume={VOCAL_LUFS - raw:.2f}dB", squeezed, f",{DENSE}" if look.get("dense") else "")
     lines = _lines(_envelope(squeezed))
     _ffmpeg("-i", squeezed, "-af", ("" if project else _equalizer(squeezed, lines, work)) + DEESSER + (f",{look['color']}" if "color" in look else ""),
             *reels.VOICE_CODEC, dry)
@@ -1147,7 +1211,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
         room = _room(whole, dry, head, loudness(beat, head)[0] + balance + voice - sung, lines, work)
     ducked = _sum([(room, 0.0), (kit, 0.0)], work / "beat-parts.wav") if room and kit else room or kit
     under = loudness(ducked)[0]
-    ridden = _ride(dry, ducked, under + balance + voice - sung, RIDE_TARGET + balance - VOCAL_OVER_BEAT + voice, work)
+    ridden = _ride(dry, ducked, under + balance + voice - sung, balance + voice + RIDE_TARGET, work)
     level = loudness(ridden)[0]
     placed = voices([(part, path) for part, path in parts if part in PARTS], level, work / "ride.wav", work, tune or "", project)
 
@@ -1370,8 +1434,7 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
         look, same = PARTS[part], [i for i, (other, _) in enumerate(parts) if other == part]
         chain = f"{FORMAT},{_center(path)}highpass=f={look['cut']},pan=mono|c0=0.5*c0+0.5*c1" + (f",{tune}" if tune else "")
         squeezed, dry = work / f"part{n}-comp.wav", work / f"part{n}.wav"
-        _ffmpeg("-i", path, "-af", f"{chain},volume={VOCAL_LUFS - loudness(path, chain + ',')[0]:.2f}dB,{VOCAL_CHAIN}",
-                *reels.VOICE_CODEC, squeezed)
+        _squeeze(path, f"{chain},volume={VOCAL_LUFS - loudness(path, chain + ',')[0]:.2f}dB", squeezed)
         tone = ("" if keep else _equalizer(squeezed, _lines(_envelope(squeezed)), work)) + look["deess"] \
             + (f",{look['color']}" if "color" in look else "")
         events = _lines(_envelope(squeezed), VOICE_RANGE, ADLIB_PAUSE) if part == "эдлиб" else []
