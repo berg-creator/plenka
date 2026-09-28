@@ -17,7 +17,7 @@
     --soft: var(--tg-theme-secondary-bg-color, #eff1f4);
     --main: var(--tg-theme-button-color, #3a7bd5);
     --main-text: var(--tg-theme-button-text-color, #ffffff);
-    --rec: #f04a2f;  /* лампочка записи: блок голоса и бегущая линия, больше нигде */
+    --rec: #f04a2f;  /* лампочка записи: блок голоса, больше нигде */
     --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     --counter: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Roboto Mono", Consolas, monospace;
   }
@@ -215,8 +215,8 @@ function drawView() {
   c.fill();
   c.globalAlpha = 1;
   wave(c, voiceEnv, view0, pps, w, voiceY, lane, t => t - shift, dpr);
-  // Первое слово — цветом текста, чтобы не спутать с бегущей линией: чёрточка по голосу
-  // с засечкой сверху и тонкая нить в бит — видно, на что оно ложится.
+  // Первое слово — цветом текста: чёрточка по голосу с засечкой сверху и тонкая нить
+  // в бит — видно, на что оно ложится.
   c.fillStyle = text;
   c.fillRect(x(shown) - 1, voiceY, 2, lane);
   c.fillRect(x(shown) - 5, voiceY, 10, 2);
@@ -224,8 +224,19 @@ function drawView() {
   c.fillRect(x(shown) - 0.5, beatY, 1, lane + GAP);
   c.globalAlpha = 1;
 
-  c.fillStyle = rec;
-  if (playing) c.fillRect(x(head()) - 1, 0, 2, h);
+  // Бегущая линия. Красная в 2 px тонула в красном голосе (владелец 28.09.2026: «непонятно,
+  // где сейчас играет»), поэтому она цвета текста с каймой фона, а проигранное подсвечено.
+  if (playing) {
+    const t = x(head()), from = x(Math.max(playing.from, view0));
+    c.fillStyle = text;
+    c.globalAlpha = 0.1;
+    c.fillRect(from, RULER, t - from, h - RULER);
+    c.globalAlpha = 1;
+    c.fillStyle = color("--bg");
+    c.fillRect(t - 3, 0, 6, h);
+    c.fillStyle = text;
+    c.fillRect(t - 1, 0, 2, h);
+  }
 }
 
 function drawMap() {
@@ -242,7 +253,8 @@ function drawMap() {
   c.globalAlpha = 1;
   c.fillStyle = color("--rec");
   c.fillRect(shown * pps - 1, 0, 2, h);
-  if (playing) c.fillRect(head() * pps - 0.5, 0, 1, h);
+  c.fillStyle = color("--text");
+  if (playing) c.fillRect(head() * pps - 1, 0, 2, h);
 }
 
 function drawAll() {
