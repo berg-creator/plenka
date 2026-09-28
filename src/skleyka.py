@@ -2174,6 +2174,7 @@ def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> N
 # с ответом на пересборку (_tweak, talk), а когда человек пишет боту о другом или
 # звук по ссылке протух — с первым ответом бота без своих кнопок (unkey).
 MOVE_HOURS = 24
+KEYS_SINCE = "2026-09-28T17:30"  # с этой минуты кнопку приложения отмечают (data["keys"])
 MOVE_BUTTON = "🎚 Двигать голос"
 MOVE_ASK = f"🎚 Голос встал не туда? Подвинь его пальцем по сетке бита и послушай — кнопка «{MOVE_BUTTON}» внизу."
 REMOVE = {"remove_keyboard": True}
@@ -2245,7 +2246,10 @@ def unkey(message: dict) -> None:
     if not text.startswith("/") and TALK_MARK in (message.get("reply_to_message") or {}).get("text", ""):
         return
     data = load()
-    if data["keys"].pop(chat_id, None):
+    # ponytail: кнопки до 28.09.2026 не отмечались — снимаем всем, чей трек готов раньше;
+    # такие треки чистка удалит к 05.10, тогда условие не сработает и его можно убрать.
+    unmarked = any(track["chat"] == chat_id and track.get("done", "~") < KEYS_SINCE for track in data["tracks"].values())
+    if data["keys"].pop(chat_id, None) or unmarked:
         save(data)
         telegram.UNKEY.add(chat_id)
 
@@ -3093,6 +3097,12 @@ def _selftest() -> None:
         done.wait()
         _finish(data, done, {"id": "jk", "track": "t1", "tweak": True}, tmp / "keyed")
         save(data)
+        data["tracks"]["t9"] = {"chat": "9", "files": [], "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(),
+                                "done": "2026-09-28T12:00:00+00:00"}
+        save(data)
+        unkey({"chat": {"id": 9}, "text": "привет"})
+        assert telegram.UNKEY == {"9"}, "кнопка до отметок снимается по готовому треку"
+        telegram.UNKEY.clear()
         unkey({"chat": {"id": 7}, "text": "эха меньше", "reply_to_message": {"text": TUNE}})
         assert "7" in load()["keys"] and not telegram.UNKEY, "ответ словами на ручки — работа над треком"
         unkey({"chat": {"id": 7}, "text": "/dvoynik"})
