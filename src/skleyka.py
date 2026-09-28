@@ -75,6 +75,8 @@ from __future__ import annotations
 import argparse
 import array
 import contextlib
+import hashlib
+import hmac
 import html
 import json
 import math
@@ -85,6 +87,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import wave
 from datetime import timedelta
 from pathlib import Path
@@ -2000,23 +2003,92 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     save(data)
 
 
-def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> None:
-    """Пересборка готового трека с ручкой code."""
+def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool, markup: dict | None = None) -> None:
+    """Пересборка готового трека с ручкой code. markup — клавиатура к ответу."""
     track = data["tracks"].get(track_id)
     if not track or track["chat"] != chat_id:
-        telegram.send_message(chat_id, STALE)
+        telegram.send_message(chat_id, STALE, markup=markup)
         return
     if not (admin or track.get("admin")) and track["tweaks"] >= config.SKLEYKA_TWEAKS:
-        telegram.send_message(chat_id, NO_TWEAKS)
+        telegram.send_message(chat_id, NO_TWEAKS, markup=markup)
         return
     knobs = turn(track["knobs"], code)
     if knobs == track["knobs"]:
-        telegram.send_message(chat_id, SAME)
+        telegram.send_message(chat_id, SAME, markup=markup)
         return
     track.update(knobs=knobs, tweaks=track["tweaks"] + 1)
     minutes = _enqueue(data, track_id, knobs, tweak=True)
     save(data)
-    telegram.send_message(chat_id, REBUILD.format(what=look(knobs), minutes=minutes))
+    telegram.send_message(chat_id, REBUILD.format(what=look(knobs), minutes=minutes), markup=markup)
+
+
+# Мини-приложение «🎚 Двигать голос» (cloud/skleyka_app.py): человек пальцем ставит
+# голос на сетку бита и слушает. Звук ему — превью сведения в Telegram (file_id), ссылка
+# подписана ключом SKLEYKA_APP_KEY и живёт MOVE_HOURS. Выбор приходит сообщением
+# web_app_data — только с кнопки обычной клавиатуры, инлайн-кнопка sendData не умеет —
+# и ставит ту же ручку at, что «🎯», в тот же лимит пересборок. Нет адреса или ключа —
+# кнопки нет: сведение без приложения то же.
+MOVE_HOURS = 24
+MOVE_BUTTON = "🎚 Двигать голос"
+MOVE_ASK = f"🎚 Голос встал не туда? Подвинь его пальцем по сетке бита и послушай — кнопка «{MOVE_BUTTON}» внизу."
+REMOVE = {"remove_keyboard": True}
+# Превью — ответ функции Облака: до 3,5 МБ в base64, то есть файл не больше ~2,5 МБ.
+PREVIEW_BYTES = 2_000_000
+
+
+def sign(key: str, file_id: str, expires: int | str) -> str:
+    """Подпись ссылки на звук — та же строка, что в cloud/skleyka_app.sign."""
+    return hmac.new(key.encode(), f"{file_id}|{expires}".encode(), hashlib.sha256).hexdigest()
+
+
+def preview(vocal: Path, beat: Path, dest: Path) -> Path:
+    """Превью для приложения: слева голос, справа бит, каждый в моно — страница играет их
+    порознь со сдвигом. 22 кГц и битрейт по длине: 8 минут влезают в PREVIEW_BYTES."""
+    seconds = max(clips.probe_seconds(vocal), clips.probe_seconds(beat))
+    # Битрейты MP3 на 22 кГц — только из ряда стандарта, иначе LAME берёт соседний сам.
+    rate = max([32] + [r for r in (40, 48, 56, 64, 80, 96) if r * 1000 / 8 * seconds <= PREVIEW_BYTES])
+    _ffmpeg("-i", vocal, "-i", beat, "-filter_complex",
+            f"[0:a]{FORMAT},{MID},apad[v];[1:a]{FORMAT},{MID},apad[b];[v][b]amerge=inputs=2,aresample=22050",
+            "-t", f"{seconds:.2f}", "-c:a", "libmp3lame", "-b:a", f"{rate}k", "-joint_stereo", "0", dest)
+    return dest
+
+
+def _offer(spec: dict, clip: Path, rhythm: tuple[float, float], timing: dict, voice: float) -> None:
+    """Кнопка приложения под готовым треком. Превью заливается ботом владельцу без звука
+    и сразу удаляется: служебного чата у бота нет, а file_id живёт и после удаления."""
+    key = config.secret("SKLEYKA_APP_KEY", required=False)
+    if not (config.SKLEYKA_APP_URL and key):
+        return
+    admin = config.secret("TELEGRAM_ADMIN_ID")
+    with clip.open("rb") as handle:
+        stash = telegram._call("sendDocument", {"chat_id": admin, "disable_notification": True},
+                               files={"document": ("preview.mp3", handle, "audio/mpeg")})
+    with contextlib.suppress(telegram.TelegramError):
+        telegram.delete_message(admin, stash["message_id"])
+    file_id = (stash.get("audio") or stash["document"])["file_id"]
+    expires = int(state.now().timestamp()) + MOVE_HOURS * 3600
+    query = urllib.parse.urlencode({
+        "t": spec["track"], "f": file_id, "e": expires, "s": sign(key, file_id, expires),
+        "b": round(rhythm[0], 4), "p": round(rhythm[1], 3), "w": timing["sent"], "a": round(voice, 2),
+        "d": ",".join(f"{drop:g}" for drop in timing["drops"]), "l": timing["length"]})
+    telegram.send_message(spec["chat"], MOVE_ASK, markup={
+        "keyboard": [[{"text": MOVE_BUTTON, "web_app": {"url": f"{config.SKLEYKA_APP_URL}?{query}"}}]],
+        "one_time_keyboard": True, "resize_keyboard": True})
+
+
+def moved(message: dict, *, admin: bool = False) -> None:
+    """Выбор из приложения — {"t": трек, "at": секунда первого слова}: пересборка тем же путём,
+    что кнопка «🎯». Клавиатура с кнопкой приложения в ответе убирается."""
+    chat_id = str(message["chat"]["id"])
+    try:
+        choice = json.loads(message["web_app_data"]["data"])
+        track_id, at = str(choice["t"]), float(choice["at"])
+    except (ValueError, KeyError, TypeError):
+        track_id, at = "", math.nan
+    data = load()
+    if not math.isfinite(at):
+        track_id = ""  # «anan» ручка turn приняла бы, а run_job поставил бы голос на ноль
+    _tweak(data, chat_id, track_id, f"a{at:.2f}", admin, markup=REMOVE)
 
 
 # Ответ словами на ручки готового трека — «голос тише на припеве, эха побольше».
@@ -2352,6 +2424,13 @@ def run_job(spec_path: Path) -> int:
             timing = {"sent": first_word(vocal), "drops": drops(beat, rhythm), "beat": round(rhythm[0], 3),
                       "length": round(clips.probe_seconds(beat), 1)}
             result["timing"] = timing
+            clip = None
+            if config.SKLEYKA_APP_URL:
+                # Голос для приложения — без сдвига at: страница сдвигает его сама.
+                try:
+                    clip = preview(vocal, beat, work / "preview.mp3")
+                except Exception as exc:  # noqa: BLE001 — без приложения трек всё равно уходит
+                    print(f"  сведение {spec['job']}: превью не собралось: {type(exc).__name__}")
             if spec.get("wish"):
                 try:
                     knobs, words = understood(knobs, spec["wish"], timing)
@@ -2390,6 +2469,11 @@ def run_job(spec_path: Path) -> int:
                 movie = None
             _send(spec, master, parts, note + (GUESSED if guessed else ""), service, work, movie, swap=guessed, drop=drop)
             result["ok"] = True
+            if clip:
+                try:
+                    _offer(spec, clip, rhythm, timing, voice)
+                except Exception as exc:  # noqa: BLE001 — трек уже у человека
+                    print(f"  сведение {spec['job']}: кнопка приложения не ушла: {type(exc).__name__}")
     except Exception as exc:  # noqa: BLE001 — человеку честный ответ, в журнал — без его данных
         print(f"  сведение {spec['job']}: сбой {type(exc).__name__}: {str(exc)[:200]}")
         telegram.send_message(chat, FAILED)
@@ -2485,8 +2569,9 @@ def _selftest() -> None:
     calls: list[tuple[str, dict]] = []
     real = (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
             itunes.find_song, telegram._call)
-    telegram.send_message = lambda chat, text, buttons=None, **_: sent.append(text) or keys.append(buttons) \
-        or {"message_id": len(sent)}
+    marks: list = []
+    telegram.send_message = lambda chat, text, buttons=None, markup=None, **_: sent.append(text) \
+        or keys.append(buttons) or marks.append(markup) or {"message_id": len(sent)}
     telegram._call = lambda method, payload, files=None: calls.append((method, payload)) or {}
     telegram.edit_markup = lambda chat, message, markup: None
     config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
@@ -2528,6 +2613,43 @@ def _selftest() -> None:
         _ffmpeg("-f", "lavfi", "-i", "anoisesrc=d=12:a=0.1", "-f", "lavfi", "-i", "sine=f=55:d=8", "-filter_complex",
                 "[0:a]highpass=f=2000[h];[1:a]adelay=4000:all=1[s];[h][s]amix=inputs=2:duration=longest", beat)
         assert drops(beat, (0.5, 0.0)) == [4.0], drops(beat, (0.5, 0.0))
+        # Превью приложения: слева голос (кончился на 4 с), справа бит, длина — длиннейшей.
+        clip = preview(voice, beat, tmp / "preview.mp3")
+        left, right = _channels(clip, "atrim=start=5,")
+        assert left < -60 < right and abs(clips.probe_seconds(clip) - 12) < 0.2, (left, right)
+        assert clip.stat().st_size < PREVIEW_BYTES
+
+        # Подпись ссылки на звук: бот и функция Облака считают её одинаково; просроченная
+        # и подделанная не качают ничего.
+        import importlib.util
+        from unittest import mock
+        loader = importlib.util.spec_from_file_location("skleyka_app", config.ROOT / "cloud" / "skleyka_app.py")
+        app = importlib.util.module_from_spec(loader)
+        loader.loader.exec_module(app)
+        app.fetch = lambda file_id, token: b"ID3" + file_id.encode()
+        with mock.patch.dict("os.environ", {"SKLEYKA_APP_KEY": "k", "TELEGRAM_BOT_TOKEN": "t"}):
+            later = int(state.now().timestamp()) + 60
+
+            def get(**query) -> dict:
+                return app.handler({"httpMethod": "GET", "queryStringParameters": query}, None)
+            ok = get(audio="", f="F1", e=str(later), s=sign("k", "F1", later))
+            assert ok["statusCode"] == 200 and ok["isBase64Encoded"] and ok["body"] == "SUQzRjE=", ok
+            assert get(audio="", f="F1", e=str(later - 120), s=sign("k", "F1", later - 120))["statusCode"] == 403
+            assert get(audio="", f="F2", e=str(later), s=sign("k", "F1", later))["statusCode"] == 403, "чужой file_id"
+            assert get(audio="", f="F1", e=str(later), s=sign("x", "F1", later))["statusCode"] == 403, "чужой ключ"
+            assert "Telegram.WebApp" in get(t="1")["body"], "без audio — страница"
+            # Кнопка под треком: ссылку, что собрал бот, функция принимает; превью у владельца удалено.
+            deleted: list = []
+            with mock.patch.object(config, "SKLEYKA_APP_URL", "https://app"), \
+                    mock.patch.object(config, "secret", lambda name, required=True: "k" if name == "SKLEYKA_APP_KEY" else "1"), \
+                    mock.patch.object(telegram, "_call", lambda *_, **__: {"message_id": 5, "document": {"file_id": "F9"}}), \
+                    mock.patch.object(telegram, "delete_message", lambda chat, message: deleted.append(message)):
+                _offer({"track": "t1", "chat": "7"}, clip, (0.5, 0.25), {"sent": 1.0, "drops": [4.0, 8.5], "length": 12.0}, 2.0)
+            button = marks[-1]["keyboard"][0][0]
+            query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(button["web_app"]["url"]).query))
+            assert sent[-1] == MOVE_ASK and button["text"] == MOVE_BUTTON and deleted == [5], (sent[-1], deleted)
+            assert (query["t"], query["d"], query["a"], query["w"], query["p"]) == ("t1", "4,8.5", "2.0", "1.0", "0.25"), query
+            assert get(audio="", **{key: query[key] for key in "fes"})["body"] == "SUQzRjk=", "подпись бота функция принимает"
 
         # Куда идёт файл: при открытой заявке и ответом на вопрос сведения — сюда; без заявки
         # и ответом на другое (запрос трека владельца) — мимо, в ОТБОР и attach_track.
@@ -2662,6 +2784,18 @@ def _selftest() -> None:
         assert sent[-1] == SAME, "мелодично уже выбрано заранее"
         callback(8, 8, f"{track}:v+")
         assert sent[-1] == STALE, "чужой трек"
+        # Место голоса из мини-приложения — та же ручка at, что у «🎯»; клавиатура прочь.
+        def app_data(chat: int, data: str) -> dict:
+            return {"chat": {"id": chat}, "from": {"id": chat}, "web_app_data": {"data": data}}
+        moved(app_data(7, json.dumps({"t": track, "at": 12.5})))
+        data = load()
+        assert data["jobs"][-1]["knobs"]["at"] == 12.5 and data["tracks"][track]["tweaks"] == 2 and marks[-1] == REMOVE
+        moved(app_data(8, json.dumps({"t": track, "at": 3})))
+        assert sent[-1] == STALE and marks[-1] == REMOVE, "чужой трек из приложения"
+        for junk in ("{", '{"t": "%s", "at": "NaN"}' % track, "[1]"):
+            moved(app_data(7, junk))
+            assert sent[-1] == STALE, junk
+        assert load()["tracks"][track]["tweaks"] == 2, "мусор лимит не тратит"
         for _ in range(config.SKLEYKA_TWEAKS):
             callback(7, 7, f"{track}:v-")
         assert sent[-1] == NO_TWEAKS
@@ -2831,7 +2965,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, звук заранее, "
           "ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
-          "реферал за трек и звёзды — ок")
+          "реферал за трек и звёзды, превью и подпись звука, место голоса из приложения — ок")
 
 
 def talk_check() -> list[str]:

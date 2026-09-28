@@ -151,6 +151,7 @@ def send_message(
     reply_to: int | None = None,
     quiet: bool = False,
     ask: str = "",
+    markup: dict | None = None,
 ) -> dict:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
@@ -165,6 +166,10 @@ def send_message(
         # в поле ввода — подсказка ask. Бот узнаёт ответ по reply_to_message,
         # и помнить, о чём спросил, ему не нужно.
         payload["reply_markup"] = json.dumps({"force_reply": True, "input_field_placeholder": ask})
+    elif markup:
+        # Обычная клавиатура или её снятие: кнопка мини-приложения, чей sendData
+        # приходит в getUpdates, бывает только на ней, а не на инлайн-кнопке.
+        payload["reply_markup"] = json.dumps(markup)
     if quiet:
         payload["disable_notification"] = True
     if reply_to is not None:

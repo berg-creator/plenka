@@ -356,6 +356,16 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                 except Exception as exc:  # noqa: BLE001 — сбой начисления не роняет дежурство
                     log.error("Звёзды не начислены: %s", exc)
             continue
+        # Место голоса из мини-приложения СВЕДЕНИЯ (cloud/skleyka_app.py): sendData
+        # с кнопки клавиатуры приходит сюда же сообщением без текста.
+        if message and message.get("web_app_data"):
+            print("  место голоса из мини-приложения")
+            if not args.dry_run:
+                try:
+                    skleyka.moved(message, admin=str(admin) == str(message.get("from", {}).get("id")))
+                except Exception as exc:  # noqa: BLE001 — сбой приёма не роняет дежурство
+                    log.error("Место голоса не принято: %s", exc)
+            continue
         if message:
             # Пост, пересланный Telegram в чат обсуждений, — повод открыть ветку
             # комментариев первым. Под прослушкой первой идёт сама викторина

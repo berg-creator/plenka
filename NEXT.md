@@ -1172,6 +1172,32 @@ Festival (cropped)`, Киф — `Chief Keef 2017` (подростком есть
 > журнал launchd на Маке — была ли субботняя проверка. Ответ никуда в открытое не печатать.
 > Всё в порядке — раздел удалить.
 
+## 66. «🎚 Двигать голос»: выложить функцию, завести ключ, проверить на телефоне
+
+28.09.2026 в коде: мини-приложение СВЕДЕНИЯ — голос пальцем по сетке бита (`cloud/skleyka_app.py`
+и `cloud/skleyka_app.html`, приём — `skleyka.moved`, превью и кнопка — `skleyka.preview`/`_offer`
+в `run_job`). Пока `config.SKLEYKA_APP_URL` пуст, кнопки нет. Проверено только без сети: selftest
+(подпись, превью, приём) и страница в Chrome из локального сервера. В Telegram и Облаке — ни разу.
+
+**Шаги владельца** (секреты — только он, Claude их не пишет):
+1. Ключ подписи: `python3 -c "import secrets; print(secrets.token_hex(32))"`.
+2. Функция (из ~/ПЛЕНКА, вместо `<ключ>` — ключ из шага 1, `<токен>` — токен бота):
+   `yc serverless function create --name plenka-skleyka-app`, затем
+   `yc serverless function version create --function-name plenka-skleyka-app --runtime python312
+   --entrypoint skleyka_app.handler --memory 128m --execution-timeout 15s --source-path cloud/
+   --environment SKLEYKA_APP_KEY=<ключ>,TELEGRAM_BOT_TOKEN=<токен>` и
+   `yc serverless function allow-unauthenticated-invoke plenka-skleyka-app`.
+3. Тот же ключ — боту: `gh secret set SKLEYKA_APP_KEY` (вставить ключ по запросу).
+4. Адрес: `yc serverless function get plenka-skleyka-app` → `http_invoke_url` прислать Claude.
+
+**Дальше Claude** (промпт):
+> Проект ~/ПЛЕНКА, раздел 66 NEXT.md. Вписать адрес функции в `config.SKLEYKA_APP_URL`, запушить.
+> Проверить: (1) адрес без параметров отдаёт страницу, с `?audio=1&f=x&e=1&s=x` — 403;
+> (2) владелец сводит трек в боте — после ручек приходит «🎚 Голос встал не туда?» с кнопкой внизу;
+> приложение открывается, волны рисуются (иначе смотреть, достаёт ли функция из России
+> api.telegram.org — лог функции в консоли Облака), ▶ играет, «Склеить так» → «Пересобираю: … голос с …»
+> и клавиатура пропала; (3) в логе дежурства нет «кнопка приложения не ушла». Всё так — раздел удалить.
+
 ## Закрытые вопросы — не переоткрывать
 
 - **Под концерты и релизы в боте больше ничего не строим — замер 22.09.2026

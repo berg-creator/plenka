@@ -121,6 +121,9 @@ jobs:
           # Служебный вход самого бота (MTProto): дорожки СВЕДЕНИЯ больше 20 МБ
           # Bot API не отдаёт, а WAV больше 50 МБ не принимает (src/telegram.py).
           TELEGRAM_BOT_SESSION: ${{ secrets.TELEGRAM_BOT_SESSION }}
+          # Подпись ссылок на звук мини-приложения СВЕДЕНИЯ (cloud/skleyka_app.py):
+          # тот же ключ лежит в окружении функции. Нет его — кнопки «🎚» нет.
+          SKLEYKA_APP_KEY: ${{ secrets.SKLEYKA_APP_KEY }}
           # Смена выпускает посты: о свежих релизах — раз в час, мимо слотов,
           # обычные — по часам config.PUBLISH_HOURS_MSK (src/moderate.py,
           # publish_shift). Куда: та же переменная, что у ручного publish.yml.

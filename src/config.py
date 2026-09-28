@@ -81,6 +81,10 @@ SKLEYKA_STARS_PACK = 30      # SKLEYKA_PACK треков сверх лимита
 SKLEYKA_PACK = 3
 SKLEYKA_STARS_MONTH = 150    # 30 дней по SKLEYKA_MONTH_PER_DAY треков в сутки
 SKLEYKA_MONTH_PER_DAY = 10
+# Мини-приложение «🎚 Двигать голос» — функция Яндекс Облака cloud/skleyka_app.py.
+# Адрес не секрет: он и так виден в кнопке. Пусто — кнопки нет, сведение то же.
+# Ключ подписи ссылок на звук — секрет SKLEYKA_APP_KEY, тот же в окружении функции.
+SKLEYKA_APP_URL = ""
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (gemini — Google, по умолчанию; anthropic — платный Claude; gigachat — Сбер).

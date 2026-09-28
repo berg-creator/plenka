@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Двигать голос</title>
+<!-- Мини-приложение СВЕДЕНИЯ: голос пальцем по сетке бита. Отдаёт cloud/skleyka_app.py,
+     выбор уходит боту через Telegram.WebApp.sendData (src/skleyka.py, moved). -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  /* Всё, кроме лампочки записи, — цвета темы Telegram: telegram-web-app.js кладёт их
+     в --tg-theme-*, и в светлой и в тёмной теме приложение выглядит родным. */
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #16181b);
+    --hint: var(--tg-theme-hint-color, #8b9097);
+    --soft: var(--tg-theme-secondary-bg-color, #eff1f4);
+    --main: var(--tg-theme-button-color, #3a7bd5);
+    --main-text: var(--tg-theme-button-text-color, #ffffff);
+    --rec: #f04a2f;  /* лампочка записи: блок голоса и бегущая линия, больше нигде */
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --counter: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Roboto Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { background: var(--bg); }
+  body { margin: 0; padding: 20px 16px 28px; color: var(--text); font: 15px/1.4 var(--ui); user-select: none;
+         -webkit-user-select: none; }
+  #counter { margin: 0; font: 500 44px/1 var(--counter); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  #where { margin-top: 6px; color: var(--hint); font-size: 14px; min-height: 20px; font-variant-numeric: tabular-nums; }
+  canvas { display: block; width: 100%; touch-action: none; }
+  #view { height: 208px; margin-top: 20px; }
+  #map { height: 26px; margin-top: 10px; }
+  #hint { margin: 12px 0 0; color: var(--hint); font-size: 13px; min-height: 18px; }
+  .deck { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+  .step { flex: 1; min-height: 48px; border-radius: 24px; background: var(--soft); font-size: 15px; }
+  .step:active { opacity: 0.7; }
+  #play { flex: 0 0 64px; height: 64px; border-radius: 50%; background: var(--text); color: var(--bg);
+          display: grid; place-items: center; }
+  #play svg { width: 22px; height: 22px; fill: currentColor; }
+  #done { display: block; width: 100%; min-height: 50px; margin-top: 24px; border-radius: 12px;
+          background: var(--main); color: var(--main-text); font-weight: 600; }
+  #done:disabled { opacity: 0.45; }
+</style>
+</head>
+<body>
+<h1 id="counter" aria-live="polite">00:00.00</h1>
+<div id="where"></div>
+<canvas id="view" role="img" aria-label="Бит сверху, голос под ним: тащи голос пальцем, он встаёт на доли"></canvas>
+<canvas id="map" role="img" aria-label="Весь бит: нажми, чтобы посмотреть другое место"></canvas>
+<p id="hint">Загружаю звук…</p>
+<div class="deck">
+  <button class="step" id="prev" aria-label="На долю раньше">◀ доля</button>
+  <button id="play" aria-label="Слушать"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg></button>
+  <button class="step" id="next" aria-label="На долю позже">доля ▶</button>
+</div>
+<button id="done" hidden>Склеить так</button>
+<script>
+"use strict";
+const tg = window.Telegram && window.Telegram.WebApp;
+const inTg = Boolean(tg && tg.initData);
+const q = new URLSearchParams(location.search);
+const num = (key, fallback) => { const v = parseFloat(q.get(key)); return Number.isFinite(v) ? v : fallback; };
+
+// Сетка из run_job: длина доли и сильная доля такта; w — первое слово в файле голоса, a — где оно сейчас.
+const beatLen = num("b", 0) >= 0.2 && num("b", 0) <= 2 ? num("b", 0) : 0;
+const phase = num("p", 0), sent = num("w", 0);
+const drops = (q.get("d") || "").split(",").map(parseFloat).filter(Number.isFinite);
+let total = num("l", 0);
+const start = num("a", sent);
+let at = start;    // куда встанет первое слово — это и уйдёт боту
+let shown = start; // где блок голоса нарисован: под пальцем он идёт за ним, отпущенный — доезжает до доли
+const SPAN = 10;   // секунд на экране: доля в 0,5 с — это 15–20 пикселей под пальцем
+const RULER = 18;  // полоска с номерами тактов и метками дропов
+const GAP = 8;     // между рядом бита и рядом голоса
+const ER = 200;    // огибающая — 200 точек в секунду, волна рисуется из неё
+const SETTLE = 120;
+const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const $ = id => document.getElementById(id);
+const view = $("view"), map = $("map"), hint = $("hint");
+let view0 = Math.max(0, at - SPAN * 0.3);
+let ctx = null, voiceBuf = null, beatBuf = null, voiceEnv = new Float32Array(0), beatEnv = new Float32Array(0);
+let playing = null, settling = null;
+
+if (tg) {
+  tg.ready();
+  tg.expand();
+  // Вертикальный свайп по волне иначе сворачивает приложение.
+  if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+  tg.onEvent("themeChanged", drawAll);
+}
+// iOS глушит Web Audio переключателем «без звука», а это не звонок, а трек.
+if (navigator.audioSession) navigator.audioSession.type = "playback";
+
+const pad = (n, w) => String(n).padStart(w, "0");
+function counter(t) {  // 00:12.35 — как счётчик деки
+  const cs = Math.round(Math.max(0, t) * 100);
+  return pad(Math.floor(cs / 6000), 2) + ":" + pad(Math.floor(cs / 100) % 60, 2) + "." + pad(cs % 100, 2);
+}
+function clock(t) { return Math.floor(t / 60) + ":" + pad(Math.floor(t % 60), 2); }
+function color(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888"; }
+
+// Такт 1 — первый полный такт от начала бита; доли до него — затакт, такт 0.
+const firstBar = beatLen ? Math.ceil((0 - phase) / (4 * beatLen) - 1e-6) : 0;
+function place(t) {
+  if (!beatLen) return "без сетки: бит не дал ровного пульса";
+  const k = Math.round((t - phase) / beatLen);
+  const bar = Math.floor(k / 4) - firstBar + 1, beat = ((k % 4) + 4) % 4 + 1;
+  return "такт " + bar + " · доля " + beat + (drops.some(d => Math.abs(d - t) < 0.05) ? " · дроп" : "");
+}
+
+function snap(t) {
+  const hi = Math.max(0, (total || t + 1) - 1), step = beatLen || 0.05;
+  let s = beatLen ? phase + Math.round((t - phase) / beatLen) * beatLen : Math.round(t / step) * step;
+  while (s < 0) s += step;
+  while (s > hi) s -= step;
+  return Math.round(s * 1000) / 1000;
+}
+
+// Новая точка входа: вибрация на каждом прилипании, счётчик — сразу.
+function target(t) {
+  const next = snap(t);
+  if (Math.abs(next - at) < 1e-6) return;
+  at = next;
+  if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+  drawAll();
+}
+
+// Блок доезжает до доли за SETTLE мс, замедляясь к концу.
+function settle() {
+  const from = shown, begin = performance.now();
+  if (still) { shown = at; drawAll(); return; }
+  const mine = settling = {};
+  requestAnimationFrame(function frame(now) {
+    if (settling !== mine) return;
+    const k = Math.min(1, (now - begin) / SETTLE);
+    shown = from + (at - from) * (1 - Math.pow(1 - k, 3));
+    drawAll();
+    if (k < 1) requestAnimationFrame(frame);
+  });
+}
+
+function panTo(t) { view0 = Math.max(0, Math.min(t, Math.max(0, total - SPAN))); }
+function follow() { if (at < view0 + SPAN * 0.1 || at > view0 + SPAN * 0.9) panTo(at - SPAN * 0.3); }
+
+// ---- рисование ----
+function fit(canvas) {
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  const c = canvas.getContext("2d");
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+  return [c, w, h, dpr];
+}
+
+// Волна: на каждый столбик пикселей — пик огибающей за его время. toFile — время экрана → время файла.
+function wave(c, env, from, pps, w, y, h, toFile, dpr) {
+  const step = 1 / dpr, mid = y + h / 2;
+  for (let px = 0; px < w; px += step) {
+    const t = from + px / pps;
+    let a = Math.floor(toFile(t) * ER), b = Math.ceil(toFile(t + step / pps) * ER);
+    if (b <= 0 || a >= env.length) continue;
+    a = Math.max(0, a); b = Math.min(env.length, Math.max(a + 1, b));
+    let m = 0;
+    for (let i = a; i < b; i++) if (env[i] > m) m = env[i];
+    const half = Math.max(step / 2, m * (h / 2 - 2));
+    c.fillRect(px, mid - half, step, 2 * half);
+  }
+}
+
+function drawView() {
+  const [c, w, h, dpr] = fit(view);
+  const pps = w / SPAN, x = t => (t - view0) * pps;
+  const lane = (h - RULER - GAP) / 2, beatY = RULER, voiceY = RULER + lane + GAP;
+  const text = color("--text"), hint = color("--hint"), rec = color("--rec");
+  c.font = "11px " + color("--ui");
+  c.textBaseline = "middle";
+
+  if (beatLen) {  // доли — еле видно, такты — чуть ярче и с номером
+    for (let k = Math.ceil((view0 - phase) / beatLen); phase + k * beatLen <= view0 + SPAN; k++) {
+      const t = phase + k * beatLen, bar = ((k % 4) + 4) % 4 === 0;
+      c.fillStyle = hint;
+      c.globalAlpha = bar ? 0.45 : 0.16;
+      c.fillRect(Math.round(x(t)), bar ? 4 : RULER, 1, h);
+      c.globalAlpha = 0.9;
+      const n = Math.floor(k / 4) - firstBar + 1;
+      if (bar && n >= 1 && x(t) < w - 16) c.fillText(String(n), x(t) + 4, RULER / 2);
+    }
+    c.globalAlpha = 1;
+  }
+  for (const d of drops) {  // дроп — маленький треугольник сверху
+    if (d < view0 - 1 || d > view0 + SPAN + 1) continue;
+    c.fillStyle = text;
+    c.beginPath();
+    c.moveTo(x(d) - 5, 1); c.lineTo(x(d) + 5, 1); c.lineTo(x(d), 9);
+    c.fill();
+  }
+
+  c.fillStyle = text;
+  c.globalAlpha = 0.42;
+  wave(c, beatEnv, view0, pps, w, beatY, lane, t => t, dpr);
+  c.globalAlpha = 1;
+
+  // Голос — блок во всю длину файла, сдвинутый так, что первое слово стоит на shown.
+  const shift = shown - sent, dur = voiceBuf ? voiceBuf.duration : total;
+  c.fillStyle = rec;
+  c.globalAlpha = 0.13;
+  c.beginPath();
+  if (c.roundRect) c.roundRect(x(shift), voiceY, dur * pps, lane, 6); else c.rect(x(shift), voiceY, dur * pps, lane);
+  c.fill();
+  c.globalAlpha = 1;
+  wave(c, voiceEnv, view0, pps, w, voiceY, lane, t => t - shift, dpr);
+  // Первое слово — цветом текста, чтобы не спутать с бегущей линией: чёрточка по голосу
+  // с засечкой сверху и тонкая нить в бит — видно, на что оно ложится.
+  c.fillStyle = text;
+  c.fillRect(x(shown) - 1, voiceY, 2, lane);
+  c.fillRect(x(shown) - 5, voiceY, 10, 2);
+  c.globalAlpha = 0.5;
+  c.fillRect(x(shown) - 0.5, beatY, 1, lane + GAP);
+  c.globalAlpha = 1;
+
+  c.fillStyle = rec;
+  if (playing) c.fillRect(x(head()) - 1, 0, 2, h);
+}
+
+function drawMap() {
+  const [c, w, h, dpr] = fit(map);
+  if (!total) return;
+  const pps = w / total;
+  c.fillStyle = color("--hint");
+  c.globalAlpha = 0.6;
+  wave(c, beatEnv, 0, pps, w, 0, h, t => t, dpr);
+  c.globalAlpha = 1;
+  c.fillStyle = color("--text");
+  c.globalAlpha = 0.12;
+  c.fillRect(view0 * pps, 0, SPAN * pps, h);  // что сейчас на экране
+  c.globalAlpha = 1;
+  c.fillStyle = color("--rec");
+  c.fillRect(shown * pps - 1, 0, 2, h);
+  if (playing) c.fillRect(head() * pps - 0.5, 0, 1, h);
+}
+
+function drawAll() {
+  drawView();
+  drawMap();
+  $("counter").textContent = counter(at);
+  $("where").textContent = place(at);
+  const moved = Math.abs(at - start) > 1e-3;
+  if (inTg) moved ? tg.MainButton.enable() : tg.MainButton.disable();
+  $("done").disabled = !moved;
+}
+
+// ---- пальцем ----
+// Палец, ушедший за край холста, продолжает тащить; без захвата (старый WebView) — просто без него.
+function capture(canvas, e) { try { canvas.setPointerCapture(e.pointerId); } catch (_) {} }
+let grab = null;
+view.addEventListener("pointerdown", e => {
+  const r = view.getBoundingClientRect();
+  const voiceLane = e.clientY - r.top > RULER + (r.height - RULER) / 2;
+  grab = { x: e.clientX, from: shown, view0, voice: voiceLane, wasPlaying: Boolean(playing) };
+  settling = null;
+  if (voiceLane) stop();
+  capture(view, e);
+});
+view.addEventListener("pointermove", e => {
+  if (!grab) return;
+  const dt = (e.clientX - grab.x) * SPAN / view.clientWidth;
+  if (grab.voice) {
+    shown = Math.max(-sent, Math.min(grab.from + dt, total));
+    target(shown);
+    drawAll();
+  } else {
+    panTo(grab.view0 - dt);
+    drawAll();
+  }
+});
+function release() {
+  if (!grab) return;
+  if (grab.voice) {
+    hint.textContent = "Блок голоса — пальцем, ряд бита — листает.";
+    settle();
+    if (grab.wasPlaying) play();
+  }
+  grab = null;
+}
+view.addEventListener("pointerup", release);
+view.addEventListener("pointercancel", release);
+
+function mapTo(e) {
+  const r = map.getBoundingClientRect();
+  panTo((e.clientX - r.left) / r.width * total - SPAN / 2);
+  drawAll();
+}
+map.addEventListener("pointerdown", e => { capture(map, e); mapTo(e); });
+map.addEventListener("pointermove", e => { if (e.buttons || e.pointerType === "touch") mapTo(e); });
+
+function nudge(k) {
+  target((beatLen ? snap(at) : at) + k * (beatLen || 0.05));
+  follow();
+  settle();
+  if (playing) play();
+}
+$("prev").onclick = () => nudge(-1);
+$("next").onclick = () => nudge(1);
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft") nudge(-1);
+  else if (e.key === "ArrowRight") nudge(1);
+  else if (e.key === " ") { e.preventDefault(); toggle(); }
+});
+
+// ---- звук: оба канала порознь, голос со сдвигом, с 2 с до первого слова ----
+const ICONS = { play: '<path d="M7 4.5v15l12.5-7.5z"/>', pause: '<path d="M6 4.5h4.2v15H6zm7.8 0H18v15h-4.2z"/>' };
+function icon(name, label) {
+  $("play").querySelector("svg").innerHTML = ICONS[name];
+  $("play").setAttribute("aria-label", label);
+}
+function head() { return playing ? playing.from + (ctx.currentTime - playing.t0) : 0; }
+
+function stop() {
+  if (!playing) return;
+  for (const s of playing.sources) { s.onended = null; try { s.stop(); } catch (_) {} }
+  playing = null;
+  icon("play", "Слушать");
+  drawAll();
+}
+
+function play() {
+  if (!beatBuf) return;
+  stop();
+  ctx.resume();
+  const from = Math.max(0, at - 2), now = ctx.currentTime + 0.05, lag = from - (at - sent);
+  const beat = ctx.createBufferSource(), voice = ctx.createBufferSource();
+  beat.buffer = beatBuf; voice.buffer = voiceBuf;
+  beat.connect(ctx.destination); voice.connect(ctx.destination);
+  beat.start(now, from);
+  if (lag >= 0) voice.start(now, lag); else voice.start(now - lag, 0);
+  beat.onended = stop;
+  playing = { sources: [beat, voice], t0: now, from };
+  icon("pause", "Пауза");
+  const mine = playing;  // перезапуск заводит свою петлю кадров, старая гаснет
+  requestAnimationFrame(function frame() {
+    if (playing !== mine) return;
+    const t = head();
+    if (t > view0 + SPAN * 0.9) panTo(t - SPAN * 0.1);
+    drawAll();
+    requestAnimationFrame(frame);
+  });
+}
+function toggle() { playing ? stop() : play(); }
+$("play").onclick = toggle;
+
+function send() {
+  const data = JSON.stringify({ t: q.get("t") || "", at: Math.round(at * 100) / 100 });
+  if (inTg) tg.sendData(data);
+  else hint.textContent = "Ушло бы боту: " + data;
+}
+if (inTg) {
+  tg.MainButton.setParams({ text: "Склеить так", is_visible: true });
+  tg.MainButton.onClick(send);
+} else {
+  $("done").hidden = false;
+  $("done").onclick = send;
+}
+
+function envelope(data, rate) {
+  const step = rate / ER, n = Math.ceil(data.length / step), out = new Float32Array(n);
+  let peak = 0;
+  for (let i = 0; i < n; i++) {
+    let m = 0;
+    for (let j = Math.floor(i * step), end = Math.min(data.length, Math.floor((i + 1) * step)); j < end; j++) {
+      const v = Math.abs(data[j]);
+      if (v > m) m = v;
+    }
+    out[i] = m;
+    if (m > peak) peak = m;
+  }
+  if (peak) for (let i = 0; i < n; i++) out[i] /= peak;
+  return out;
+}
+
+function mono(buffer, channel) {
+  const out = ctx.createBuffer(1, buffer.length, buffer.sampleRate);
+  out.getChannelData(0).set(buffer.getChannelData(Math.min(channel, buffer.numberOfChannels - 1)));
+  return out;
+}
+
+window.addEventListener("resize", drawAll);
+drawAll();
+
+// Звук — с того же адреса (подпись бота) или, для проверки в браузере, по адресу src.
+const src = q.get("src") || "?" + new URLSearchParams({ audio: 1, f: q.get("f") || "", e: q.get("e") || "", s: q.get("s") || "" });
+ctx = new (window.AudioContext || window.webkitAudioContext)();
+fetch(src)
+  .then(r => { if (!r.ok) throw new Error(r.status === 403 ? "old" : "http " + r.status); return r.arrayBuffer(); })
+  .then(bytes => new Promise((ok, fail) => ctx.decodeAudioData(bytes, ok, fail)))
+  .then(buffer => {
+    voiceBuf = mono(buffer, 0);
+    beatBuf = mono(buffer, 1);
+    voiceEnv = envelope(voiceBuf.getChannelData(0), buffer.sampleRate);
+    beatEnv = envelope(beatBuf.getChannelData(0), buffer.sampleRate);
+    total = total || buffer.duration;
+    hint.textContent = "Тащи голос пальцем — он встаёт на доли. Слушать — с двух секунд до входа.";
+    drawAll();
+  })
+  .catch(err => {
+    hint.textContent = err.message === "old"
+      ? "Звук по этой кнопке был доступен сутки. Подвинь голос кнопками под треком или напиши словами."
+      : "Звук не загрузился. Голос всё равно можно поставить по сетке и склеить.";
+  });
+</script>
+</body>
+</html>
