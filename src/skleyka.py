@@ -2768,8 +2768,8 @@ def _story_pictures(work: Path) -> list[Path]:
     draw.rounded_rectangle((side, 262, width - side, 338), radius=38, fill=STORY_GREY)
     draw.text((width / 2, 300), "ДО", font=font, fill=reels.PLATE_BG, anchor="mm")
     after, _ = _frame([("ПОСЛЕ", 250, 420, STORY_ACCENT, 700), ("Свёл бот. Бесплатно", 96, 640, white, 700)])
-    ending, _ = _frame([("/svedenie", 120, 1050, white, 700), (reels.SKLEYKA_LINK, 46, 1150, (200, 200, 200), 500)],
-                       reels.PLATE_BG + (255,))
+    # Ссылки в концовке нет: в сторис и Shorts её не нажать, а адрес бота и команду запомнят и так.
+    ending, _ = _frame([("/svedenie", 120, 1050, white, 700)], reels.PLATE_BG + (255,))
     mark = reels.handle_mark(110, pill=False, words=config.BOT_HANDLE)
     ending.alpha_composite(mark, ((width - mark.width) // 2, 905 - mark.height // 2))
     # Спектр ПОСЛЕ: слева (низ) малиновый, к верхам — янтарь и жёлтый.
