@@ -431,7 +431,7 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                         log.error("Правка ролика не принята: %s", exc)
                 continue
 
-            # Дорожки СВЕДЕНИЯ (src/skleyka.py): после /skleyka или ответом на её
+            # Дорожки СВЕДЕНИЯ (src/skleyka.py): после /svedenie или ответом на её
             # инструкцию файлы — вокал и бит, а не трек в ОТБОР. Ответ на что-то
             # другое, например на запрос трека у владельца, идёт дальше своим путём.
             if skleyka.wants(message):
@@ -683,7 +683,9 @@ def serve(minutes: int) -> int:
             urgent.shift()
             push_state()
             next_push = time.monotonic() + PUSH_EVERY
-            if code_changed():
+            # Идёт или ждёт сведение — смена дежурит дальше: иначе finish() до пяти минут
+            # ждал бы его без опроса, и кнопки у всех крутились бы впустую.
+            if code_changed() and not skleyka.busy():
                 print("Код бота обновился — смена уступает место свежей.")
                 break
 

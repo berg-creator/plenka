@@ -7,8 +7,9 @@
 на студии» не обещаем. До 27.09.2026 функция звалась СКЛЕЙКОЙ, но люди читали её
 как «бот просто склеит дорожки», а не сведёт их. Имя СВЕДЕНИЕ до 22.09.2026 носили
 проценты совпадения — теперь это ДВОЙНИК (src/svedenie.py, имя файла историческое).
-Имя модуля, команда /skleyka и метки ?start=skleyka_* остались прежними: старые
-ссылки уже разосланы по чатам.
+Имя модуля и метки ?start=skleyka_* остались прежними: старые
+ссылки уже разосланы по чатам. Команда с 28.09.2026 — /svedenie: /skleyka в меню
+«/» выдавала старое имя; прежняя понимается при наборе.
 
 Как. Только ffmpeg: он уже стоит в дежурстве, а считать хватает машины Actions.
 Громкость дорожек на входе любая — телефон, студия, бит с YouTube, — поэтому
@@ -1379,7 +1380,7 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
 
 # ─────────────────────────── бот ───────────────────────────
 #
-# /skleyka или ссылка ?start=skleyka открывает заявку, дорожки приходят файлами —
+# /svedenie или ссылка ?start=skleyka открывает заявку, дорожки приходят файлами —
 # альбомом или по одной. Поллер у бота один (src/moderate.py), и считать сам он
 # не может: пока идёт ffmpeg, бот не отвечал бы никому. Поэтому сведение — отдельный
 # процесс (python -m src.skleyka --job ФАЙЛ): он сам качает дорожки, сводит
@@ -1413,23 +1414,23 @@ WISH_LATE = "✏️ Уже свожу — поправишь словами по
 WISH_FAILED = "✏️ Просьбу словами разобрать не вышло — свёл как есть. Поправь кнопками или словами ниже.\n"
 ACCEPTED = ("Принял: {parts}. Свожу — пришлю минут через {minutes}.\n"
             "Голос встанет сам по первому слову. Встанет не туда — после сведения подвинешь пальцем.")
-EXPIRED = "Дорожки не пришли до конца — заявку закрыл. Начать заново — /skleyka."
-OLD = "Эта заявка уже закрыта. Начать заново — /skleyka."
-CANCELLED = "Отменил. Захочешь свести — /skleyka."
+EXPIRED = "Дорожки не пришли до конца — заявку закрыл. Начать заново — /svedenie."
+OLD = "Эта заявка уже закрыта. Начать заново — /svedenie."
+CANCELLED = "Отменил. Захочешь свести — /svedenie."
 LIMIT = "Треков в сутки — {count}. Следующий можно с {time} по Москве."
 INVITE = ("Твоя ссылка для артиста:\n{link}\n\nПридёт по ней и сведёт свой трек — получишь ещё один трек "
           f"сверх лимита. Живёт {config.SKLEYKA_BONUS_DAYS} дней.")
-BONUS = "👥 Артист по твоей ссылке свёл трек — у тебя ещё один трек сверх лимита. Жми /skleyka."
+BONUS = "👥 Артист по твоей ссылке свёл трек — у тебя ещё один трек сверх лимита. Жми /svedenie."
 BONUS_SENT = "Тот, кто позвал тебя в СВЕДЕНИЕ, получил за твой трек ещё один сверх лимита."
-THANKS = "Спасибо! {what} — жми /skleyka."
+THANKS = "Спасибо! {what} — жми /svedenie."
 TOO_BIG = f"«{{name}}» больше {config.SKLEYKA_MAX_MB} МБ. Пришли FLAC или MP3 320 — они легче."
-BAD = "«{name}» не читается. Пришли WAV, FLAC или MP3 — /skleyka."
-SILENT = "В «{name}» тишина — похоже, выгрузилась пустая дорожка. Пришли заново — /skleyka."
-LENGTH = "Бит длится {length}, а свожу треки от 1 до 8 минут. Другой — /skleyka."
-NEED = "Нужны и вокал, и бит, а {what}. Пришли все дорожки заново — /skleyka."
-FAILED = "Не вышло — что-то сломалось у меня. Попробуй ещё раз: /skleyka. Лимит на сутки не потрачен."
-STALE = "Это сведение устарело — пришли дорожки заново: /skleyka."
-NO_TWEAKS = "Пересборки этого трека кончились. Новое сведение — /skleyka."
+BAD = "«{name}» не читается. Пришли WAV, FLAC или MP3 — /svedenie."
+SILENT = "В «{name}» тишина — похоже, выгрузилась пустая дорожка. Пришли заново — /svedenie."
+LENGTH = "Бит длится {length}, а свожу треки от 1 до 8 минут. Другой — /svedenie."
+NEED = "Нужны и вокал, и бит, а {what}. Пришли все дорожки заново — /svedenie."
+FAILED = "Не вышло — что-то сломалось у меня. Попробуй ещё раз: /svedenie. Лимит на сутки не потрачен."
+STALE = "Это сведение устарело — пришли дорожки заново: /svedenie."
+NO_TWEAKS = "Пересборки этого трека кончились. Новое сведение — /svedenie."
 SAME = "Так уже и есть."
 REBUILD = "Пересобираю: {what}. Пришлю минут через {minutes}."
 READY = ("🎛 <b>Трек готов</b> — {look}.\n{parts}.\n{note}"
@@ -1631,7 +1632,7 @@ def _limit(data: dict, chat_id: str) -> str:
 
 
 def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> None:
-    """/skleyka, кнопка меню и ссылка ?start=skleyka: две строки и выбор кнопкой.
+    """/svedenie, кнопка меню и ссылка ?start=skleyka: две строки и выбор кнопкой.
     Подписку проверяет service."""
     chat_id, data = str(chat_id), load()
     denied = "" if admin else _limit(data, chat_id)
@@ -1821,10 +1822,11 @@ def _what(parts: list[tuple[str, str]]) -> str:
     return ", ".join(f"{NAMES[part]} {' и '.join(groups[part])}" for part in ORDER if part in groups)
 
 
-def _enqueue(data: dict, track: str, knobs: dict, tweak: bool = False) -> int:
+def _enqueue(data: dict, track: str, knobs: dict, tweak: bool = False, wish: str = "") -> int:
     """Сведение трека с этими ручками — в очередь; сколько минут ждать. tweak — пересборка
-    кнопкой: не вышла — возвращается пересборка, а не трек суток."""
-    data["jobs"].append({"id": secrets.token_hex(3), "track": track, "knobs": knobs, "at": state.iso(), "tweak": tweak})
+    кнопкой или словами (wish): не вышла — возвращается пересборка, а не трек суток."""
+    data["jobs"].append({"id": secrets.token_hex(3), "track": track, "knobs": knobs, "at": state.iso(), "tweak": tweak,
+                         **({"wish": wish} if wish else {})})
     return MINUTES * len(data["jobs"])
 
 
@@ -2096,11 +2098,14 @@ def moved(message: dict, *, admin: bool = False) -> None:
 # Модель (prompts/skleyka.md) только выбирает значения тех же ручек, что у кнопок,
 # код держит их в пределах, а пересборка — та же, что с кнопки, и в тот же лимит.
 # Ответ без пересборки лимита не тратит, но генератор общий с каналом, поэтому
-# разговоров у трека не больше TALKS. Метка в тексте ручек (TUNE) — ответ на это
+# разговоров у трека не больше TALKS. Модель спрашивает само сведение (run_job, heed),
+# а не дежурство: до 28.09.2026 ответ Gemini ждали в общем цикле опроса, и минуту-две
+# бот не отвечал никому — у владельца крутилась кнопка «чисто». Метка в тексте ручек (TUNE) — ответ на это
 # сообщение идёт сюда, а не в разбор (src/service.py).
 TALK_MARK = "напиши словами"
 TALKS = 6
 TALK_FAILED = "Не разобрал — подкрути кнопками выше."
+TALK_QUEUED = "✏️ Принял — разберу и пришлю пересборку минут через {minutes}."
 TALKED = "Поговорили про этот трек достаточно — дальше кнопками выше."
 LIKE_MISSING = "«{name}» в магазинах не нашёл — звук ни к чему не подтягивал."
 LIKE_LOST = "Отрывок «{name}» не скачался — звук к нему не подтягивал.\n"
@@ -2129,8 +2134,8 @@ def heard(knobs: dict, answer: dict) -> dict:
 def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
     """Просьба словами — в ручки и ответ человеку (prompts/skleyka.md). timing — замер
     сведения (run_job): где первое слово в присланном файле, дропы бита, длина доли;
-    по нему модель ставит голос «на дроп» или «на долю позже». До первого сведения
-    замера нет в дежурстве, поэтому просьбу заранее разбирает само сведение."""
+    по нему модель ставит голос «на дроп» или «на долю позже». Зовёт его только
+    сведение (heed): там замер уже есть, а дежурство не ждёт генератор."""
     now = {key: knobs.get(key) for key in TALK_KNOBS}
     now["at"] = -1 if now["at"] is None else now["at"]
     answer = llm.generate_skleyka({
@@ -2155,6 +2160,20 @@ def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
         if new["like"] is was:
             words = (f"{words}\n" if words else "") + LIKE_MISSING.format(name=html.escape(asked))
     return new, words
+
+
+def heed(knobs: dict, wish: str, timing: dict, talk: bool = False) -> tuple[dict, str, str]:
+    """Просьба словами в сведении (run_job): ручки, строка к треку и отказ. talk — просьба
+    к готовому треку: не разобралась или ничего не поменяла — отказ, ответ человеку вместо
+    пересборки, и лимит вернёт _finish."""
+    try:
+        new, words = understood(knobs, wish, timing)
+    except Exception as exc:  # noqa: BLE001 — генератор недоступен, сведение идёт как есть
+        print(f"  сведение: просьба не разобрана: {type(exc).__name__}")
+        return knobs, "" if talk else WISH_FAILED, TALK_FAILED if talk else ""
+    if talk and new == knobs:
+        return knobs, "", words or TALK_FAILED
+    return new, f"✏️ {words}\n" if words else "", ""
 
 
 # Час после готового трека простой текст — к нему, а не в разбор: ответом на сообщение
@@ -2213,20 +2232,17 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
         telegram.send_message(chat_id, TALKED)
         return
     track["talks"] = track.get("talks", 0) + 1
-    save(data)
-    try:
-        knobs, words = understood(track["knobs"], text, track.get("timing"))
-    except Exception as exc:  # noqa: BLE001 — генератор недоступен, кнопки остаются
-        print(f"  сведение: разговор не вышел: {type(exc).__name__}")
-        telegram.send_message(chat_id, TALK_FAILED)
+    # Прошлая просьба ещё ждёт в очереди — эта к ней: иначе пересборка вышла бы без неё.
+    if queued := next((job for job in data["jobs"] if job["track"] == track_id
+                       and "wish" in job and "started" not in job), None):
+        queued["wish"] = f"{queued['wish']}\n{text[:500]}"[-1000:]
+        save(data)
+        telegram.send_message(chat_id, WISHED)
         return
-    if knobs == track["knobs"]:
-        telegram.send_message(chat_id, words or TALK_FAILED)
-        return
-    track.update(knobs=knobs, tweaks=track["tweaks"] + 1)
-    minutes = _enqueue(data, track_id, knobs, tweak=True)
+    track["tweaks"] += 1
+    minutes = _enqueue(data, track_id, dict(track["knobs"]), tweak=True, wish=text[:1000])
     save(data)
-    telegram.send_message(chat_id, (f"{words}\n\n" if words else "") + REBUILD.format(what=look(knobs), minutes=minutes))
+    telegram.send_message(chat_id, TALK_QUEUED.format(minutes=minutes))
 
 
 # Сведение, что идёт сейчас: (процесс, заявка, папка). Одно на дежурство.
@@ -2264,7 +2280,7 @@ def _spawn(data: dict, job: dict) -> tuple[subprocess.Popen, dict, Path]:
     work = Path(tempfile.mkdtemp(prefix="skleyka-"))
     spec = {"job": job["id"], "track": job["track"], "chat": track["chat"], "files": track["files"],
             "knobs": job["knobs"], "left": None if track.get("admin") else config.SKLEYKA_TWEAKS - track["tweaks"],
-            "wish": None if job.get("tweak") else track.get("wish")}
+            "wish": job.get("wish") or (None if job.get("tweak") else track.get("wish")), "talk": "wish" in job}
     (work / "job.json").write_text(json.dumps(spec, ensure_ascii=False))
     job["started"] = state.iso()
     print(f"  сведение {job['id']}: пошло, в очереди ещё {len(data['jobs']) - 1}")
@@ -2433,13 +2449,13 @@ def run_job(spec_path: Path) -> int:
                 except Exception as exc:  # noqa: BLE001 — без приложения трек всё равно уходит
                     print(f"  сведение {spec['job']}: превью не собралось: {type(exc).__name__}")
             if spec.get("wish"):
-                try:
-                    knobs, words = understood(knobs, spec["wish"], timing)
-                    note = (f"✏️ {words}\n" if words else "") + note
-                    spec["knobs"] = result["knobs"] = knobs
-                except Exception as exc:  # noqa: BLE001 — генератор недоступен, сведение идёт как есть
-                    print(f"  сведение {spec['job']}: просьба не разобрана: {type(exc).__name__}")
-                    note = WISH_FAILED + note
+                knobs, told, refusal = heed(knobs, spec["wish"], timing, spec.get("talk", False))
+                if refusal:
+                    telegram.send_message(chat, refusal)
+                    result["why"] = "без перемен"
+                    return 0
+                note = told + note
+                spec["knobs"] = result["knobs"] = knobs
             voice = timing["sent"]
             if knobs.get("at") is not None:
                 # Первое слово — на секунду at: все дорожки голоса сдвигаются вместе.
@@ -2828,8 +2844,9 @@ def _selftest() -> None:
         assert sent[-1] == FAILED and data["used"]["7"] == [] and data["tracks"][track]["tweaks"] == 2
         save(data)
 
-        # Ответ словами: модель выбирает ручки, код держит пределы; ничего не поменялось —
-        # только ответ, без пересборки; генератор упал — кнопки.
+        # Ответ словами: дежурство только ставит просьбу в очередь, модель спрашивает сведение
+        # (heed). Она выбирает ручки, код держит пределы; ничего не поменялось — только ответ,
+        # без пересборки; генератор упал — кнопки.
         answers: list = []
 
         def model(payload: dict) -> dict:
@@ -2846,44 +2863,49 @@ def _selftest() -> None:
                                 "at": state.iso(state.now() + timedelta(minutes=1))}
         save(data)
         menu = {"text": TUNE, "reply_markup": {"inline_keyboard": buttons("t1", KNOBS, swap=False)}}
-        answers[:] = [{"style": "мелодично", "design": True, "voice": -9, "echo": "много", "reply": "Голос <тише>."}]
         talk(7, "автотюн", menu)
         data = load()
-        assert data["jobs"][-1]["track"] == "t1" and data["tracks"]["t1"]["tweaks"] == 1
-        assert data["jobs"][-1]["knobs"] == dict(KNOBS, style="мелодично", design=True, voice=-VOICE_LIMIT), data["jobs"][-1]
-        assert sent[-1].startswith("Голос &lt;тише&gt;.\n\nПересобираю: «мелодично»"), sent[-1]
-        jobs = len(data["jobs"])
+        assert data["jobs"][-1]["track"] == "t1" and data["jobs"][-1]["wish"] == "автотюн" and data["tracks"]["t1"]["tweaks"] == 1
+        assert sent[-1] == TALK_QUEUED.format(minutes=MINUTES * len(data["jobs"])), "генератор дежурство не ждёт"
+        talk(7, "и эха меньше", {"text": TUNE})  # кнопок Telegram не приложил — последний трек человека
+        data = load()
+        assert data["jobs"][-1]["wish"] == "автотюн\nи эха меньше" and data["tracks"]["t1"]["tweaks"] == 1 and sent[-1] == WISHED, \
+            "вторая просьба, пока первая ждёт, — к ней"
+        job = data["jobs"][-1]
+        (tmp / job["id"]).mkdir()
+        (tmp / job["id"] / "result.json").write_text(json.dumps({"ok": False, "why": "без перемен"}))
+        told = subprocess.Popen(["true"])
+        told.wait()
+        _finish(data, told, job, tmp / job["id"])
+        assert data["tracks"]["t1"]["tweaks"] == 0 and sent[-1] == WISHED and job not in data["jobs"], \
+            "ответ без пересборки — пересборка вернулась, «не вышло» не пишется"
+        save(data)
+        answers[:] = [{"style": "мелодично", "design": True, "voice": -9, "echo": "много", "reply": "Голос <тише>."}]
+        knobs, told, refusal = heed(dict(KNOBS), "автотюн", None, talk=True)
+        assert knobs == dict(KNOBS, style="мелодично", design=True, voice=-VOICE_LIMIT) and not refusal, knobs
+        assert told == "✏️ Голос &lt;тише&gt;.\n", told
         answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "reply": "Ширину не кручу."}]
-        talk(7, "шире", {"text": TUNE})  # кнопок Telegram не приложил — последний трек человека
-        assert sent[-1] == "Ширину не кручу." and load()["tracks"]["t1"]["tweaks"] == 1 and len(load()["jobs"]) == jobs
+        assert heed(knobs, "шире", None, talk=True) == (knobs, "", "Ширину не кручу.")
         # «Как у артиста»: трек ищет код, а не модель; не нашёлся — подгонки нет, и это сказано.
         itunes.find_song = lambda query: {"id": 1, "title": "Future — Mask Off", "url": "u"} if "Future" in query else {}
         answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "like": "Future", "reply": "Автотюн оставил."}]
-        talk(7, "как у Future", menu)
-        assert load()["tracks"]["t1"]["knobs"]["like"]["id"] == 1 and "к «Future — Mask Off»" in sent[-1], sent[-1]
+        knobs = heed(knobs, "как у Future", None, talk=True)[0]
+        assert knobs["like"]["id"] == 1 and "к «Future — Mask Off»" in look(knobs), look(knobs)
         answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "like": "Никто", "reply": ""}]
-        talk(7, "как у Никто", menu)
-        assert sent[-1] == LIKE_MISSING.format(name="Никто") and load()["tracks"]["t1"]["knobs"]["like"]["id"] == 1, sent[-1]
+        assert heed(knobs, "как у Никто", None, talk=True) == (knobs, "", LIKE_MISSING.format(name="Никто"))
         answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "like": "", "reply": "Убрал."}]
-        talk(7, "как было", menu)
-        assert load()["tracks"]["t1"]["knobs"]["like"] is None and load()["tracks"]["t1"]["tweaks"] == 3
-        data = load()
-        data["tracks"]["t1"]["tweaks"] = 1
-        data["tracks"]["t1"]["timing"] = {"sent": 2.75, "drops": [12.95], "beat": 0.857, "length": 153.0}
-        save(data)
+        knobs = heed(knobs, "как было", None, talk=True)[0]
+        assert knobs["like"] is None
         payloads: list = []
         llm.generate_skleyka = lambda payload: payloads.append(payload) or answers.pop(0)
         answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "at": 12.95, "like": "", "reply": "На дроп."}]
-        talk(7, "голос раньше дропа", menu)
+        knobs = heed(knobs, "голос раньше дропа", {"sent": 2.75, "drops": [12.95], "beat": 0.857, "length": 153.0}, talk=True)[0]
         assert payloads[-1]["timing"]["voice"] == 2.75 and payloads[-1]["knobs"]["at"] == -1, payloads[-1]
-        assert load()["tracks"]["t1"]["knobs"]["at"] == 12.95 and "голос с 0:13" in sent[-1], sent[-1]
+        assert knobs["at"] == 12.95 and "голос с 0:13" in look(knobs), look(knobs)
         llm.generate_skleyka = model
-        data = load()
-        data["tracks"]["t1"].update(tweaks=1, talks=0)
-        save(data)
-        answers[:] = [RuntimeError("сеть")]
-        talk(7, "эха", menu)
-        assert sent[-1] == TALK_FAILED
+        answers[:] = [RuntimeError("сеть"), RuntimeError("сеть")]
+        assert heed(dict(KNOBS), "эха", None, talk=True) == (dict(KNOBS), "", TALK_FAILED)
+        assert heed(dict(KNOBS), "эха", None) == (dict(KNOBS), WISH_FAILED, ""), "просьба заранее — свести как есть"
         talk(8, "эха", menu)
         assert sent[-1] == STALE, "чужой трек"
         data = load()

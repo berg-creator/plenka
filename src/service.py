@@ -113,7 +113,8 @@ COMMANDS = {
     "gorod": "city", "город": "city",
     "otbor": "otbor", "отбор": "otbor",
     "skleyka": "skleyka", "склейка": "skleyka",
-    "sved": "sved", "двойник": "sved", "сведение": "skleyka",
+    "svedenie": "skleyka", "сведение": "skleyka",
+    "dvoynik": "sved", "sved": "sved", "двойник": "sved",
     "proyavka": "proyavka", "проявка": "proyavka",
     "vkladysh": "vkladysh", "вкладыш": "vkladysh",
 }
