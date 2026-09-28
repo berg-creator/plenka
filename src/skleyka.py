@@ -25,9 +25,10 @@
    в сайдчейне: середина бита приседает по полосам выше 120 Гц ключом от тех же
    полос голоса, глубже всего в 1–4 кГц и только пока голос звучит (ROOM_*).
    Низ и края не тронуты: бочка и 808 качают, бит остаётся широким.
-4. Баланс — вровень по EBU R128, а по ходу трека голос ведёт райдер: где бит
-   его перекрывает, голос плавно поднимается. Один баланс на весь трек владелец
-   услышал с первой прослушки: «где-то будто слишком громкий бит».
+4. Баланс — вровень по EBU R128, а у дорожек из одного проекта — как у артиста
+   (SAME_PROJECT); по ходу трека голос ведёт райдер: где бит его перекрывает,
+   голос плавно поднимается. Один баланс на весь трек владелец услышал с первой
+   прослушки: «где-то будто слишком громкий бит».
 5. Стиль (STYLES) — набор эффектов, названный словом, понятным без знания
    сведения. Отзвук, дилей и дабл — шинами, доля к сухому голосу по замеру,
    как в reels.studio.
@@ -187,6 +188,16 @@ ROOM_RATIO = 1.25
 # Вокал к биту по EBU R128. Бит без пауз, а у вокала паузы отсекает сам замер,
 # так что 0 — голос в строке вровень с битом.
 VOCAL_OVER_BEAT = 0.0
+# Голос и бит одной длины (расходятся не больше SAME_PROJECT с) выгружены из одного
+# проекта — так просит FROM_START, — и баланс между ними поставил артист: он и остаётся.
+# 28.09.2026 у «Асапчика» владельца голос был на 6,8 дБ тише бита, вровень с райдером
+# вышло на 1,8 громче — «голос не лежит в бите, пластиковый и воздушный»: поверх бита
+# слышна вся обработка; с его балансом — «лежит лучше». Пределы BALANCE_RANGE — как
+# в релизах: у 447 треков, разделённых demucs, голос к музыке по медиане −1,9 дБ,
+# у девяти из десяти с голосом — от −9 до +3. Тише −9 — скорее забытая громкость
+# дорожки, чем замысел.
+SAME_PROJECT = 2.0
+BALANCE_RANGE = (-9.0, 3.0)
 # Райдер — как звукорежиссёр с фейдером голоса: громкость голоса окнами 0,4 с
 # (EBU R128 M) против бита в те же окна. Где голос отстаёт от бита больше чем
 # на RIDE_TARGET, он поднимается до RIDE_MAX дБ (у Waves Vocal Rider по умолчанию
@@ -1102,8 +1113,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     clean = f"{FORMAT},{_center(vocal)}{HIGHPASS}"
     if tune := look.get("autotune") and _autotune(beat):
         clean += f",{tune}"
-    squeezed, dry = work / "vocal-comp.wav", work / "vocal.wav"
-    _ffmpeg("-i", vocal, "-af", f"{clean},volume={VOCAL_LUFS - loudness(vocal, clean + ',')[0]:.2f}dB,{VOCAL_CHAIN}"
+    squeezed, dry, raw = work / "vocal-comp.wav", work / "vocal.wav", loudness(vocal, clean + ",")[0]
+    _ffmpeg("-i", vocal, "-af", f"{clean},volume={VOCAL_LUFS - raw:.2f}dB,{VOCAL_CHAIN}"
             + (f",{DENSE}" if look.get("dense") else ""), *reels.VOICE_CODEC, squeezed)
     lines = _lines(_envelope(squeezed))
     _ffmpeg("-i", squeezed, "-af", _equalizer(squeezed, lines, work) + DEESSER + (f",{look['color']}" if "color" in look else ""),
@@ -1116,6 +1127,10 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     flip = "pan=stereo|c0=c0|c1=-1*c1," if width < 0 else ""
     head = f"{FORMAT},{flip}"
     print(f"  бит: корреляция каналов {width:+.2f}" + (", один канал перевёрнут" if flip else ""))
+    balance = VOCAL_OVER_BEAT
+    if abs(clips.probe_seconds(vocal) - clips.probe_seconds(beat)) <= SAME_PROJECT:
+        balance = min(max(raw - loudness(beat, head)[0], BALANCE_RANGE[0]), BALANCE_RANGE[1])
+        print(f"  голос и бит из одного проекта: голос к биту {balance:+.1f} дБ, как у артиста")
     # Барабаны и бас пришли отдельно — место голосу только в остальном бите.
     drums = [path for part, path in parts if part in ("барабаны", "бас")]
     music = [path for part, path in parts if part in ("бит", "музыка")] if drums else [beat]
@@ -1123,10 +1138,10 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     room = None
     if music:
         whole = music[0] if len(music) == 1 else _sum([(path, 0.0) for path in music], work / "music.wav")
-        room = _room(whole, dry, head, loudness(beat, head)[0] + VOCAL_OVER_BEAT + voice - sung, lines, work)
+        room = _room(whole, dry, head, loudness(beat, head)[0] + balance + voice - sung, lines, work)
     ducked = _sum([(room, 0.0), (kit, 0.0)], work / "beat-parts.wav") if room and kit else room or kit
     under = loudness(ducked)[0]
-    ridden = _ride(dry, ducked, under + VOCAL_OVER_BEAT + voice - sung, RIDE_TARGET + voice, work)
+    ridden = _ride(dry, ducked, under + balance + voice - sung, RIDE_TARGET + balance - VOCAL_OVER_BEAT + voice, work)
     level = loudness(ridden)[0]
     placed = voices([(part, path) for part, path in parts if part in PARTS], level, work / "ride.wav", work, tune or "")
 
@@ -2398,7 +2413,7 @@ def check(parts: list[tuple[str, Path, str]]) -> tuple[str, str]:
     beat = max(length[name] for name, _, part in parts if part not in VOCAL_SIDE)
     if not 60 <= beat <= 480:
         return LENGTH.format(length=_minutes(beat)), ""
-    return "", MISMATCH.format(a=_minutes(voice), b=_minutes(beat)) if abs(voice - beat) > 2 else ""
+    return "", MISMATCH.format(a=_minutes(voice), b=_minutes(beat)) if abs(voice - beat) > SAME_PROJECT else ""
 
 
 def _bus(parts: list[tuple[str, Path, str]], vocal: bool, dest: Path) -> Path:
