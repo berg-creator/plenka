@@ -25,6 +25,9 @@
   html, body { background: var(--bg); }
   body { margin: 0; padding: 20px 16px 28px; color: var(--text); font: 15px/1.4 var(--ui); user-select: none;
          -webkit-user-select: none; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #mode { min-height: 40px; padding: 0 16px; border-radius: 20px; background: var(--soft); font-size: 14px; }
+  #mode[aria-pressed="true"] { background: var(--text); color: var(--bg); }
   #counter { margin: 0; font: 500 44px/1 var(--counter); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
   #where { margin-top: 6px; color: var(--hint); font-size: 14px; min-height: 20px; font-variant-numeric: tabular-nums; }
   canvas { display: block; width: 100%; touch-action: none; }
@@ -45,9 +48,12 @@
 </style>
 </head>
 <body>
-<h1 id="counter" aria-live="polite">00:00.00</h1>
+<div class="top">
+  <h1 id="counter" aria-live="polite">00:00.00</h1>
+  <button id="mode" aria-pressed="false" aria-label="Свободно: без прилипания к долям">по долям</button>
+</div>
 <div id="where"></div>
-<canvas id="view" role="img" aria-label="Бит сверху, голос под ним: тащи голос пальцем, он встаёт на доли"></canvas>
+<canvas id="view" role="img" aria-label="Бит сверху, голос под ним: тащи голос пальцем, он шагает по долям"></canvas>
 <canvas id="map" role="img" aria-label="Весь бит: нажми, чтобы посмотреть другое место"></canvas>
 <p id="hint">Загружаю звук…</p>
 <div class="deck">
@@ -76,6 +82,8 @@ const RULER = 18;  // полоска с номерами тактов и мет�
 const GAP = 8;     // между рядом бита и рядом голоса
 const ER = 200;    // огибающая — 200 точек в секунду, волна рисуется из неё
 const SETTLE = 120;
+const FINE = 0.01; // шаг «свободно»: сотые — точность, с которой сведение сдвигает голос
+let free = !beatLen; // без сетки прилипать не к чему
 const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const $ = id => document.getElementById(id);
@@ -108,14 +116,19 @@ function place(t) {
   if (!beatLen) return "без сетки: бит не дал ровного пульса";
   const k = Math.round((t - phase) / beatLen);
   const bar = Math.floor(k / 4) - firstBar + 1, beat = ((k % 4) + 4) % 4 + 1;
-  return "такт " + bar + " · доля " + beat + (drops.some(d => Math.abs(d - t) < 0.05) ? " · дроп" : "");
+  return "такт " + bar + " · доля " + beat + (drops.some(d => Math.abs(d - phase - k * beatLen) < 0.05) ? " · дроп" : "");
 }
 
+// Шаг — целыми долями от исходного места, а не к линии сетки. Начало первого слова — атака
+// согласной, слог ухо слышит позже, и слово, прилипшее атакой к доле, звучало позади бита
+// как ни двигай (владелец 28.09.2026); запевы до доли ломались. Своё смещение к доле
+// у записи артиста верное — его и держим. «Свободно» — без прилипания.
 function snap(t) {
-  const hi = Math.max(0, (total || t + 1) - 1), step = beatLen || 0.05;
-  let s = beatLen ? phase + Math.round((t - phase) / beatLen) * beatLen : Math.round(t / step) * step;
-  while (s < 0) s += step;
-  while (s > hi) s -= step;
+  const hi = Math.max(0, (total || t + 1) - 1);
+  if (free) return Math.round(Math.min(hi, Math.max(0, t)) * 100) / 100;
+  let s = start + Math.round((t - start) / beatLen) * beatLen;
+  while (s < 0) s += beatLen;
+  while (s > hi) s -= beatLen;
   return Math.round(s * 1000) / 1000;
 }
 
@@ -124,7 +137,7 @@ function target(t) {
   const next = snap(t);
   if (Math.abs(next - at) < 1e-6) return;
   at = next;
-  if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+  if (!free && tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();  // свободно — жужжало бы без конца
   drawAll();
 }
 
@@ -312,11 +325,27 @@ map.addEventListener("pointerdown", e => { capture(map, e); mapTo(e); });
 map.addEventListener("pointermove", e => { if (e.buttons || e.pointerType === "touch") mapTo(e); });
 
 function nudge(k) {
-  target((beatLen ? snap(at) : at) + k * (beatLen || 0.05));
+  target(snap(at) + k * (free ? FINE : beatLen));
   follow();
   settle();
   if (playing) play();
 }
+const HINTS = {
+  grid: "Тащи голос пальцем — он шагает по долям. Слушать — с двух секунд до входа.",
+  free: "Свободно: голос встаёт, где отпустишь, кнопки двигают на 10 мс.",
+};
+function mode() {
+  $("mode").textContent = free ? "свободно" : "по долям";
+  $("mode").setAttribute("aria-pressed", String(free));
+  $("prev").textContent = free ? "◀ 10 мс" : "◀ доля";
+  $("next").textContent = free ? "10 мс ▶" : "доля ▶";
+  $("prev").setAttribute("aria-label", free ? "На 10 мс раньше" : "На долю раньше");
+  $("next").setAttribute("aria-label", free ? "На 10 мс позже" : "На долю позже");
+  if (voiceBuf) hint.textContent = HINTS[free ? "free" : "grid"];
+}
+$("mode").hidden = !beatLen;
+$("mode").onclick = () => { free = !free; mode(); };
+mode();
 $("prev").onclick = () => nudge(-1);
 $("next").onclick = () => nudge(1);
 document.addEventListener("keydown", e => {
@@ -331,7 +360,12 @@ function icon(name, label) {
   $("play").querySelector("svg").innerHTML = ICONS[name];
   $("play").setAttribute("aria-label", label);
 }
-function head() { return playing ? playing.from + (ctx.currentTime - playing.t0) : 0; }
+// Звук доходит до уха позже, чем его отдали: задержка вывода, в Bluetooth 0,15–0,3 с.
+// Без поправки линия бежала впереди звука (владелец 28.09.2026).
+function head() {
+  if (!playing) return 0;
+  return playing.from + Math.max(0, ctx.currentTime - playing.t0 - (ctx.outputLatency || ctx.baseLatency || 0));
+}
 
 function stop() {
   if (!playing) return;
@@ -416,7 +450,7 @@ fetch(src)
     voiceEnv = envelope(voiceBuf.getChannelData(0), buffer.sampleRate);
     beatEnv = envelope(beatBuf.getChannelData(0), buffer.sampleRate);
     total = total || buffer.duration;
-    hint.textContent = "Тащи голос пальцем — он встаёт на доли. Слушать — с двух секунд до входа.";
+    hint.textContent = HINTS[free ? "free" : "grid"];
     drawAll();
   })
   .catch(err => {
