@@ -941,6 +941,12 @@
       "file": "20260915-085805-4832-lineage.json",
       "published_at": "2026-09-28T14:26:35+00:00",
       "rubric": "lineage"
+    },
+    {
+      "chat": "channel",
+      "file": "20260915-085811-9451-subtext.json",
+      "published_at": "2026-09-28T17:31:54+00:00",
+      "rubric": "subtext"
     }
   ],
   "photos": [
@@ -1070,6 +1076,7 @@
     "8133892a99262326164e166a365a2e5a0a323d620de2f293d0c64b8cd393db25",
     "3e0e6071c07b40f980fd006f4cce869e868e84cf06d70a330a5784cf98f3007f",
     "48714278430ce326a3923b915b0d9d8f9f4d3f4de58fdf4f63cf836f83f781bf",
-    "5f935f2b5f3d1ff58ffddab3d8d4dad4da942eb54bfb07ef57ff5d7b5fbf57d7"
+    "5f935f2b5f3d1ff58ffddab3d8d4dad4da942eb54bfb07ef57ff5d7b5fbf57d7",
+    "a755af0dcf1633b2d68be764f39df79ce61c6f3a4920c924a63d843391e19363"
   ]
 }
