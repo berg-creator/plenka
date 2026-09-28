@@ -55,7 +55,7 @@
   <button id="play" aria-label="Слушать"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg></button>
   <button class="step" id="next" aria-label="На долю позже">доля ▶</button>
 </div>
-<button id="done" hidden>Склеить так</button>
+<button id="done" hidden>Свести так</button>
 <script>
 "use strict";
 const tg = window.Telegram && window.Telegram.WebApp;
@@ -360,7 +360,7 @@ function send() {
   else hint.textContent = "Ушло бы боту: " + data;
 }
 if (inTg) {
-  tg.MainButton.setParams({ text: "Склеить так", is_visible: true });
+  tg.MainButton.setParams({ text: "Свести так", is_visible: true });
   tg.MainButton.onClick(send);
 } else {
   $("done").hidden = false;
