@@ -2172,7 +2172,8 @@ def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> N
 # и ставит ту же ручку at, что «🎯», в тот же лимит пересборок. Нет адреса или ключа
 # или пересборок не осталось — кнопки нет: сведение без приложения то же. Уходит кнопка
 # с ответом на пересборку (_tweak, talk), а когда человек пишет боту о другом или
-# звук по ссылке протух — с первым ответом бота без своих кнопок (unkey).
+# звук по ссылке протух — с первым ответом бота без своих кнопок (unkey), а молчит
+# человек — сама, когда протух звук (_sweep).
 MOVE_HOURS = 24
 KEYS_SINCE = "2026-09-28T17:30"  # с этой минуты кнопку приложения отмечают (data["keys"])
 MOVE_BUTTON = "🎚 Двигать голос"
@@ -2246,12 +2247,29 @@ def unkey(message: dict) -> None:
     if not text.startswith("/") and TALK_MARK in (message.get("reply_to_message") or {}).get("text", ""):
         return
     data = load()
-    # ponytail: кнопки до 28.09.2026 не отмечались — снимаем всем, чей трек готов раньше;
-    # такие треки чистка удалит к 05.10, тогда условие не сработает и его можно убрать.
-    unmarked = any(track["chat"] == chat_id and track.get("done", "~") < KEYS_SINCE for track in data["tracks"].values())
-    if data["keys"].pop(chat_id, None) or unmarked:
+    if data["keys"].pop(chat_id, None):
         save(data)
         telegram.UNKEY.add(chat_id)
+
+
+def _sweep(data: dict) -> bool:
+    """Звук по ссылке протух, а человек молчит — кнопку снять самим. Снять её можно только
+    сообщением, поэтому оно уходит без звука и тут же удаляется. Было что снимать — True."""
+    # ponytail: разово для кнопок до 28.09.2026 — отметить их по готовому треку; к 05.10 убрать.
+    marked = False
+    for track in data["tracks"].values():
+        if track.get("done", "~") < KEYS_SINCE and not track.get("swept"):
+            track["swept"] = marked = True
+            data["keys"][track["chat"]] = max(data["keys"].get(track["chat"], ""), track["done"])
+    old = [chat_id for chat_id, stamp in data["keys"].items() if _age(stamp) > MOVE_HOURS * 3600]
+    for chat_id in old:
+        del data["keys"][chat_id]
+        try:
+            sent = telegram.send_message(chat_id, MOVE_BUTTON, markup=REMOVE, quiet=True)
+            telegram.delete_message(chat_id, sent["message_id"])
+        except telegram.TelegramError as exc:  # бота заблокировали — снимать нечего
+            print(f"  кнопка приложения не снята: {exc}")
+    return bool(old) or marked
 
 
 # Ответ словами на ручки готового трека — «голос тише на припеве, эха побольше».
@@ -2426,6 +2444,7 @@ def tick() -> None:
         _RUNNING, changed = None, True
     if not _RUNNING and data["jobs"]:
         _RUNNING, changed = _spawn(data, data["jobs"][0]), True
+    changed = _sweep(data) or changed
     for track_id, track in list(data["tracks"].items()):
         if _age(track["at"]) > TRACK_DAYS * 86400:
             del data["tracks"][track_id]
@@ -3097,12 +3116,15 @@ def _selftest() -> None:
         done.wait()
         _finish(data, done, {"id": "jk", "track": "t1", "tweak": True}, tmp / "keyed")
         save(data)
+        # Молчит — кнопку снимает дежурство, когда звук протух: беззвучно и без следа.
         data["tracks"]["t9"] = {"chat": "9", "files": [], "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(),
-                                "done": "2026-09-28T12:00:00+00:00"}
+                                "done": "2026-09-27T12:00:00+00:00"}
+        data["keys"]["10"] = state.iso()
+        assert _sweep(data) and "9" not in data["keys"] and data["keys"]["10"], "кнопка до отметок — по готовому треку"
+        assert sent[-1] == MOVE_BUTTON and marks[-1] == REMOVE and calls[-1][0] == "deleteMessage"
+        assert not _sweep(data), "снята — второй раз не шлёт; свежая ждёт"
+        del data["keys"]["10"]
         save(data)
-        unkey({"chat": {"id": 9}, "text": "привет"})
-        assert telegram.UNKEY == {"9"}, "кнопка до отметок снимается по готовому треку"
-        telegram.UNKEY.clear()
         unkey({"chat": {"id": 7}, "text": "эха меньше", "reply_to_message": {"text": TUNE}})
         assert "7" in load()["keys"] and not telegram.UNKEY, "ответ словами на ручки — работа над треком"
         unkey({"chat": {"id": 7}, "text": "/dvoynik"})
