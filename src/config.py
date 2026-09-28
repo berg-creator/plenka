@@ -84,7 +84,7 @@ SKLEYKA_MONTH_PER_DAY = 10
 # Мини-приложение «🎚 Двигать голос» — функция Яндекс Облака cloud/skleyka_app.py.
 # Адрес не секрет: он и так виден в кнопке. Пусто — кнопки нет, сведение то же.
 # Ключ подписи ссылок на звук — секрет SKLEYKA_APP_KEY, тот же в окружении функции.
-SKLEYKA_APP_URL = ""
+SKLEYKA_APP_URL = "https://functions.yandexcloud.net/d4ee6akvq3r53vcq0a34"
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (gemini — Google, по умолчанию; anthropic — платный Claude; gigachat — Сбер).
