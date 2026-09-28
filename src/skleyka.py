@@ -88,6 +88,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.parse
+import urllib.request
 import wave
 from datetime import timedelta
 from pathlib import Path
@@ -1410,7 +1411,8 @@ MORE = "Есть: {names}. Ещё файл — или дальше."
 WISHED = "✏️ Записал — учту при сведении."
 WISH_LATE = "✏️ Уже свожу — поправишь словами под готовым треком."
 WISH_FAILED = "✏️ Просьбу словами разобрать не вышло — свёл как есть. Поправь кнопками или словами ниже.\n"
-ACCEPTED = "Принял: {parts}. Свожу — пришлю минут через {minutes}."
+ACCEPTED = ("Принял: {parts}. Свожу — пришлю минут через {minutes}.\n"
+            "Голос встанет сам по первому слову. Встанет не туда — после сведения подвинешь пальцем.")
 EXPIRED = "Дорожки не пришли до конца — заявку закрыл. Начать заново — /skleyka."
 OLD = "Эта заявка уже закрыта. Начать заново — /skleyka."
 CANCELLED = "Отменил. Захочешь свести — /skleyka."
@@ -1431,7 +1433,7 @@ NO_TWEAKS = "Пересборки этого трека кончились. Но
 SAME = "Так уже и есть."
 REBUILD = "Пересобираю: {what}. Пришлю минут через {minutes}."
 READY = ("🎛 <b>Трек готов</b> — {look}.\n{parts}.\n{note}"
-         "Это черновое сведение автоматом, не студия. Громкость как у релизов; WAV для площадок — следующим файлом.")
+         "Громкость как у релизов; WAV для площадок — следующим файлом.")
 MISMATCH = "Дорожки разной длины ({a} и {b}): если голос уехал от бита — выгрузи обе с самого начала проекта.\n"
 GUESSED = "Вокал и бит пришли одним альбомом — где что, понял по звуку. Перепутал — жми «↔ поменять».\n"
 TUNE = ("Не так? Подкрути — пересоберу{left}. Или просто напиши словами, что поменять, как другу: "
@@ -2023,8 +2025,9 @@ def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool, mark
 
 
 # Мини-приложение «🎚 Двигать голос» (cloud/skleyka_app.py): человек пальцем ставит
-# голос на сетку бита и слушает. Звук ему — превью сведения в Telegram (file_id), ссылка
-# подписана ключом SKLEYKA_APP_KEY и живёт MOVE_HOURS. Выбор приходит сообщением
+# голос на сетку бита и слушает. Звук ему — превью сведения: бот кладёт его в функцию
+# сам (из Облака Telegram не отвечает), ссылка подписана ключом SKLEYKA_APP_KEY
+# и живёт MOVE_HOURS. Выбор приходит сообщением
 # web_app_data — только с кнопки обычной клавиатуры, инлайн-кнопка sendData не умеет —
 # и ставит ту же ручку at, что «🎯», в тот же лимит пересборок. Нет адреса или ключа —
 # кнопки нет: сведение без приложения то же.
@@ -2054,21 +2057,19 @@ def preview(vocal: Path, beat: Path, dest: Path) -> Path:
 
 
 def _offer(spec: dict, clip: Path, rhythm: tuple[float, float], timing: dict, voice: float) -> None:
-    """Кнопка приложения под готовым треком. Превью заливается ботом владельцу без звука
-    и сразу удаляется: служебного чата у бота нет, а file_id живёт и после удаления."""
+    """Кнопка приложения под готовым треком. Превью бот кладёт в функцию сам под случайным
+    именем: сама функция до Telegram не достаёт, а имя не угадать."""
     key = config.secret("SKLEYKA_APP_KEY", required=False)
     if not (config.SKLEYKA_APP_URL and key):
         return
-    admin = config.secret("TELEGRAM_ADMIN_ID")
-    with clip.open("rb") as handle:
-        stash = telegram._call("sendDocument", {"chat_id": admin, "disable_notification": True},
-                               files={"document": ("preview.mp3", handle, "audio/mpeg")})
-    with contextlib.suppress(telegram.TelegramError):
-        telegram.delete_message(admin, stash["message_id"])
-    file_id = (stash.get("audio") or stash["document"])["file_id"]
+    name = secrets.token_urlsafe(18)
     expires = int(state.now().timestamp()) + MOVE_HOURS * 3600
+    put = urllib.parse.urlencode({"put": 1, "f": name, "e": expires, "s": sign(key, "put:" + name, expires)})
+    urllib.request.urlopen(urllib.request.Request(  # не 2xx — исключение, кнопки не будет
+        f"{config.SKLEYKA_APP_URL}?{put}", data=clip.read_bytes(), method="POST",
+        headers={"Content-Type": "audio/mpeg"}), timeout=60).close()
     query = urllib.parse.urlencode({
-        "t": spec["track"], "f": file_id, "e": expires, "s": sign(key, file_id, expires),
+        "t": spec["track"], "f": name, "e": expires, "s": sign(key, name, expires),
         "b": round(rhythm[0], 4), "p": round(rhythm[1], 3), "w": timing["sent"], "a": round(voice, 2),
         "d": ",".join(f"{drop:g}" for drop in timing["drops"]), "l": timing["length"]})
     telegram.send_message(spec["chat"], MOVE_ASK, markup={
@@ -2619,37 +2620,51 @@ def _selftest() -> None:
         assert left < -60 < right and abs(clips.probe_seconds(clip) - 12) < 0.2, (left, right)
         assert clip.stat().st_size < PREVIEW_BYTES
 
-        # Подпись ссылки на звук: бот и функция Облака считают её одинаково; просроченная
-        # и подделанная не качают ничего.
+        # Подпись ссылки на звук: бот и функция Облака считают её одинаково; просроченная,
+        # подделанная и подпись чтения вместо записи не пишут и не отдают ничего.
+        import base64
         import importlib.util
         from unittest import mock
         loader = importlib.util.spec_from_file_location("skleyka_app", config.ROOT / "cloud" / "skleyka_app.py")
         app = importlib.util.module_from_spec(loader)
         loader.loader.exec_module(app)
-        app.fetch = lambda file_id, token: b"ID3" + file_id.encode()
-        with mock.patch.dict("os.environ", {"SKLEYKA_APP_KEY": "k", "TELEGRAM_BOT_TOKEN": "t"}):
+        app.STORE = tmp
+        with mock.patch.dict("os.environ", {"SKLEYKA_APP_KEY": "k"}):
             later = int(state.now().timestamp()) + 60
+            name = "N" * 20
 
-            def get(**query) -> dict:
-                return app.handler({"httpMethod": "GET", "queryStringParameters": query}, None)
-            ok = get(audio="", f="F1", e=str(later), s=sign("k", "F1", later))
-            assert ok["statusCode"] == 200 and ok["isBase64Encoded"] and ok["body"] == "SUQzRjE=", ok
-            assert get(audio="", f="F1", e=str(later - 120), s=sign("k", "F1", later - 120))["statusCode"] == 403
-            assert get(audio="", f="F2", e=str(later), s=sign("k", "F1", later))["statusCode"] == 403, "чужой file_id"
-            assert get(audio="", f="F1", e=str(later), s=sign("x", "F1", later))["statusCode"] == 403, "чужой ключ"
-            assert "Telegram.WebApp" in get(t="1")["body"], "без audio — страница"
-            # Кнопка под треком: ссылку, что собрал бот, функция принимает; превью у владельца удалено.
-            deleted: list = []
+            def call(method: str, body: bytes = b"", **query) -> dict:
+                return app.handler({"httpMethod": method, "queryStringParameters": query,
+                                    "body": base64.b64encode(body).decode(), "isBase64Encoded": True}, None)
+            assert call("POST", b"ID3x", put="", f=name, e=str(later), s=sign("k", name, later))["statusCode"] == 403, \
+                "подписью чтения не записать"
+            assert call("POST", b"ID3x", put="", f=name, e=str(later), s=sign("k", "put:" + name, later))["statusCode"] == 200
+            ok = call("GET", audio="", f=name, e=str(later), s=sign("k", name, later))
+            assert ok["statusCode"] == 200 and ok["isBase64Encoded"] and ok["body"] == "SUQzeA==", ok
+            assert call("GET", audio="", f=name, e=str(later - 120), s=sign("k", name, later - 120))["statusCode"] == 403
+            assert call("GET", audio="", f="M" * 20, e=str(later), s=sign("k", name, later))["statusCode"] == 403, "чужое имя"
+            assert call("GET", audio="", f=name, e=str(later), s=sign("x", name, later))["statusCode"] == 403, "чужой ключ"
+            bad = "../" + "a" * 20
+            assert call("POST", b"x", put="", f=bad, e=str(later), s=sign("k", "put:" + bad, later))["statusCode"] == 403, "вон из бакета"
+            assert call("GET", audio="", f="G" * 20, e=str(later), s=sign("k", "G" * 20, later))["statusCode"] == 404
+            assert "Telegram.WebApp" in call("GET", t="1")["body"], "без audio — страница"
+
+            # Кнопка под треком: бот кладёт превью в функцию, и ссылку страницы функция принимает.
+            def upload(request, timeout):
+                query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(request.full_url).query))
+                answer = call(request.get_method(), request.data, **query)
+                assert answer["statusCode"] == 200, answer
+                return mock.MagicMock()
             with mock.patch.object(config, "SKLEYKA_APP_URL", "https://app"), \
                     mock.patch.object(config, "secret", lambda name, required=True: "k" if name == "SKLEYKA_APP_KEY" else "1"), \
-                    mock.patch.object(telegram, "_call", lambda *_, **__: {"message_id": 5, "document": {"file_id": "F9"}}), \
-                    mock.patch.object(telegram, "delete_message", lambda chat, message: deleted.append(message)):
+                    mock.patch.object(urllib.request, "urlopen", upload):
                 _offer({"track": "t1", "chat": "7"}, clip, (0.5, 0.25), {"sent": 1.0, "drops": [4.0, 8.5], "length": 12.0}, 2.0)
             button = marks[-1]["keyboard"][0][0]
             query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(button["web_app"]["url"]).query))
-            assert sent[-1] == MOVE_ASK and button["text"] == MOVE_BUTTON and deleted == [5], (sent[-1], deleted)
+            assert sent[-1] == MOVE_ASK and button["text"] == MOVE_BUTTON, sent[-1]
             assert (query["t"], query["d"], query["a"], query["w"], query["p"]) == ("t1", "4,8.5", "2.0", "1.0", "0.25"), query
-            assert get(audio="", **{key: query[key] for key in "fes"})["body"] == "SUQzRjk=", "подпись бота функция принимает"
+            audio = call("GET", audio="", **{key: query[key] for key in "fes"})
+            assert base64.b64decode(audio["body"]) == clip.read_bytes(), "подпись бота функция принимает"
 
         # Куда идёт файл: при открытой заявке и ответом на вопрос сведения — сюда; без заявки
         # и ответом на другое (запрос трека владельца) — мимо, в ОТБОР и attach_track.
