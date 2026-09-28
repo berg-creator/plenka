@@ -158,6 +158,12 @@ def _call(method: str, payload: dict[str, Any], files: dict | None = None) -> di
     return data["result"]
 
 
+# Чаты, где кнопку «🎚 Двигать голос» пора снять (src/skleyka.py, unkey): её снимает
+# первое же сообщение бота без своих кнопок — отдельного сообщения ради этого нет.
+# Живёт в памяти смены: всё ответили инлайн-кнопками — кнопка дождётся следующей.
+UNKEY: set[str] = set()
+
+
 def send_message(
     chat_id: str,
     text: str,
@@ -182,10 +188,11 @@ def send_message(
         # в поле ввода — подсказка ask. Бот узнаёт ответ по reply_to_message,
         # и помнить, о чём спросил, ему не нужно.
         payload["reply_markup"] = json.dumps({"force_reply": True, "input_field_placeholder": ask})
-    elif markup:
+    elif markup or str(chat_id) in UNKEY:
         # Обычная клавиатура или её снятие: кнопка мини-приложения, чей sendData
         # приходит в getUpdates, бывает только на ней, а не на инлайн-кнопке.
-        payload["reply_markup"] = json.dumps(markup)
+        payload["reply_markup"] = json.dumps(markup or {"remove_keyboard": True})
+        UNKEY.discard(str(chat_id))
     if quiet:
         payload["disable_notification"] = True
     if reply_to is not None:

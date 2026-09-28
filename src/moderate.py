@@ -366,6 +366,13 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                 except Exception as exc:  # noqa: BLE001 — сбой приёма не роняет дежурство
                     log.error("Место голоса не принято: %s", exc)
             continue
+        # Человек пишет боту не словами о треке СВЕДЕНИЯ — кнопку приложения снимет первый
+        # ответ бота (src/skleyka.py, unkey).
+        if message and message.get("chat", {}).get("type") == "private" and not args.dry_run:
+            try:
+                skleyka.unkey(message)
+            except Exception as exc:  # noqa: BLE001 — кнопка подождёт, дежурство не падает
+                log.error("Кнопка приложения не снята: %s", exc)
         if message:
             # Пост, пересланный Telegram в чат обсуждений, — повод открыть ветку
             # комментариев первым. Под прослушкой первой идёт сама викторина
@@ -537,6 +544,10 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                 print(f"  кнопка сервиса: {data}")
                 continue
             try:
+                # Кнопка другой функции, хоть «🎙 Выложил — в ОТБОР» под треком, — работа над треком
+                # кончилась. Свои кнопки СВЕДЕНИЯ снимают клавиатуру ответом сами (skleyka._tweak).
+                if not data.startswith(skleyka.PREFIX) and query.get("message"):
+                    skleyka.unkey(query["message"])
                 service.handle_callback(query, limits)
             except Exception as exc:  # noqa: BLE001 — чужое нажатие не роняет запуск
                 log.error("Кнопка сервиса не сработала: %s", exc)

@@ -1677,7 +1677,7 @@ def _item(message: dict) -> dict:
 def load() -> dict:
     data = state.read_json(config.SKLEYKA_FILE, {})
     for key, empty in (("drafts", {}), ("jobs", []), ("tracks", {}), ("used", {}), ("invite", {}), ("invited_by", {}),
-                       ("bonus", {}), ("paid", {})):
+                       ("bonus", {}), ("paid", {}), ("keys", {})):
         data.setdefault(key, empty)
     return data
 
@@ -2143,23 +2143,25 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     save(data)
 
 
-def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool, markup: dict | None = None) -> None:
-    """Пересборка готового трека с ручкой code. markup — клавиатура к ответу."""
+def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> None:
+    """Пересборка готового трека с ручкой code. Кнопка приложения уходит вместе с ответом:
+    трек устарел, пересборки кончились или пересборка пошла — новая сборка принесёт свою.
+    «Уже так» её оставляет: человек ещё двигает голос."""
     track = data["tracks"].get(track_id)
     if not track or track["chat"] != chat_id:
-        telegram.send_message(chat_id, STALE, markup=markup)
+        telegram.send_message(chat_id, STALE, markup=REMOVE)
         return
     if not (admin or track.get("admin")) and track["tweaks"] >= config.SKLEYKA_TWEAKS:
-        telegram.send_message(chat_id, NO_TWEAKS, markup=markup)
+        telegram.send_message(chat_id, NO_TWEAKS, markup=REMOVE)
         return
     knobs = turn(track["knobs"], code)
     if knobs == track["knobs"]:
-        telegram.send_message(chat_id, SAME, markup=markup)
+        telegram.send_message(chat_id, SAME)
         return
     track.update(knobs=knobs, tweaks=track["tweaks"] + 1)
     minutes = _enqueue(data, track_id, knobs, tweak=True)
     save(data)
-    telegram.send_message(chat_id, REBUILD.format(what=look(knobs), minutes=minutes), markup=markup)
+    telegram.send_message(chat_id, REBUILD.format(what=look(knobs), minutes=minutes), markup=REMOVE)
 
 
 # Мини-приложение «🎚 Двигать голос» (cloud/skleyka_app.py): человек пальцем ставит
@@ -2167,8 +2169,10 @@ def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool, mark
 # сам (из Облака Telegram не отвечает), ссылка подписана ключом SKLEYKA_APP_KEY
 # и живёт MOVE_HOURS. Выбор приходит сообщением
 # web_app_data — только с кнопки обычной клавиатуры, инлайн-кнопка sendData не умеет —
-# и ставит ту же ручку at, что «🎯», в тот же лимит пересборок. Нет адреса или ключа —
-# кнопки нет: сведение без приложения то же.
+# и ставит ту же ручку at, что «🎯», в тот же лимит пересборок. Нет адреса или ключа
+# или пересборок не осталось — кнопки нет: сведение без приложения то же. Уходит кнопка
+# с ответом на пересборку (_tweak, talk), а когда человек пишет боту о другом или
+# звук по ссылке протух — с первым ответом бота без своих кнопок (unkey).
 MOVE_HOURS = 24
 MOVE_BUTTON = "🎚 Двигать голос"
 MOVE_ASK = f"🎚 Голос встал не туда? Подвинь его пальцем по сетке бита и послушай — кнопка «{MOVE_BUTTON}» внизу."
@@ -2194,12 +2198,12 @@ def preview(vocal: Path, beat: Path, dest: Path) -> Path:
     return dest
 
 
-def _offer(spec: dict, clip: Path, rhythm: tuple[float, float], timing: dict, voice: float) -> None:
+def _offer(spec: dict, clip: Path, rhythm: tuple[float, float], timing: dict, voice: float) -> bool:
     """Кнопка приложения под готовым треком. Превью бот кладёт в функцию сам под случайным
     именем: сама функция до Telegram не достаёт, а имя не угадать."""
     key = config.secret("SKLEYKA_APP_KEY", required=False)
     if not (config.SKLEYKA_APP_URL and key):
-        return
+        return False
     name = secrets.token_urlsafe(18)
     expires = int(state.now().timestamp()) + MOVE_HOURS * 3600
     put = urllib.parse.urlencode({"put": 1, "f": name, "e": expires, "s": sign(key, "put:" + name, expires)})
@@ -2213,11 +2217,12 @@ def _offer(spec: dict, clip: Path, rhythm: tuple[float, float], timing: dict, vo
     telegram.send_message(spec["chat"], MOVE_ASK, markup={
         "keyboard": [[{"text": MOVE_BUTTON, "web_app": {"url": f"{config.SKLEYKA_APP_URL}?{query}"}}]],
         "one_time_keyboard": True, "resize_keyboard": True})
+    return True
 
 
 def moved(message: dict, *, admin: bool = False) -> None:
     """Выбор из приложения — {"t": трек, "at": секунда первого слова}: пересборка тем же путём,
-    что кнопка «🎯». Клавиатура с кнопкой приложения в ответе убирается."""
+    что кнопка «🎯»."""
     chat_id = str(message["chat"]["id"])
     try:
         choice = json.loads(message["web_app_data"]["data"])
@@ -2227,7 +2232,22 @@ def moved(message: dict, *, admin: bool = False) -> None:
     data = load()
     if not math.isfinite(at):
         track_id = ""  # «anan» ручка turn приняла бы, а run_job поставил бы голос на ноль
-    _tweak(data, chat_id, track_id, f"a{at:.2f}", admin, markup=REMOVE)
+    _tweak(data, chat_id, track_id, f"a{at:.2f}", admin)
+
+
+def unkey(message: dict) -> None:
+    """Человек пишет боту не словами о треке — ушёл в новое сведение, ОТБОР, ДВОЙНИК или
+    ПРОЯВКУ, или вернулся, когда звук по ссылке протух (MOVE_HOURS) и трек устарел:
+    кнопку приложения снимет первый ответ бота без своих кнопок. Отметка «кнопка висит»
+    живёт отдельно от трека: трек чистка удалит молча, а кнопка останется."""
+    chat_id = str(message["chat"]["id"])
+    text = message.get("text") or ""
+    if not text.startswith("/") and TALK_MARK in (message.get("reply_to_message") or {}).get("text", ""):
+        return
+    data = load()
+    if data["keys"].pop(chat_id, None):
+        save(data)
+        telegram.UNKEY.add(chat_id)
 
 
 # Ответ словами на ручки готового трека — «голос тише на припеве, эха побольше».
@@ -2358,11 +2378,11 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
                key=lambda key: data["tracks"][key]["at"], default="")
     track = data["tracks"].get(track_id)
     if not track or track["chat"] != chat_id:
-        telegram.send_message(chat_id, STALE)
+        telegram.send_message(chat_id, STALE, markup=REMOVE)
         return
     owner = admin or track.get("admin")
     if not owner and track["tweaks"] >= config.SKLEYKA_TWEAKS:
-        telegram.send_message(chat_id, NO_TWEAKS)
+        telegram.send_message(chat_id, NO_TWEAKS, markup=REMOVE)
         return
     if not owner and track.get("talks", 0) >= TALKS:
         telegram.send_message(chat_id, TALKED)
@@ -2378,7 +2398,7 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
     track["tweaks"] += 1
     minutes = _enqueue(data, track_id, dict(track["knobs"]), tweak=True, wish=text[:1000])
     save(data)
-    telegram.send_message(chat_id, TALK_QUEUED.format(minutes=minutes))
+    telegram.send_message(chat_id, TALK_QUEUED.format(minutes=minutes), markup=REMOVE)
 
 
 # Сведение, что идёт сейчас: (процесс, заявка, папка). Одно на дежурство.
@@ -2439,6 +2459,8 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
         return
     if result.get("ok"):
         track.update({key: result[key] for key in ("timing", "knobs") if result.get(key)}, done=state.iso())
+        if result.get("keyed"):
+            data["keys"][track["chat"]] = state.iso()
         if not job.get("tweak"):
             _reward(data, track)
         return
@@ -2578,7 +2600,7 @@ def run_job(spec_path: Path) -> int:
                       "length": round(clips.probe_seconds(beat), 1)}
             result["timing"] = timing
             clip = None
-            if config.SKLEYKA_APP_URL:
+            if config.SKLEYKA_APP_URL and spec["left"] != 0:
                 # Голос для приложения — без сдвига at: страница сдвигает его сама.
                 try:
                     clip = preview(vocal, beat, work / "preview.mp3")
@@ -2624,7 +2646,7 @@ def run_job(spec_path: Path) -> int:
             result["ok"] = True
             if clip:
                 try:
-                    _offer(spec, clip, rhythm, timing, voice)
+                    result["keyed"] = _offer(spec, clip, rhythm, timing, voice)
                 except Exception as exc:  # noqa: BLE001 — трек уже у человека
                     print(f"  сведение {spec['job']}: кнопка приложения не ушла: {type(exc).__name__}")
     except Exception as exc:  # noqa: BLE001 — человеку честный ответ, в журнал — без его данных
@@ -2958,10 +2980,11 @@ def _selftest() -> None:
         callback(7, 7, f"{track}:v+")
         data = load()
         assert data["jobs"][-1]["knobs"]["voice"] == VOICE_STEP and data["tracks"][track]["tweaks"] == 1
+        assert marks[-1] == REMOVE, "пересборка пошла — старая кнопка приложения прочь"
         callback(7, 7, f"{track}:c1")
-        assert sent[-1] == SAME, "мелодично уже выбрано заранее"
+        assert sent[-1] == SAME and marks[-1] is None, "мелодично уже выбрано заранее; голос ещё двигают"
         callback(8, 8, f"{track}:v+")
-        assert sent[-1] == STALE, "чужой трек"
+        assert sent[-1] == STALE and marks[-1] == REMOVE, "чужой трек"
         # Место голоса из мини-приложения — та же ручка at, что у «🎯»; клавиатура прочь.
         def app_data(chat: int, data: str) -> dict:
             return {"chat": {"id": chat}, "from": {"id": chat}, "web_app_data": {"data": data}}
@@ -2976,7 +2999,7 @@ def _selftest() -> None:
         assert load()["tracks"][track]["tweaks"] == 2, "мусор лимит не тратит"
         for _ in range(config.SKLEYKA_TWEAKS):
             callback(7, 7, f"{track}:v-")
-        assert sent[-1] == NO_TWEAKS
+        assert sent[-1] == NO_TWEAKS and marks[-1] == REMOVE
         assert [row[0]["callback_data"] for row in buttons(track, KNOBS, swap=True)][-2:] == [f"{PREFIX}{track}:sw", "s:otbor:skleyka"]
         assert _roles([{"r": "вокал", "g": "a"}, {"r": "бит", "g": "a"}], [("take1.wav", low), ("take2.wav", mid)],
                       False) == ([("take1.wav", low, "бит"), ("take2.wav", mid, "вокал")], True), "альбом — по звуку"
@@ -3013,7 +3036,8 @@ def _selftest() -> None:
         talk(7, "автотюн", menu)
         data = load()
         assert data["jobs"][-1]["track"] == "t1" and data["jobs"][-1]["wish"] == "автотюн" and data["tracks"]["t1"]["tweaks"] == 1
-        assert sent[-1] == TALK_QUEUED.format(minutes=MINUTES * len(data["jobs"])), "генератор дежурство не ждёт"
+        assert sent[-1] == TALK_QUEUED.format(minutes=MINUTES * len(data["jobs"])) and marks[-1] == REMOVE, \
+            "генератор дежурство не ждёт"
         talk(7, "и эха меньше", {"text": TUNE})  # кнопок Telegram не приложил — последний трек человека
         data = load()
         assert data["jobs"][-1]["wish"] == "автотюн\nи эха меньше" and data["tracks"]["t1"]["tweaks"] == 1 and sent[-1] == WISHED, \
@@ -3060,6 +3084,25 @@ def _selftest() -> None:
         save(data)
         talk(7, "эха", menu)
         assert sent[-1] == TALKED and not answers
+
+        # Кнопка приложения: отметку ставит сборка, что её прислала; человек пишет не словами
+        # о треке — её снимает первый ответ бота без своих кнопок, и один раз.
+        (tmp / "keyed").mkdir()
+        (tmp / "keyed" / "result.json").write_text(json.dumps({"ok": True, "keyed": True}))
+        done = subprocess.Popen(["true"])
+        done.wait()
+        _finish(data, done, {"id": "jk", "track": "t1", "tweak": True}, tmp / "keyed")
+        save(data)
+        unkey({"chat": {"id": 7}, "text": "эха меньше", "reply_to_message": {"text": TUNE}})
+        assert "7" in load()["keys"] and not telegram.UNKEY, "ответ словами на ручки — работа над треком"
+        unkey({"chat": {"id": 7}, "text": "/dvoynik"})
+        assert "7" not in load()["keys"] and telegram.UNKEY == {"7"}
+        real[0]("7", "Кинь ссылку", buttons=[[{"text": "x", "callback_data": "y"}]])
+        assert "remove_keyboard" not in calls[-1][1]["reply_markup"] and telegram.UNKEY, "инлайн-ответ её не снимает"
+        real[0]("7", "Кинь ссылку")
+        assert json.loads(calls[-1][1]["reply_markup"]) == REMOVE and not telegram.UNKEY
+        real[0]("7", "ещё")
+        assert "reply_markup" not in calls[-1][1], "снята — дальше ответы как были"
 
         # Лимит суток: два трека — третий завтра; владельцу лимита нет.
         data["used"]["7"] = [state.iso(), state.iso()]
