@@ -65,7 +65,10 @@
 <script>
 "use strict";
 const tg = window.Telegram && window.Telegram.WebApp;
-const inTg = Boolean(tg && tg.initData);
+// initData с кнопки обычной клавиатуры Telegram не даёт, а sendData работает только с неё:
+// по initData приложение считало себя открытым в браузере, и «Свести так» лишь писало
+// «Ушло бы боту» (владелец 28.09.2026). Вне Telegram платформа — "unknown".
+const inTg = Boolean(tg && tg.platform && tg.platform !== "unknown");
 const q = new URLSearchParams(location.search);
 const num = (key, fallback) => { const v = parseFloat(q.get(key)); return Number.isFinite(v) ? v : fallback; };
 
@@ -141,17 +144,27 @@ function target(t) {
   drawAll();
 }
 
+// Следующий кадр. В окне приложения Telegram на Mac requestAnimationFrame не зовётся:
+// на записи владельца 28.09.2026 линия при игре не появлялась, блок не доезжал до доли.
+// Таймер подстраховывает — что сработает первым, то и рисует.
+function nextFrame(f) {
+  let done = false;
+  const go = () => { if (!done) { done = true; f(performance.now()); } };
+  requestAnimationFrame(go);
+  setTimeout(go, 40);
+}
+
 // Блок доезжает до доли за SETTLE мс, замедляясь к концу.
 function settle() {
   const from = shown, begin = performance.now();
   if (still) { shown = at; drawAll(); return; }
   const mine = settling = {};
-  requestAnimationFrame(function frame(now) {
+  nextFrame(function frame(now) {
     if (settling !== mine) return;
     const k = Math.min(1, (now - begin) / SETTLE);
     shown = from + (at - from) * (1 - Math.pow(1 - k, 3));
     drawAll();
-    if (k < 1) requestAnimationFrame(frame);
+    if (k < 1) nextFrame(frame);
   });
 }
 
@@ -389,12 +402,12 @@ function play() {
   playing = { sources: [beat, voice], t0: now, from };
   icon("pause", "Пауза");
   const mine = playing;  // перезапуск заводит свою петлю кадров, старая гаснет
-  requestAnimationFrame(function frame() {
+  nextFrame(function frame() {
     if (playing !== mine) return;
     const t = head();
     if (t > view0 + SPAN * 0.9) panTo(t - SPAN * 0.1);
     drawAll();
-    requestAnimationFrame(frame);
+    nextFrame(frame);
   });
 }
 function toggle() { playing ? stop() : play(); }
