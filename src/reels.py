@@ -1683,15 +1683,17 @@ def telegram_icon(size: int):
     return icon.resize((size, size), Image.LANCZOS)
 
 
-def handle_mark(height: int, pill: bool, icon: bool = True):
-    """Значок Telegram и адрес канала одной строкой; `pill` — на полупрозрачной подложке, `icon` — со значком."""
+def handle_mark(height: int, pill: bool, icon: bool = True, words: str = ""):
+    """Значок Telegram и адрес канала (или `words`) одной строкой; `pill` — на полупрозрачной подложке, `icon` — со значком."""
     from PIL import Image, ImageDraw
 
     from . import stories
 
+    words = words or config.CHANNEL_HANDLE
+
     font = stories.font(round(height * 0.62), 600)
     draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    left, top, right, bottom = draw.textbbox((0, 0), config.CHANNEL_HANDLE, font=font)
+    left, top, right, bottom = draw.textbbox((0, 0), words, font=font)
     side = round(height * 0.72) if icon else 0
     pad = round(height * 0.2)
     width = pad + (side + pad if icon else 0) + (right - left) + pad * 2
@@ -1701,7 +1703,7 @@ def handle_mark(height: int, pill: bool, icon: bool = True):
         ink.rounded_rectangle((0, 0, width - 1, height - 1), radius=height // 2, fill=(0, 0, 0, 120))
     if icon:
         mark.alpha_composite(telegram_icon(side), (pad, (height - side) // 2))
-    ink.text((pad + (side + pad if icon else pad) - left, (height - (bottom - top)) / 2 - top), config.CHANNEL_HANDLE, font=font,
+    ink.text((pad + (side + pad if icon else pad) - left, (height - (bottom - top)) / 2 - top), words, font=font,
              fill=(255, 255, 255, 255), stroke_width=max(2, height // 30), stroke_fill=(0, 0, 0, 255))
     return mark
 

@@ -68,7 +68,7 @@
 вручную не нужно. За звёзды — только число треков.
 Коды, бонусы и номера платежей — в SKLEYKA_FILE, приватном хранилище.
 
-    python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   сведение и пара ДО/ПОСЛЕ одной громкости
+    python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   сведение, пара ДО/ПОСЛЕ одной громкости и ролик
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --style грязно --design
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --voice 2 --echo -4   ручки «голос громче», «эха меньше»
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --part бэк БЭКИ --part барабаны БАРАБАНЫ   по дорожкам
@@ -2702,7 +2702,7 @@ def run_job(spec_path: Path) -> int:
             master = mix(_bus(lead, True, work / "lead.wav"), beat, work / "out", knobs["style"], knobs["design"],
                          parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead], **extra)
             try:
-                movie = story(vocal, beat, master, work)
+                movie = story(vocal, beat, master, work, rhythm)
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
                 print(f"  сведение {spec['job']}: ролик не собрался: {type(exc).__name__}")
                 movie = None
@@ -2722,56 +2722,137 @@ def run_job(spec_path: Path) -> int:
     return 0
 
 
-# Ролик для сторис: те же 7,5 секунды сначала ДО, потом ПОСЛЕ, одной громкости —
-# слышно, что сделало сведение, а не насколько стало громче (как в compare). Внизу —
-# адрес бота: кто увидел сторис, сведёт свой трек сам.
-STORY_HALF = 7.5
-STORY_CAPTION = "Для сторис: ДО и ПОСЛЕ одной громкости."
+# Ролик ДО/ПОСЛЕ — как тот, что 28.09.2026 ушёл на YouTube (владелец: «пусть бот делает так же»).
+# ДО — голос как записан, на бит, под ним тусклая серая волна; ПОСЛЕ продолжает трек с места,
+# где кончился ДО, спектром в янтаре; звук гаснет на концовке — колесо канала, адрес бота
+# и команда, а последние полсекунды перетекают в первый кадр: Shorts крутят ролик по кругу.
+# Громкость одна, посчитанная на отрезке ДО (как в compare): слышно, что сделало сведение,
+# а не насколько стало громче. Кусок — самый громкий в треке, стык — на доле сетки бита.
+# «Записал на телефон», как в ролике канала, бот не пишет: где записан чужой трек, он не знает.
+STORY_DO, STORY_BODY = 3.6, 10.0  # ДО и продолжение ПОСЛЕ, секунды — округляются до долей
+STORY_OUTRO, STORY_LOOP = 2.0, 0.5  # затухание с концовкой; из него полсекунды — переход в первый кадр
+STORY_CAPTION = "Для сторис и Shorts: ДО и ПОСЛЕ одной громкости."
+STORY_ACCENT, STORY_GREY = (255, 181, 71), (140, 140, 140)
+STORY_VIZ_Y, STORY_VIZ_HALF, STORY_WAVE = 1100, 330, 260  # центр графики, полвысоты спектра, высота волны ДО
 
 
-def _ink(words: str, size: int, top: float, dest: Path) -> Path:
-    """Надпись прозрачным кадром 1080×1920 шрифтом роликов канала: drawtext в ffmpeg
-    на Маке нет, а Pillow есть везде."""
+def _frame(items: list, ground: tuple = (0, 0, 0, 0)):
+    """Надписи кадром 1080×1920 шрифтом роликов канала — (текст, кегль, центр по y, цвет, вес).
+    Кегль уменьшается, пока строка не влезет в безопасную ширину reels.SAFE_TEXT. drawtext
+    в ffmpeg на Маке нет, а Pillow есть везде."""
     from PIL import Image, ImageDraw
 
     from . import stories
 
-    frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT))
-    ImageDraw.Draw(frame).text((clips.WIDTH / 2, clips.HEIGHT * top), words, font=stories.font(size, 600),
-                               fill="white", anchor="mt")
-    frame.save(dest)
-    return dest
+    frame = Image.new("RGBA", (clips.WIDTH, clips.HEIGHT), ground)
+    draw = ImageDraw.Draw(frame)
+    for text, size, y, color, weight in items:
+        while stories.font(size, weight).getlength(text) + 8 > reels.SAFE_TEXT * clips.WIDTH:
+            size -= 2
+        draw.text((clips.WIDTH / 2, y), text, font=stories.font(size, weight), fill=color, anchor="mm",
+                  stroke_width=3, stroke_fill=(0, 0, 0, 255))
+    return frame, draw
 
 
-def story(vocal: Path, beat: Path, master: Path, work: Path) -> Path:
-    """Ролик 9:16 на 15 с: самый громкий кусок трека — ДО и ПОСЛЕ, волна и адрес бота.
-    Надписи — в безопасной зоне площадок (reels.SAFE_*)."""
+def _story_pictures(work: Path) -> list[Path]:
+    """Кадры ролика: ДО с меткой, ПОСЛЕ, концовка (непрозрачная — закрывает графику) и градиент спектра."""
+    from PIL import Image
+
+    from . import stories
+
+    white, width = (255, 255, 255), clips.WIDTH
+    first, draw = _frame([("Как", 170, 470, white, 700), ("записал", 170, 657, white, 700)])
+    font = stories.font(46, 700)
+    left, _, right, _ = draw.textbbox((0, 0), "ДО", font=font)
+    side = (width - (right - left + 56)) / 2
+    draw.rounded_rectangle((side, 262, width - side, 338), radius=38, fill=STORY_GREY)
+    draw.text((width / 2, 300), "ДО", font=font, fill=reels.PLATE_BG, anchor="mm")
+    after, _ = _frame([("ПОСЛЕ", 250, 420, STORY_ACCENT, 700), ("Свёл бот. Бесплатно", 96, 640, white, 700)])
+    ending, _ = _frame([("/svedenie", 120, 1050, white, 700), (reels.SKLEYKA_LINK, 46, 1150, (200, 200, 200), 500)],
+                       reels.PLATE_BG + (255,))
+    mark = reels.handle_mark(110, pill=False, words=config.BOT_HANDLE)
+    ending.alpha_composite(mark, ((width - mark.width) // 2, 905 - mark.height // 2))
+    # Спектр ПОСЛЕ: слева (низ) малиновый, к верхам — янтарь и жёлтый.
+    stops = [(0.0, (255, 46, 99)), (0.5, (255, 138, 61)), (1.0, (255, 214, 90))]
+    row = []
+    for x in range(width):
+        f = x / (width - 1)
+        (a, ca), (b, cb) = next((s, stops[i + 1]) for i, s in enumerate(stops[:-1]) if f <= stops[i + 1][0])
+        row.append(tuple(round(ca[c] + (cb[c] - ca[c]) * (f - a) / (b - a)) for c in range(3)))
+    gradient = Image.new("RGB", (width, 1))
+    gradient.putdata(row)
+    gradient = gradient.resize((width, 2 * STORY_VIZ_HALF), Image.NEAREST)
+    paths = [work / f"story-{name}.png" for name in ("do", "posle", "end", "grad")]
+    for image, path in zip((first, after, ending, gradient), paths):
+        image.save(path)
+    return paths
+
+
+def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float, float]) -> Path:
+    """Ролик 9:16 на 12–21 с (зависит от темпа): ДО, ПОСЛЕ дальше по треку и концовка."""
+    length = rhythm[0]
+    seg = max(1, round(STORY_DO / length)) * length
+    total = 2 * seg + round(STORY_BODY / length) * length + STORY_OUTRO
+    end0, loop0 = total - STORY_OUTRO, total - STORY_LOOP - 0.1  # переход кончается за 3 кадра до конца
     _, trace = reels.meter(master)
-    n = round(STORY_HALF / 0.1)  # ebur128 отмечает громкость каждые 0,1 с
+    n = round(total / (trace[1][0] - trace[0][0]))
     loud = [m for _, m, _ in trace]
     best = max(range(max(1, len(loud) - n)), key=lambda i: sum(loud[i:i + n]))
-    cut = f"atrim=start={max(0.0, trace[best][0] - 0.4):.2f}:duration={STORY_HALF},asetpts=PTS-STARTPTS"
-    before, after, out = work / "story-do.wav", work / "story-posle.wav", work / "story.mp4"
-    _ffmpeg("-i", vocal, "-i", beat, "-filter_complex",
-            f"[0:a]{FORMAT},{cut}[v];[1:a]{FORMAT},{cut}[b];[v][b]amix=inputs=2:normalize=0", *reels.VOICE_CODEC, before)
-    _ffmpeg("-i", master, "-af", f"{FORMAT},{cut}", *reels.VOICE_CODEC, after)
+    # Громкость M меряется окном 0,4 с: край — на полокна раньше.
+    start = max(_on_grid(trace[best][0] - 0.2, rhythm), _on_grid(0, rhythm, math.ceil))
+
+    def cut(a: float, b: float) -> str:
+        return f"{FORMAT},atrim=start={a:.4f}:end={b:.4f},asetpts=PTS-STARTPTS"
+
+    raw_mix = f"[0:a]{cut(start, start + seg)}[v];[1:a]{cut(start, start + seg)}[b];[v][b]amix=inputs=2:normalize=0"
+    before, after, sound, out = (work / f"story-{name}" for name in ("do.wav", "posle.wav", "zvuk.wav", "video.mp4"))
+    _ffmpeg("-i", vocal, "-i", beat, "-filter_complex", raw_mix, *reels.VOICE_CODEC, before)
+    _ffmpeg("-i", master, "-af", cut(start, start + seg), *reels.VOICE_CODEC, after)
     (raw, peak), glued = loudness(before), loudness(after)[0]
     level = min(glued, raw + CEILING - peak)
-    labels = [_ink(words, size, top, work / f"ink{n}.png") for n, (words, size, top) in enumerate(
-        (("ДО", 220, reels.SAFE_TOP + 0.04), ("ПОСЛЕ", 220, reels.SAFE_TOP + 0.04),
-         (f"сведено в {config.BOT_HANDLE}", 64, reels.SAFE_BOTTOM - 0.07)))]
-    _ffmpeg("-i", before, "-i", after, *(arg for label in labels for arg in ("-loop", "1", "-i", label)),
+    half = 0.0075  # полкроссфейда на стыке: 15 мс
+    _ffmpeg("-i", vocal, "-i", beat, "-i", master, "-filter_complex",
+            f"[0:a]{cut(start, start + seg + half)}[v];[1:a]{cut(start, start + seg + half)}[b];"
+            f"[v][b]amix=inputs=2:normalize=0,volume={level - raw:.2f}dB[do];"
+            f"[2:a]{cut(start + seg - half, start + total)},volume={level - glued:.2f}dB[pb];"
+            f"[do][pb]acrossfade=d={2 * half},afade=t=in:d=0.01,afade=t=out:st={end0:.4f}:d={STORY_OUTRO}[a]",
+            "-map", "[a]", "-t", f"{total:.4f}", *reels.VOICE_CODEC, sound)
+    first, posle, ending, gradient = _story_pictures(work)
+    width, fps, side, top = clips.WIDTH, 30, 460, 360  # колесо: по центру, над адресом
+    viz, bg = STORY_VIZ_Y - STORY_VIZ_HALF, "0x{:02x}{:02x}{:02x}".format(*reels.PLATE_BG)
+    shown = f"between(t,{seg:.3f},{loop0:.3f})"
+    fade = f"fade=t=in:st={end0:.3f}:d=0.25:alpha=1,fade=t=out:st={loop0:.3f}:d={STORY_LOOP}:alpha=1"
+    _ffmpeg("-i", sound, *(arg for image in (first, posle, ending, gradient)
+                           for arg in ("-loop", "1", "-framerate", fps, "-t", f"{total:.3f}", "-i", image)),
+            "-stream_loop", "-1", "-t", f"{STORY_OUTRO:.3f}", "-i", reels.WHEEL,
             "-filter_complex",
-            f"[0:a]volume={level - raw:.2f}dB[a0];[1:a]volume={level - glued:.2f}dB[a1];"
-            "[a0][a1]concat=n=2:v=0:a=1,asplit[a][w];"
-            f"[w]showwaves=s={clips.WIDTH}x560:mode=cline:rate=30:colors=white,format=rgba[wave];"
-            f"color=c=0x101010:s={clips.WIDTH}x{clips.HEIGHT}:r=30:d={2 * STORY_HALF}[bg];"
-            "[bg][wave]overlay=0:(H-h)/2[s0];"
-            f"[s0][2:v]overlay=0:0:enable='lt(t,{STORY_HALF})'[s1];"
-            f"[s1][3:v]overlay=0:0:enable='gte(t,{STORY_HALF})'[s2];"
-            "[s2][4:v]overlay=0:0:shortest=1[v]",
-            "-map", "[v]", "-map", "[a]", "-t", 2 * STORY_HALF, "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-preset", "veryfast", "-c:a", "aac", "-b:a", "192k", out)
+            # ПОСЛЕ: спектр showcqt белым — маска для градиента, зеркально вверх и вниз от средней линии.
+            # Эквалайзер только для картинки: иначе 808 забивает левую треть, а верхов не видно.
+            "[0:a]asplit=2[s1][s2];"
+            f"[s1]bass=g=-10:f=150,treble=g=18:f=2000,showcqt=s={width}x{STORY_VIZ_HALF}:fps={fps}:sono_h=0:"
+            f"bar_h={STORY_VIZ_HALF}:axis=0:bar_g=3:bar_v=8:basefreq=45:endfreq=8000:cscheme=1|1|1|1|1|1,"
+            "format=gray,split[q1][q2];[q2]vflip[q3];[q1][q3]vstack[mask];"
+            "[4:v]format=rgb24[gr];[gr][mask]alphamerge,split[bars][glow0];"
+            "[glow0]gblur=sigma=14,colorchannelmixer=aa=0.9[glow];"
+            # ДО: тонкая серая волна, тусклая.
+            f"[s2]showwaves=s={width}x{STORY_WAVE}:mode=p2p:rate={fps}:colors=0x9a9a9a:scale=sqrt,format=rgba,"
+            "colorchannelmixer=aa=0.8[wave];"
+            f"color=c={bg}:s={width}x{clips.HEIGHT}:r={fps}:d={total:.3f},format=rgba[bg];"
+            "[1:v]split[f1][f2];"
+            f"[bg][glow]overlay=0:{viz}:enable='{shown}'[v0];[v0][bars]overlay=0:{viz}:enable='{shown}'[v1];"
+            # Волна и надпись ДО — в начале и снова в последние полсекунды: конец перетекает в начало.
+            f"[v1][wave]overlay=0:{STORY_VIZ_Y - STORY_WAVE // 2}:enable='lt(t,{seg:.3f})+gte(t,{loop0:.3f})'[v2];"
+            f"[v2][f1]overlay=0:0:enable='lt(t,{seg:.3f})'[v3];"
+            f"[v3][2:v]overlay=0:0:enable='between(t,{seg:.3f},{end0:.3f})'[v4];"
+            f"[3:v]format=rgba,{fade}[e];[v4][e]overlay=0:0:enable='gte(t,{end0:.3f})'[v5];"
+            f"[5:v]scale={side}:{side},fps={fps},format=rgba,"
+            f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='255*clip({side / 2 - 1}-hypot(X-{side / 2},Y-{side / 2}),0,1)',"
+            f"setpts=PTS-STARTPTS+{end0:.3f}/TB,{fade}[w];"
+            f"[v5][w]overlay={(width - side) // 2}:{top}:eof_action=pass[v6];"
+            f"[f2]format=rgba,fade=t=in:st={loop0:.3f}:d={STORY_LOOP}:alpha=1[l];"
+            f"[v6][l]overlay=0:0:enable='gte(t,{loop0:.3f})',format=yuv420p[v]",
+            "-map", "[v]", "-map", "0:a", "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            "-r", fps, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", out)
     return out
 
 
@@ -2794,7 +2875,7 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
     else:
         telegram.send_big(service(), chat, wav, "", via=spec["files"][0]["m"])
     if movie:
-        telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(2 * STORY_HALF))
+        telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(clips.probe_seconds(movie)))
     left = spec["left"]
     telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}"),
                           buttons=buttons(spec["track"], knobs, swap=swap, drop=drop))
@@ -3327,7 +3408,8 @@ def main() -> int:
         master = mix(*args.mix, args.out, args.style, args.design, args.voice, args.echo,
                      [(part, Path(path)) for part, path in args.part], args.like)
         compare(*args.mix, master, args.out)
-        print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}")
+        movie = story(*args.mix, master, args.out, grid(args.mix[1]))
+        print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}, {movie}")
         return 0
     parser.print_help()
     return 0
