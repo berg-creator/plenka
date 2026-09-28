@@ -130,9 +130,14 @@ class TelegramError(RuntimeError):
 
 def _call(method: str, payload: dict[str, Any], files: dict | None = None) -> dict:
     token = config.secret("TELEGRAM_BOT_TOKEN")
-    response = requests.post(
-        API.format(token=token, method=method), data=payload, files=files, timeout=90
-    )
+    try:
+        response = requests.post(
+            API.format(token=token, method=method), data=payload, files=files, timeout=90
+        )
+    except requests.RequestException as exc:
+        # Обрыв связи — та же ошибка Telegram: её ловят все, а сырой ConnectionError
+        # 28.09.2026 уронил дежурство, и бот молчал до следующего запуска.
+        raise TelegramError(f"{method}: сеть ({type(exc).__name__})") from exc
 
     try:
         data = response.json()
