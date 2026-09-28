@@ -1472,6 +1472,10 @@ STARS = {"pack": f"+{config.SKLEYKA_PACK} трека на сутки",
          "month": f"30 дней по {config.SKLEYKA_MONTH_PER_DAY} треков в сутки"}
 MODES = [[{"text": "🎤 Вокал + бит", "callback_data": f"{PREFIX}m:1"}],
          [{"text": "🎚 По дорожкам — даблы, бэки, инструменты", "callback_data": f"{PREFIX}m:2"}]]
+# Шаг назад — к выбору режима, под каждым вопросом до сведения (владелец 28.09.2026: выбрал
+# «вокал + бит», а вернуться к «по дорожкам» было нечем).
+BACK = {"text": "↩️ Сменить режим", "callback_data": f"{PREFIX}b"}
+REMODE = "↩️ Выбираем заново{files}. Как пришлёшь?"
 # Части в том порядке, в каком бот их спрашивает; что можно прислать несколькими файлами.
 ORDER = ("вокал", "дабл", "бэк", "эдлиб", "бит", "барабаны", "бас", "музыка")
 MULTI = ("дабл", "бэк", "эдлиб", "барабаны", "бас", "музыка")
@@ -1722,8 +1726,9 @@ def _invoices(chat_id: str) -> None:
 
 
 def _ask(chat_id: str, draft: dict) -> None:
-    """Вопрос шага: «Шаг 1 из 2 · пришли вокал». Ответом Telegram сам открывает ответ
-    на это сообщение, в поле ввода — подсказка. Шаги кончились — вопрос о звуке.
+    """Вопрос шага: «Шаг 1 из 2 · пришли вокал», под ним — «Сменить режим». Ответ
+    с подсказкой в поле ввода (force_reply) и кнопки Telegram под одним сообщением
+    не держит — кнопка назад нужнее. Шаги кончились — вопрос о звуке.
     Шаг, чья дорожка уже пришла по имени, не спрашивается; у даблов, бэков и инструментов
     вместо подсказки — «пропустить»: отметил лишнее — иначе заявка встала бы до протухания."""
     plan = draft["plan"]
@@ -1738,9 +1743,9 @@ def _ask(chat_id: str, draft: dict) -> None:
     what = "лид-вокал — главный голос" if part == "вокал" and len(plan) > 2 else ASKS[part]
     telegram.send_message(chat_id, f"<b>Шаг {step + 1} из {len(plan)}</b> {ASK_MARK} {what}"
                           + ("; можно несколькими файлами" if part in MULTI else "") + "."
-                          + (FROM_START if step == 0 else ""), ask="Прикрепи файл",
-                          buttons=[[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]]
-                          if part in MULTI else None)
+                          + (FROM_START if step == 0 else ""),
+                          buttons=[*([[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]]
+                                     if part in MULTI else []), [BACK]])
     draft["asked"] = step
 
 
@@ -1753,7 +1758,8 @@ def _checklist(pick: list[str]) -> list[list[dict]]:
             [box("дабл", "d"), box("бэк", "b"), box("эдлиб", "a")],
             [box("бит", "w")],
             [box("барабаны", "k"), box("бас", "s"), box("музыка", "m")],
-            [{"text": "▶ Дальше", "callback_data": f"{PREFIX}n"}, {"text": "✖ Отмена", "callback_data": f"{PREFIX}x"}]]
+            [{"text": "▶ Дальше", "callback_data": f"{PREFIX}n"}, {"text": "✖ Отмена", "callback_data": f"{PREFIX}x"}],
+            [BACK]]
 
 
 def _styles(knobs: dict) -> list[list[dict]]:
@@ -1763,7 +1769,8 @@ def _styles(knobs: dict) -> list[list[dict]]:
     return [looks[:2], looks[2:],
             [{"text": ("✅" if knobs["design"] else "▫️") + " саунд-дизайн: переходы и эффекты",
               "callback_data": f"{PREFIX}e"}],
-            [{"text": "🤷 Как лучше", "callback_data": f"{PREFIX}y:-"}]]
+            [{"text": "🤷 Как лучше", "callback_data": f"{PREFIX}y:-"}],
+            [BACK]]
 
 
 def toggle(pick: list[str], code: str) -> list[str]:
@@ -1942,7 +1949,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
              message_id: int | None = None) -> None:
     """Кнопки сведения. Под готовым треком — пересборка с новыми ручками новой заявкой,
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
-    галочки дорожек (t), «Дальше» (n), «Отмена» (x), стиль (y) и саунд-дизайн (e) —
+    галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y) и саунд-дизайн (e) —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте."""
     chat_id = str(chat_id)
     head, _, code = subject.partition(":")
@@ -1993,6 +2000,14 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
             draft["knobs"]["style"] = list(STYLES)[int(code)]
         telegram.edit_markup(chat_id, message_id, None)
         _queue(data, chat_id, draft)
+    elif head == "b":
+        # Присланное сбрасывается: у другого режима другие шаги, и роли файлов разъехались бы.
+        telegram.edit_markup(chat_id, message_id, None)
+        telegram.send_message(chat_id, REMODE.format(
+            files=" — присланные файлы сбросил, пришлёшь их ещё раз" if draft["files"] else ""), buttons=MODES)
+        for key in ("pick", "menu", "asked", "acked", "knobs"):
+            draft.pop(key, None)
+        draft.update(plan=None, step=0, files=[])
     elif head == "p" and draft["plan"] and code == str(draft["step"]):
         draft.update(step=draft["step"] + 1, acked=0)
         _ask(chat_id, draft)
@@ -2704,6 +2719,14 @@ def _selftest() -> None:
         start(7, 7)
         assert sent[-1] == INTRO and wants(file(3, "a.wav")) and not wants(file(3, "a.wav", reply="Пришли трек"))
         assert not wants({"message_id": 4, "chat": {"id": 7, "type": "private"}, "text": "привет"})
+
+        # Шаг назад: выбрал «вокал + бит», прислал вокал — и передумал; присланное сбрасывается.
+        callback(7, 7, "m:1")
+        take(file(3, "take 1.wav"))
+        assert keys[-1][-1] == [BACK]
+        callback(7, 7, "b")
+        draft = load()["drafts"]["7"]
+        assert keys[-1] == MODES and "сбросил" in sent[-1] and draft["plan"] is None and not draft["files"]
 
         # «Вокал + бит»: вопрос за вопросом, роль — шаг, имена файлов не нужны; потом — звук.
         callback(7, 7, "m:1")
