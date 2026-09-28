@@ -929,6 +929,12 @@
       "file": "20260927-111535-6724-news.json",
       "published_at": "2026-09-27T11:15:43+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20260928-111915-6337-news.json",
+      "published_at": "2026-09-28T11:19:22+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1056,6 +1062,7 @@
     "265766970e9feb38cd44c555e55cc55c878c936482e6e2aa6a32dc339433c633",
     "9d839d83dd835d821b921b101b101f001f001f000f000ec00e80078002800000",
     "8133892a99262326164e166a365a2e5a0a323d620de2f293d0c64b8cd393db25",
-    "3e0e6071c07b40f980fd006f4cce869e868e84cf06d70a330a5784cf98f3007f"
+    "3e0e6071c07b40f980fd006f4cce869e868e84cf06d70a330a5784cf98f3007f",
+    "48714278430ce326a3923b915b0d9d8f9f4d3f4de58fdf4f63cf836f83f781bf"
   ]
 }
