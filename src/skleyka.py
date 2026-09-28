@@ -187,7 +187,24 @@ TONE_STEP = 0.5
 TONE_SPAN = 3.0
 TONE_LOCAL = 4.0
 # Де-эссер последним: подъём разборчивости и компрессия сами добавляют свиста.
+# Сила — по замеру, как у первой ступени компрессии: самая большая из DEESS_STEPS,
+# при которой шипящие к голосу (hiss) не тише VOCAL_HISS — медианы тех же 420 голосов
+# релизов после _squeeze (квартили −12,1…−7,4 дБ; до компрессии медиана −10,7 —
+# компрессия и правда поднимает свист). Одна сила на всех не годится: у ffmpeg она
+# почти порог и срабатывает по уровню, а не по тому, сырой голос или сведённый.
+# 0,5 у 20 голосов релизов резала шипящие на 2,7 дБ, а 8 кГц целиком — на 1,6
+# (медианы), и экзамен 28.09.2026 показал голос в 8 кГц на 1,1 дБ темнее своего
+# релиза; 0,4 голос релиза почти не трогает (8 кГц −0,3), но и шипящие сырого
+# «Асапчика» режет лишь на 0,7–0,9 дБ. По замеру у «Асапчика» (голос, лид, дабл)
+# шипящие до компрессии −7,1…−7,6 дБ, после −5,8…−6,9; выбрана сила 0,45 —
+# −7,9…−8,7, срез 1,8–2,3 дБ (0,5 резала на 3,7–4,6, ниже релизов). Из 20 голосов
+# релизов 12 идут без де-эссера, 8 кГц у них — медиана 0 вместо −1,6. Экзамен
+# на 40 релизах: голос в 8 кГц к своему релизу −1,14 → 0,00 (квартили −0,4…+0,4),
+# среднее отклонение тембра 0,40 → 0,27; у испорченного голоса 8 кГц −1,15 → −0,50.
+# Бэк и эдлибы — прежним DEESSER без замера: они фоном, тише ведущего.
 DEESSER = "deesser=i=0.5"
+DEESS_STEPS = (0.5, 0.45, 0.4)
+VOCAL_HISS = -9.6
 
 # --- бит --------------------------------------------------------------------
 # Место голосу — как soothe с голосом в сайдчейне (руководство soothe2: «carve out
@@ -487,14 +504,14 @@ def _bells(gains: dict[int, float]) -> str:
     return "".join(f"equalizer=f={f}:t=o:w=1:g={g:.1f}," for f, g in gains.items() if g)
 
 
-def _equalizer(vocal: Path, lines: list[tuple[float, float]], work: Path) -> str:
+def _equalizer(vocal: Path, lines: list[tuple[float, float]], work: Path, deess: str = DEESSER + ",") -> str:
     """Поправка тембра в пределы TONE колоколами по октавам: общая на весь трек и своя по ходу
     трека — командами asendcmd колоколам equalizer@t…, шагами по 0,1 с, чтобы
-    не щёлкало. Меряется голос уже с де-эссером, а соседние колокола задевают друг
-    друга, поэтому каждый замер повторяется по поправленному голосу."""
+    не щёлкало. Меряется голос уже с де-эссером deess (с запятой или пусто), а соседние
+    колокола задевают друг друга, поэтому каждый замер повторяется по поправленному голосу."""
     gains = dict.fromkeys(TONE, 0.0)
     for _ in range(2):
-        for f, db in tone(vocal, _bells(gains) + DEESSER).items():
+        for f, db in tone(vocal, _bells(gains) + deess + "anull").items():
             gains[f] = max(TONE_CUT, min(TONE_BOOST.get(f, 0.0), gains[f] + min(max(db, TONE[f][0]), TONE[f][1]) - db))
     print("  тембр: " + ", ".join(f"{f} Гц {g:+.1f}" for f, g in gains.items() if g))
     # Колокол есть и у 1 кГц: поправка окна меняет только форму, а общую мощность
@@ -506,7 +523,7 @@ def _equalizer(vocal: Path, lines: list[tuple[float, float]], work: Path) -> str
     extra, ref, drift = {f: {} for f in octaves}, {}, []
     split = [f / 2 ** 0.5 for f in octaves] + [octaves[-1] * 2 ** 0.5]
     for again in range(2):
-        chain = _bells(gains) + (f"asendcmd=f='{cmd}',{local}" if again else "") + f"{DEESSER},{MID},"
+        chain = _bells(gains) + (f"asendcmd=f='{cmd}',{local}" if again else "") + f"{deess}{MID},"
         power = dict(zip(octaves, ([10 ** (db / 10) for db in band] for band in _bands(vocal, chain, split, TONE_STEP)[1:])))
         sung = _sung(lines, len(power[1000]), TONE_STEP)
         if not sung:
@@ -692,6 +709,29 @@ def _squeeze(source: Path, before: str, dest: Path, after: str = "") -> Path:
     _ffmpeg("-i", probe, "-af", f"volume={SQUEEZED_LUFS - loudness(probe)[0]:.2f}dB{after}", *reels.VOICE_CODEC, dest)
     probe.unlink()
     return dest
+
+
+def hiss(path: Path, chain: str = "") -> float:
+    """Шипящие к голосу, дБ: средняя мощность 5–10 кГц в 5% окон по 20 мс, где её доля
+    больше всего, к средней мощности голоса. Голос — окна не тише 30 дБ от громких
+    (95-й процентиль), иначе тишина между строками сошла бы за голос."""
+    low, mid, high = ([10 ** (db / 10) for db in band] for band in _bands(path, chain, (5000, 10000), 0.02))
+    total = [sum(w) for w in zip(low, mid, high)]
+    loud = sorted(total)[int(0.95 * (len(total) - 1))] / 1000
+    sung = sorted((m / t, m, t) for m, t in zip(mid, total) if t >= loud)
+    top = sung[int(0.95 * (len(sung) - 1)):]
+    return 10 * math.log10(statistics.fmean(m for _, m, _ in top) / statistics.fmean(t for *_, t in sung))
+
+
+def _deesser(vocal: Path) -> str:
+    """Самый сильный де-эссер из DEESS_STEPS, после которого шипящие не тише VOCAL_HISS,
+    с запятой в конце; не нужен ни один — пусто."""
+    for strength in DEESS_STEPS:
+        if (got := hiss(vocal, f"deesser=i={strength},")) >= VOCAL_HISS:
+            print(f"  де-эссер: сила {strength:g}, шипящие к голосу {got:.1f} дБ")
+            return f"deesser=i={strength},"
+    print(f"  де-эссер: не нужен, шипящие к голосу {hiss(vocal):.1f} дБ")
+    return ""
 
 
 def _gain_track(points: list[tuple[float, float]], seconds: float, path: Path) -> Path:
@@ -1212,7 +1252,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     squeezed, dry, raw = work / "vocal-comp.wav", work / "vocal.wav", loudness(vocal, clean + ",")[0]
     _squeeze(vocal, f"{clean},volume={VOCAL_LUFS - raw:.2f}dB", squeezed, f",{DENSE}" if look.get("dense") else "")
     lines = _lines(_envelope(squeezed))
-    _ffmpeg("-i", squeezed, "-af", ("" if project else _equalizer(squeezed, lines, work)) + DEESSER + (f",{look['color']}" if "color" in look else ""),
+    deess = _deesser(squeezed)
+    _ffmpeg("-i", squeezed, "-af", ("" if project else _equalizer(squeezed, lines, work, deess)) + deess + look.get("color", "anull"),
             *reels.VOICE_CODEC, dry)
     sung = loudness(dry)[0]
 
