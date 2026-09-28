@@ -1404,7 +1404,7 @@ PICK = "Отметь, что у тебя есть отдельно, — пото
 FROM_START = "\n\nВыгружай все дорожки с начала проекта — тогда голос встанет в бит ровно так, как в проекте."
 # Характер звука — заранее: его выбирают, не слыша результата. Громкость голоса и эхо —
 # поправки «чуть громче, чем сейчас», их без прослушки не выбрать: они кнопками под треком.
-STYLE = ("Дорожки есть. Какой звук?\n\n✏️ Голос выгружен не с начала проекта или важно что-то ещё — "
+STYLE = ("Дорожки есть: {parts}. Какой звук?\n\n✏️ Голос выгружен не с начала проекта или важно что-то ещё — "
          "напиши словами до выбора: «голос входит на дропе», «первое слово на 0:20».")
 # Не ответил на вопрос о звуке — сведение идёт как лучше, чтобы человек не ждал зря.
 STYLE_WAIT = 180
@@ -1737,7 +1737,7 @@ def _ask(chat_id: str, draft: dict) -> None:
     step = draft["step"]
     if step >= len(plan):
         draft["asked"], draft["knobs"] = "style", dict(KNOBS)
-        telegram.send_message(chat_id, STYLE, buttons=_styles(draft["knobs"]))
+        telegram.send_message(chat_id, STYLE.format(parts=_got(draft)), buttons=_styles(draft["knobs"]))
         return
     part = plan[step]
     what = "лид-вокал — главный голос" if part == "вокал" and len(plan) > 2 else ASKS[part]
@@ -1746,7 +1746,12 @@ def _ask(chat_id: str, draft: dict) -> None:
                           + (FROM_START if step == 0 else ""),
                           buttons=[*([[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]]
                                      if part in MULTI else []), [BACK]])
-    draft["asked"] = step
+    draft["asked"], draft["acked"] = step, len(draft["files"])
+
+
+def _got(draft: dict) -> str:
+    """Всё принятое с ролями: человек видит, куда бот поставил каждый файл."""
+    return _what([(f["n"], f["r"]) for f in draft["files"]])
 
 
 def _checklist(pick: list[str]) -> list[list[dict]]:
@@ -1877,10 +1882,16 @@ def _drafts(data: dict) -> bool:
             _queue(data, chat_id, draft)
         elif draft.get("asked") != step:
             _ask(chat_id, draft)
-        elif plan[step] in MULTI and len(have) > draft.get("acked", 0):
-            telegram.send_message(chat_id, MORE.format(names=", ".join(f"«{f['n']}»" for f in have)),
-                                  buttons=[[{"text": "▶ Дальше", "callback_data": f"{PREFIX}n"}]])
-            draft["acked"] = len(have)
+        elif len(draft["files"]) > draft.get("acked", 0):
+            # Ответ на каждый новый файл, со всем принятым: бит, узнанный по имени на шаге даблов,
+            # раньше принимался молча, и шаг «пришли бит» потом не наступал — 28.09 это читалось
+            # как «бит даже не попросил».
+            more = plan[step] in MULTI
+            telegram.send_message(chat_id, (MORE if more and have else "Есть: {names}.").format(names=_got(draft)),
+                                  buttons=[[{"text": "▶ Дальше", "callback_data": f"{PREFIX}n"}]] if more and have
+                                  else [[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]] if more
+                                  else None)
+            draft["acked"] = len(draft["files"])
         else:
             continue
         changed = True
@@ -2009,11 +2020,11 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
             draft.pop(key, None)
         draft.update(plan=None, step=0, files=[])
     elif head == "p" and draft["plan"] and code == str(draft["step"]):
-        draft.update(step=draft["step"] + 1, acked=0)
+        draft["step"] += 1
         _ask(chat_id, draft)
     elif head == "n" and draft["plan"] and draft["step"] < len(draft["plan"]) \
             and any(f["r"] == draft["plan"][draft["step"]] for f in draft["files"]):
-        draft.update(step=draft["step"] + 1, acked=0)
+        draft["step"] += 1
         _ask(chat_id, draft)
     else:
         return
@@ -2737,7 +2748,7 @@ def _selftest() -> None:
         assert sent[-1].startswith("<b>Шаг 2 из 2</b> · пришли бит"), sent[-1]
         take(file(5, "take 2.wav"))
         later("7")
-        assert sent[-1] == STYLE and load()["drafts"]["7"]["asked"] == "style"
+        assert sent[-1].startswith("Дорожки есть: вокал «") and load()["drafts"]["7"]["asked"] == "style"
         wish(7, "голос входит на дропе")  # текст при открытой заявке — просьба, а не разбор
         assert sent[-1] == WISHED and load()["drafts"]["7"]["wish"] == "голос входит на дропе"
         callback(7, 7, "e")
@@ -2762,7 +2773,7 @@ def _selftest() -> None:
         take(file(20, "a.wav", chat=11, album="g1"))
         take(file(21, "b.wav", chat=11, album="g1"))  # альбомом, не выбрав режим — «вокал + бит» по порядку
         later("11")
-        assert sent[-1] == STYLE
+        assert sent[-1].startswith("Дорожки есть: вокал «")
         later("11", STYLE_WAIT + 1)
         files = load()["tracks"][load()["jobs"][-1]["track"]]["files"]
         assert [f["r"] for f in files] == ["вокал", "бит"] and files[0]["g"] == files[1]["g"] == "g1"
@@ -2785,7 +2796,10 @@ def _selftest() -> None:
         take(file(31, "d1.wav", chat=9))
         take(file(32, "d2.wav", chat=9))
         later("9")
-        assert sent[-1] == MORE.format(names="«d1.wav», «d2.wav»")
+        assert sent[-1] == MORE.format(names="вокал «x.wav», даблы «d1.wav» и «d2.wav»"), sent[-1]
+        take(file(34, "808.wav", chat=9))  # бас по имени на шаге даблов — не молча (28.09)
+        later("9")
+        assert sent[-1] == MORE.format(names="вокал «x.wav», даблы «d1.wav» и «d2.wav», бас «808.wav»"), sent[-1]
         callback(9, 9, "n")
         assert sent[-1].startswith("<b>Шаг 3 из 4</b> · пришли барабаны")
         callback(9, 9, "n")  # без файла дальше не пускает
@@ -2812,7 +2826,7 @@ def _selftest() -> None:
         assert sent[-1].startswith("<b>Шаг 4 из 5</b> · пришли эдлибы") and keys[-1][0][0]["callback_data"] == f"{PREFIX}p:3"
         callback(9, 9, "p:1")  # старая кнопка чужой шаг не пропускает
         callback(9, 9, "p:3")
-        assert sent[-1] == STYLE, sent[-1]
+        assert sent[-1].startswith("Дорожки есть: вокал «"), sent[-1]
         callback(9, 9, "y:-")
         assert sent[-1].startswith("Принял: вокал «Lead.wav», даблы «Double.wav», бэки «Backs.wav», бит «Beat.wav»")
         start(13, 13)
