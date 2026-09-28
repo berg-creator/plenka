@@ -67,7 +67,9 @@ def sanitize(text: str) -> str:
     text = _P_CLOSE.sub("\n\n", text)
 
     def keep_or_drop(match: re.Match[str]) -> str:
-        return match.group(0) if match.group(1).lower() in ALLOWED_TAGS else ""
+        # «<\nblockquote>» модель тоже пишет, а Telegram пробела после «<» не прощает:
+        # такой пост из очереди 28.09.2026 падал на каждой попытке выхода.
+        return re.sub(r"^<\s*(/?)\s*", r"<\1", match.group(0)) if match.group(1).lower() in ALLOWED_TAGS else ""
 
     text = _TAG.sub(keep_or_drop, text)
 
@@ -805,6 +807,7 @@ def _selftest() -> None:
     assert _audio_kind(b"\x00\x00\x00\x20ftypM4A \x00") == ("preview.m4a", "audio/mp4")
     assert _audio_kind(b"ID3\x04\x00\x00") == ("preview.mp3", "audio/mpeg")
     assert sanitize("рейтинг <3 из 10") == "рейтинг &lt;3 из 10"
+    assert sanitize("<\nblockquote>Цитата</ blockquote>") == "<blockquote>Цитата</blockquote>"
     # Разрешённая разметка проходит целиком.
     assert sanitize('<b>жир</b> и <a href="https://x.ru">ссылка</a>').startswith("<b>жир</b>")
     # Уже экранированное вторым проходом не портится.
