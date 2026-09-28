@@ -8,6 +8,7 @@ import json
 import os
 import re
 import struct
+import time
 from pathlib import Path
 from typing import Any
 
@@ -130,14 +131,22 @@ class TelegramError(RuntimeError):
 
 def _call(method: str, payload: dict[str, Any], files: dict | None = None) -> dict:
     token = config.secret("TELEGRAM_BOT_TOKEN")
-    try:
-        response = requests.post(
-            API.format(token=token, method=method), data=payload, files=files, timeout=90
-        )
-    except requests.RequestException as exc:
-        # Обрыв связи — та же ошибка Telegram: её ловят все, а сырой ConnectionError
-        # 28.09.2026 уронил дежурство, и бот молчал до следующего запуска.
-        raise TelegramError(f"{method}: сеть ({type(exc).__name__})") from exc
+    # Сброс соединения с адресов GitHub бывает разовым: 28.09.2026 он съел нажатие галочки
+    # в СВЕДЕНИИ, а через минуту уронил дежурство. Повтор один; файлы не повторяем —
+    # открытый файл уже дочитан, и второй раз ушёл бы пустым.
+    for attempt in (1, 2):
+        try:
+            response = requests.post(
+                API.format(token=token, method=method), data=payload, files=files, timeout=90
+            )
+            break
+        except requests.ConnectionError as exc:
+            if attempt == 2 or files:
+                raise TelegramError(f"{method}: сеть ({type(exc).__name__})") from exc
+            time.sleep(2)
+        except requests.RequestException as exc:
+            # Ошибка сети — та же ошибка Telegram: её ловят все, сырую не ловил никто.
+            raise TelegramError(f"{method}: сеть ({type(exc).__name__})") from exc
 
     try:
         data = response.json()
