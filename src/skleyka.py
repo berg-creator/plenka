@@ -127,14 +127,18 @@ VOCAL_CHAIN = (
 # Тембр — после компрессии и по замеру, а не одной полкой на всех: домашние
 # записи расходятся на 10 дБ. У конденсатора вплотную середина бубнит (у Little
 # Chicago's Finest полоса 250 Гц на 5 дБ выше 1 кГц), у телефона её нет вовсе,
-# а компрессия поднимает тихое — и гул, и шипящие. Цель — октавы голоса к 1 кГц
-# у сведённого рэп-вокала (Grants — PunchDrunk из MedleyDB: 125 Гц −17,
-# 250 Гц −7, 2 кГц −4, 4 кГц −8, 8 кГц −11; воздуха у нас на 2 дБ больше — голос
-# у него тёмный). Вниз — не больше 9 дБ, вверх —
-# только разборчивость, 2–4 кГц, и не больше 3 дБ: поднятый низ гудит,
-# поднятый верх шипит.
-TONE = {125: -15, 250: -6, 500: 0, 2000: -4, 4000: -7, 8000: -9}
-TONE_CUT = -9.0
+# а компрессия поднимает тихое — и гул, и шипящие. Цель — октавы голоса к 1 кГц,
+# медиана 420 релизов с голосом, разделённых demucs (квартили: 125 Гц −16…−4,
+# 250 Гц −4…+3, 500 Гц 0…+4, 2 кГц −4…−1, 4 кГц −9…−3, 8 кГц −10…−3). До 28.09.2026
+# целью был один тёмный голос (Grants — PunchDrunk из MedleyDB), на 6 дБ тоньше
+# релизов в 250 Гц: подгонка к нему резала тело и верх, оставляя 1–2 кГц, — владелец:
+# «голос как из телефонной трубки, крепость ушла». Вниз — не больше 4 дБ: к этой цели
+# гудящему конденсатору (250 Гц на 5 дБ выше 1 кГц) хватает, а глубже режется уже
+# чей-то замысел. Вверх — только разборчивость, 2–4 кГц, и не больше 3 дБ: поднятый
+# низ гудит, поднятый верх шипит. Дорожки из одного проекта не подгоняются вовсе
+# (SAME_PROJECT): тембр там выставил артист.
+TONE = {125: -10, 250: 0, 500: 2, 2000: -2.5, 4000: -6, 8000: -7}
+TONE_CUT = -4.0
 TONE_BOOST = {2000: 3.0, 4000: 3.0}
 # Тембр по ходу трека: куски одной записи пишутся по-разному — у Little Chicago's
 # Finest на 176–192 с полоса 500 Гц на 5 дБ выше 1 кГц, на 160–168 — на 5 ниже,
@@ -189,7 +193,8 @@ ROOM_RATIO = 1.25
 # так что 0 — голос в строке вровень с битом.
 VOCAL_OVER_BEAT = 0.0
 # Голос и бит одной длины (расходятся не больше SAME_PROJECT с) выгружены из одного
-# проекта — так просит FROM_START, — и баланс между ними поставил артист: он и остаётся.
+# проекта — так просит FROM_START, — и баланс между ними поставил артист: он и остаётся,
+# как и тембр голоса (TONE).
 # 28.09.2026 у «Асапчика» владельца голос был на 6,8 дБ тише бита, вровень с райдером
 # вышло на 1,8 громче — «голос не лежит в бите, пластиковый и воздушный»: поверх бита
 # слышна вся обработка; с его балансом — «лежит лучше». Пределы BALANCE_RANGE — как
@@ -1107,6 +1112,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     подтянуть тембр, ширину и громкость («как у <артиста>», _like)."""
     look, work = STYLES[style], out / "work"
     work.mkdir(parents=True, exist_ok=True)
+    project = abs(clips.probe_seconds(vocal) - clips.probe_seconds(beat)) <= SAME_PROJECT
     print(f"  стиль «{style}»: {look['about']}" + (", саунд-дизайн" if design else "")
           + (f", голос {voice:+g} дБ" if voice else "") + (f", эхо {echo:+g} дБ" if echo else ""))
 
@@ -1117,7 +1123,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     _ffmpeg("-i", vocal, "-af", f"{clean},volume={VOCAL_LUFS - raw:.2f}dB,{VOCAL_CHAIN}"
             + (f",{DENSE}" if look.get("dense") else ""), *reels.VOICE_CODEC, squeezed)
     lines = _lines(_envelope(squeezed))
-    _ffmpeg("-i", squeezed, "-af", _equalizer(squeezed, lines, work) + DEESSER + (f",{look['color']}" if "color" in look else ""),
+    _ffmpeg("-i", squeezed, "-af", ("" if project else _equalizer(squeezed, lines, work)) + DEESSER + (f",{look['color']}" if "color" in look else ""),
             *reels.VOICE_CODEC, dry)
     sung = loudness(dry)[0]
 
@@ -1128,9 +1134,9 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     head = f"{FORMAT},{flip}"
     print(f"  бит: корреляция каналов {width:+.2f}" + (", один канал перевёрнут" if flip else ""))
     balance = VOCAL_OVER_BEAT
-    if abs(clips.probe_seconds(vocal) - clips.probe_seconds(beat)) <= SAME_PROJECT:
+    if project:
         balance = min(max(raw - loudness(beat, head)[0], BALANCE_RANGE[0]), BALANCE_RANGE[1])
-        print(f"  голос и бит из одного проекта: голос к биту {balance:+.1f} дБ, как у артиста")
+        print(f"  голос и бит из одного проекта: голос к биту {balance:+.1f} дБ и тембр — как у артиста")
     # Барабаны и бас пришли отдельно — место голосу только в остальном бите.
     drums = [path for part, path in parts if part in ("барабаны", "бас")]
     music = [path for part, path in parts if part in ("бит", "музыка")] if drums else [beat]
@@ -1143,7 +1149,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     under = loudness(ducked)[0]
     ridden = _ride(dry, ducked, under + balance + voice - sung, RIDE_TARGET + balance - VOCAL_OVER_BEAT + voice, work)
     level = loudness(ridden)[0]
-    placed = voices([(part, path) for part, path in parts if part in PARTS], level, work / "ride.wav", work, tune or "")
+    placed = voices([(part, path) for part, path in parts if part in PARTS], level, work / "ride.wav", work, tune or "", project)
 
     adlibs = [(path, gain) for path, gain, part in placed if part == "эдлиб"]
     rhythm = grid(beat) if design or adlibs or look.get("delay", ("",))[0] == "в темп" else None
@@ -1352,12 +1358,13 @@ def _scatter(events: list[tuple[float, float]], first: int = 0) -> tuple[list[tu
 
 
 def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work: Path,
-           tune: str = "") -> list[tuple[Path, float, str]]:
+           tune: str = "", keep: bool = False) -> list[tuple[Path, float, str]]:
     """Части голоса сухими дорожками на своих местах: [(файл, поправка громкости в сумме, роль)].
 
     Цепочка — как у ведущего: срез, громкость к VOCAL_LUFS, компрессия, тембр по замеру,
     де-эссер своей роли; дальше — своя точка панорамы и своя громкость к ведущему level.
-    tune — автотюн ведущего: ненастроенный дабл под настроенным голосом звучит фальшиво."""
+    tune — автотюн ведущего: ненастроенный дабл под настроенным голосом звучит фальшиво;
+    keep — дорожки из одного проекта, тембр артиста не трогается (TONE)."""
     placed = []
     for n, (part, path) in enumerate(parts):
         look, same = PARTS[part], [i for i, (other, _) in enumerate(parts) if other == part]
@@ -1365,7 +1372,7 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
         squeezed, dry = work / f"part{n}-comp.wav", work / f"part{n}.wav"
         _ffmpeg("-i", path, "-af", f"{chain},volume={VOCAL_LUFS - loudness(path, chain + ',')[0]:.2f}dB,{VOCAL_CHAIN}",
                 *reels.VOICE_CODEC, squeezed)
-        tone = f"{_equalizer(squeezed, _lines(_envelope(squeezed)), work)}{look['deess']}" \
+        tone = ("" if keep else _equalizer(squeezed, _lines(_envelope(squeezed)), work)) + look["deess"] \
             + (f",{look['color']}" if "color" in look else "")
         events = _lines(_envelope(squeezed), VOICE_RANGE, ADLIB_PAUSE) if part == "эдлиб" else []
         # Длинные партии под видом эдлибов (сплошной бэк) по кругу встали бы на минуту
