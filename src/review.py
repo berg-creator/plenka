@@ -267,7 +267,7 @@ def _selftest() -> None:
     new = (
         "<b>NKEEEI И YANIX ВЫПУСТИЛИ СИНГЛ ПОЦЕЛУИ</b>\n\n"
         "У nkeeei и Yanix вышел сингл <i>Поцелуи</i>.\n\n"
-        "<blockquote>Два имени на обложке, один трек — делили, видимо, по секундам.</blockquote>\n\n" + button
+        "<blockquote>Два имени на обложке, один трек — поделить его ещё предстоит.</blockquote>\n\n" + button
     )
     name = "20260912-0835"
     fix = {"file": "content/queue/a-verdict.json", "action": "rewrite", "text": new,

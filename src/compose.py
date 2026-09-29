@@ -586,9 +586,11 @@ def press_row(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dict] |
 def _release_payload(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dict] | None = None) -> dict:
     """Данные о релизе для модели.
 
-    Кроме служебных полей сюда идёт треклист: единственное, что позволяет
-    писать про музыку, ничего не выдумывая. Хронометраж, длина треков и фиты —
-    это то, что слышно и на слух, но проверяется по данным.
+    Кроме служебных полей сюда идёт треклист: названия, число треков и гости —
+    то, что проверяется по данным. Длительностей нет намеренно (владелец,
+    29.09.2026): получив их, модель строила пост на хронометраже — «трек длится
+    2 минуты 26 секунд, это всё, что нужно знать», — и читалось это притянуто.
+    Нет данных — нет соблазна; по старой памяти посчитанное ловит quality.py.
 
     inbox и artists дают историю артиста (previous_releases). Нет истории —
     нет и поля: пустой список модель читает как «раньше ничего не выпускал».
@@ -607,14 +609,8 @@ def _release_payload(item: dict, inbox: Iterable[dict] = (), artists: dict[str, 
 
     tracks = item.get("tracks") or []
     if tracks:
-        payload["tracks"] = [
-            {"title": t.get("title", ""), "length": _mmss(t.get("seconds", 0))} for t in tracks
-        ]
-        payload["shortest_track"] = _mmss(min(t.get("seconds", 0) for t in tracks))
-        payload["longest_track"] = _mmss(max(t.get("seconds", 0) for t in tracks))
+        payload["tracks"] = [{"title": t.get("title", "")} for t in tracks]
         payload["features"] = _features(tracks)
-    if item.get("duration_sec"):
-        payload["total_length"] = _mmss(item["duration_sec"])
     if item.get("genre"):
         payload["genre_by_store"] = item["genre"]
     earlier = previous_releases(item, inbox, artists or {})
@@ -625,10 +621,6 @@ def _release_payload(item: dict, inbox: Iterable[dict] = (), artists: dict[str, 
         payload["outside"] = outside
 
     return payload
-
-
-def _mmss(seconds: int) -> str:
-    return f"{seconds // 60}:{seconds % 60:02d}"
 
 
 # Гости прячутся в названиях треков — «(feat. X)», «with X», «prod. by X».
@@ -1272,9 +1264,11 @@ def _selftest() -> int:
     assert len(jobs) == 40 and {rubric for _, rubric, _, _ in jobs} == set(config.RELEASE_RUBRICS), jobs
     assert all(p["stance"] in ("respect", "roast") for _, rubric, p, _ in jobs if rubric == "verdict")
     globals()["outside_voice"] = lambda *_: {}
-    assert {rubric for _, rubric, _, _ in release_jobs(fresh * 20)} == {"release"}
-    # Сингл без цитаты — без поста: писать о нём, кроме длины, нечего.
-    assert [s["fingerprint"] for _, _, _, s in release_jobs(fresh)] == ["today"]
+    albums = [{**i, "title": i["title"].removesuffix(" - Single")} for i in fresh]
+    assert {rubric for _, rubric, _, _ in release_jobs(albums * 20)} == {"release"}
+    # Сингл без цитаты — без поста: писать о нём, кроме длины, нечего,
+    # а о длине не пишем (оба свежих в самотесте — синглы).
+    assert release_jobs(fresh) == []
     globals()["outside_voice"] = real_voice
     # Ночной plan о релизах не пишет вовсе — ни свежих, ни старых.
     assert not [rubric for _, rubric, _, _ in plan(config.QUEUE_TARGET) if rubric in config.RELEASE_RUBRICS]
@@ -1307,6 +1301,10 @@ def _selftest() -> int:
     assert earlier[3] == {"title": "We Are Not Your Kind", "track_count": 14,
                           "released_at": (now - timedelta(days=30)).date().isoformat()}, earlier
     assert _release_payload(current, history, {})["previous_releases"] == earlier
+    # Длительностей модель не получает вовсе (владелец, 29.09.2026): ни у трека, ни у релиза.
+    timed = before("timed", "Long", 0, duration_sec=146, tracks=[{"title": "Long", "seconds": 146}])
+    assert _release_payload(timed) == {**_release_payload(timed), "tracks": [{"title": "Long"}]}
+    assert not {"total_length", "shortest_track", "longest_track"} & set(_release_payload(timed))
     assert "previous_releases" not in _release_payload(before("debut", "Debut", 0, artist="Nobody"), history, {})
     print("история: последние 5 раньше релиза, дубль магазина один раз, чужой артист и предзаказ мимо")
 
