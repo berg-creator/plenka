@@ -29,6 +29,13 @@ SUBTEXT_FILE = DATA / "subtext.json"
 FACTS_FILE = DATA / "facts.json"
 CALENDAR_FILE = DATA / "calendar.json"
 INBOX_FILE = DATA / "inbox.jsonl"
+# Отпечатки находок inbox, по которым пост уже писался (compose.mark_used).
+USED_INBOX_FILE = DATA / "used_inbox.json"
+# Мнения о релизах из сети: {ключ релиза: {"at", "voice"}}, пустой voice — не нашлось
+# (src/sources/web_voice.py). Искать не нашедшееся снова — не раньше WEB_VOICE_RETRY_HOURS:
+# так его не ищет каждый сбор и каждый проход облачного Claude (review --voices).
+WEB_VOICE_FILE = DATA / "web_voice.json"
+WEB_VOICE_RETRY_HOURS = 12
 SEEN_FILE = DATA / "seen.json"
 POSTED_FILE = DATA / "posted.json"
 STORIES_FILE = DATA / "stories.json"

@@ -46,8 +46,20 @@ rewrite; старый пост без message пропускается — пр�
 канала красит запуск, но годные правки рядом применяются: в канале они уже
 вышли, и архив должен помнить их текст. ВКонтакте не правится вовсе.
 
+Второй вид правки — мнения о свежих релизах (владелец, 29.09.2026): поиск
+Gemini на бесплатном ключе отвечает 429, а подписка уже оплачена. Тем же
+проходом рутина берёт список --voices (свежие релизы без поста и без мнения;
+сингл без чужого голоса поста не получает) и приносит полем voices адрес
+страницы и цитату. Цитату принимает только sources/web_voice.accept, скачав
+страницу сам, — Claude верим не больше, чем Gemini. Не подтвердилась — строка
+в логе, а не красный запуск: это промах автора, а не поломка. Релиз не из
+списка --apply пропускает без сети: пост уже написан, сутки вышли, или рутина
+выдумала артиста. --voices и --check на мнениях — та же стандартная
+библиотека; web_voice тянет requests и зовётся только из --apply.
+
     python -m src.review --check content/review/20260912-0835.json    проверка без сети
     python -m src.review --apply content/review/20260912-0835.json --dry-run
+    python -m src.review --voices                                     кому рутина ищет мнение, без сети
     python -m src.review --selftest
 """
 
@@ -57,6 +69,7 @@ import argparse
 import html
 import json
 import re
+from datetime import timedelta
 from pathlib import Path
 
 # Только лёгкое: --check зовёт облачный автор, и requests с Pillow ему ставить незачем.
@@ -74,6 +87,11 @@ BUTTON = re.compile(r"(?m)^▸\s*<a\s+href=.*$")
 TAG = re.compile(r"<[^>]+>")
 
 PUBLISHED = "пост вышел, а сообщение в канале не записано — править не с чем"
+
+# Релизов, которым рутина ищет мнение за проход: каждый — поиск и чтение страниц,
+# а лимиты подписки те же, что у разбора постов.
+VOICES_PER_RUN = 5
+BY = ("", "critic", "listener")
 
 
 def _filled(value) -> bool:
@@ -152,6 +170,77 @@ def _text_problems(post: dict, edit: dict) -> list[str]:
     return errors
 
 
+def _voice_key(voice: dict) -> str:
+    # Тот же ключ, что web_voice.key: импортировать его нельзя — модуль тянет requests.
+    return quality.norm(f"{voice['artist']} — {voice['release']}")
+
+
+def voices_wanted(rows: list[dict], used: set[str], cache: dict, artists: dict[str, dict]) -> list[dict]:
+    """Кому рутина ищет мнение: свежие релизы inbox без поста и без мнения, по убыванию веса.
+
+    Окно то же, что у compose --fresh (fresh_releases): вышли не больше
+    RELEASE_MAX_AGE_HOURS назад и не в будущем. Без поста — отпечаток не в used:
+    сингл без чужого голоса compose пропускает, не помечая, и пересматривает
+    каждым сбором, пока релиз свежий; это главные адресаты. Дубль второго
+    магазина уже написанного релиза — тоже с постом. Искали и не нашли — снова
+    не раньше WEB_VOICE_RETRY_HOURS. names — написания для сверки страницы,
+    как у compose.outside_voice.
+    """
+    now = state.now()
+    cutoff = timedelta(hours=config.RELEASE_MAX_AGE_HOURS)
+    retry = timedelta(hours=config.WEB_VOICE_RETRY_HOURS)
+    wanted: dict[str, dict] = {}
+    posted = set()
+    for row in sorted(rows, key=lambda r: r.get("score", 0), reverse=True):
+        voice = {"artist": row.get("artist", ""), "release": quality.release_name(row.get("title", ""))}
+        if row.get("kind") != "release" or not (voice["artist"] and voice["release"]):
+            continue
+        if row.get("fingerprint") in used:
+            posted.add(_voice_key(voice))
+            continue
+        released = state._parse(row.get("released_at") or "")
+        if released is None or released.date() > now.date() or now - released > cutoff:
+            continue
+        seen = cache.get(_voice_key(voice)) or {}
+        searched = state._parse(seen.get("at", ""))
+        if seen.get("voice") or (searched and now - searched < retry):
+            continue
+        tracked = row.get("tracked") or voice["artist"]
+        voice["names"] = [tracked, *(artists.get(tracked, {}).get("aliases") or [])]
+        wanted.setdefault(_voice_key(voice), voice)
+    return [voice for key, voice in wanted.items() if key not in posted]
+
+
+def _wanted() -> dict[str, dict]:
+    """voices_wanted по файлам состояния: {ключ: релиз}."""
+    rows = list(state.read_jsonl(config.INBOX_FILE))
+    artists = {a["name"]: a for a in state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]}
+    found = voices_wanted(rows, set(state.read_json(config.USED_INBOX_FILE, [])),
+                          state.read_json(config.WEB_VOICE_FILE, {}), artists)
+    return {_voice_key(v): v for v in found}
+
+
+def _voice_shape(voice) -> str:
+    """Что не так с мнением по форме. Пустая строка — годно; правду сверит --apply."""
+    if not isinstance(voice, dict):
+        return "мнение — это объект"
+    missing = [field for field in ("artist", "release") if not _filled(voice.get(field))]
+    if missing:
+        return "нет " + ", ".join(missing)
+    url, quote = voice.get("url", ""), voice.get("quote", "")
+    if not isinstance(url, str) or not isinstance(quote, str):
+        return "url и quote — строки"
+    if url and not url.startswith(("http://", "https://")):
+        return "url: адрес страницы http(s)://…, а не нашлось ничего — пустая строка"
+    if url and not quote.strip():
+        return "нет quote — дословной цитаты с этой страницы"
+    if quote.strip() and not url:
+        return "quote без url: код сверит цитату только со страницей"
+    if voice.get("by", "") not in BY:
+        return "by: critic или listener"
+    return ""
+
+
 def check(review, name: str = "") -> tuple[list[str], dict[int, str]]:
     """Ошибки файла правок и пропуски — {номер правки с нуля: почему}.
 
@@ -160,15 +249,20 @@ def check(review, name: str = "") -> tuple[list[str], dict[int, str]]:
     тоже ошибка (пост там лежит ровно как она его читала, значит, неверны путь
     или цитата), а на свежем main — обычная гонка, и правка просто не нужна.
     """
-    if not isinstance(review, dict) or not isinstance(review.get("edits"), list):
-        return ['файл правок — объект {"edits": [...]}'], {}
-    edits = review["edits"]
+    if not (isinstance(review, dict) and isinstance(review.get("edits", []), list)
+            and isinstance(review.get("voices", []), list)):
+        return ['файл правок — объект {"edits": [...], "voices": [...]}'], {}
+    edits, voices = review.get("edits", []), review.get("voices", [])
     errors: list[str] = []
     skipped: dict[int, str] = {}
     if name and not ID_FORMAT.fullmatch(name):
         errors.append(f"имя файла «{name}»: ГГГГММДД-ЧЧММ, например 20260912-0835")
-    if not edits:
-        errors.append("edits пуст — без выдумок файл не пушится")
+    if not edits and not voices:
+        errors.append("edits и voices пусты — без выдумок и мнений файл не пушится")
+    shapes = [_voice_shape(voice) for voice in voices]
+    errors += [f"мнение {index + 1}: {wrong}" for index, wrong in enumerate(shapes) if wrong]
+    if not any(shapes) and len({_voice_key(voice) for voice in voices}) > VOICES_PER_RUN:
+        errors.append(f"мнения о больше чем {VOICES_PER_RUN} релизах — столько за проход не ищем")
     files = [edit.get("file") for edit in edits if isinstance(edit, dict)]
     for index, edit in enumerate(edits):
         where = f"правка {index + 1}"
@@ -226,7 +320,7 @@ def apply(review, name: str, dry_run: bool) -> int:
         return 1
 
     done = failed = 0
-    for index, edit in enumerate(review["edits"]):
+    for index, edit in enumerate(review.get("edits", [])):
         path = _current(edit["file"])
         if index in skipped:
             print(f"  — {path.name}: {skipped[index]}")
@@ -241,12 +335,50 @@ def apply(review, name: str, dry_run: bool) -> int:
         done += 1
     print(f"{'Применилось бы' if dry_run else 'Применено'} правок: {done}, пропущено: {len(skipped)}, "
           f"не принял канал: {failed}.")
+    if review.get("voices"):
+        _voices(review["voices"], dry_run)
     return 1 if failed else 0
+
+
+def _voices(voices: list[dict], dry_run: bool) -> None:
+    """Мнения из файла — в data/web_voice.json, откуда их берёт следующий compose --fresh.
+
+    Цитату принимает только web_voice.accept: страницу он качает сам и ищет
+    цитату в тексте дословно. Не подтвердилась — строка в лог, а не красный
+    запуск: это ошибка автора, а не поломка, и промах запомнится. Релиз, который
+    мнения уже не ждёт (пост написан, срок вышел, искали недавно), пропускается
+    без сети — так же и выдуманный рутиной артист в кэш не попадёт.
+    """
+    wanted = _wanted()
+    found: dict[str, list[dict]] = {}
+    for voice in voices:
+        found.setdefault(_voice_key(voice), []).append(voice)
+    if not dry_run:
+        # Не наверху: --check и --voices зовёт облачный автор, а web_voice тянет requests.
+        from .sources import web_voice
+    for key, items in found.items():
+        name = f"{items[0]['artist']} — {items[0]['release']}"
+        release = wanted.get(key)
+        if release is None:
+            print(f"  — мнение о «{name}»: релиз мнения уже не ждёт")
+            continue
+        pages = [item for item in items if item.get("url")]
+        if dry_run:
+            print(f"  мнение о «{name}»: сверилось бы со страниц: {len(pages)}")
+            continue
+        voice = web_voice.accept(release["artist"], release["release"], pages, release["names"])
+        if voice:
+            print(f"  мнение о «{name}»: {voice['who']} — «{voice['text']}»")
+        else:
+            print(f"  мнение о «{name}»: {'цитата на странице не подтвердилась' if pages else 'не нашлось'}"
+                  " — запомнено, повтор не раньше чем через "
+                  f"{config.WEB_VOICE_RETRY_HOURS} ч")
 
 
 def _selftest() -> None:
     """Без сети, во временной папке: правка, снятие, отказ на битом тексте,
-    вышедший пост — правка в канале, отказ канала и пропуск без сообщения.
+    вышедший пост — правка в канале, отказ канала и пропуск без сообщения;
+    мнения — форма, список релизов и сверка со страницей-заглушкой.
 
     Запуск: python -m src.review --selftest
     """
@@ -256,6 +388,7 @@ def _selftest() -> None:
     from unittest import mock
 
     from . import publish, telegram
+    from .sources import web_voice
 
     button = '▸ <a href="https://music.apple.com/us/album/x/6809882935">Слушать в Apple Music</a>'
     # Живой пример из очереди 11.09.2026: содержание трека, который никто не слушал.
@@ -299,7 +432,7 @@ def _selftest() -> None:
             assert plain("сингл ПОЦЕЛУИ: короткий и лишенный") in plain(old)
 
             refused("ГГГГММДД-ЧЧММ", file_name="20260912")
-            refused("edits пуст", {"edits": []})
+            refused("edits и voices пусты", {"edits": [], "voices": []})
             refused("объект", {"edits": {}})
             refused("путь поста", file="content/queue/../../.env")
             refused("rewrite или drop", action="fix")
@@ -371,6 +504,51 @@ def _selftest() -> None:
                       mock.patch.object(telegram, "edit_caption", refuse)):
                     assert apply({"edits": [out]}, name, dry_run=False) == code, error
                 assert post_of(config.ARCHIVE / "e-verdict.json")["text"] == text, error
+
+            # Мнения о релизах — второй вид правки. Файл с одними voices годен,
+            # битая форма — нет; правду цитаты --check не знает, её сверяет --apply.
+            quote = "Ghost Mountain makes Winchester the heaviest thing he has made this year."
+            voice = {"artist": "Ghost Mountain", "release": "Winchester",
+                     "url": "https://pitchfork.com/reviews/winchester", "quote": quote, "by": "critic"}
+            assert check({"voices": [voice]}, name) == ([], {})
+            assert check({"voices": [{**voice, "url": "", "quote": ""}]}, name) == ([], {}), "промах годен"
+            refused("объект", {"voices": {}})
+            refused("нет release", {"voices": [{**voice, "release": " "}]})
+            refused("http", {"voices": [{**voice, "url": "pitchfork.com/reviews"}]})
+            refused("нет quote", {"voices": [{**voice, "quote": ""}]})
+            refused("quote без url", {"voices": [{**voice, "url": ""}]})
+            refused("critic или listener", {"voices": [{**voice, "by": "editor"}]})
+            refused("за проход", {"voices": [{**voice, "release": str(n)} for n in range(VOICES_PER_RUN + 1)]})
+
+            data = config.ROOT / "data"
+            today = state.iso()
+            state.append_jsonl(data / "inbox.jsonl", [
+                {"kind": "release", "fingerprint": f, "artist": a, "title": t, "released_at": when, "score": 50}
+                for f, a, t, when in (("gm", "Ghost Mountain", "Winchester - Single", today),
+                                      ("old", "Yeat", "COCOON", state.iso(state.now() - timedelta(days=2))),
+                                      ("done", "Bones", "Rot", today), ("done2", "Bones", "Rot - Single", today))])
+            state.write_json(data / "used_inbox.json", ["done"])
+            key = quality.norm("Ghost Mountain — Winchester")
+            html_page = f"<title>Ghost Mountain – Winchester review</title><p>{quote}</p>"
+            with (mock.patch.multiple(config, INBOX_FILE=data / "inbox.jsonl", USED_INBOX_FILE=data / "used_inbox.json",
+                                      WEB_VOICE_FILE=data / "web_voice.json", ARTISTS_FILE=data / "artists.json"),
+                  mock.patch.object(web_voice, "page",
+                                    lambda url: (url, "Ghost Mountain – Winchester review", quality.norm(html_page)))):
+                # Старое, с постом и дубль второго магазина под постом — не ищем.
+                assert list(_wanted()) == [key], _wanted()
+                lie = {**voice, "quote": "Winchester is the best song of the whole decade, no question."}
+                # Цитаты нет на странице — не принята, запуск не красный, промах запомнен.
+                assert apply({"voices": [lie]}, name, dry_run=False) == 0
+                assert state.read_json(config.WEB_VOICE_FILE, {})[key]["voice"] == {} and _wanted() == {}
+                cache = state.read_json(config.WEB_VOICE_FILE, {})
+                cache[key]["at"] = state.iso(state.now() - timedelta(hours=config.WEB_VOICE_RETRY_HOURS + 1))
+                state.write_json(config.WEB_VOICE_FILE, cache)
+                # Через срок повтора — снова в списке; дословная цитата со страницы принята.
+                assert apply({"voices": [lie, voice]}, name, dry_run=False) == 0
+                assert state.read_json(config.WEB_VOICE_FILE, {})[key]["voice"] == {"who": "Pitchfork", "text": quote}
+                # Выдуманный рутиной релиз в кэш не попадает.
+                assert apply({"voices": [{**voice, "artist": "Nobody"}]}, name, dry_run=False) == 0
+                assert list(state.read_json(config.WEB_VOICE_FILE, {})) == [key]
         finally:
             config.ROOT, config.ARCHIVE = saved
 
@@ -381,13 +559,20 @@ def main() -> int:
     parser.add_argument("--apply", metavar="ФАЙЛ",
                         help="применить правки: переписать или снять посты очереди, поправить вышедшие в канале")
     parser.add_argument("--dry-run", action="store_true", help="с --apply: показать, что изменится, ничего не меняя")
+    parser.add_argument("--voices", action="store_true",
+                        help="каким свежим релизам рутине искать мнение в сети — строкой JSON на релиз, без сети")
     parser.add_argument("--selftest", action="store_true",
                         help="правка, снятие, отказ на битом тексте и правка вышедшего поста — без сети")
     args = parser.parse_args()
 
     if args.selftest:
         _selftest()
-        print("Правка, снятие, отказ на битом тексте, правка вышедшего поста в канале: все проверки прошли.")
+        print("Правка, снятие, отказ на битом тексте, правка вышедшего поста в канале, "
+              "мнения о релизах — форма, список и сверка со страницей: все проверки прошли.")
+        return 0
+    if args.voices:
+        for voice in list(_wanted().values())[:VOICES_PER_RUN]:
+            print(json.dumps(voice, ensure_ascii=False))
         return 0
     if not (args.check or args.apply):
         parser.print_help()
@@ -416,8 +601,16 @@ def main() -> int:
     if errors:
         print(f"Правки {path.name} не годны: ошибок {len(errors)}.")
         return 1
-    actions = [edit["action"] for edit in review["edits"]]
-    print(f"Правки {path.name} годны: переписать {actions.count('rewrite')}, снять {actions.count('drop')}.")
+    actions = [edit["action"] for edit in review.get("edits", [])]
+    voices = review.get("voices", [])
+    # Не ошибка: к применению список мог сдвинуться сам — пост написан, сутки вышли.
+    wanted = _wanted()
+    for voice in voices:
+        if _voice_key(voice) not in wanted:
+            print(f"  ! «{voice['artist']} — {voice['release']}» нет в списке --voices: "
+                  "применение его пропустит — перепиши artist и release оттуда буква в букву")
+    print(f"Правки {path.name} годны: переписать {actions.count('rewrite')}, снять {actions.count('drop')}, "
+          f"мнений {len(voices)}.")
     return 0
 
 

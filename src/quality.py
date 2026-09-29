@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 
 # Обороты, которые прямо запрещены голосом канала. Их наличие означает,
@@ -255,6 +256,25 @@ def _flat(text: str) -> str:
     """Текст без разметки, регистра и «ё» — для сверки цитаты с источником
     слово в слово: издание пишет «всё», модель ставит «все»."""
     return " ".join(re.sub(r"<[^>]+>", " ", text).lower().replace("ё", "е").split())
+
+
+def norm(text: str) -> str:
+    """Текст для дословной сверки чужой цитаты со страницей (sources/web_voice.py):
+    кавычки, тире, «ё», переносы и сущности у модели и на странице пишутся по-разному.
+    Здесь, а не в web_voice: им же считается ключ мнения в data/web_voice.json
+    для review --voices, а облачной рутине, которая его зовёт, requests не ставится."""
+    text = html.unescape(text).casefold().replace("ё", "е").replace("\u00ad", "")
+    text = re.sub(r"[“”«»„‟″\"]", '"', text)
+    text = re.sub(r"[’‘`´′]", "'", text)
+    text = re.sub(r"[‐‑‒–—―−]", "-", text).replace("…", "...")
+    return " ".join(text.split())
+
+
+def release_name(title: str) -> str:
+    """Название релиза без магазинного хвоста: «Джеки Будек - Single» — это
+    подпись витрины, а не то, как релиз называют люди. Здесь, а не в compose:
+    так же релиз называет рутине review --voices, а compose тянет requests."""
+    return re.sub(r"\s*[-–—]\s*(Single|EP)$", "", title.strip(), flags=re.IGNORECASE)
 
 
 def _quoted(matches: list[str]) -> str:

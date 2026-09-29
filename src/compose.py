@@ -25,12 +25,13 @@ from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
 from . import card, collect, config, footage, llm, publish, quality, state, telegram, tracks
+from .quality import release_name
 from .sources import deezer, itunes, web_voice, youtube_comments
 
 log = logging.getLogger("compose")
 
 BATCH_FILE = config.DATA / "pending_batch.json"
-USED_FILE = config.DATA / "used_inbox.json"
+USED_FILE = config.USED_INBOX_FILE
 
 # Кнопка обязана называть площадку: «Слушать» не говорит, что откроется —
 # Apple Music, Deezer или YouTube, а это три разных приложения, и человек
@@ -181,12 +182,6 @@ def drop_channel_link(text: str) -> str:
 
     text = re.sub(r"(?m)^▸(?!.*<a\s).*$", "", _BUTTON_LINE.sub(drop, text))
     return re.sub(r"\n{3,}", "\n\n", text).strip()
-
-
-def release_name(title: str) -> str:
-    """Название релиза без магазинного хвоста: «Джеки Будек - Single» — это
-    подпись витрины, а не то, как релиз называют люди."""
-    return re.sub(r"\s*[-–—]\s*(Single|EP)$", "", title.strip(), flags=re.IGNORECASE)
 
 
 def _lead_track(source: dict) -> dict:
@@ -529,9 +524,10 @@ def outside_voice(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dic
 
     Порядок — по цене и весу. Мнение издания ничего не стоит: новости The Flow
     и RAP.RU уже приходят в сбор из их Telegram-каналов (src/sources/telegram_web.py).
-    Дальше — мнение из сети (src/sources/web_voice.py): его ищет Gemini с поиском
-    Google, а код сверяет цитату со страницей слово в слово; на бесплатном ключе
-    поиска у Gemini нет, и этот шаг молча пропускается. Последним — отзыв под роликом на YouTube
+    Дальше — мнение из сети (src/sources/web_voice.py): его приносит облачный
+    Claude проходом автопилота точности или ищет Gemini с поиском Google, а код
+    сверяет цитату со страницей слово в слово; на бесплатном ключе поиска
+    у Gemini нет, и остаётся только найденное Claude. Последним — отзыв под роликом на YouTube
     (src/sources/youtube_comments.py): бесплатно, но это реплика, а не разбор.
 
     Какая новость годится — решает press_row.

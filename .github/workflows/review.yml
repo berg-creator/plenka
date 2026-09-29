@@ -5,7 +5,9 @@ name: Разбор выдумок
 # и пушит файл правок в ветку claude/review-<ГГГГММДД-ЧЧММ>. В main ему пушить
 # нельзя, и ветка для него — почтовый ящик, как у роликов (reels.yml). Здесь
 # правки проверяются, применяются к main (вышедший пост — прямо в канале),
-# а ветка удаляется.
+# а ветка удаляется. Тем же файлом рутина приносит мнения о свежих релизах
+# (поле voices): --apply сам качает страницу и кладёт в data/web_voice.json
+# только цитату, найденную на ней дословно.
 #
 # Владельцу воркфлоу пишет только о поломке, одной строкой (job notify):
 # решение владельца — автопилот. Ветка упавшего запуска остаётся для разбора.
@@ -82,6 +84,7 @@ jobs:
 
       # К свежему main: между проходом рутины и этим запуском посты выходили
       # и менялись. Поменявшееся --apply пропустит, вышедшее поправит в канале.
+      # Мнение, не подтвердившееся на странице, — строка в логе, а не красный запуск.
       - name: Применить к main
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -94,8 +97,9 @@ jobs:
         run: |
           git config user.name "plenka-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add -A content/queue content/archive
-          git diff --cached --quiet || git commit -m "разбор: выдумки исправлены"
+          # data целиком, а не data/web_voice.json: файла ещё нет, и git add на нём упал бы.
+          git add -A content/queue content/archive data
+          git diff --cached --quiet || git commit -m "разбор: выдумки исправлены, мнения сверены"
           git pull --rebase --autostash origin main
           git push origin HEAD:main
 
