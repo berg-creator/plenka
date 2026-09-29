@@ -25,7 +25,7 @@ from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
 from . import card, collect, config, footage, llm, publish, quality, state, telegram, tracks
-from .sources import deezer, itunes, youtube_comments
+from .sources import deezer, itunes, web_voice, youtube_comments
 
 log = logging.getLogger("compose")
 
@@ -527,9 +527,12 @@ def outside_voice(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dic
     Чужой голос — единственное законное мнение о самой музыке: это не выдумка,
     а проверяемая цитата, и в посте она так и стоит — со словами, кто её сказал.
 
-    Мнение издания ничего не стоит: новости The Flow и RAP.RU уже приходят
-    в сбор из их Telegram-каналов (src/sources/telegram_web.py). Отзыв слушателя
-    стоит ключа и квоты, поэтому он второй — и без ключа его просто нет.
+    Порядок — по цене и весу. Мнение издания ничего не стоит: новости The Flow
+    и RAP.RU уже приходят в сбор из их Telegram-каналов (src/sources/telegram_web.py).
+    Дальше — мнение из сети (src/sources/web_voice.py): его ищет Gemini с поиском
+    Google, а код сверяет цитату со страницей слово в слово; на бесплатном ключе
+    поиска у Gemini нет, и этот шаг молча пропускается. Последним — отзыв под роликом на YouTube
+    (src/sources/youtube_comments.py): бесплатно, но это реплика, а не разбор.
 
     Какая новость годится — решает press_row.
     """
@@ -538,9 +541,18 @@ def outside_voice(item: dict, inbox: Iterable[dict] = (), artists: dict[str, dic
         # Ссылку на t.me не отдаём даже в данные: чужой канал в ленте не рекламируем.
         return {"who": row.get("outlet", "издание"), "text": row.get("summary", "")[:400]}
 
-    comment = youtube_comments.top_comment(item.get("artist", ""), release_name(item.get("title", "")))
+    # Ролик и страницу могут подписать написанием из базы, а не магазинным:
+    # «Смоки Мо», а не «Smoky Mo».
+    tracked = item.get("tracked") or item.get("artist", "")
+    names = [tracked, *((artists or {}).get(tracked, {}).get("aliases") or [])]
+    found = web_voice.find(item.get("artist", ""), release_name(item.get("title", "")), names)
+    if found:
+        return found
+    comment = youtube_comments.top_comment(item.get("artist", ""), release_name(item.get("title", "")), names)
     if comment:
-        return {"who": "слушатель под клипом на YouTube", "text": comment["text"]}
+        # Подпись говорит, под каким роликом сказано: «под клипом» про запись
+        # концерта была бы неправдой (youtube_comments.kind).
+        return {"who": comment["who"], "text": comment["text"]}
     return {}
 
 
@@ -835,6 +847,9 @@ def do_fresh(dry_run: bool) -> int:
     и второй раз не пишутся. Полный трек просит следующий шаг, compose --ask-tracks:
     запрос трека живёт в одном месте.
     """
+    if dry_run:
+        # Поиск мнений в сети тратит суточную квоту генератора и пишет data/web_voice.json.
+        web_voice.ENABLED = False
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
     by_name = {a["name"]: a for a in artists}
     rows = list(state.read_jsonl(config.INBOX_FILE))
@@ -844,7 +859,8 @@ def do_fresh(dry_run: bool) -> int:
         for _, rubric, payload, _ in jobs:
             print(f"  {config.RUBRIC_BY_KEY[rubric].title:<8} {payload['artist']} — {payload['title']}"
                   f"  (выход {payload['released_at'][:10]},"
-                  f" прошлых релизов: {len(payload.get('previous_releases', []))})")
+                  f" прошлых релизов: {len(payload.get('previous_releases', []))},"
+                  f" голос: {payload.get('outside', {}).get('who', '—')})")
         print(f"\nСвежих релизов к посту: {len(jobs)}. Рубрика — жребий по весам. Модель не вызывалась.")
         return 0
     if not jobs:
@@ -1309,7 +1325,8 @@ def _selftest() -> int:
     print("история: последние 5 раньше релиза, дубль магазина один раз, чужой артист и предзаказ мимо")
 
     # Чужой голос: мнение издания ищется в новостях Telegram по любому написанию
-    # имени. Отзыв слушателя тут заглушён — это сеть и квота YouTube.
+    # имени. Мнение из сети и отзыв слушателя тут заглушены — это сеть и квота.
+    web_voice.find = lambda *_: {}
     youtube_comments.top_comment = lambda *_: {}
     press = {"kind": "news", "source": "telegram", "outlet": "The Flow",
              "title": "Смоки Мо выпустил Sorry Mama",
@@ -1332,6 +1349,20 @@ def _selftest() -> int:
     assert outside_voice(mo, [tribute], known) == {}
     # По той же сверке срочные новости узнают дубль поста о релизе.
     assert press_row(mo, [press], known) == press and press_row(mo, [tribute], known) == {}
+    # Нет новости — отзыв слушателя, с подписью из youtube_comments и с написанием
+    # артиста из базы: ролик подписан «Смоки Мо», а магазин пишет «Smoky Mo».
+    youtube_comments.top_comment = lambda artist, title, names=(): (
+        {"text": "жду официальный релиз, качает", "likes": 4, "who": "слушатель под сливом на YouTube"}
+        if (artist, title) == ("Smoky Mo", "Sorry Mama") and "Смоки Мо" in names else {})
+    assert outside_voice(mo, [], known) == {"who": "слушатель под сливом на YouTube",
+                                            "text": "жду официальный релиз, качает"}, outside_voice(mo, [], known)
+    assert outside_voice(mo, [press], known)["who"] == "The Flow", "издание важнее слушателя"
+    # Мнение из сети — после издания, но раньше YouTube.
+    web_voice.find = lambda *_: {"who": "Pitchfork", "text": "самый тяжёлый их трек за год"}
+    assert outside_voice(mo, [], known)["who"] == "Pitchfork"
+    assert outside_voice(mo, [press], known)["who"] == "The Flow"
+    web_voice.find = lambda *_: {}
+    youtube_comments.top_comment = lambda *_: {}
     assert "outside" not in _release_payload(current, history, {})
     print("чужой голос: мнение издания находится по алиасу, чужое и старое — мимо")
 

@@ -103,8 +103,34 @@ def generate(models: list[str], system: str, user: str, schema: dict) -> dict:
     raise RuntimeError(f"Gemini не ответил ({'; '.join(errors)})")
 
 
+def ground(models: list[str], prompt: str) -> tuple[str, list[str]]:
+    """Запрос с поиском Google (grounding): текст ответа и адреса страниц, на которые
+    модель опиралась. Модели по очереди, до первой ответившей.
+
+    Схему ответа тут не задаём: вместе с инструментом поиска её понимают не все
+    модели, а ответ всё равно разбирает и проверяет код (sources/web_voice.py).
+    """
+    payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}], "tools": [{"google_search": {}}]}
+    errors = []
+    for model in models:
+        data = _post(model, payload)
+        if isinstance(data, dict):
+            candidate = (data.get("candidates") or [{}])[0]
+            text = "".join(part.get("text", "") for part in candidate.get("content", {}).get("parts") or [])
+            chunks = candidate.get("groundingMetadata", {}).get("groundingChunks") or []
+            return text, [c["web"]["uri"] for c in chunks if c.get("web", {}).get("uri")]
+        errors.append(f"{model}: {data}")
+    raise RuntimeError(f"Gemini не ответил ({'; '.join(errors)})")
+
+
 def _ask(model: str, payload: dict) -> dict | str:
     """Один запрос к одной модели: разобранный ответ или текст ошибки."""
+    data = _post(model, payload)
+    return _parse(data) if isinstance(data, dict) else data
+
+
+def _post(model: str, payload: dict) -> dict | str:
+    """Один запрос к одной модели: сырой ответ или текст ошибки."""
     global _last_call
 
     waited = time.monotonic() - _last_call
@@ -124,7 +150,7 @@ def _ask(model: str, payload: dict) -> dict | str:
     finally:
         _last_call = time.monotonic()
     if response.status_code == 200:
-        return _parse(response.json())
+        return response.json()
     return f"{response.status_code}: {response.text[:300]}"
 
 
