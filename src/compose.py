@@ -807,12 +807,20 @@ def release_jobs(
     а не композиция», а SKAI ISYOURGOD — «скучным задолго до первой трети».
     Список слов в quality.py такое не ловит и ловить не будет: оборотов
     оценки больше, чем корней. Без цитаты релиз уходит РЕЛИЗОМ.
+
+    Сингл без чужого голоса не пишется вовсе (владелец, 29.09.2026): о нём
+    в данных только название и длина, и в то утро все три таких поста свелись
+    к шутке про минуты. Находка не помечается использованной — появится цитата,
+    пока релиз свежий, и следующий сбор пост напишет.
     """
     weights = [config.RUBRIC_BY_KEY[key].weight for key in config.RELEASE_RUBRICS]
     rows = list(inbox)
     jobs = []
     for item in items:
         payload = _release_payload(item, rows, artists)
+        single = item.get("track_count") == 1 or item.get("title", "").endswith(" - Single")
+        if single and not payload.get("outside"):
+            continue
         rubric = random.choices(config.RELEASE_RUBRICS, weights)[0] if payload.get("outside") else "release"
         if rubric == "verdict":
             payload["stance"] = random.choice(["respect", "roast"])
@@ -1265,6 +1273,8 @@ def _selftest() -> int:
     assert all(p["stance"] in ("respect", "roast") for _, rubric, p, _ in jobs if rubric == "verdict")
     globals()["outside_voice"] = lambda *_: {}
     assert {rubric for _, rubric, _, _ in release_jobs(fresh * 20)} == {"release"}
+    # Сингл без цитаты — без поста: писать о нём, кроме длины, нечего.
+    assert [s["fingerprint"] for _, _, _, s in release_jobs(fresh)] == ["today"]
     globals()["outside_voice"] = real_voice
     # Ночной plan о релизах не пишет вовсе — ни свежих, ни старых.
     assert not [rubric for _, rubric, _, _ in plan(config.QUEUE_TARGET) if rubric in config.RELEASE_RUBRICS]
