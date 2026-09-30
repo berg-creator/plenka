@@ -1049,8 +1049,8 @@ def _throws(voice: Path, throws: list[tuple[float, float, float]], length: float
         return None
     n, send, out = len(throws), work / "throw-send.wav", work / "throws.wav"
     _ffmpeg("-i", voice, "-filter_complex", f"[0:a]asplit={n}" + "".join(f"[v{j}]" for j in range(n)) + ";"
-            + "".join(f"[v{j}]atrim=start={a - 0.01:.3f}:end={e + 0.03:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.005,"
-                      f"afade=t=out:st={e - a + 0.03:.3f}:d=0.01,adelay={1000 * (k - length / 2 - 0.01):.0f}:all=1[o{j}];"
+            + "".join(f"[v{j}]atrim=start={a - 0.005:.3f}:end={e + 0.03:.3f},asetpts=PTS-STARTPTS,afade=t=in:d=0.005,"
+                      f"afade=t=out:st={e - a + 0.025:.3f}:d=0.01,adelay={1000 * (k - length / 2 - 0.005):.0f}:all=1[o{j}];"
                       for j, (a, e, k) in enumerate(throws))
             + "".join(f"[o{j}]" for j in range(n)) + f"amix=inputs={n}:normalize=0,apad=whole_dur={clips.probe_seconds(voice):.2f}",
             *reels.VOICE_CODEC, send)
@@ -1288,6 +1288,16 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
             low[max(0, round((t := rhythm[1] % length + n * length) * ENV_RATE) - 3):round(t * ENV_RATE) + 4]) >= loud]
         ins = drops(beat, rhythm)
         changes = ins + drops(beat, rhythm, -1)
+        drop = next((c for c in ins if c > first + length), None)
+        # Дроп меряется тактами и бывает на долю раньше удара (у одного из релизов бас
+        # вошёл на долю раньше бочки): голос открывается на первом ударе от доли до дропа.
+        drop = drop and next((t for t in kicks if t > drop - 1.5 * length), drop)
+        before = [a for a, _ in phrases if drop and drop - 4 * length <= a < drop][-PHONE_LINES:]
+        phone = [(before[0] - 0.05, drop)] if before else []
+        if phone:
+            ridden = _phone(ridden, phone, work)
+            heard = _envelope(ridden)  # бросок режется из голоса в телефоне
+            placed = [(_phone(path, phone, work), gain, part) for path, gain, part in placed]
         picks = {}
         for (_, end), (nxt, _) in zip(phrases, [*phrases[1:], (math.inf, 0.0)]):
             if kick := next((t for t in kicks if end <= t < min(nxt, end + 4 * length)), None):
@@ -1300,15 +1310,6 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
                 picks[end] = ((word - 0.5) / ENV_RATE, kick, nxt - end + 99 * any(0 <= c - end <= 4 * length for c in changes))
         throws = [(picks[e][0], e, picks[e][1])
                   for e in _spread([(w, e) for e, (_, _, w) in picks.items()], THROW_BARS * 4 * length, THROWS)]
-        drop = next((c for c in ins if c > first + length), None)
-        # Дроп меряется тактами и бывает на долю раньше удара (у одного из релизов бас
-        # вошёл на долю раньше бочки): голос открывается на первом ударе от доли до дропа.
-        drop = drop and next((t for t in kicks if t > drop - 1.5 * length), drop)
-        before = [a for a, _ in phrases if drop and drop - 4 * length <= a < drop][-PHONE_LINES:]
-        phone = [(before[0] - 0.05, drop)] if before else []
-        if phone:
-            ridden = _phone(ridden, phone, work)
-            placed = [(_phone(path, phone, work), gain, part) for path, gain, part in placed]
         print(f"  саунд-дизайн: первое слово {first:.2f} с; смены в бите " + (", ".join(f"{c:.1f}" for c in sorted(changes)) or "—")
               + " с; броски на удар " + (", ".join(f"{k:.2f}" for _, _, k in throws) or "—")
               + (f" с; телефон {phone[0][0]:.1f}–{phone[0][1]:.2f} с" if phone else " с"))
