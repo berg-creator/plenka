@@ -1868,6 +1868,9 @@ def paid(message: dict) -> None:
     data["paid"].setdefault(chat, []).append({"item": item, "charge": charge, "stars": payment.get("total_amount"),
                                               "at": state.iso()})
     save(data)
+    # Иначе о покупке владелец узнаёт, только заглянув в /vozvrat.
+    telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"),
+                          f"💫 Купили: {STARS.get(item, item)} · {payment.get('total_amount')} ⭐️")
     telegram.send_message(chat, THANKS.format(what=STARS.get(item, "треки добавил")))
 
 
@@ -3642,6 +3645,7 @@ def _selftest() -> None:
         moderate.process([payment("c1", 1), {"update_id": 2, "pre_checkout_query": {"id": "q1"}}], {}, "1", False, 0)
         assert calls == [("answerPreCheckoutQuery", {"pre_checkout_query_id": "q1", "ok": True})], calls
         assert sent[-1].startswith("Спасибо! +3") and not _limit(load(), "7"), "пакет поднял лимит"
+        assert sent[-2].startswith("💫 Купили: +3"), "о покупке — владельцу"
         data = load()
         data["used"]["7"] += [state.iso()] * 2
         save(data)
