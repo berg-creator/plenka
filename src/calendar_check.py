@@ -72,7 +72,7 @@ def main() -> int:
             print(f"  модель отказалась: {result.get('reason', '')}")
             continue
 
-        path = compose.save_post("legend", result["text"], {})
+        path = compose.save_post("legend", result["text"], {}, answer=result)
         # Дата привязана к сегодняшнему дню — пост должен выйти первым.
         priority = path.with_name("0000-" + path.name)
         path.rename(priority)

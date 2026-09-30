@@ -237,7 +237,7 @@ def run(limit: int, dry_run: bool, target: str) -> int:
             print(f"  — пропущено ({result.get('reason', '')}): {item.get('title', '')[:50]}")
             continue
 
-        path = compose.save_post("news", result["text"], with_portrait(item), folder=config.URGENT)
+        path = compose.save_post("news", result["text"], with_portrait(item), folder=config.URGENT, answer=result)
         post = state.read_json(path, {})
 
         if target == "admin":

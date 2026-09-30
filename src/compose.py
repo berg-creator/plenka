@@ -24,7 +24,7 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
-from . import card, collect, config, footage, llm, publish, quality, state, telegram, tracks
+from . import card, collect, config, footage, llm, otbor, publish, quality, state, telegram, tracks
 from .quality import release_name
 from .sources import deezer, itunes, web_voice, youtube_comments
 
@@ -60,7 +60,7 @@ def save_post(
     text: str,
     source: dict | None = None,
     folder: Path | None = None,
-    meme: dict | None = None,
+    answer: dict | None = None,
 ) -> Path:
     """Кладёт готовый пост в очередь. Имя файла задаёт порядок публикации.
 
@@ -68,7 +68,8 @@ def save_post(
     (config.URGENT): они выходят в день события, а не когда до них дойдёт
     очередь, и публикатору по расписанию их видеть незачем.
 
-    meme — ответ модели на мем: надписи на картинке и ключ шаблона.
+    answer — ответ модели целиком: у мема надписи на картинке и ключ шаблона,
+    у любого поста — названные в нём люди (llm.POST_SCHEMA, поле people).
     """
     # Чистим разметку сразу при сохранении, чтобы в очереди лежал тот же текст,
     # который уйдёт в канал, — иначе просмотр очереди врёт.
@@ -114,10 +115,21 @@ def save_post(
     if (source or {}).get("video_cover"):
         post["video"] = True
 
+    # Кого из названных в посте сделать ссылкой на карточку артиста (publish.artist_links):
+    # артист и гости релиза, артисты новости, артист связи — из данных, остальных назвала
+    # модель. Id Deezer ложатся в пост: при выходе и правке их заново не ищут.
+    src = source or {}
+    if rubric_key != "poll":
+        named = [*(otbor._credits(src["artist"]) if src.get("artist") else []),
+                 *_features(src.get("tracks") or []), *(src.get("artists") or [])]
+        people = (answer or {}).get("people")  # GigaChat схему не держит: не список — никого
+        if links := publish.artist_ids(text, [*named, *(people if isinstance(people, list) else [])]):
+            post["links"] = links
+
     if rubric_key == "meme":
         # Надписи лежат отдельно от подписи: они рисуются поверх шаблона,
         # а подпись уходит текстом под фото (card.render_meme).
-        meme = meme or {}
+        meme = answer or {}
         post |= {
             "top": _plain(meme.get("top")),
             "bottom": _plain(meme.get("bottom")),
@@ -757,7 +769,7 @@ def do_fetch() -> int:
             log.info("Пропущен %s: %s", job["custom_id"], result.get("reason", ""))
             continue
 
-        save_post(job["rubric"], result["text"], source, meme=result)
+        save_post(job["rubric"], result["text"], source, answer=result)
         if source.get("subtext_index") is not None:
             subtext_done.append(source["subtext_index"])
         created += 1
@@ -789,7 +801,7 @@ def do_now(count: int, jobs: list[tuple[str, str, dict, dict]] | None = None) ->
             if result["skip"] or not result["text"]:
                 print(f"  — {rubric_key}: пропущено ({result.get('reason', '')})")
                 continue
-            path = save_post(rubric_key, result["text"], source, meme=result)
+            path = save_post(rubric_key, result["text"], source, answer=result)
             if source.get("subtext_index") is not None:
                 subtext_done.append(source["subtext_index"])
             created += 1
@@ -1376,6 +1388,16 @@ def _selftest() -> int:
         # Заголовок новости на фото не пишется: это не название релиза.
         news = state.read_json(save_post("news", "Текст.", {"kind": "news", "title": "👀 Показал сниппет"},
                                          folder=Path(tmp)), {})
+        # Имена для ссылок на карточку артиста — полем links, а текст без ссылок (publish.artist_links).
+        real_find, deezer.find_artist_id = deezer.find_artist_id, {"Quavo": 8, "Pharrell Williams": 7}.get
+        try:
+            named = state.read_json(save_post(
+                "news", "Quavo позвал Фаррелла Уильямса.", {"kind": "news", "artists": ["Quavo"]}, folder=Path(tmp),
+                answer={"people": [{"shown": "Фаррелла Уильямса", "name": "Pharrell Williams"},
+                                   {"shown": "Канье", "name": "Kanye West"}]}), {})
+        finally:
+            deezer.find_artist_id = real_find
+    assert named["links"] == {"Quavo": 8, "Фаррелла Уильямса": 7} and "<a" not in named["text"], named
     assert (saved["released_at"], saved["score"]) == (inbox[2]["released_at"], 95), saved
     assert saved["release"] and news["release"] == "", (saved["release"], news["release"])
 

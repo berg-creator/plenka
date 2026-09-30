@@ -41,10 +41,30 @@ POST_SCHEMA = {
             "type": "string",
             "description": "Если skip=true — одной строкой почему",
         },
+        # Имя в посте становится ссылкой на карточку артиста в боте (publish.artist_links).
+        # Базу канала и данные поста код знает сам, а «Фаррелла Уильямса» в новости
+        # об альбоме Quavo назовёт только модель. Ссылку ставит код, а не модель:
+        # shown должен стоять в тексте, name — найтись в Deezer (publish.artist_ids).
+        "people": {
+            "type": "array",
+            "description": "Музыканты, названные в text, — артисты, группы, продюсеры. "
+                           'Каждый: {"shown": ровно как написан в text, "name": как пишется на площадках}. '
+                           "Никого не названо — пустой список",
+            "items": {
+                "type": "object",
+                "properties": {"shown": {"type": "string"}, "name": {"type": "string"}},
+                "required": ["shown", "name"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["skip", "text", "reason"],
+    "required": ["skip", "text", "reason", "people"],
     "additionalProperties": False,
 }
+# Разборам в боте и вопросу под постом ссылки на артистов не нужны: лишнее поле —
+# лишний повод модели его заполнять.
+REPLY_SCHEMA = {**POST_SCHEMA, "properties": {k: v for k, v in POST_SCHEMA["properties"].items() if k != "people"},
+                "required": ["skip", "text", "reason"]}
 
 # Ролики отвечают не постом, а раскадровкой: что говорит голос и что стоит
 # на экране (см. src/clips.py). Схема отдельная, потому что разбирать
@@ -205,7 +225,7 @@ def _call(name: str, user: str, schema: dict) -> dict:
     return gigachat.generate(voice(), user, schema)
 
 
-def _generate(user: str, schema: dict = POST_SCHEMA) -> dict:
+def _generate(user: str, schema: dict = REPLY_SCHEMA) -> dict:
     """Запрос к основному генератору, при отказе — к запасному.
 
     Исключение здесь всегда означает «провайдер недоступен»: сеть, ключ, лимит,

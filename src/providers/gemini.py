@@ -154,15 +154,12 @@ def _post(model: str, payload: dict) -> dict | str:
     return f"{response.status_code}: {response.text[:300]}"
 
 
-def _to_gemini_schema(schema: dict) -> dict:
-    """Приводит схему к диалекту Gemini: он не понимает additionalProperties."""
-    cleaned = {k: v for k, v in schema.items() if k != "additionalProperties"}
-    if "properties" in cleaned:
-        cleaned["properties"] = {
-            name: {k: v for k, v in prop.items() if k != "additionalProperties"}
-            for name, prop in cleaned["properties"].items()
-        }
-    return cleaned
+def _to_gemini_schema(schema):
+    """Приводит схему к диалекту Gemini: он не понимает additionalProperties — на любой
+    глубине, в том числе у элементов списка (llm.POST_SCHEMA, поле people)."""
+    if isinstance(schema, dict):
+        return {k: _to_gemini_schema(v) for k, v in schema.items() if k != "additionalProperties"}
+    return schema
 
 
 def _parse(data: dict) -> dict:

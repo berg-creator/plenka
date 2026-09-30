@@ -477,7 +477,8 @@ def _selftest() -> None:
             # в подписи развёрнута в площадки, кнопки старого поста на месте (правка без
             # reply_markup их сняла бы), в архиве — новый текст.
             message = {"chat": -100, "message_id": 5, "kind": "caption", "buttons": [[{"text": "Apple", "url": "a"}]]}
-            released = {"rubric": "verdict", "artist": "nkeeei & Yanix", "text": old, "message": message}
+            released = {"rubric": "verdict", "artist": "nkeeei & Yanix", "text": old, "message": message,
+                        "links": {"nkeeei": 1}}
             state.write_json(config.ARCHIVE / "e-verdict.json", released)
             out = {**fix, "file": "content/archive/e-verdict.json"}
             assert check({"edits": [out]}, name) == ([], {})
@@ -488,7 +489,10 @@ def _selftest() -> None:
                 assert apply({"edits": [out]}, name, dry_run=False) == 0
             assert len(edited) == 1 and edited[0][0::3] == (-100, {"buttons": message["buttons"]}), edited
             caption = edited[0][2]
-            assert caption.startswith(new.replace("\n\n" + button, "")) and button not in caption, caption
+            # Имена — ссылками на карточку артиста: их ставит правка, в тексте архива их нет (publish.artist_links).
+            assert f'<a href="{publish.ARTIST_LINK.format(1)}">nkeeei</a>' in caption, caption
+            bare = re.sub(r'<a href="[^"]*\?start=a_\d+">([^<]*)</a>', r"\1", caption)
+            assert bare.startswith(new.replace("\n\n" + button, "")) and button not in bare, caption
             assert "\n\n▸ Слушать:\n<a href=" in caption, caption
             assert post_of(config.ARCHIVE / "e-verdict.json") == {**released, "text": new}
 

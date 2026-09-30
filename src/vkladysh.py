@@ -15,12 +15,20 @@
 убил бы пересылку, а реклама здесь — сама карточка с маркой канала и ссылкой на бота.
 Подписку спрашивают кнопки под вкладышем — слежение и разбор вкуса (src/service.py).
 
+КАРТОЧКА АРТИСТА — тот же вкладыш, но об артисте: имя в посте канала ведёт
+в бота ссылкой ?start=a_<id Deezer> (publish.artist_links), и бот сразу отвечает
+фото, кто это, тремя последними релизами и площадками. «Кто это» — первое предложение
+Википедии, и только если оно о музыканте: своих сведений карточка не добавляет, а у «Bones»
+и «Кино» первая статья — про кости и про кинематограф. Под карточкой «🔔 Следить» —
+кнопка СЛЕЖУ (src/service.py), второго списка слежения нет.
+
 Инлайн-режим (@plenka_fm_bot Артист — Трек в чужом чате) отложен: дежурство
 разбирает события по одному, и запрос из чужого чата ждал бы за разбором модели
 дольше, чем Telegram держит его открытым (NEXT.md, задача 57).
 
     python -m src.vkladysh --selftest           разбор, карточка, отказ на мусоре — без сети
     python -m src.vkladysh --dry-run "ССЫЛКА"   что бот ответит на ссылку или «Артист — Трек», без Telegram
+    python -m src.vkladysh --artist 12345       карточка артиста по id Deezer, без Telegram
 """
 
 from __future__ import annotations
@@ -28,11 +36,13 @@ from __future__ import annotations
 import argparse
 import html
 import logging
+import re
 import sys
 from urllib.parse import quote
 
-from . import card, collect, config, otbor, publish, telegram
-from .sources import afisha
+from . import card, collect, config, otbor, publish, state, telegram
+from .sources import afisha, deezer
+from .sources.http import get_json
 
 log = logging.getLogger("vkladysh")
 
@@ -72,7 +82,7 @@ def concert(artist: str) -> str:
 
 def platforms(track: dict) -> str:
     """Все площадки строкой: присланная ссылка — своей площадке, остальным — поиск."""
-    query = quote(f"{track['artist']} {track['title']}", safe="")
+    query = quote(f"{track['artist']} {track['title']}".strip(), safe="")
     return f"{publish.LISTEN_HEAD}\n" + " · ".join(
         f'<a href="{html.escape(track["url"] if publish._host(search) == publish._host(track["url"]) else search.format(q=query))}">{label}</a>'
         for label, search in config.LISTEN_SERVICES)
@@ -99,6 +109,86 @@ def send(chat_id: str, track: dict) -> None:
         return
     telegram.send_photo_file(chat_id, image, text)
     image.unlink(missing_ok=True)  # карточка уже у человека
+
+
+ARTIST_KICKER = "КАРТОЧКА АРТИСТА"
+# Первое предложение Википедии — о музыканте? Иначе строки «кто это» нет вовсе.
+MUSICIAN = re.compile(r"рэпер|реп-исполнител|певец|певица|музыкант|продюсер|битмейкер|диджей|групп[аыу]|дуэт|"
+                      r"rapper|singer|musician|producer|\bband\b|\bduo\b|\bDJ\b", re.IGNORECASE)
+
+
+def first_sentence(text: str) -> str:
+    """Первое предложение без скобок: в них настоящее имя, даты и «род.», на чьей точке
+    предложение оборвалось бы. Точка после слова короче трёх букв — сокращение, не конец.
+    Знаки ударения русской Википедии («Куэ́йво») в подписи читаются как мусор — снимаем."""
+    text = text.replace("\u0301", "")
+    while (bare := re.sub(r"\s*\([^()]*\)", "", text)) != text:
+        text = bare
+    for match in re.finditer(r"(\S+)[.!?](?=\s+[A-ZА-ЯЁ«\"]|\s*$)", text):
+        if len(match.group(1)) > 2:
+            return text[:match.end()].strip()
+    return text.strip()
+
+
+def who(name: str) -> str:
+    """Кто это — первое предложение Википедии: сперва русской, потом английской."""
+    for lang in ("ru", "en"):
+        page = get_json(f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/"
+                        f"{quote(name.replace(' ', '_'), safe='')}", identify_as_bot=True, retries=2)
+        if not page or page.get("type") != "standard":
+            continue  # нет статьи или страница неоднозначности
+        sentence = first_sentence(page.get("extract", ""))
+        if MUSICIAN.search(sentence):
+            return sentence
+    return ""
+
+
+def artist(artist_id: int | str) -> dict:
+    """Карточка артиста по id Deezer: имя, фото, кто это, три последних релиза, подпись.
+    Пусто — Deezer такого не знает или не ответил."""
+    data = get_json(f"{deezer.BASE}/artist/{artist_id}", min_interval=deezer.MIN_INTERVAL) or {}
+    if not data.get("name"):
+        return {}
+    picture = data.get("picture_xl") or data.get("picture_big") or ""
+    today = state.now().strftime("%Y-%m-%d")
+    releases, titles = [], set()
+    # Предзаказ — ещё не релиз; у Deezer один альбом бывает заведён дважды.
+    for release in sorted(deezer.recent_releases(int(artist_id), limit=50),
+                          key=lambda r: r["released_at"], reverse=True):
+        if release["released_at"][:10] <= today and release["title"].casefold() not in titles and len(releases) < 3:
+            titles.add(release["title"].casefold())
+            releases.append(release)
+    found = {"id": int(artist_id), "name": data["name"], "url": data.get("link", ""),
+             "photo": "" if deezer.EMPTY_PICTURE in picture else picture,
+             "who": who(data["name"]), "releases": releases}
+    found["caption"] = artist_caption(found)
+    if telegram.visible_len(found["caption"]) > telegram.MAX_CAPTION:
+        found["caption"] = artist_caption({**found, "who": ""})  # длинная Википедия уступает релизам
+    return found
+
+
+def artist_caption(found: dict) -> str:
+    """Подпись карточки: имя и кто это, последние релизы, площадки, откуда карточка."""
+    esc = html.escape
+    parts = [f"<b>{esc(found['name'])}</b>" + (f"\n{esc(found['who'])}" if found.get("who") else "")]
+    if found["releases"]:
+        parts.append("Последние релизы:\n" + "\n".join(
+            f'▸ <a href="{esc(r["url"])}">{esc(r["title"])}</a> · {".".join(reversed(r["released_at"][:10].split("-")))}'
+            for r in found["releases"]))
+    parts.append(platforms({"artist": found["name"], "title": "", "url": found["url"]}))
+    parts.append(f'<a href="{publish.ARTIST_LINK.format(found["id"])}">{ARTIST_KICKER}</a> · {config.CHANNEL_HANDLE}')
+    return "\n\n".join(parts)
+
+
+def send_artist(chat_id: str, found: dict, buttons: list[list[dict]]) -> None:
+    """Фото артиста с подписью; фото нет или Telegram его не забрал — одна подпись."""
+    if found["photo"]:
+        try:
+            telegram.send_photo(chat_id, found["photo"], found["caption"], buttons=buttons)
+            return
+        except telegram.TelegramError as exc:
+            log.info("Фото артиста не ушло (%s): %s", found["name"], exc)
+    telegram.send_message(chat_id, found["caption"], buttons=buttons)
 
 
 def _selftest() -> None:
@@ -134,12 +224,46 @@ def _selftest() -> None:
         otbor.by_link, otbor.lookup, collect.load_artists, afisha.find_artist, afisha.concerts = real
     print("vkladysh: ссылка и «Артист — Трек», отказ на мусоре, площадки и концерт в подписи — ок")
 
+    # КАРТОЧКА АРТИСТА: Википедия только о музыканте, три последних релиза без предзаказа и дублей.
+    assert first_sentence("Oxxxymiron (род. 31 января 1985, Ленинград) — российский рэпер. Основатель лейбла.") \
+        == "Oxxxymiron — российский рэпер."
+    assert first_sentence("Куэ\u0301йво — рэпер.") == "Куэйво — рэпер."
+    assert first_sentence("Quavo (born April 2, 1991) is an American rapper from Georgia. He is") \
+        == "Quavo is an American rapper from Georgia."
+    pages = {"ru": {"type": "standard", "extract": "Кости — твёрдые органы скелета. Их много."},
+             "en": {"type": "standard", "extract": "Bones (born 1994) is an American rapper and producer."}}
+    wiki = lambda url, **kw: pages[url[8:10]] if "wikipedia" in url else {
+        "name": "Bones", "link": "https://www.deezer.com/artist/5", "picture_xl": "https://x/p.jpg"}
+    rows = [{"title": t, "url": f"https://www.deezer.com/album/{n}", "released_at": d} for n, (t, d) in enumerate(
+        (("Old", "2020-01-01"), ("Later", "2099-01-01"), ("Dirt", "2026-09-01"), ("DIRT", "2026-08-31"),
+         ("Tape", "2026-05-02"), ("Mid", "2024-03-03")))]
+    real = globals()["get_json"], deezer.recent_releases
+    globals()["get_json"], deezer.recent_releases = wiki, lambda artist_id, limit=5: rows
+    try:
+        found = artist(5)
+        pages["en"]["extract"] = "Bones is a 2001 American horror film."
+        assert artist(5)["who"] == "", "не о музыканте — строки нет"
+    finally:
+        globals()["get_json"], deezer.recent_releases = real
+    assert found["who"] == "Bones is an American rapper and producer.", found["who"]
+    assert [r["title"] for r in found["releases"]] == ["Dirt", "Tape", "Mid"], found["releases"]
+    text = found["caption"]
+    assert text.startswith("<b>Bones</b>\nBones is an American rapper") and "Dirt</a> · 01.09.2026" in text, text
+    assert 'href="https://www.deezer.com/artist/5">Deezer' in text and "search?text=Bones\"" in text, text
+    assert publish.ARTIST_LINK.format(5) in text and telegram.visible_len(text) <= telegram.MAX_CAPTION
+    print("карточка артиста: Википедия только о музыканте, три последних релиза, площадки — ок")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="ВКЛАДЫШ: карточка трека со всеми площадками")
     parser.add_argument("--selftest", action="store_true", help="проверка без сети")
     parser.add_argument("--dry-run", metavar="ТЕКСТ", help="что бот ответит, без Telegram")
+    parser.add_argument("--artist", metavar="ID", help="карточка артиста по id Deezer, без Telegram")
     args = parser.parse_args()
+    if args.artist:
+        found = artist(args.artist)
+        print(f"{found['caption']}\n\nфото: {found['photo'] or 'нет'}" if found else "Deezer такого артиста не знает.")
+        return 0 if found else 1
     if args.selftest:
         _selftest()
         return 0

@@ -223,7 +223,7 @@ def edit(post: dict) -> None:
     молча, а отказывает: обрезанный пост хуже непоправленного.
     """
     message = post["message"]
-    text = track_note(listen(post.get("text", "").strip(), post.get("artist", ""), release_title(post)), post)
+    text = view(post.get("text", "").strip(), post)
     where = message["chat"], message["message_id"], text
     if message["kind"] != "caption":
         telegram.edit_text(*where, buttons=message.get("buttons"))
@@ -331,6 +331,97 @@ def release_title(post: dict) -> str:
     return title or post.get("track", "")
 
 
+# Имя артиста в посте — ссылка на его карточку в боте (владелец, 01.10.2026): кто он,
+# последние релизы, площадки и «🔔 Следить» (src/vkladysh.py). Метка a_<id Deezer>.
+ARTIST_LINK = f"https://t.me/{config.BOT_HANDLE.lstrip('@')}?start=a_{{}}"
+# Теги и готовые ссылки: имя внутри них не ищем — ни в адресе, ни в строке площадок.
+_MARKUP = re.compile(r"<a\b[^>]*>.*?</a>|<[^>]*>", re.DOTALL | re.IGNORECASE)
+
+
+def _mention(text: str, name: str, taken: list[tuple[int, int]] = ()) -> tuple[int, int] | None:
+    """Первое упоминание имени целым словом вне разметки и чужих ссылок.
+
+    Слева — начало строки, пробел, тег или открывающая кавычка и скобка: «Nas» в «Nasty»
+    не имя, а ссылку после другого знака telegram.sanitize отбил бы пустой строкой.
+    """
+    blocked = [m.span() for m in _MARKUP.finditer(text)] + list(taken)
+    for match in re.finditer(rf"(?<![^\s>«(„“\"']){re.escape(name)}(?!\w)", text):
+        if not any(start < match.end() and match.start() < end for start, end in blocked):
+            return match.span()
+    return None
+
+
+def artist_ids(text: str, people) -> dict[str, int]:
+    """Единственная проверка ссылок на артистов: {как имя стоит в тексте: id Deezer}.
+
+    people — имена из данных поста строкой и люди, которых назвала модель
+    ({"shown": как в тексте, "name": как на площадках}, llm.POST_SCHEMA). Ссылка будет,
+    только если shown стоит в тексте целым словом, а name Deezer знает точно, без учёта
+    регистра (deezer.find_artist_id): похожий артист — чужая карточка под нашим именем,
+    та же выдумка. Не нашёлся — ссылки нет. Зовётся при сохранении поста (compose.save_post),
+    id ложатся полем links: при выходе и правке заново не ищем.
+    """
+    found: dict[str, int] = {}
+    for person in people or []:
+        shown, name = (person.get("shown"), person.get("name")) if isinstance(person, dict) else (person, person)
+        if not (isinstance(shown, str) and isinstance(name, str) and shown.strip() and name.strip()):
+            continue
+        shown = shown.strip()
+        if shown in found or not _mention(text, shown):
+            continue
+        try:
+            artist_id = deezer.find_artist_id(name.strip())
+        except Exception as exc:  # noqa: BLE001 — Deezer молчит: ссылки нет, пост важнее
+            log.info("Deezer не ответил про «%s»: %s", name, exc)
+            continue
+        if artist_id:
+            found[shown] = artist_id
+    return found
+
+
+def artist_links(text: str, post: dict) -> str:
+    """Имена артистов — ссылками на их карточки в боте, каждое по первому упоминанию.
+
+    В тексте поста ссылок нет: их накладывает код при отправке и правке (send, edit).
+    30.09.2026 автопилот точности (src/review.py) снял из поста ссылку, которой не было
+    в данных, — лежи они в text, он снимал бы их и дальше. Имена — база канала с алиасами
+    и поле links поста (artist_ids). Длинное первым: «Lil Uzi Vert» раньше «Uzi».
+    Во ВКонтакте уходит сохранённый текст — ссылки на бота Telegram там не нужны.
+
+    Подпись к фото короче 1024 знаков, и текст ради ссылок не режется: не влезло —
+    ссылки снимаются с последней. Считаем так же, как отправка: после telegram.sanitize,
+    по видимой длине, и сырой текст сообщения не длиннее telegram.MAX_TEXT, иначе
+    send_message его обрежет.
+    """
+    ids = {name: artist["deezer_id"] for artist in state.read_json(config.ARTISTS_FILE, {}).get("artists", [])
+           for name in (artist.get("name", ""), *artist.get("aliases", [])) if name and artist.get("deezer_id")}
+    ids |= post.get("links") or {}
+    spans: list[tuple[int, int, int]] = []
+    for name in sorted(ids, key=len, reverse=True):
+        if span := _mention(text, name, [(start, end) for start, end, _ in spans]):
+            spans.append((*span, ids[name]))
+    # Одна карточка — одна ссылка: у «Кино» и «Kino» она ставится на первое из упоминаний.
+    first: dict[int, tuple[int, int, int]] = {}
+    for span in sorted(spans):
+        first.setdefault(span[2], span)
+    spans = sorted(first.values())
+    limit = telegram.MAX_CAPTION if telegram.visible_len(text) <= telegram.MAX_CAPTION else telegram.MAX_TEXT
+    while True:
+        linked = text
+        for start, end, artist_id in reversed(spans):
+            linked = f'{linked[:start]}<a href="{ARTIST_LINK.format(artist_id)}">{linked[start:end]}</a>{linked[end:]}'
+        clean = telegram.sanitize(linked)
+        if not spans or (telegram.visible_len(clean) <= limit and len(clean) <= telegram.MAX_TEXT):
+            return linked
+        spans.pop()
+
+
+def view(text: str, post: dict) -> str:
+    """Текст поста, каким его видит читатель Telegram: площадки строкой, строка о треке,
+    имена артистов ссылками. Один путь для выхода, правки и сухого прогона."""
+    return artist_links(track_note(listen(text, post.get("artist", ""), release_title(post)), post), post)
+
+
 def _where(message: dict, kind: str, buttons: list[list[dict]] | None = None) -> dict:
     """Сообщение с текстом поста: чат, id, подпись это или текст, кнопки под ним.
 
@@ -380,7 +471,7 @@ def send(post: dict, chat_id: str) -> dict | None:
                                               height=post.get("height", 0), quiet=night(state.now())), "caption")
 
     cover = post.get("cover", "")
-    text = track_note(listen(text, post.get("artist", ""), release_title(post)), post)
+    text = view(text, post)
     # В тихие часы молчит любой пост (config.QUIET_FROM_HOUR).
     quiet = night(state.now())
 
@@ -764,6 +855,38 @@ def _selftest() -> None:
     assert otbor == f"{text}\n{TRACK_NOTE}\n\nПришли свой — @bot", otbor
     print("площадки стримингов: все проверки прошли")
 
+    # Имена артистов — ссылками на карточку в боте, только при выдаче (artist_links).
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp) / "artists.json"
+        state.write_json(base, {"artists": [{"name": "Nas", "deezer_id": 1}, {"name": "Lil Uzi Vert", "deezer_id": 3},
+                                            {"name": "Uzi", "deezer_id": 4},
+                                            {"name": "Кино", "aliases": ["Kino"], "deezer_id": 2}]})
+        known = {"Pharrell Williams": 7, "Quavo": 8}.get
+        with mock.patch.object(config, "ARTISTS_FILE", base), mock.patch.object(deezer, "find_artist_id", known):
+            # shown, которого нет в тексте, и имя, которого Deezer не знает, ссылки не получают.
+            ids = artist_ids("Quavo позвал «Фаррелла Уильямса».", [
+                "Quavo", {"shown": "Фаррелла Уильямса", "name": "Pharrell Williams"},
+                {"shown": "Канье", "name": "Kanye West"}, {"shown": "позвал", "name": "Нет такого"}, "мусор", {"shown": 1}])
+            assert ids == {"Quavo": 8, "Фаррелла Уильямса": 7}, ids
+            link = ARTIST_LINK.format
+            text = "Nasty — не Nas. Nas снова, Lil Uzi Vert без Uzi. <b>Кино</b> — это «Kino» и «Фаррелла Уильямса»."
+            linked = artist_links(text, {"links": ids})
+            assert linked.count(link(1)) == 1 and f'не <a href="{link(1)}">Nas</a>. Nas' in linked, linked
+            assert f'<a href="{link(3)}">Lil Uzi Vert</a> без <a href="{link(4)}">Uzi</a>' in linked, linked
+            assert linked.count(link(2)) == 1 and f'<b><a href="{link(2)}">Кино</a></b>' in linked, "одна карточка — одна ссылка"
+            assert f'«<a href="{link(7)}">Фаррелла Уильямса</a>»' in linked, linked
+            assert telegram.sanitize(linked) == linked and telegram.visible_len(linked) == telegram.visible_len(text)
+            assert artist_links(f'<a href="https://nas.com/Nas">Nas</a>', {}) == '<a href="https://nas.com/Nas">Nas</a>'
+            # Текст ради ссылок не режется: не влезло — ссылки снимаются с последней.
+            extra = len(f'<a href="{link(1)}"></a>')
+            long = "Nas и Uzi " + "а" * (telegram.MAX_TEXT - extra - 11)
+            linked = artist_links(long, {})
+            assert link(1) in linked and link(4) not in linked and len(linked) <= telegram.MAX_TEXT, len(linked)
+            assert telegram.visible_len(linked) == len(long)
+            caption = "Nas. " + "а" * (telegram.MAX_CAPTION - 5)
+            assert telegram.visible_len(artist_links(caption, {})) == telegram.MAX_CAPTION
+    print("имена артистов: ссылка одна на имя, внутри слова и без Deezer — нет, лимит соблюдён")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Публикация постов в Telegram")
@@ -845,7 +968,7 @@ def main() -> int:
         else:
             full = "нет"
         print(f"Полный трек: {full}")
-        shown = track_note(listen(post.get("text", ""), post.get("artist", ""), release_title(post)), post)
+        shown = view(post.get("text", ""), post)
         if telegram.visible_len(shown) > telegram.MAX_CAPTION:
             print(f"Вид: текстом — подпись к фото не больше {telegram.MAX_CAPTION} знаков, "
                   f"а в посте {telegram.visible_len(shown)}")

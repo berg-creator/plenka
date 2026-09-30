@@ -86,6 +86,8 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "skleyka_pin": "СВЕДЕНИЕ, закреп канала", "skleyka_otbor": "СВЕДЕНИЕ, пост ОТБОРА",
            # Ссылка в подписи вкладыша: пересланная карточка привела нового человека.
            "vkladysh": "ВКЛАДЫШ, пересланная карточка",
+           # Имя артиста в посте канала (?start=a_<id Deezer>, publish.artist_links): id сюда не пишется.
+           "a": "КАРТОЧКА АРТИСТА, имя в посте",
            "ad": "реклама, канал не распознан"}
 # Платный пост ведёт в ДВОЙНИКА ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
@@ -159,6 +161,8 @@ VKLADYSH = (
     "Кинь ссылку на трек — Яндекс, Spotify, Apple Music, YouTube — или напиши <i>Артист — Трек</i>. "
     "Пришлю карточку со всеми площадками: перешлёшь другу, и он откроет трек у себя."
 )
+# Карточка артиста не собралась: Deezer не ответил или id из ссылки чужой.
+ARTIST_MISSING = "Карточку артиста собрать не вышло — Deezer не ответил. Попробуй ещё раз через минуту."
 # Строка под вкладышем: кнопки живут отдельно, карточку пересылают без них.
 VKLADYSH_NEXT = "Перешли карточку другу — площадки в ней. А дальше?"
 # Ссылка на «Мне нравится» или плейлист Яндекс Музыки — то, что ролик ДВОЙНИКА велит кинуть
@@ -1405,6 +1409,17 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         if _subscribed(chat_id, user_id, admin, retry=f"sv:{code}"):
             svedenie.invite(chat_id, code)
         return False
+    if kind == "menu" and link == "a":
+        # Имя артиста в посте канала — карточка сразу и без подписки, как вкладыш:
+        # подписку спросит «🔔 Следить» под ней — та же кнопка СЛЕЖУ, что под разбором.
+        count_source("a")
+        found = vkladysh.artist(slug) if slug.isdigit() else {}
+        if not found:
+            telegram.send_message(chat_id, ARTIST_MISSING)
+            return False
+        # Двадцать знаков — как у кнопок под разбором (_subject): кириллица в 64 байта.
+        vkladysh.send_artist(chat_id, found, [[{"text": "🔔 Следить", "callback_data": _cb("watch", found["name"][:20])}]])
+        return False
     if kind == "sved" or kind == "menu" and link in ("sved", "ad"):
         if kind == "menu":
             count_source(body if body in SOURCES or AD_LABEL.fullmatch(body) else link)
@@ -2002,6 +2017,20 @@ def _selftest() -> None:
         assert replies[-3][0] == VKLADYSH_NEXT and replies[-3][1][1][0]["callback_data"] == _cb("razbor", "Bones")
         assert [text for text, _ in replies[-2:]] == [VKLADYSH] * 2, replies[-2:]
         assert state.read_json(SOURCES_FILE, {})[_today()]["vkladysh"] == 1
+        # Имя артиста в посте: /start a_<id> — карточка сразу, «🔔 Следить» ведёт в СЛЕЖУ, метка одна — a.
+        shown, real_art = [], (vkladysh.artist, vkladysh.send_artist)
+        vkladysh.artist = lambda artist_id: {"name": "Bones", "caption": "<b>Bones</b>"} if artist_id == "123" else {}
+        vkladysh.send_artist = lambda chat, found, buttons: shown.append((found["name"], buttons))
+        try:
+            for n, text in enumerate(("/start a_123", "/start a_мусор")):
+                handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
+                                "message_id": 250 + n, "date": 25000 + n * 60, "text": text}, {})
+        finally:
+            vkladysh.artist, vkladysh.send_artist = real_art
+        assert shown == [("Bones", [[{"text": "🔔 Следить", "callback_data": _cb("watch", "Bones")}]])], shown
+        assert replies[-1][0] == ARTIST_MISSING, replies[-1]
+        saved = SOURCES_FILE.read_text()
+        assert state.read_json(SOURCES_FILE, {})[_today()]["a"] == 2 and "123" not in saved, saved
         # Артист позвал артиста из-под лимита треков: метка одна, код — в приглашение.
         real_sk = skleyka.start, skleyka.invited
         skleyka.start, skleyka.invited = (lambda *a, **kw: None), (lambda chat, code: invited.append((chat, code)))
@@ -2058,7 +2087,7 @@ def _selftest() -> None:
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал; "
           "skleyka_r<код> — метка skleyka_ref, код в приглашение; переспрос СВЕДЕНИЯ: «разбор вкуса» — прежним путём; "
-          "/vopros и /paysupport — вопрос владельцу, его ответ — человеку")
+          "/vopros и /paysupport — вопрос владельцу, его ответ — человеку; a_<id> — карточка артиста с «Следить»")
 
 
 # ─────────────────────────── командная строка ───────────────────────────
