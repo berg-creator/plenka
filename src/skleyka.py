@@ -1625,7 +1625,7 @@ DRAFT_MINUTES = 30
 # Срок — в первом же вопросе о дорожке: до 30.09.2026 о нём узнавали только из EXPIRED.
 WAIT = f" Жду их {DRAFT_MINUTES} минут — потом заявка закроется."
 # Ссылкой на облако — для тех, кому гигабайт стемов на телефон не скачать (src/oblako.py).
-BY_LINK = "\nМожно и ссылкой на Яндекс Диск, Dropbox или файл Google Диска — папкой или архивом, файлы по ролям: vocal, beat, adlib, bass."
+BY_LINK = "\nМожно и ссылкой на Яндекс Диск, Dropbox или файл Google Диска — папкой или архивом, роль — по имени файла, хоть по-русски: вокал, бит, эдлиб, бас или vocal, beat."
 # Сколько минут занимает сведение на машине дежурства: скачать, свести, отправить.
 MINUTES = 4
 # Ссылка на облако — ещё столько: скачать до гигабайта стемов и распаковать архив.
@@ -1634,6 +1634,9 @@ LINK_MINUTES = 3
 # сведение, что идёт дольше JOB_MINUTES, дежурство снимает.
 RESUME_MINUTES = 60
 JOB_MINUTES = 20
+# Заявке ссылкой — вдвое: гигабайт стемов с Яндекс Диска и 7z на машине GitHub
+# ни разу не мерили, на Маке такая шла 4 минуты. Снятая по времени — «Не вышло» человеку.
+LINK_JOB_MINUTES = 40
 # Кнопки пересборки живут неделю: номера сообщений с дорожками дольше хранить незачем.
 TRACK_DAYS = 7
 # Ручки: голос к биту и доля эха, дБ, — шаг и пределы.
@@ -2788,7 +2791,8 @@ def tick() -> None:
     global _RUNNING
     data = load()
     changed = _drafts(data)
-    if _RUNNING and (_RUNNING[0].poll() is not None or _age(_RUNNING[1]["started"]) > JOB_MINUTES * 60):
+    limit = LINK_JOB_MINUTES if _RUNNING and data["tracks"].get(_RUNNING[1]["track"], {}).get("links") else JOB_MINUTES
+    if _RUNNING and (_RUNNING[0].poll() is not None or _age(_RUNNING[1]["started"]) > limit * 60):
         _finish(data, *_RUNNING)
         _RUNNING, changed = None, True
     if not _RUNNING and data["jobs"]:
