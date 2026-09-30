@@ -292,9 +292,15 @@ DENSE = "acompressor=threshold=0.03:ratio=6:attack=3:release=60:knee=4"
 # ±5,4 цента), на 15 дБ тише голоса. Второго дубля у артиста нет, и дабл из той же
 # записи — старый студийный приём (ADT); без расстройки копия слилась бы
 # с голосом гребёнкой.
+# vibrato в ffmpeg (6.1–8.0) первые 5 мс читает свою линию задержки раньше, чем пишет:
+# буфер не обнулён, и на Linux там лежит чужая память — числа вроде 1e214, во float это inf.
+# Одна бесконечность в начале бэка, и фильтры мастера делают NaN из всего трека
+# (сбой 29–30.09: склейка шины мерила −70 LUFS). Поэтому задержка на 6 мс длиннее,
+# а первые 6 мс — вон: сдвиг прежний с точностью до отсчёта, мусора нет.
 DOUBLE = (
     "[0:a]highpass=f=150,pan=mono|c0=0.5*c0+0.5*c1,asplit[a][b];"
-    "[a]adelay=11,vibrato=f=0.4:d=0.5[l];[b]adelay=13,vibrato=f=0.55:d=0.36[r];"
+    "[a]adelay=17,vibrato=f=0.4:d=0.5,atrim=start=0.006,asetpts=PTS-STARTPTS[l];"
+    "[b]adelay=19,vibrato=f=0.55:d=0.36,atrim=start=0.006,asetpts=PTS-STARTPTS[r];"
     "[l][r]amerge=inputs=2[w]"
 )
 DOUBLE_SHARE = 10 ** (-15 / 20)
@@ -454,6 +460,12 @@ def loudness(path: Path, chain: str = "") -> tuple[float, float]:
     level = re.findall(r"I:\s+(-?[\d.]+) LUFS", err)
     peak = re.findall(r"Peak:\s+(-?[\d.]+|-inf) dBFS", err)
     return (float(level[-1]) if level else -70.0), (float(peak[-1]) if peak else -math.inf)
+
+
+def _broken(path: Path) -> bool:
+    """Есть ли в звуке NaN или бесконечность: громкость по EBU R128 их не всегда видит."""
+    err = _stderr("-i", path, "-af", "astats=measure_perchannel=none:measure_overall=Number_of_NaNs+Number_of_Infs")
+    return any(float(n) for n in re.findall(r"Number of (?:NaNs|Infs): (\S+)", err))
 
 
 def _channels(path: Path, chain: str = "") -> list[float]:
@@ -1177,9 +1189,14 @@ def _tape_stop(master: Path, at: float, length: float, work: Path) -> None:
 def _glue(total: Path) -> str:
     """Склейка шины (GLUE) с порогом по замеру: сжатие GLUE дБ по EBU R128."""
     level = loudness(total)[0]
+    if level <= -69:
+        # −70 — «не намерил»: сжимать нечего, а порог ниже −60 дБ acompressor не берёт.
+        print(f"  склейка шины: сумма {level:.1f} LUFS — без склейки")
+        return ""
     threshold, drop = level - 2 * GLUE, 0.0
     for _ in range(4):
-        chain = f"acompressor=threshold={10 ** (threshold / 20):.5f}:ratio=2:attack=30:release=200,"
+        # Пределы порога у acompressor — от −60 дБ до 0.
+        chain = f"acompressor=threshold={min(1.0, max(0.00098, 10 ** (threshold / 20))):.5f}:ratio=2:attack=30:release=200,"
         drop = level - loudness(total, chain)[0]
         if abs(drop - GLUE) < 0.2:
             break
@@ -1231,7 +1248,8 @@ VOICES = "voices.wav"  # голос сведения без бита, в out/wor
 
 
 def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
-        voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = (), like: Path | None = None) -> Path:
+        voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = (), like: Path | None = None,
+        lost: list[str] | None = None) -> Path:
     """Сведение в out/skleyka.wav, промежуточное — в out/work.
 
     parts — дорожки по отдельности, [(роль, файл)]: даблы, бэки и эдлибы встают вокруг
@@ -1243,7 +1261,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     и баланс, и цель райдера, иначе в местах, где бит перекрывал голос, райдер
     съел бы поправку; echo — доля отзвука, дилея и бросков к своей, дБ («эха
     больше / меньше» — по ±4); дабл не эхо, его не трогает. like — превью трека, к которому
-    подтянуть тембр, ширину и громкость («как у <артиста>», _like)."""
+    подтянуть тембр, ширину и громкость («как у <артиста>», _like). lost — сюда роли
+    частей, которые в трек не вошли: обработка их испортила."""
     look, work = STYLES[style], out / "work"
     work.mkdir(parents=True, exist_ok=True)
     project = abs(clips.probe_seconds(vocal) - clips.probe_seconds(beat)) <= SAME_PROJECT
@@ -1367,10 +1386,23 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
                     [(e, e + 3 * length) for e in ends], [(e, e + 3 * length) for e in ends])]
         wets += [(path, target) for _, path, target, _, _ in tricks if path and target is not None]
     gains = {wet: target - loudness(wet)[0] for wet, target in wets}
+    # Одна точка NaN или бесконечности — и фильтры мастера портят трек от неё до конца
+    # (так 29–30.09 vibrato испортил бэк, DOUBLE). Испорченная часть или шина в сумму
+    # не идёт, человеку об этом скажут (lost); голос и бит заменить нечем — это сбой.
+    if _broken(ridden) or _broken(bed):
+        raise clips.ClipError("в голосе или бите после обработки NaN или бесконечность")
+    spoiled = [(part, path) for path, _, part in placed if _broken(path)] + [(wet.stem, wet) for wet in gains if _broken(wet)]
+    if spoiled:
+        print("  NaN или бесконечность, в сумму не идёт: " + ", ".join(name for name, _ in spoiled))
+        bad = {path for _, path in spoiled}
+        if lost is not None:
+            lost += [part for path, _, part in placed if path in bad]
+        placed = [item for item in placed if item[0] not in bad]
+        gains = {wet: gain for wet, gain in gains.items() if wet not in bad}
     total = _sum([(ridden, 0.0), (bed, 0.0), *((path, gain) for path, gain, _ in placed), *gains.items()], work / "sum.wav")
     # Голос без бита — звук приложения «🎚 Двигать голос»: сырой голос там тонул под битом.
     # Трюки саунд-дизайна привязаны к месту голоса и к биту — при сдвиге они были бы не там.
-    _sum([(ridden, 0.0), *((path, gain) for path, gain, _ in placed), *((wet, gains[wet]) for wet, _ in wets[:own])],
+    _sum([(ridden, 0.0), *((path, gain) for path, gain, _ in placed), *((wet, gains[wet]) for wet, _ in wets[:own] if wet in gains)],
          work / VOICES)
     if tricks:
         print("  слышно: " + _audible(bed, [(name, path, gains.get(path, 0.0), spans, ref)
@@ -2543,6 +2575,7 @@ TALK_QUEUED = "✏️ Принял — разберу: пересоберу ил
 TALKED = "Поговорили про этот трек достаточно — дальше кнопками выше."
 LIKE_MISSING = "«{name}» в магазинах не нашёл — звук ни к чему не подтягивал."
 LIKE_LOST = "Отрывок «{name}» не скачался — звук к нему не подтягивал.\n"
+LOST = "В трек не вошло: {parts} — на обработке сломался звук, свёл без этого. Разберусь, если напишешь /vopros.\n"
 TALK_KNOBS = ("style", "design", "voice", "echo", "at")
 TALK_ASK = ("✏️ Что поменять — напиши словами, как другу: «слов не слышно», «голос входит на дропе», "
             "«голос на долю позже», «эха меньше», «погрязнее», «как у Travis Scott».")
@@ -3152,8 +3185,12 @@ def run_job(spec_path: Path) -> int:
                 if not extra["like"]:
                     note += LIKE_LOST.format(name=html.escape(like["title"]))
                     spec["knobs"] = dict(knobs, like=None)
+            lost = []
             master = mix(_bus(lead, True, work / "lead.wav"), beat, work / "out", knobs["style"], knobs["design"],
-                         parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead], **extra)
+                         parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead],
+                         lost=lost, **extra)
+            if lost:
+                note += LOST.format(parts=", ".join(lost))
             clip = None
             if config.SKLEYKA_APP_URL and spec["left"] != 0:
                 # Голос для приложения — каким встал в трек, но без сдвига at: страница сдвигает его сама.
@@ -4149,6 +4186,12 @@ def _selftest() -> None:
         _ffmpeg("-f", "lavfi", "-i", f"aevalsrc='{pattern}':d=20", stems_sum)
         _ffmpeg("-i", stems_sum, "-af", "adelay=2000:all=1", project)
         assert abs(offset(project, stems_sum) - 2.0) <= 0.05 and offset(stems_sum, stems_sum) == 0.0
+        # Бесконечность в дорожке видна до суммы, а сумма, которую не намерить, идёт без склейки,
+        # а не роняет мастер порогом ниже −60 дБ (сбой бэков 29–30.09).
+        spoiled, silent = tmp / "inf.wav", tmp / "silent.wav"
+        _ffmpeg("-f", "lavfi", "-i", "aevalsrc='if(eq(n,100),1/0,0.1*sin(2*PI*440*t))':d=1", *reels.VOICE_CODEC, spoiled)
+        _ffmpeg("-f", "lavfi", "-i", "anullsrc=d=3", *reels.VOICE_CODEC, silent)
+        assert _broken(spoiled) and not _broken(stems_sum) and _glue(silent) == ""
     finally:
         (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
          itunes.find_song, telegram._call) = real
