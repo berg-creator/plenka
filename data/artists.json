@@ -331,26 +331,6 @@
       "tier": "scene"
     },
     {
-      "deezer_id": 4919855,
-      "itunes_id": 560628163,
-      "name": "Yung Simmie",
-      "tags": [
-        "raider-klan",
-        "memphis"
-      ],
-      "tier": "scene"
-    },
-    {
-      "deezer_id": 9225830,
-      "itunes_id": 726661363,
-      "name": "Amber London",
-      "tags": [
-        "raider-klan",
-        "memphis"
-      ],
-      "tier": "scene"
-    },
-    {
       "deezer_id": 7150049,
       "itunes_id": 945826126,
       "name": "Ghostemane",
@@ -364,15 +344,6 @@
       "deezer_id": 10541089,
       "itunes_id": 1123771392,
       "name": "Scarlxrd",
-      "tags": [
-        "trap-metal"
-      ],
-      "tier": "scene"
-    },
-    {
-      "deezer_id": 14386891,
-      "itunes_id": 1361386830,
-      "name": "City Morgue",
       "tags": [
         "trap-metal"
       ],
@@ -416,40 +387,11 @@
       "tier": "scene"
     },
     {
-      "deezer_id": 10138676,
-      "itunes_id": 1099433152,
-      "name": "nothing,nowhere.",
-      "tags": [
-        "emo-rap"
-      ],
-      "tier": "scene"
-    },
-    {
       "deezer_id": 15339709,
       "itunes_id": 1411605197,
       "name": "Lil Darkie",
       "tags": [
         "underground-rap"
-      ],
-      "tier": "scene"
-    },
-    {
-      "deezer_id": 10159992,
-      "itunes_id": 1101525244,
-      "name": "Freddie Dredd",
-      "tags": [
-        "phonk",
-        "memphis"
-      ],
-      "tier": "scene"
-    },
-    {
-      "deezer_id": 125722472,
-      "itunes_id": 1557035452,
-      "name": "Kordhell",
-      "tags": [
-        "phonk",
-        "drift-phonk"
       ],
       "tier": "scene"
     },
@@ -460,42 +402,6 @@
       "tags": [
         "phonk",
         "drift-phonk"
-      ],
-      "tier": "scene"
-    },
-    {
-      "deezer_id": 100588482,
-      "itunes_id": 1473236877,
-      "name": "Sxmpra",
-      "tags": [
-        "phonk"
-      ],
-      "tier": "scene"
-    },
-    {
-      "deezer_id": 150272142,
-      "itunes_id": 1593188093,
-      "name": "MoonDeity",
-      "tags": [
-        "phonk"
-      ],
-      "tier": "scene"
-    },
-    {
-      "deezer_id": 59471332,
-      "itunes_id": 1467274153,
-      "name": "Kaito Shoma",
-      "tags": [
-        "phonk"
-      ],
-      "tier": "scene"
-    },
-    {
-      "deezer_id": 287530971,
-      "itunes_id": 1489874860,
-      "name": "Ghostface Playa",
-      "tags": [
-        "phonk"
       ],
       "tier": "scene"
     },
