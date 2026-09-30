@@ -983,6 +983,12 @@
       "file": "20260930-0902-otbor-a21fa23a48a60a24.json",
       "published_at": "2026-09-30T09:02:44+00:00",
       "rubric": "otbor"
+    },
+    {
+      "chat": "channel",
+      "file": "20260930-111607-7377-news.json",
+      "published_at": "2026-09-30T11:16:13+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1119,6 +1125,7 @@
     "3c941b799ce49ce49cf49cf48cd61ce60ce29cf698eae8e0d4ea54ca2cc99c03",
     "4e1a1e5a9e59bedbe45bd840c4e0c4c9c958c99ce3dc72e4336860604362c061",
     "20048c01215c728d46a15b05571547154b054b254b2541450001490d80000021",
-    "11306f0850f45b384c8d98e69236b452331794669ce6cc9c431d20fa18e40718"
+    "11306f0850f45b384c8d98e69236b452331794669ce6cc9c431d20fa18e40718",
+    "ad11ad11ac002888a261a203a24dc225c193d0d3d2d3d253d05344439cc451ca"
   ]
 }
