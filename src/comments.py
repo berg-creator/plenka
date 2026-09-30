@@ -245,7 +245,9 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
     with tempfile.TemporaryDirectory() as folder:
         snippet = ((telegram_web.preview_video(source, Path(folder))
                     or telegram_web.account_video(source, Path(folder)))
-                   if post.get("snippet") and not track else {})
+                   if (post.get("snippet") or post.get("video")) and not track else {})
+        # Под тизером спрашиваем о новости, а не «как вам сниппет».
+        about = ("snippet", "сниппет") if post.get("snippet") else (rubric, "ролик")
         try:
             if track:
                 telegram.send_audio(chat_id, track, ask(post, rubric, "трек"), reply_to=message_id)
@@ -256,9 +258,9 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                         # Трек уже в ветке — без опроса она всё равно живая.
                         log.warning("Опрос под отбором не ушёл: %s", exc)
             elif snippet and into_post(post, snippet, message):
-                telegram.send_message(chat_id, ask(post, "snippet", "сниппет"), reply_to=message_id)
+                telegram.send_message(chat_id, ask(post, *about), reply_to=message_id)
             elif snippet:
-                telegram.send_video_file(chat_id, snippet["path"], ask(post, "snippet", "сниппет"),
+                telegram.send_video_file(chat_id, snippet["path"], ask(post, *about),
                                          seconds=snippet["seconds"], width=snippet["width"],
                                          height=snippet["height"], reply_to=message_id)
             elif rubric in config.RELEASE_RUBRICS and post.get("file"):
@@ -346,6 +348,13 @@ def _selftest() -> None:
         # Пост с фото: ролик встаёт вместо фото, подпись та же, в комментарии — вопрос.
         assert seed({**forwarded, "photo": [{}], "caption": "Подпись"})
         assert sent[0] == ("в пост", "preview.mp4", "Подпись") and sent[1][0] == "вопрос", sent
+        # Тизер из поста издания встаёт так же, хоть он и не сниппет.
+        sent.clear()
+        snippet.pop("snippet")
+        snippet["video"] = True
+        assert seed({**forwarded, "photo": [{}], "caption": "Подпись"}) and sent[0][0] == "в пост", sent
+        snippet.pop("video")
+        snippet["snippet"] = True
         # Текстовый пост медиа не примет — ролик уходит комментарием.
         sent.clear()
         assert seed(forwarded)
