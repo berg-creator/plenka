@@ -2776,18 +2776,19 @@ def run_job(spec_path: Path) -> int:
 # начинался с ДО: 3,6 с чёрного экрана с «Как записал», серой волной и сырым голосом — и в Shorts
 # его досмотрели 22 % против 51–69 % у новостей (prompts/reels.md, «Удержание»). Поэтому с первого
 # кадра — ПОСЛЕ: самое громкое место трека, крупная надпись и спектр в янтаре; потом ДО не дольше
-# 2,5 с — голос как записан, под ним светлая волна; потом снова ПОСЛЕ и концовка: колесо канала,
+# 3,5 с — голос как записан, под ним светлая волна; потом снова ПОСЛЕ и концовка: колесо канала,
 # адрес бота и команда, а последние полсекунды перетекают в первый кадр — Shorts крутят по кругу.
 # Трек идёт подряд, меняется только обработка, стыки — на долях сетки бита. Громкость одна,
 # посчитанная на отрезке ДО (как в compare): слышно, что сделало сведение, а не насколько громче.
 # Адрес бота — мелко сверху весь ролик: в Shorts и сторис ссылка не нажимается, а из YouTube
 # за месяц в бота пришёл один человек.
 # «Записал на телефон», как в ролике канала, бот не пишет: где записан чужой трек, он не знает.
-STORY_HOOK, STORY_DO, STORY_TOTAL = 3.0, 2.5, 13.5  # ПОСЛЕ до ДО, ДО (не дольше) и весь ролик, с — по долям
+STORY_HOOK, STORY_DO, STORY_TOTAL = 3.0, 3.5, 13.5  # ПОСЛЕ до ДО, ДО (не дольше) и весь ролик, с — по долям
 STORY_OUTRO, STORY_LOOP = 2.0, 0.5  # затухание с концовкой; из него полсекунды — переход в первый кадр
 STORY_CAPTION = "Для сторис и Shorts: ДО и ПОСЛЕ одной громкости."
 STORY_ACCENT, STORY_GREY = (255, 181, 71), (220, 220, 220)
 STORY_VIZ_Y, STORY_VIZ_HALF, STORY_WAVE = 1100, 330, 260  # центр графики, полвысоты спектра, высота волны ДО
+STORY_BLEND = 0.3  # цветной спектр растворяется в серую волну и обратно, с — поровну по обе стороны стыка
 
 
 def _frame(items: list, ground: tuple = (0, 0, 0, 0)):
@@ -2881,7 +2882,11 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     width, fps, side, top = clips.WIDTH, 30, 460, 360  # колесо: по центру, над адресом
     hexed = "0x{:02x}{:02x}{:02x}".format
     viz, bg, grey = STORY_VIZ_Y - STORY_VIZ_HALF, hexed(*reels.PLATE_BG), hexed(*STORY_GREY)
-    raw_on, shown = f"gte(t,{do0:.3f})*lt(t,{do1:.3f})", f"lt(t,{do0:.3f})+gte(t,{do1:.3f})"
+    raw_on = f"gte(t,{do0:.3f})*lt(t,{do1:.3f})"
+    # Цвет в серое и обратно — растворением, а не щелчком: плашка цвета фона гасит спектр, волна ДО
+    # проявляется поверх. Звук и надписи меняются на доле, графика перетекает вокруг неё.
+    blend = (f"fade=t=in:st={do0 - STORY_BLEND / 2:.3f}:d={STORY_BLEND}:alpha=1,"
+             f"fade=t=out:st={do1 - STORY_BLEND / 2:.3f}:d={STORY_BLEND}:alpha=1")
     fade = f"fade=t=in:st={end0:.3f}:d=0.25:alpha=1,fade=t=out:st={loop0:.3f}:d={STORY_LOOP}:alpha=1"
     _ffmpeg("-i", sound, *(arg for image in (posle, first, ending, gradient)
                            for arg in ("-loop", "1", "-framerate", fps, "-t", f"{total:.3f}", "-i", image)),
@@ -2898,12 +2903,13 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
             # ДО: светлая волна без цвета — видно, что звук есть, но он сырой. draw=full — иначе
             # showwaves приглушает цвет, и светлая волна на чёрном выходит тёмно-серой.
             f"[s2]showwaves=s={width}x{STORY_WAVE}:mode=cline:draw=full:rate={fps}:colors={grey}:scale=sqrt,"
-            "format=rgba[wave];"
+            f"format=rgba,{blend}[wave];"
+            f"color=c={bg}:s={width}x{2 * STORY_VIZ_HALF}:r={fps}:d={total:.3f},format=rgba,{blend}[hide];"
             f"color=c={bg}:s={width}x{clips.HEIGHT}:r={fps}:d={total:.3f},format=rgba[bg];"
             "[1:v]split[f1][f2];"
             # Спектр под концовкой тоже идёт: в последние полсекунды она тает, и конец перетекает в начало.
-            f"[bg][glow]overlay=0:{viz}:enable='{shown}'[v0];[v0][bars]overlay=0:{viz}:enable='{shown}'[v1];"
-            f"[v1][wave]overlay=0:{STORY_VIZ_Y - STORY_WAVE // 2}:enable='{raw_on}'[v2];"
+            f"[bg][glow]overlay=0:{viz}[v0];[v0][bars]overlay=0:{viz}[hb];[hb][hide]overlay=0:{viz}[v1];"
+            f"[v1][wave]overlay=0:{STORY_VIZ_Y - STORY_WAVE // 2}[v2];"
             f"[v2][f1]overlay=0:0:enable='lt(t,{do0:.3f})+gte(t,{do1:.3f})*lt(t,{end0:.3f})'[v3];"
             f"[v3][2:v]overlay=0:0:enable='{raw_on}'[v4];"
             f"[3:v]format=rgba,{fade}[e];[v4][e]overlay=0:0:enable='gte(t,{end0:.3f})'[v5];"
@@ -3305,7 +3311,7 @@ def _selftest() -> None:
         _finish(data, done, {"id": "jk", "track": "t1", "tweak": True}, tmp / "keyed")
         save(data)
 
-        # Ролик ДО/ПОСЛЕ: при любом темпе сетки первым идёт ПОСЛЕ, ДО — не дольше 2,5 с, весь ролик 12–15 с.
+        # Ролик ДО/ПОСЛЕ: при любом темпе сетки первым идёт ПОСЛЕ, ДО — не дольше 3,5 с, весь ролик 12–15 с.
         for beat_length in (0.5, 0.6, 0.75, 0.857, 1.0):
             do0, do1, total = story_cuts(beat_length)
             assert 2.5 <= do0 < do1 <= do0 + STORY_DO and 12 <= total <= 15, (beat_length, do0, do1, total)
