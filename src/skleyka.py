@@ -1226,6 +1226,9 @@ def _shape(total: Path, gains: dict[int, float], wide: float, work: Path) -> Pat
     return matched
 
 
+VOICES = "voices.wav"  # голос сведения без бита, в out/work
+
+
 def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
         voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = (), like: Path | None = None) -> Path:
     """Сведение в out/skleyka.wav, промежуточное — в out/work.
@@ -1311,6 +1314,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
         _ffmpeg("-i", path, "-i", ridden, "-filter_complex", _tempo_delay(rhythm[0], level, "[1:a]"),
                 "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
         wets.append((wet, loudness(path)[0] + gain + ADLIB_ECHO + echo))
+    own = len(wets)  # шины самого голоса; дальше — трюки саунд-дизайна
     bed, tricks = ducked, []
     if design and lines:
         length, first = rhythm[0], lines[0][0]
@@ -1363,6 +1367,10 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
         wets += [(path, target) for _, path, target, _, _ in tricks if path and target is not None]
     gains = {wet: target - loudness(wet)[0] for wet, target in wets}
     total = _sum([(ridden, 0.0), (bed, 0.0), *((path, gain) for path, gain, _ in placed), *gains.items()], work / "sum.wav")
+    # Голос без бита — звук приложения «🎚 Двигать голос»: сырой голос там тонул под битом.
+    # Трюки саунд-дизайна привязаны к месту голоса и к биту — при сдвиге они были бы не там.
+    _sum([(ridden, 0.0), *((path, gain) for path, gain, _ in placed), *((wet, gains[wet]) for wet, _ in wets[:own])],
+         work / VOICES)
     if tricks:
         print("  слышно: " + _audible(bed, [(name, path, gains.get(path, 0.0), spans, ref)
                                             for name, path, _, spans, ref in tricks if path and spans]))
@@ -2702,13 +2710,6 @@ def run_job(spec_path: Path) -> int:
             timing = {"sent": first_word(vocal), "drops": drops(beat, rhythm), "beat": round(rhythm[0], 3),
                       "length": round(clips.probe_seconds(beat), 1)}
             result["timing"] = timing
-            clip = None
-            if config.SKLEYKA_APP_URL and spec["left"] != 0:
-                # Голос для приложения — без сдвига at: страница сдвигает его сама.
-                try:
-                    clip = preview(vocal, beat, work / "preview.mp3")
-                except Exception as exc:  # noqa: BLE001 — без приложения трек всё равно уходит
-                    print(f"  сведение {spec['job']}: превью не собралось: {type(exc).__name__}")
             if spec.get("wish"):
                 knobs, told, refusal = heed(knobs, spec["wish"], timing, spec.get("talk", False))
                 if refusal:
@@ -2740,6 +2741,16 @@ def run_job(spec_path: Path) -> int:
                     spec["knobs"] = dict(knobs, like=None)
             master = mix(_bus(lead, True, work / "lead.wav"), beat, work / "out", knobs["style"], knobs["design"],
                          parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead], **extra)
+            clip = None
+            if config.SKLEYKA_APP_URL and spec["left"] != 0:
+                # Голос для приложения — каким встал в трек, но без сдвига at: страница сдвигает его сама.
+                try:
+                    voiced = work / "out" / "work" / VOICES
+                    if abs(back := timing["sent"] - voice) >= 0.01:
+                        voiced = _moved(voiced, back, work / "voices-back.wav")
+                    clip = preview(voiced, beat, work / "preview.mp3")
+                except Exception as exc:  # noqa: BLE001 — без приложения трек всё равно уходит
+                    print(f"  сведение {spec['job']}: превью не собралось: {type(exc).__name__}")
             try:
                 movie = story(vocal, beat, master, work, rhythm)
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
