@@ -100,7 +100,7 @@ from datetime import timedelta
 from pathlib import Path, PurePosixPath
 
 from . import clips, config, llm, oblako, reels, state, telegram
-from .sources import itunes
+from .sources import itunes, youtube_comments
 
 RATE = 44100
 # Любой формат на входе: моно становится стерео, частота — 44,1 кГц. Неслышимое
@@ -1728,6 +1728,8 @@ HELP = ("❓ <b>Как это работает</b>\n\n"
         "• Дорожки на облаке — «🔗 Ссылкой на облако»: Яндекс Диск, Dropbox или файл Google Диска, "
         f"папкой или архивом (zip, 7z), всего до {config.SKLEYKA_LINK_MB // 1024} ГБ и {config.SKLEYKA_LINK_FILES} файлов. "
         "Делить на дорожки не надо — разложу по именам файлов: vocal, beat, adlib, bass, kick… или по-русски.\n"
+        "• Нет бита — «🔎 Нет бита — найти бесплатный» на шаге бита: найду на YouTube биты как у нужного артиста, "
+        "которые продюсеры отдают бесплатно и для релиза, — дам ссылки.\n"
         "• Упрёшься в лимит — докупи треки за звёзды или позови артиста: за его первый трек — ещё один тебе.\n"
         "• Спроси словами, почему трек звучит так, — объясню.\n"
         f"• Нужен живой звукорежиссёр — «🎧 Свести руками» под готовым треком: от {config.SKLEYKA_HAND_RUB[0]} ₽, "
@@ -2052,7 +2054,7 @@ def _ask(chat_id: str, draft: dict) -> None:
                           + ("; можно несколькими файлами" if part in MULTI else "") + "."
                           + (FROM_START + WAIT + BY_LINK if step == 0 else ""),
                           buttons=[*([[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]]
-                                     if part in MULTI else []), [BACK]])
+                                     if part in MULTI else []), *([[BEAT_BUTTON]] if part == "бит" else []), [BACK]])
     draft["asked"], draft["acked"] = step, len(draft["files"])
 
 
@@ -2281,7 +2283,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     """Кнопки сведения. Под готовым треком — пересборка с новыми ручками новой заявкой,
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y), саунд-дизайн (e),
-    справка (h) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
+    справка (h), «нет бита» (g) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
     «🎧 Свести руками» (u) — под треком и под лимитом —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
     keyboard — кнопки того сообщения."""
@@ -2326,6 +2328,8 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         return
     if head == "h":
         telegram.send_message(chat_id, HELP, buttons=MODES)
+    elif head == "g":
+        telegram.send_message(chat_id, BEATS_ASK, ask="Toxi$")
     elif head == "m" and draft["plan"] is None:
         if code == "1":
             draft.update(plan=["вокал", "бит"], step=0)
@@ -2824,6 +2828,99 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
     telegram.send_message(chat_id, TALK_QUEUED.format(minutes=minutes), markup=REMOVE)
 
 
+# Бесплатный бит (владелец 01.10.2026): у многих артистов нет денег на бит, а без бита сводить
+# нечего. Продюсеры сами выкладывают на YouTube type beat'ы «free for profit» — бесплатно
+# и для релиза, обычно за «prod. by» в названии трека. Бот их находит и даёт только ссылки:
+# звук с ролика он не качает и бит из него не вырезает — это увод бита у продюсера. Качает
+# человек сам, по ссылке автора, рядом с условиями.
+# Отбор строгий: одно «[FREE]» обычно значит «бесплатно для некоммерческого», поэтому нужно
+# явное «free for profit» в названии, а любое «non profit» или «некоммерческ» в названии или
+# описании — отказ. Описание в выдаче — кусок вокруг слов запроса, у многих это SEO-теги
+# («kizaru type beat free for profit, …»), а не условия автора: 01.10.2026 по ним прошли
+# биты, в названии которых free for profit нет. Лишний отказ дешевле трека, снятого
+# с площадок по жалобе продюсера.
+FREE_FOR_PROFIT = re.compile(r"free\W{0,3}(?:for|4)\W{0,3}profit", re.IGNORECASE)
+NOT_FOR_PROFIT = re.compile(r"\bnon\W?profit|\bnot\W{0,3}for\W{0,3}profit|\bno\W{0,3}profit|некоммерч", re.IGNORECASE)
+# Бит короче полутора минут — луп на пробу, длиннее шести — сборник или стрим.
+BEAT_SECONDS = (90, 360)
+BEATS_MAX = 5
+# Выдачу берём шире: у Кизару 01.10.2026 строгий отбор оставил из двадцати три, из сорока — пять,
+# а вторая страница выдачи стоит полсекунды.
+BEATS_SEARCH = 40
+BEAT_BUTTON = {"text": "🔎 Нет бита — найти бесплатный", "callback_data": f"{PREFIX}g"}
+# Метка ответа: без неё имя артиста ушло бы в ПРОЯВКУ (src/service.py). Стоит и в вопросе,
+# и в отказе «не нашёл» — другого артиста пишут ответом на него же.
+BEATS_MARK = "Как у кого бит"
+BEATS_ASK = (f"🔎 {BEATS_MARK}? Напиши артиста ответом на это сообщение — найду на YouTube биты, "
+             "которые продюсеры отдают бесплатно и для релиза («free for profit»).")
+# «· пришли» (ASK_MARK) — файл ответом на этот список тоже дорожка сведения (wants).
+BEATS_FOUND = ("🔎 Биты как у {artist}, бесплатные и для релиза — «free for profit»:\n\n{rows}\n\n"
+               "Условия — в описании у автора, чаще всего просят подписать «prod. by». Прочитай перед релизом.\n"
+               f"Скачай бит по ссылке автора {ASK_MARK} сюда файлом или ссылкой на облако — сведу.")
+BEATS_NONE = ("🔎 Бесплатных для релиза битов как у {artist} не нашёл — беру только с явным «free for profit».\n"
+              f"{BEATS_MARK} ещё? Напиши другого артиста ответом на это сообщение.")
+# Пустая выдача — не «нет битов», а YouTube не ответил: на «type beat free for profit» выдача есть всегда.
+BEATS_DOWN = f"🔎 YouTube сейчас не отвечает. {BEATS_MARK}? Напиши артиста ответом на это сообщение ещё раз через пару минут."
+# Поиск, что идёт сейчас, по чатам: второй от того же человека разом не нужен.
+_BEATS: dict[str, subprocess.Popen] = {}
+
+
+def pick_beats(videos: list[dict], names: list[str]) -> list[dict]:
+    """Годные биты выдачи: «free for profit» в названии без «non profit» рядом, длина бита,
+    артист в названии, один бит на канал продюсера, не больше BEATS_MAX."""
+    picked, channels = [], set()
+    for video in videos:
+        if (FREE_FOR_PROFIT.search(video["title"])
+                and not NOT_FOR_PROFIT.search(f"{video['title']} {video.get('description', '')}")
+                and BEAT_SECONDS[0] <= (video.get("duration") or 0) <= BEAT_SECONDS[1]
+                and any(youtube_comments.word(name).search(video["title"]) for name in names)
+                and video["channel"] not in channels):
+            picked.append(video)
+            channels.add(video["channel"])
+    return picked[:BEATS_MAX]
+
+
+def find_beats(artist: str) -> list[dict] | None:
+    """Биты как у артиста; None — YouTube не ответил. Продюсеры пишут имена латиницей —
+    «Kizaru», а не «Кизару», поэтому кириллицу сперва переводит iTunes (resolve_name). Его поиск нечёткий
+    и на «Мейби Бейби» отдаёт «мс парень мейби бейби»: ответ кириллицей не берём,
+    а в названии бита годится любое из двух написаний."""
+    names = [" ".join(artist.split())[:60]]
+    if youtube_comments.CYRILLIC.search(names[0]):
+        latin = itunes.resolve_name(names[0])
+        if latin and not youtube_comments.CYRILLIC.search(latin):
+            names.insert(0, latin)
+    videos = youtube_comments.search(f"{names[0]} type beat free for profit", BEATS_SEARCH)
+    return pick_beats(videos, names) if videos else None
+
+
+def beats_text(artist: str, found: list[dict] | None) -> str:
+    if found is None:
+        return BEATS_DOWN
+    if not found:
+        return BEATS_NONE.format(artist=html.escape(artist))
+    rows = [f'{n}. <a href="{youtube_comments.WATCH}{video["id"]}">{html.escape(video["title"])}</a>'
+            f" — {html.escape(video['channel'])}" for n, video in enumerate(found, 1)]
+    return BEATS_FOUND.format(artist=html.escape(artist), rows="\n".join(rows))
+
+
+def beats(chat_id: str | int, text: str) -> None:
+    """Ответ «как у кого бит»: iTunes и выдача YouTube — 3–6 секунд (замер 01.10.2026), а дежурство — единственный
+    поллер, и столько ждать ответа в цикле опроса значит держать кнопки всех. Поэтому поиск —
+    отдельным процессом (--beats … --chat), как сведение (--job): он сам шлёт ответ, дежурство
+    его не ждёт, а tick только прибирает кончившиеся. Заявка на это время не закрывается."""
+    chat_id = str(chat_id)
+    if chat_id in _BEATS and _BEATS[chat_id].poll() is None:
+        return
+    data = load()
+    if draft := _draft(data, chat_id):
+        draft["at"] = state.iso()
+        save(data)
+    # «--beats=…» одним словом: имя с дефиса в начале argparse иначе принял бы за флаг.
+    _BEATS[chat_id] = subprocess.Popen([sys.executable, "-m", "src.skleyka", f"--beats={text[:100]}", "--chat", chat_id],
+                                       cwd=config.ROOT)
+
+
 # Сведение, что идёт сейчас: (процесс, заявка, папка). Одно на дежурство.
 _RUNNING: tuple[subprocess.Popen, dict, Path] | None = None
 
@@ -2847,6 +2944,8 @@ def tick() -> None:
     if not _RUNNING and data["jobs"]:
         _RUNNING, changed = _spawn(data, data["jobs"][0]), True
     changed = _sweep(data) or changed
+    for chat_id in [chat_id for chat_id, search in _BEATS.items() if search.poll() is not None]:
+        del _BEATS[chat_id]  # poll уже собрал кончившийся процесс, иначе копились бы зомби
     for track_id, track in list(data["tracks"].items()):
         if _age(track["at"]) > TRACK_DAYS * 86400:
             del data["tracks"][track_id]
@@ -3656,6 +3755,37 @@ def _selftest() -> None:
             _drafts(data)
             save(data)
 
+        # Бесплатный бит: только явное «free for profit» без «non profit», длина бита, артист
+        # в названии, один бит на канал; кириллицу переводит iTunes, его ответ кириллицей не берётся.
+        def video(title: str, channel: str = "a", seconds: int = 150, about: str = "") -> dict:
+            return {"id": channel, "title": title, "channel": channel, "duration": seconds, "description": about}
+
+        videos = [video("[FREE FOR PROFIT] Toxi$ Type Beat"), video("[FREE] Toxi$ Type Beat", "b"),
+                  video("FREE FOR NON-PROFIT Toxi$ Type Beat", "c"), video("[FREE FOR PROFIT] Toxi$ Type Beat 2"),
+                  video("free4profit toxi$ type beat", "d", 60), video("(FREE 4 PROFIT) Toxi$ type beat", "e"),
+                  video("[FREE] Toxi$ type beat", "i", about="... toxi$ type beat free for profit, ..."),  # SEO-теги
+                  video("[FREE FOR PROFIT] Toxi$ type beat", "f", about="Бесплатный только для некоммерческого"),
+                  video("[FREE FOR PROFIT] Kizaru type beat", "g"), video("free for profit toxi$ type beat", "h", 400)]
+        assert [v["channel"] for v in pick_beats(videos, ["Toxi$"])] == ["a", "e"]
+        assert len(pick_beats([video(f"free for profit Toxi$ {n}", str(n)) for n in range(9)], ["Toxi$"])) == BEATS_MAX
+        queries, real_find = [], (youtube_comments.search, itunes.resolve_name)
+        youtube_comments.search = lambda query, count: queries.append(query) or videos
+        itunes.resolve_name = lambda name: {"Кизару": "kizaru", "Мейби Бейби": "мс парень мейби бейби"}.get(name, "")
+        try:
+            assert [v["channel"] for v in find_beats("Кизару")] == ["g"]
+            find_beats("Мейби Бейби")
+        finally:
+            youtube_comments.search, itunes.resolve_name = real_find
+        assert queries == ["kizaru type beat free for profit", "Мейби Бейби type beat free for profit"], queries
+        found = beats_text("Toxi$", [video("[FREE FOR PROFIT] Toxi$ R&B Type Beat")])
+        assert "R&amp;B" in found and f"{youtube_comments.WATCH}a" in found and ASK_MARK in found
+        assert BEATS_MARK in beats_text("Toxi$", []) and BEATS_MARK in BEATS_ASK and beats_text("Toxi$", None) == BEATS_DOWN
+        youtube_comments.search = lambda query, count: []
+        try:
+            assert find_beats("Toxi$") is None, "пустая выдача — YouTube молчит, а не битов нет"
+        finally:
+            youtube_comments.search = real_find[0]
+
         assert not wants(file(2, "vocal.wav"))
         start(7, 7)
         assert sent[-1] == INTRO and wants(file(3, "a.wav")) and not wants(file(3, "a.wav", reply="Пришли трек"))
@@ -3678,11 +3808,38 @@ def _selftest() -> None:
         # «Вокал + бит»: вопрос за вопросом, роль — шаг, имена файлов не нужны; потом — звук.
         callback(7, 7, "m:1")
         assert sent[-1].startswith("<b>Шаг 1 из 2</b> · пришли вокал") and wants(file(3, "a.wav", reply=sent[-1]))
+        assert [BEAT_BUTTON] not in keys[-1], "поиск бита — на шаге бита, не вокала"
         assert sent[-1].endswith(WAIT + BY_LINK), "срок заявки и ссылка — в первом вопросе о дорожке"
         take(file(3, "take 1.wav"))
         take(file(3, "take 1.wav"))  # повтор того же сообщения — дорожка одна
         later("7")
         assert sent[-1].startswith("<b>Шаг 2 из 2</b> · пришли бит"), sent[-1]
+        # Нет бита: кнопка на шаге бита — вопрос с меткой; ответ на неё — в поиск, а не в ПРОЯВКУ;
+        # поиск — отдельным процессом, второй разом не идёт, заявка продлевается.
+        assert [BEAT_BUTTON] in keys[-1]
+        callback(7, 7, "g")
+        assert sent[-1] == BEATS_ASK
+        from . import service
+        searched = []
+        real_beats = service.skleyka.beats
+        service.skleyka.beats = lambda chat, text: searched.append((str(chat), text))
+        try:
+            assert not service.handle_message({"chat": {"id": 7, "type": "private"}, "from": {"id": 7}, "message_id": 9,
+                                               "date": 9, "text": "Кизару", "reply_to_message": {"text": sent[-1]}}, {})
+        finally:
+            service.skleyka.beats = real_beats
+        assert searched == [("7", "Кизару")], searched
+        spawned, real_popen = [], subprocess.Popen
+        subprocess.Popen = lambda args, **_: spawned.append(args) or real_popen(["sleep", "5"])
+        later("7", 600)
+        try:
+            beats(7, "Кизару")
+            beats(7, "Кизару")
+        finally:
+            subprocess.Popen = real_popen
+            _BEATS.pop("7").kill()
+        assert spawned == [[sys.executable, "-m", "src.skleyka", "--beats=Кизару", "--chat", "7"]], spawned
+        assert _age(load()["drafts"]["7"]["at"]) < 60
         take(file(5, "take 2.wav"))
         later("7")
         assert sent[-1].startswith("Дорожки есть: вокал «") and load()["drafts"]["7"]["asked"] == "style"
@@ -4216,7 +4373,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
-          "реферал за трек и звёзды, «свести руками» один раз, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик — ок")
+          "реферал за трек и звёзды, «свести руками» один раз, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск — ок")
 
 
 def talk_check() -> list[str]:
@@ -4256,6 +4413,10 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="заявки и очередь сведения, ничего не делая")
     parser.add_argument("--link-check", metavar="ССЫЛКА",
                         help="что бот возьмёт по ссылке на облако: файлы и роли, без скачивания звука")
+    parser.add_argument("--beats", metavar="АРТИСТ",
+                        help="бесплатные биты как у артиста: что нашлось бы на YouTube, без Telegram")
+    # Чат для ответа: так --beats запускает дежурство (beats), руками — не нужен.
+    parser.add_argument("--chat", help=argparse.SUPPRESS)
     parser.add_argument("--talk-check", action="store_true",
                         help="просьбы о месте голоса — живому генератору: куда он ставит голос (только из Actions)")
     args = parser.parse_args()
@@ -4267,6 +4428,17 @@ def main() -> int:
         return 1 if talk_check() else 0
     if args.link_check:
         return link_check(args.link_check)
+    if args.beats:
+        found = find_beats(args.beats)
+        if args.chat:
+            # Не нашёл — вопрос с ответом: другого артиста пишут прямо в поле ввода.
+            telegram.send_message(args.chat, beats_text(args.beats, found), ask="" if found else "Toxi$")
+            return 0
+        for video in found or []:
+            print(f"  {video['duration'] // 60}:{video['duration'] % 60:02d}  {video['channel']} — {video['title']}"
+                  f"\n        {youtube_comments.WATCH}{video['id']}")
+        print("YouTube не ответил" if found is None else f"Нашлось: {len(found)}")
+        return 0
     if args.job:
         return run_job(args.job)
     if args.dry_run:

@@ -1331,6 +1331,10 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         # Ответ словами на ручки готового трека СВЕДЕНИЯ (src/skleyka.py): пересборка, а не разбор.
         skleyka.talk(chat_id, text, message["reply_to_message"], admin=admin)
         return False
+    if not text.startswith("/") and skleyka.BEATS_MARK in asked:
+        # «Как у кого бит» (src/skleyka.py): имя артиста — в поиск бесплатного бита, а не в разбор.
+        skleyka.beats(chat_id, text)
+        return False
     if not text.startswith("/") and (svedenie.INTRO_MARK in asked or svedenie.NAMES_MARK in asked):
         # Ответ на INTRO ДВОЙНИКА или на вопрос об артистах: ссылка — в разбор лайков,
         # остальное — список артистов. Без ответа тот же список ушёл бы в ПРОЯВКУ.

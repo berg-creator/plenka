@@ -140,17 +140,20 @@ def _call(method: str, **params: str) -> dict | None:
     return data
 
 
-def search(query: str) -> list[dict]:
-    """Ролики выдачи: [{id, title, channel}]. Через yt-dlp — бесплатно по квоте."""
+def search(query: str, count: int = SEARCH_RESULTS) -> list[dict]:
+    """Ролики выдачи: [{id, title, channel, duration, description}]. Через yt-dlp — бесплатно
+    по квоте. Описание — только начало, знаков двести: его отдаёт сама выдача, без захода
+    на страницу ролика (им пользуется поиск бесплатных битов, src/skleyka.py)."""
     from yt_dlp import YoutubeDL
 
     try:
         with YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
-            found = ydl.extract_info(f"ytsearch{SEARCH_RESULTS}:{query}", download=False)
+            found = ydl.extract_info(f"ytsearch{count}:{query}", download=False)
     except Exception as exc:  # noqa: BLE001 — без выдачи пост просто без отзыва
         log.warning("Поиск на YouTube не ответил: %s", exc)
         return []
-    return [{"id": e.get("id", ""), "title": e.get("title") or "", "channel": e.get("channel") or ""}
+    return [{"id": e.get("id", ""), "title": e.get("title") or "", "channel": e.get("channel") or "",
+             "duration": e.get("duration") or 0, "description": e.get("description") or ""}
             for e in found.get("entries") or [] if e.get("id")]
 
 
