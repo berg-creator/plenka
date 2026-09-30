@@ -157,6 +157,20 @@ def search(query: str, count: int = SEARCH_RESULTS) -> list[dict]:
             for e in found.get("entries") or [] if e.get("id")]
 
 
+def description(video: str) -> str:
+    """Полное описание ролика, без звука и разбора форматов; пусто — YouTube не ответил.
+    Темп бита продюсеры пишут в описании, а не в названии: 01.10.2026 из 52 битов
+    «free for profit» BPM в названии не стоял ни у одного, в описании — у 10 из 20."""
+    from yt_dlp import YoutubeDL
+
+    try:
+        with YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
+            return ydl.extract_info(WATCH + video, download=False, process=False).get("description") or ""
+    except Exception as exc:  # noqa: BLE001 — без описания бит просто без темпа
+        log.warning("Описание ролика не пришло: %s", exc)
+        return ""
+
+
 def comments(video: str) -> list[dict]:
     """Верхние комментарии ролика: [{text, likes}], без ответов в ветках —
     ответ без реплики, на которую отвечают, читается не так."""

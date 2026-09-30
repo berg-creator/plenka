@@ -73,12 +73,15 @@
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --voice 2 --echo -4   ручки «голос громче», «эха меньше»
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --part бэк БЭКИ --part барабаны БАРАБАНЫ   по дорожкам
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --like ТРЕК   тембр, ширина и громкость — к чужому треку
+    python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --old СТАРЫЙ   голос с чужого бита — на БИТ, темп до ±8 %
+    python -m src.skleyka --beats Kizaru --bpm 142   бесплатные биты в темпе голоса, без Telegram
 """
 
 from __future__ import annotations
 
 import argparse
 import array
+import concurrent.futures
 import contextlib
 import hashlib
 import hmac
@@ -443,6 +446,10 @@ LIKE_LUFS = (-12.0, -8.0)
 LIKE_PASSES = 2
 # Стороны — выше 150 Гц: ниже 120 мастер и так сводит в моно.
 LIKE_BAND = "highpass=f=150,"
+# Голос на чужом бите (swap): дальше чем на 8 % по темпу его не тянем — растянутый голос
+# плывёт. Темп мерит grid: тот же бит, ускоренный на 5 %, он 01.10.2026 узнал в 28 случаях
+# из 30, а два промаха (×1,27 и ×1,40) — за этим пределом, то есть отказ, а не голос мимо долей.
+SWAP_TEMPO = 0.08
 
 
 def _ffmpeg(*args) -> None:
@@ -1730,6 +1737,8 @@ HELP = ("❓ <b>Как это работает</b>\n\n"
         "Делить на дорожки не надо — разложу по именам файлов: vocal, beat, adlib, bass, kick… или по-русски.\n"
         "• Нет бита — «🔎 Нет бита — найти бесплатный» на шаге бита: найду на YouTube биты как у нужного артиста, "
         "которые продюсеры отдают бесплатно и для релиза, — дам ссылки.\n"
+        "• Голос записан на чужом бите «[FREE]», а аренда дорогая — «🔁 Голос записан на чужом бите» там же: "
+        f"пришли старый бит, найду бесплатный того же темпа и перенесу голос на него (темп — до ±{SWAP_TEMPO:.0%}).\n"
         "• Упрёшься в лимит — докупи треки за звёзды или позови артиста: за его первый трек — ещё один тебе.\n"
         "• Спроси словами, почему трек звучит так, — объясню.\n"
         f"• Нужен живой звукорежиссёр — «🎧 Свести руками» под готовым треком: от {config.SKLEYKA_HAND_RUB[0]} ₽, "
@@ -2054,7 +2063,7 @@ def _ask(chat_id: str, draft: dict) -> None:
                           + ("; можно несколькими файлами" if part in MULTI else "") + "."
                           + (FROM_START + WAIT + BY_LINK if step == 0 else ""),
                           buttons=[*([[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]]
-                                     if part in MULTI else []), *([[BEAT_BUTTON]] if part == "бит" else []), [BACK]])
+                                     if part in MULTI else []), *([[BEAT_BUTTON], [SWAP_BUTTON]] if part == "бит" else []), [BACK]])
     draft["asked"], draft["acked"] = step, len(draft["files"])
 
 
@@ -2123,6 +2132,12 @@ def take(message: dict) -> None:
         draft.update(plan=draft.get("pick") or ["вокал", "бит"], step=0, asked=0)
         if draft.get("menu"):
             telegram.edit_markup(chat_id, draft["menu"], None)
+    if draft.get("beat") == "swap" and "old" not in draft and "бит" in draft["plan"][draft["step"]:draft["step"] + 1]:
+        # Старый бит — ориентир переноса, не дорожка: в files и в микс он не идёт.
+        draft.update(old=item, at=state.iso())
+        save(data)
+        telegram.send_message(chat_id, SWAP_TOOK.format(name=html.escape(item["n"])), ask="Toxi$")
+        return
     if draft["step"] >= len(draft["plan"]) and not draft.get("links") or len(draft["files"]) >= MAX_PARTS \
             or any(known["m"] == item["m"] for known in draft["files"]):
         return
@@ -2166,7 +2181,8 @@ def _queue(data: dict, chat_id: str, draft: dict) -> None:
     data["tracks"][track] = {"chat": chat_id, "admin": draft.get("admin", False), "files": files,
                              "knobs": knobs, "tweaks": 0, "at": state.iso(),
                              **({"wish": draft["wish"]} if draft.get("wish") else {}),
-                             **({"links": draft["links"]} if draft.get("links") else {})}
+                             **({"links": draft["links"]} if draft.get("links") else {}),
+                             **{key: draft[key] for key in ("old", "artist", "beat") if draft.get(key)}}
     recent, base, bonus = _allowance(data, chat_id)
     if len(recent) >= base and bonus:
         # Сверх лимита — тратится бонус, ближайший к сгоранию; не вышло — вернётся (_finish).
@@ -2283,7 +2299,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     """Кнопки сведения. Под готовым треком — пересборка с новыми ручками новой заявкой,
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y), саунд-дизайн (e),
-    справка (h), «нет бита» (g) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
+    справка (h), «нет бита» (g), «голос на чужом бите» (o) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
     «🎧 Свести руками» (u) — под треком и под лимитом —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
     keyboard — кнопки того сообщения."""
@@ -2329,7 +2345,14 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     if head == "h":
         telegram.send_message(chat_id, HELP, buttons=MODES)
     elif head == "g":
+        draft["beat"] = "find"
+        _count(BEAT_COUNT["find"])
         telegram.send_message(chat_id, BEATS_ASK, ask="Toxi$")
+    elif head == "o" and draft["plan"]:
+        draft.pop("old", None)
+        draft["beat"] = "swap"
+        _count(BEAT_COUNT["swap"])
+        telegram.send_message(chat_id, SWAP_ASK)
     elif head == "m" and draft["plan"] is None:
         if code == "1":
             draft.update(plan=["вокал", "бит"], step=0)
@@ -2857,7 +2880,7 @@ BEATS_ASK = (f"🔎 {BEATS_MARK}? Напиши артиста ответом н�
 BEATS_FOUND = ("🔎 Биты как у {artist}, бесплатные и для релиза — «free for profit»:\n\n{rows}\n\n"
                "Условия — в описании у автора, чаще всего просят подписать «prod. by». Прочитай перед релизом.\n"
                f"Скачай бит по ссылке автора {ASK_MARK} сюда файлом или ссылкой на облако — сведу.")
-BEATS_NONE = ("🔎 Бесплатных для релиза битов как у {artist} не нашёл — беру только с явным «free for profit».\n"
+BEATS_NONE = ("🔎 Бесплатных для релиза битов как у {artist}{tempo} не нашёл — беру только с явным «free for profit».\n"
               f"{BEATS_MARK} ещё? Напиши другого артиста ответом на это сообщение.")
 # Пустая выдача — не «нет битов», а YouTube не ответил: на «type beat free for profit» выдача есть всегда.
 BEATS_DOWN = f"🔎 YouTube сейчас не отвечает. {BEATS_MARK}? Напиши артиста ответом на это сообщение ещё раз через пару минут."
@@ -2865,9 +2888,9 @@ BEATS_DOWN = f"🔎 YouTube сейчас не отвечает. {BEATS_MARK}? Н
 _BEATS: dict[str, subprocess.Popen] = {}
 
 
-def pick_beats(videos: list[dict], names: list[str]) -> list[dict]:
+def pick_beats(videos: list[dict], names: list[str], limit: int = BEATS_MAX) -> list[dict]:
     """Годные биты выдачи: «free for profit» в названии без «non profit» рядом, длина бита,
-    артист в названии, один бит на канал продюсера, не больше BEATS_MAX."""
+    артист в названии, один бит на канал продюсера, не больше limit."""
     picked, channels = [], set()
     for video in videos:
         if (FREE_FOR_PROFIT.search(video["title"])
@@ -2877,31 +2900,45 @@ def pick_beats(videos: list[dict], names: list[str]) -> list[dict]:
                 and video["channel"] not in channels):
             picked.append(video)
             channels.add(video["channel"])
-    return picked[:BEATS_MAX]
+    return picked[:limit]
 
 
-def find_beats(artist: str) -> list[dict] | None:
+def find_beats(artist: str, bpm: float | None = None) -> list[dict] | None:
     """Биты как у артиста; None — YouTube не ответил. Продюсеры пишут имена латиницей —
     «Kizaru», а не «Кизару», поэтому кириллицу сперва переводит iTunes (resolve_name). Его поиск нечёткий
     и на «Мейби Бейби» отдаёт «мс парень мейби бейби»: ответ кириллицей не берём,
-    а в названии бита годится любое из двух написаний."""
+    а в названии бита годится любое из двух написаний.
+    bpm — темп бита, на котором записан голос (перенос): темп годных битов читается из их описаний,
+    чужой темп — прочь, свой — первым, неназванный — следом (его сверит сведение)."""
     names = [" ".join(artist.split())[:60]]
     if youtube_comments.CYRILLIC.search(names[0]):
         latin = itunes.resolve_name(names[0])
         if latin and not youtube_comments.CYRILLIC.search(latin):
             names.insert(0, latin)
     videos = youtube_comments.search(f"{names[0]} type beat free for profit", BEATS_SEARCH)
-    return pick_beats(videos, names) if videos else None
+    if not videos or not bpm:
+        return pick_beats(videos, names) if videos else None
+    pool = pick_beats(videos, names, BEATS_SEARCH)
+    # Описание — отдельный заход на страницу ролика, 1–2 с каждый: разом, а не по очереди.
+    with concurrent.futures.ThreadPoolExecutor(8) as workers:
+        about = list(workers.map(youtube_comments.description, [video["id"] for video in pool]))
+    for video, text in zip(pool, about):
+        said = [int(a or b) for a, b in SAID_BPM.findall(f"{video['title']} {text}") if 50 <= int(a or b) <= 220]
+        video["bpm"] = said[0] if said else None
+    near = [video for video in pool if video["bpm"] and abs(_rate(video["bpm"], bpm) - 1) <= SWAP_TEMPO]
+    return (near + [video for video in pool if not video["bpm"]])[:BEATS_MAX]
 
 
-def beats_text(artist: str, found: list[dict] | None) -> str:
+def beats_text(artist: str, found: list[dict] | None, bpm: float | None = None) -> str:
+    head = SWAP_RANGE.format(bpm=f"{bpm:.0f}", range=_span(bpm)) if bpm else ""
     if found is None:
         return BEATS_DOWN
     if not found:
-        return BEATS_NONE.format(artist=html.escape(artist))
+        return head + BEATS_NONE.format(artist=html.escape(artist), tempo=" в этом темпе" if bpm else "")
     rows = [f'{n}. <a href="{youtube_comments.WATCH}{video["id"]}">{html.escape(video["title"])}</a>'
-            f" — {html.escape(video['channel'])}" for n, video in enumerate(found, 1)]
-    return BEATS_FOUND.format(artist=html.escape(artist), rows="\n".join(rows))
+            f" — {html.escape(video['channel'])}" + (f" · {video['bpm']} BPM" if video.get("bpm") else "")
+            for n, video in enumerate(found, 1)]
+    return head + BEATS_FOUND.format(artist=html.escape(artist), rows="\n".join(rows))
 
 
 def beats(chat_id: str | int, text: str) -> None:
@@ -2914,11 +2951,106 @@ def beats(chat_id: str | int, text: str) -> None:
         return
     data = load()
     if draft := _draft(data, chat_id):
-        draft["at"] = state.iso()
+        # Артист — и в заявку: бит далёк по темпу — сведение само ищет биты ближе (run_job).
+        draft.update(at=state.iso(), artist=" ".join(text.split())[:100])
         save(data)
     # «--beats=…» одним словом: имя с дефиса в начале argparse иначе принял бы за флаг.
     _BEATS[chat_id] = subprocess.Popen([sys.executable, "-m", "src.skleyka", f"--beats={text[:100]}", "--chat", chat_id],
                                        cwd=config.ROOT)
+
+
+# Голос на чужом бите (владелец 01.10.2026): артист записал голос на YouTube-бите «[FREE]» — это
+# бесплатно только для некоммерческого, а аренда стоит денег. Бот подбирает бит «free for profit»
+# того же темпа и переносит на него готовый голос. Старый бит — только ориентир, как бит из проекта
+# голоса в offset: в микс он не идёт. Голос растягивается atempo, а не rubberband: rubberband есть
+# только в ffmpeg Actions, а на ±8 % голосу хватает и atempo — и путь один, проверенный здесь.
+# Тональность не подгоняется: scale() 01.10.2026 на 30 битах узнал тот же бит, поднятый на
+# 2 полутона, в 23 случаях, а две половины одного бита назвал одной тональностью лишь в 17 —
+# сдвиг голоса по такой оценке чаще портил бы трек, чем чинил.
+SWAP_BUTTON = {"text": "🔁 Голос записан на чужом бите", "callback_data": f"{PREFIX}o"}
+SWAP_ASK = (f"🔁 Старый бит — тот, на котором записан голос, {ASK_MARK} файлом. В трек он не пойдёт: "
+            "по нему найду бесплатный бит того же темпа и перенесу голос на новый бит.")
+SWAP_TOOK = (f"🔁 Принял «{{name}}» — это только ориентир. {BEATS_MARK}? Напиши артиста ответом на это сообщение — "
+             f"найду бесплатные биты в темпе. Новый бит уже есть — {ASK_MARK} его файлом.")
+SWAP_RANGE = "🔁 Голос записан на {bpm} BPM — перенесу на бит {range}. Тональность не подгоняю — сверь на слух.\n\n"
+SWAP_FAR = ("🔁 Этот бит — {new} BPM, а голос записан на {old}: разница {diff} %, больше {limit} % голос не тяну — "
+            "поплывёт. Нужен бит {range}. Лимит на сутки не потрачен.\n\n")
+SWAP_AGAIN = (f"{BEATS_MARK}? Напиши артиста ответом на это сообщение — найду биты в темпе. "
+              f"Есть другой бит — {ASK_MARK} его файлом.")
+SWAPPED = ("🔁 Голос перенёс с {old} BPM на {new} BPM, первый такт — на первый такт бита. "
+           "Встал не на ту долю — напиши словами, куда подвинуть.\n")
+# Счётчик (service --sources): нажатия и готовые треки после них, только числа по дню.
+BEAT_COUNT = {"find": "СВЕДЕНИЕ: нет бита", "swap": "СВЕДЕНИЕ: чужой бит"}
+SAID_BPM = re.compile(r"\b(\d{2,3})\s*bpm\b|\bbpm\W{0,3}(\d{2,3})\b", re.IGNORECASE)
+
+
+def _rate(old: float, new: float) -> float:
+    """Во сколько раз ускорить голос, по длинам доли старого и нового бита (или по их BPM
+    наоборот). Вдвое быстрее и медленнее — тот же темп: grid меряет 60–120, бит 142 для него 71."""
+    rate = old / new
+    while rate > math.sqrt(2):
+        rate /= 2
+    while rate < 1 / math.sqrt(2):
+        rate *= 2
+    return rate
+
+
+def _bpm(length: float) -> float:
+    """BPM по длине доли — как пишут продюсеры: трэп в 71 удар они зовут 142."""
+    bpm = 60 / length
+    return bpm * 2 if bpm < 90 else bpm
+
+
+def _span(bpm: float) -> str:
+    low, high = bpm * (1 - SWAP_TEMPO), bpm * (1 + SWAP_TEMPO)
+    return f"{low:.0f}–{high:.0f} BPM (или {low / 2:.0f}–{high / 2:.0f})" if bpm >= 120 else f"{low:.0f}–{high:.0f} BPM"
+
+
+def swap(voices: list[Path], first: float, old: Path, beat: Path, work: Path) -> tuple[list[Path] | None, str, float]:
+    """Голоса с бита old — на бит beat: (новые дорожки, строка человеку, BPM голоса). Дорожки None
+    и отказ — темп дальше SWAP_TEMPO. Голос растягивается к темпу нового бита и сдвигается так,
+    чтобы первая сильная доля старого бита встала на первую сильную долю нового. Голос начался бы
+    раньше бита (first — его первое слово) — он входит на столько тактов позже.
+    По дропам совмещать хуже: 01.10.2026 на 16 полных битах, ускоренных на 5 % и сдвинутых на 1,3 с,
+    дроп с дропом поставил голос на своё место такта в 9 случаях, сильная доля — в 11; остальные
+    мимо на целую долю сетки, и это правится словами или «🎚 Двигать голос»."""
+    before, after = grid(old), grid(beat)
+    rate, bpm = _rate(before[0], after[0]), _bpm(before[0])
+    print(f"  перенос: голос на {bpm:.1f} BPM, бит {bpm * rate:.1f}, растяжка ×{rate:.4f}")
+    if abs(rate - 1) > SWAP_TEMPO:
+        return None, SWAP_FAR.format(new=f"{bpm * rate:.0f}", old=f"{bpm:.0f}", diff=f"{abs(rate - 1) * 100:.0f}",
+                                     limit=f"{SWAP_TEMPO * 100:.0f}", range=_span(bpm)), bpm
+    shift = after[1] - before[1] / rate
+    if first / rate + shift < 0:
+        shift += math.ceil(-(first / rate + shift) / (4 * after[0])) * 4 * after[0]
+    print(f"  перенос: сильная доля {before[1]:.2f} → {after[1]:.2f} с, голос {shift:+.2f} с")
+    moved = []
+    for n, path in enumerate(voices):
+        _ffmpeg("-i", path, "-af", f"atempo={rate:.5f}", *reels.VOICE_CODEC, work / f"tempo{n}.wav")
+        moved.append(_moved(work / f"tempo{n}.wav", shift, work / f"swapped{n}.wav"))
+    return moved, SWAPPED.format(old=f"{bpm:.0f}", new=f"{bpm * rate:.0f}"), bpm
+
+
+def _old_bpm(chat: str) -> float | None:
+    """BPM старого бита из заявки для выдачи. Больше 20 МБ Bot API не отдаёт, а служебный вход
+    открывает только сведение — такой бит сверится уже при сведении."""
+    old = (_draft(load(), chat) or {}).get("old")
+    if not old or not 0 < old["s"] <= telegram.MAX_DOWNLOAD:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"old{Path(old['n']).suffix.lower() if Path(old['n']).suffix.lower() in AUDIO_EXT else ''}"
+        try:
+            path.write_bytes(telegram.download_file(old["f"]))
+            return _bpm(grid(path)[0])
+        except Exception as exc:  # noqa: BLE001 — без темпа выдача обычная
+            print(f"  старый бит не намерился: {type(exc).__name__}")
+            return None
+
+
+def _count(label: str) -> None:
+    from . import service  # service импортирует этот модуль
+
+    service.count_source(label)
 
 
 # Сведение, что идёт сейчас: (процесс, заявка, папка). Одно на дежурство.
@@ -2962,7 +3094,8 @@ def _spawn(data: dict, job: dict) -> tuple[subprocess.Popen, dict, Path]:
     spec = {"job": job["id"], "track": job["track"], "chat": track["chat"], "files": track["files"],
             "knobs": job["knobs"], "left": None if track.get("admin") else config.SKLEYKA_TWEAKS - track["tweaks"],
             "wish": job.get("wish") or (None if job.get("tweak") else track.get("wish")), "talk": "wish" in job,
-            "agreed": "agreed" in track, "links": track.get("links", []),
+            "agreed": "agreed" in track, "links": track.get("links", []), "old": track.get("old"),
+            "artist": track.get("artist"),
             **({"answer": True, "timing": track.get("timing")} if job.get("answer") else {})}
     (work / "job.json").write_text(json.dumps(spec, ensure_ascii=False))
     job["started"] = state.iso()
@@ -2990,7 +3123,18 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
             data["keys"][track["chat"]] = state.iso()
         if not job.get("tweak"):
             _reward(data, track)
+            if track.get("beat"):
+                _count(BEAT_COUNT[track["beat"]] + " → трек")
         return
+    plan = [part for part in ORDER if any(f["r"] == part for f in track["files"])]
+    if result.get("why") == "темп" and not job.get("tweak") and "бит" in plan and not track.get("links"):
+        # Бит далёк по темпу: заявка снова открыта на шаге бита — следующий бит из выдачи
+        # идёт к тем же голосам и старому биту, присылать их заново не нужно.
+        kept = [f for f in track["files"] if f["r"] != "бит"]
+        data["drafts"][track["chat"]] = {"admin": track.get("admin", False), "at": state.iso(), "plan": plan,
+                                         "step": plan.index("бит"), "files": kept, "asked": plan.index("бит"),
+                                         "acked": len(kept), **{key: track[key] for key in ("old", "artist", "beat", "wish")
+                                                                if key in track}}
     used = data["used"].get(track["chat"], [])
     if job.get("tweak"):
         if not job.get("answer"):  # ответ без сборки пересборку не тратил
@@ -3268,6 +3412,22 @@ def run_job(spec_path: Path) -> int:
                 vocal = _bus(parts, True, work / "vocal.wav")
                 # Длины после сдвига и так разные — «выгрузи с начала проекта» тут неправда.
                 note = ALIGNED.format(shift=f"{abs(shift):.1f} с".replace(".", ","), side="позже" if shift > 0 else "раньше")
+            if spec.get("old"):
+                # Голос на чужом бите: старый бит только меряется, в микс идут голоса, перенесённые на новый.
+                old = _fetch({"files": [spec["old"]]}, work / "old", service)[0][1]
+                side = [n for n, (_, _, part) in enumerate(parts) if part in VOCAL_SIDE]
+                moved, told, bpm = swap([parts[n][1] for n in side], first_word(vocal), old, beat, work)
+                if moved is None:
+                    # Выдача ещё раз — по артисту, названному для поиска; не назван или пусто — вопрос о нём.
+                    found = find_beats(spec["artist"], bpm) if spec.get("artist") else None
+                    telegram.send_message(chat, told + (beats_text(spec["artist"], found) if found else SWAP_AGAIN),
+                                          ask="" if found else "Toxi$")
+                    result["why"] = "темп"
+                    return 0
+                for n, path in zip(side, moved):
+                    parts[n] = (parts[n][0], path, parts[n][2])
+                vocal = _bus(parts, True, work / "vocal.wav")
+                note = told + note
             rhythm = grid(beat)
             timing = {"sent": first_word(vocal), "drops": drops(beat, rhythm), "beat": round(rhythm[0], 3),
                       "length": round(clips.probe_seconds(beat), 1)}
@@ -3650,6 +3810,8 @@ def _selftest() -> None:
     config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
     tmp = Path(tempfile.mkdtemp(prefix="skleyka-test-"))
     config.SKLEYKA_FILE = tmp / "skleyka.json"
+    from . import service
+    real_sources, service.SOURCES_FILE = service.SOURCES_FILE, tmp / "sources.json"
     try:
         for name, want in (("vocal.wav", "вокал"), ("Beat (prod. X).mp3", "бит"), ("whats my name fool.wav", ""),
                            ("Hi-Hat.wav", "барабаны"), ("808.wav", "бас"), ("lead synth.wav", "музыка"),
@@ -3786,6 +3948,17 @@ def _selftest() -> None:
             assert find_beats("Toxi$") is None, "пустая выдача — YouTube молчит, а не битов нет"
         finally:
             youtube_comments.search = real_find[0]
+        # Темп голоса известен: BPM — из описаний; свой темп (и вдвое) первым, чужой прочь, неназванный следом.
+        real_about = youtube_comments.description
+        youtube_comments.search = lambda query, count: [video("[FREE FOR PROFIT] Toxi$ type beat", c) for c in "cdab"]
+        youtube_comments.description = {"a": "BPM: 150", "b": "Key: Am | 75 bpm", "c": "", "d": "bpm 120"}.get
+        try:
+            found = find_beats("Toxi$", 142)
+        finally:
+            youtube_comments.search, youtube_comments.description = real_find[0], real_about
+        assert [(v["channel"], v["bpm"]) for v in found] == [("a", 150), ("b", 75), ("c", None)], found
+        assert "142 BPM" in beats_text("Toxi$", found, 142) and "— a · 150 BPM" in beats_text("Toxi$", found, 142)
+        assert "в этом темпе" in beats_text("Toxi$", [], 142) and "131–153 BPM (или 65–77)" in _span(142)
 
         assert not wants(file(2, "vocal.wav"))
         start(7, 7)
@@ -3817,7 +3990,7 @@ def _selftest() -> None:
         assert sent[-1].startswith("<b>Шаг 2 из 2</b> · пришли бит"), sent[-1]
         # Нет бита: кнопка на шаге бита — вопрос с меткой; ответ на неё — в поиск, а не в ПРОЯВКУ;
         # поиск — отдельным процессом, второй разом не идёт, заявка продлевается.
-        assert [BEAT_BUTTON] in keys[-1]
+        assert [BEAT_BUTTON] in keys[-1] and [SWAP_BUTTON] in keys[-1]
         callback(7, 7, "g")
         assert sent[-1] == BEATS_ASK
         from . import service
@@ -3840,7 +4013,15 @@ def _selftest() -> None:
             subprocess.Popen = real_popen
             _BEATS.pop("7").kill()
         assert spawned == [[sys.executable, "-m", "src.skleyka", "--beats=Кизару", "--chat", "7"]], spawned
-        assert _age(load()["drafts"]["7"]["at"]) < 60
+        assert _age(load()["drafts"]["7"]["at"]) < 60 and load()["drafts"]["7"]["artist"] == "Кизару"
+        # Голос на чужом бите: старый бит — ориентир в заявке, не дорожка; следующий файл — бит сведения.
+        callback(7, 7, "o")
+        assert sent[-1] == SWAP_ASK and ASK_MARK in SWAP_ASK
+        take(file(4, "old beat.mp3"))
+        draft = load()["drafts"]["7"]
+        assert draft["old"]["f"] == "f4" and [f["f"] for f in draft["files"]] == ["f3"] and draft["beat"] == "swap"
+        assert sent[-1].startswith("🔁 Принял «old beat.mp3»") and BEATS_MARK in sent[-1] and ASK_MARK in sent[-1]
+        assert state.read_json(service.SOURCES_FILE, {})[service._today()] == {BEAT_COUNT["find"]: 1, BEAT_COUNT["swap"]: 1}
         take(file(5, "take 2.wav"))
         later("7")
         assert sent[-1].startswith("Дорожки есть: вокал «") and load()["drafts"]["7"]["asked"] == "style"
@@ -3855,6 +4036,16 @@ def _selftest() -> None:
         assert data["tracks"][track]["knobs"] == dict(KNOBS, style="мелодично", design=True)
         assert [f["r"] for f in data["tracks"][track]["files"]] == ["вокал", "бит"]
         assert data["tracks"][track]["wish"] == "голос входит на дропе"
+        real_popen = subprocess.Popen
+        subprocess.Popen = lambda args, **_: args
+        try:
+            _, _, work = _spawn(load(), {"id": "sw", "track": track, "knobs": dict(KNOBS)})
+        finally:
+            subprocess.Popen = real_popen
+        spec = json.loads((work / "job.json").read_text())
+        shutil.rmtree(work)
+        assert spec["old"]["f"] == "f4" and [f["f"] for f in spec["files"]] == ["f3", "f5"] and spec["artist"] == "Кизару", \
+            "старый бит — в сведение ориентиром, не дорожкой"
         # Сведение ждёт очереди — текст дописывается к треку; уже идёт — где поправить; нет ничего — в разборы.
         assert wish(7, "на втором дропе") and load()["tracks"][track]["wish"] == "голос входит на дропе\nна втором дропе"
         data = load()
@@ -3976,6 +4167,20 @@ def _selftest() -> None:
             (tmp / job["id"]).mkdir()
             _finish(data, gone, job, tmp / job["id"])
         assert sent[-1] == FAILED and data["used"]["7"] == [] and data["tracks"][track]["tweaks"] == 2
+        # Бит далёк по темпу: лимит вернулся, заявка снова ждёт бит — голос и старый бит уже в ней.
+        data["tracks"]["tw"] = dict(data["tracks"][track], chat="70", tweaks=0)
+        data["used"]["70"] = [state.iso()]
+        for name, result in (("far", {"ok": False, "why": "темп"}), ("near", {"ok": True})):
+            (tmp / name).mkdir()
+            (tmp / name / "result.json").write_text(json.dumps(result))
+            done = subprocess.Popen(["true"])
+            done.wait()
+            _finish(data, done, {"id": name, "track": "tw"}, tmp / name)
+        draft = data["drafts"].pop("70")
+        assert (draft["plan"], draft["step"], draft["asked"], [f["f"] for f in draft["files"]], draft["old"]["f"]) \
+            == (["вокал", "бит"], 1, 1, ["f3"], "f4") and data["used"]["70"] == [], draft
+        assert state.read_json(service.SOURCES_FILE, {})[service._today()][BEAT_COUNT["swap"] + " → трек"] == 1
+        del data["tracks"]["tw"]
         save(data)
 
         # Ответ словами: дежурство только ставит просьбу в очередь, модель спрашивает сведение
@@ -4362,6 +4567,25 @@ def _selftest() -> None:
         _ffmpeg("-f", "lavfi", "-i", f"aevalsrc='{pattern}':d=20", stems_sum)
         _ffmpeg("-i", stems_sum, "-af", "adelay=2000:all=1", project)
         assert abs(offset(project, stems_sum) - 2.0) <= 0.05 and offset(stems_sum, stems_sum) == 0.0
+        # Перенос голоса: темп клика известного BPM (быстрый — вдвое медленнее), вдвое — тот же темп,
+        # голос растянут к новому биту; дальше SWAP_TEMPO — отказ. lavfi — только с длиной d=.
+        def clicks(bpm: float) -> Path:
+            _ffmpeg("-f", "lavfi", "-i", f"aevalsrc='0.8*sin(2*PI*55*t)*exp(-20*mod(t,{60 / bpm:.6f}))':d=20",
+                    tmp / f"click{bpm}.wav")
+            return tmp / f"click{bpm}.wav"
+
+        for bpm, want in ((140, 70), (100, 100)):
+            assert abs(60 / grid(clicks(bpm))[0] - want) < 0.3, (bpm, 60 / grid(clicks(bpm))[0])
+        assert abs(_rate(60 / 70, 60 / 73.5) - 1.05) < 1e-9 and abs(_rate(60 / 118, 60 / 61) - 122 / 118) < 1e-9
+        assert _rate(60 / 70, 60 / 140) == 1.0 and round(_bpm(60 / 71)) == 142 and _bpm(0.6) == 100
+        sung = tmp / "sung.wav"
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=440:d=10", "-af", "adelay=1000:all=1", sung)
+        paths, told, bpm = swap([sung], first_word(sung), clicks(140), clicks(147), tmp)
+        assert paths and told.startswith("🔁 Голос перенёс с 140 BPM на 147 BPM") and round(bpm) == 140, told
+        assert abs(clips.probe_seconds(tmp / "tempo0.wav") - 11 / 1.05) < 0.05
+        paths, told, _ = swap([sung], 1.0, clicks(140), clicks(157), tmp)
+        assert paths is None and "разница 12 %" in told and "129–151 BPM" in told, told
+
         # Бесконечность в дорожке видна до суммы, а сумма, которую не намерить, идёт без склейки,
         # а не роняет мастер порогом ниже −60 дБ (сбой бэков 29–30.09).
         spoiled, silent = tmp / "inf.wav", tmp / "silent.wav"
@@ -4371,10 +4595,11 @@ def _selftest() -> None:
     finally:
         (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
          itunes.find_song, telegram._call) = real
+        service.SOURCES_FILE = real_sources
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
-          "реферал за трек и звёзды, «свести руками» один раз, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск — ок")
+          "реферал за трек и звёзды, «свести руками» один раз, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик — ок")
 
 
 def talk_check() -> list[str]:
@@ -4416,6 +4641,9 @@ def main() -> int:
                         help="что бот возьмёт по ссылке на облако: файлы и роли, без скачивания звука")
     parser.add_argument("--beats", metavar="АРТИСТ",
                         help="бесплатные биты как у артиста: что нашлось бы на YouTube, без Telegram")
+    parser.add_argument("--bpm", type=float, help="с --beats: темп голоса — биты в этом темпе первыми, чужой темп прочь")
+    parser.add_argument("--old", type=Path, metavar="БИТ",
+                        help="с --mix: бит, на котором записан голос, — голос переносится с него на БИТ")
     # Чат для ответа: так --beats запускает дежурство (beats), руками — не нужен.
     parser.add_argument("--chat", help=argparse.SUPPRESS)
     parser.add_argument("--talk-check", action="store_true",
@@ -4430,14 +4658,16 @@ def main() -> int:
     if args.link_check:
         return link_check(args.link_check)
     if args.beats:
-        found = find_beats(args.beats)
+        # Из дежурства темп — от старого бита в заявке (перенос голоса), руками — --bpm.
+        bpm = args.bpm or (_old_bpm(args.chat) if args.chat else None)
+        found = find_beats(args.beats, bpm)
         if args.chat:
             # Не нашёл — вопрос с ответом: другого артиста пишут прямо в поле ввода.
-            telegram.send_message(args.chat, beats_text(args.beats, found), ask="" if found else "Toxi$")
+            telegram.send_message(args.chat, beats_text(args.beats, found, bpm), ask="" if found else "Toxi$")
             return 0
         for video in found or []:
             print(f"  {video['duration'] // 60}:{video['duration'] % 60:02d}  {video['channel']} — {video['title']}"
-                  f"\n        {youtube_comments.WATCH}{video['id']}")
+                  + (f"  · {video['bpm']} BPM" if video.get("bpm") else "") + f"\n        {youtube_comments.WATCH}{video['id']}")
         print("YouTube не ответил" if found is None else f"Нашлось: {len(found)}")
         return 0
     if args.job:
@@ -4452,10 +4682,19 @@ def main() -> int:
     if args.mix:
         if bad := [part for part, _ in args.part if part not in PARTS and part not in INSTRUMENTS]:
             parser.error(f"роли {', '.join(bad)} нет")
-        master = mix(*args.mix, args.out, args.style, args.design, args.voice, args.echo,
-                     [(part, Path(path)) for part, path in args.part], args.like)
-        compare(*args.mix, master, args.out)
-        movie = story(*args.mix, master, args.out, grid(args.mix[1]))
+        (vocal, beat), parts = args.mix, [(part, Path(path)) for part, path in args.part]
+        if args.old:
+            side = [vocal] + [path for part, path in parts if part in VOCAL_SIDE]
+            args.out.mkdir(parents=True, exist_ok=True)
+            moved, told, _ = swap(side, first_word(vocal), args.old, beat, args.out)
+            print(f"  {told.strip()}")
+            if moved is None:
+                return 1
+            swapped = dict(zip(side, moved))
+            vocal, parts = swapped[vocal], [(part, swapped.get(path, path)) for part, path in parts]
+        master = mix(vocal, beat, args.out, args.style, args.design, args.voice, args.echo, parts, args.like)
+        compare(vocal, beat, master, args.out)
+        movie = story(vocal, beat, master, args.out, grid(beat))
         print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}, {movie}")
         return 0
     parser.print_help()
