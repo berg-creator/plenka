@@ -22,6 +22,8 @@
     --counter: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Roboto Mono", Consolas, monospace;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  /* Иначе display у #done перебивал hidden, и в Telegram под его кнопкой стояла вторая (владелец 30.09.2026). */
+  [hidden] { display: none !important; }
   html, body { background: var(--bg); }
   body { margin: 0; padding: 20px 16px 28px; color: var(--text); font: 15px/1.4 var(--ui); user-select: none;
          -webkit-user-select: none; }
@@ -31,7 +33,12 @@
   #counter { margin: 0; font: 500 44px/1 var(--counter); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
   #where { margin-top: 6px; color: var(--hint); font-size: 14px; min-height: 20px; font-variant-numeric: tabular-nums; }
   canvas { display: block; width: 100%; touch-action: none; }
-  #view { height: 208px; margin-top: 20px; }
+  .stage { position: relative; margin-top: 20px; overflow: hidden; }
+  #view { height: 208px; }
+  #trail, #runner { position: absolute; left: 0; bottom: 0; pointer-events: none; will-change: transform; }
+  #trail { top: 18px; background: var(--text); opacity: 0.1; transform-origin: 0 0; }  /* 18 — RULER */
+  /* Цвета текста с каймой фона: красная в 2 px тонула в красном голосе (владелец 28.09.2026). */
+  #runner { top: 0; width: 6px; margin-left: -3px; background: var(--text); border: solid var(--bg); border-width: 0 2px; }
   #map { height: 26px; margin-top: 10px; }
   #hint { margin: 12px 0 0; color: var(--hint); font-size: 13px; min-height: 18px; }
   .deck { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
@@ -53,7 +60,11 @@
   <button id="mode" aria-pressed="false" aria-label="Свободно: без прилипания к долям">по долям</button>
 </div>
 <div id="where"></div>
-<canvas id="view" role="img" aria-label="Бит сверху, голос под ним: тащи голос пальцем, он шагает по долям"></canvas>
+<div class="stage">
+  <canvas id="view" role="img" aria-label="Бит сверху, голос под ним: тащи голос пальцем, он шагает по долям"></canvas>
+  <div id="trail" hidden></div>
+  <div id="runner" hidden></div>
+</div>
 <canvas id="map" role="img" aria-label="Весь бит: нажми, чтобы посмотреть другое место"></canvas>
 <p id="hint">Загружаю звук…</p>
 <div class="deck">
@@ -90,7 +101,7 @@ let free = !beatLen; // без сетки прилипать не к чему
 const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const $ = id => document.getElementById(id);
-const view = $("view"), map = $("map"), hint = $("hint");
+const view = $("view"), map = $("map"), hint = $("hint"), runner = $("runner"), trail = $("trail");
 let view0 = Math.max(0, at - SPAN * 0.3);
 let ctx = null, voiceBuf = null, beatBuf = null, voiceEnv = new Float32Array(0), beatEnv = new Float32Array(0);
 let playing = null, settling = null;
@@ -250,19 +261,7 @@ function drawView() {
   c.fillRect(x(shown) - 0.5, beatY, 1, lane + GAP);
   c.globalAlpha = 1;
 
-  // Бегущая линия. Красная в 2 px тонула в красном голосе (владелец 28.09.2026: «непонятно,
-  // где сейчас играет»), поэтому она цвета текста с каймой фона, а проигранное подсвечено.
-  if (playing) {
-    const t = x(head()), from = x(Math.max(playing.from, view0));
-    c.fillStyle = text;
-    c.globalAlpha = 0.1;
-    c.fillRect(from, RULER, t - from, h - RULER);
-    c.globalAlpha = 1;
-    c.fillStyle = color("--bg");
-    c.fillRect(t - 3, 0, 6, h);
-    c.fillStyle = text;
-    c.fillRect(t - 1, 0, 2, h);
-  }
+  if (!playing || playing.key !== view0 + ":" + w) run();
 }
 
 function drawMap() {
@@ -375,9 +374,29 @@ function icon(name, label) {
 }
 // Звук доходит до уха позже, чем его отдали: задержка вывода, в Bluetooth 0,15–0,3 с.
 // Без поправки линия бежала впереди звука (владелец 28.09.2026).
+function lag() { return Math.min(0.5, ctx.outputLatency || ctx.baseLatency || 0); }
 function head() {
   if (!playing) return 0;
-  return playing.from + Math.max(0, ctx.currentTime - playing.t0 - (ctx.outputLatency || ctx.baseLatency || 0));
+  return playing.from + Math.max(0, ctx.currentTime - playing.t0 - lag());
+}
+
+// Бегущая линия и проигранное — не кадрами холста, а анимацией слоёв. В окне Telegram на Mac
+// страница между касаниями не перерисовывается: ни requestAnimationFrame, ни таймер линию
+// не двигали (владелец 28–30.09.2026). Анимацию слоя ведёт сама система, без кадров страницы;
+// заново она заводится, только когда экран листнули.
+function run() {
+  for (const el of [runner, trail]) el.getAnimations().forEach(a => a.cancel());
+  runner.hidden = trail.hidden = !playing;
+  if (!playing) return;
+  const w = view.clientWidth, pps = w / SPAN, x = t => (t - view0) * pps;
+  const a = ctx.currentTime - playing.t0 - lag(), t = playing.from + Math.max(0, a);
+  const x0 = x(Math.max(playing.from, view0)), room = Math.max(1, w - x0);
+  const timing = { duration: Math.max(0, view0 + SPAN - t) * 1000, delay: Math.max(0, -a) * 1000, easing: "linear", fill: "both" };
+  playing.key = view0 + ":" + w;
+  runner.animate([{ transform: `translateX(${x(t)}px)` }, { transform: `translateX(${w}px)` }], timing);
+  trail.style.left = x0 + "px";
+  trail.style.width = room + "px";
+  trail.animate([{ transform: `scaleX(${Math.max(0, x(t) - x0) / room})` }, { transform: "scaleX(1)" }], timing);
 }
 
 function stop() {
@@ -402,11 +421,11 @@ function play() {
   playing = { sources: [beat, voice], t0: now, from };
   icon("pause", "Пауза");
   const mine = playing;  // перезапуск заводит свою петлю кадров, старая гаснет
+  run();
   nextFrame(function frame() {
     if (playing !== mine) return;
     const t = head();
-    if (t > view0 + SPAN * 0.9) panTo(t - SPAN * 0.1);
-    drawAll();
+    if (t > view0 + SPAN * 0.9) { panTo(t - SPAN * 0.1); drawAll(); }
     nextFrame(frame);
   });
 }
