@@ -1585,7 +1585,9 @@ THANKS = "Спасибо! {what} — жми /svedenie."
 TOO_BIG = f"«{{name}}» больше {config.SKLEYKA_MAX_MB} МБ. Пришли FLAC или MP3 320 — они легче."
 BAD = "«{name}» не читается. Пришли WAV, FLAC или MP3 — /svedenie."
 SILENT = "В «{name}» тишина — похоже, выгрузилась пустая дорожка. Пришли заново — /svedenie."
-LENGTH = "Бит длится {length}, а свожу треки от 1 до 8 минут. Другой — /svedenie."
+# Какой длины бит сведение берёт, минуты, — одно число для отказа (check), LENGTH и справки HELP.
+BEAT_MINUTES = (1, 8)
+LENGTH = f"Бит длится {{length}}, а свожу треки от {BEAT_MINUTES[0]} до {BEAT_MINUTES[1]} минут. Другой — /svedenie."
 NEED = "Нужны и вокал, и бит, а {what}. Пришли все дорожки заново — /svedenie."
 FAILED = "Не вышло — что-то сломалось у меня. Попробуй ещё раз: /svedenie. Лимит на сутки не потрачен."
 STALE = "Это сведение устарело — пришли дорожки заново: /svedenie."
@@ -1596,8 +1598,11 @@ READY = ("🎛 <b>Трек готов</b> — {look}.\n{parts}.\n{note}"
          "Громкость как у релизов; WAV для площадок — следующим файлом.")
 MISMATCH = "Дорожки разной длины ({a} и {b}): если голос уехал от бита — выгрузи обе с самого начала проекта.\n"
 GUESSED = "Вокал и бит пришли одним альбомом — где что, понял по звуку. Перепутал — жми «↔ поменять».\n"
+# Срок и «спроси, почему» — здесь, под треком: срок начинает идти с него, а 30.09.2026 люди
+# не знали ни сроков, ни что бот может объяснить свой звук (владелец).
 TUNE = ("Не так? Подкрути — пересоберу{left}. Или просто напиши словами, что поменять, как другу: "
-        "«слов не слышно», «погрязнее», «эха меньше», «голос на дропе», «как у Travis Scott».\n\n"
+        "«слов не слышно», «погрязнее», «эха меньше», «голос на дропе», «как у Travis Scott», — "
+        "или спроси, почему звучит так. Кнопки и слова работают {days} дней с первой сборки.\n\n"
         "Выложишь трек на площадки — жми «В ОТБОР»: он выйдет в канале с твоим именем.")
 # Согласие на ролик ДО/ПОСЛЕ: одна строка условий под ручками, пока артист не согласился.
 # Бит — главный риск: чужой бит без права на видео в рекламе канала не покажешь.
@@ -1612,6 +1617,8 @@ MAX_PARTS = 10
 # не приходит новых файлов. Тишина DRAFT_MINUTES — заявка закрыта.
 QUIET = 2
 DRAFT_MINUTES = 30
+# Срок — в первом же вопросе о дорожке: до 30.09.2026 о нём узнавали только из EXPIRED.
+WAIT = f" Жду их {DRAFT_MINUTES} минут — потом заявка закроется."
 # Сколько минут занимает сведение на машине дежурства: скачать, свести, отправить.
 MINUTES = 4
 # Сведение, оборванное концом смены, следующая доделывает, если ему меньше часа;
@@ -1640,6 +1647,19 @@ MODES = [[{"text": "🎤 Вокал + бит", "callback_data": f"{PREFIX}m:1"}]
 # Шаг назад — к выбору режима, под каждым вопросом до сведения (владелец 28.09.2026: выбрал
 # «вокал + бит», а вернуться к «по дорожкам» было нечем).
 BACK = {"text": "↩️ Сменить режим", "callback_data": f"{PREFIX}b"}
+# Справка — кнопкой под INTRO, а не текстом в нём: 22.09.2026 владелец резал вступление
+# за «очень много текста», а 30.09 люди не знали сроков и лимитов. Кому надо — нажмёт;
+# под справкой снова выбор режима, чтобы не листать назад.
+HELP_BUTTON = {"text": "❓ Как это работает", "callback_data": f"{PREFIX}h"}
+HELP = ("❓ <b>Как это работает</b>\n\n"
+        f"• Вокал и бит — WAV, FLAC или MP3, каждый файл до {config.SKLEYKA_MAX_MB} МБ. "
+        "Выгружай дорожки с начала проекта.\n"
+        f"• Бит — от {BEAT_MINUTES[0]} до {BEAT_MINUTES[1]} минут. Дорожки жду {DRAFT_MINUTES} минут.\n"
+        f"• Треков в сутки — {config.SKLEYKA_PER_DAY}, пересборок на трек — {config.SKLEYKA_TWEAKS}. "
+        f"Кнопки и слова под треком работают {TRACK_DAYS} дней.\n"
+        "• Спроси словами, почему трек звучит так, — объясню.\n"
+        "• Вопрос об оплате — /paysupport.\n\n"
+        "Как пришлёшь?")
 REMODE = "↩️ Выбираем заново{files}. Как пришлёшь?"
 # Части в том порядке, в каком бот их спрашивает; что можно прислать несколькими файлами.
 ORDER = ("вокал", "дабл", "бэк", "эдлиб", "бит", "барабаны", "бас", "музыка")
@@ -1813,7 +1833,7 @@ def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> Non
     data["drafts"][chat_id] = {"user": str(user_id), "admin": admin, "at": state.iso(), "plan": None,
                                "step": 0, "files": []}
     save(data)
-    telegram.send_message(chat_id, INTRO, buttons=MODES)
+    telegram.send_message(chat_id, INTRO, buttons=[*MODES, [HELP_BUTTON]])
 
 
 def invited(chat_id: str | int, code: str) -> None:
@@ -1908,7 +1928,7 @@ def _ask(chat_id: str, draft: dict) -> None:
     what = "лид-вокал — главный голос" if part == "вокал" and len(plan) > 2 else ASKS[part]
     telegram.send_message(chat_id, f"<b>Шаг {step + 1} из {len(plan)}</b> {ASK_MARK} {what}"
                           + ("; можно несколькими файлами" if part in MULTI else "") + "."
-                          + (FROM_START if step == 0 else ""),
+                          + (FROM_START + WAIT if step == 0 else ""),
                           buttons=[*([[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]]
                                      if part in MULTI else []), [BACK]])
     draft["asked"], draft["acked"] = step, len(draft["files"])
@@ -2127,7 +2147,8 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
              message_id: int | None = None, who: dict | None = None, keyboard: list | None = None) -> None:
     """Кнопки сведения. Под готовым треком — пересборка с новыми ручками новой заявкой,
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
-    галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y) и саунд-дизайн (e) —
+    галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y), саунд-дизайн (e),
+    справка (h) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service) —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
     keyboard — кнопки того сообщения."""
     chat_id = str(chat_id)
@@ -2156,11 +2177,19 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     if head == "s":
         _invoices(chat_id)
         return
+    if head == "k":
+        # «🎛 Это к треку» под переспросом (which): текст ждал в треке — теперь просьба к нему.
+        telegram.edit_markup(chat_id, message_id, None)
+        if text := asked(chat_id):
+            talk(chat_id, text, {}, admin=admin)
+        return
     draft = _draft(data, chat_id)
     if not draft:
         telegram.send_message(chat_id, OLD)
         return
-    if head == "m" and draft["plan"] is None:
+    if head == "h":
+        telegram.send_message(chat_id, HELP, buttons=MODES)
+    elif head == "m" and draft["plan"] is None:
         if code == "1":
             draft.update(plan=["вокал", "бит"], step=0)
             _ask(chat_id, draft)
@@ -2264,7 +2293,8 @@ def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> N
 MOVE_HOURS = 24
 KEYS_SINCE = "2026-09-28T17:30"  # с этой минуты кнопку приложения отмечают (data["keys"])
 MOVE_BUTTON = "🎚 Двигать голос"
-MOVE_ASK = f"🎚 Голос встал не туда? Подвинь его пальцем по сетке бита и послушай — кнопка «{MOVE_BUTTON}» внизу."
+MOVE_ASK = (f"🎚 Голос встал не туда? Подвинь его пальцем по сетке бита и послушай — кнопка «{MOVE_BUTTON}» внизу, "
+            f"работает {MOVE_HOURS} часа.")
 REMOVE = {"remove_keyboard": True}
 # Превью — ответ функции Облака: до 3,5 МБ в base64, то есть файл не больше ~2,5 МБ.
 PREVIEW_BYTES = 2_000_000
@@ -2370,7 +2400,8 @@ def _sweep(data: dict) -> bool:
 TALK_MARK = "напиши словами"
 TALKS = 6
 TALK_FAILED = "Не разобрал — подкрути кнопками выше."
-TALK_QUEUED = "✏️ Принял — разберу и пришлю пересборку минут через {minutes}."
+# Нейтрально: по словам бывает и пересборка, и ответ на вопрос без неё (heed).
+TALK_QUEUED = "✏️ Принял — разберу: пересоберу или отвечу минут через {minutes}."
 TALKED = "Поговорили про этот трек достаточно — дальше кнопками выше."
 LIKE_MISSING = "«{name}» в магазинах не нашёл — звук ни к чему не подтягивал."
 LIKE_LOST = "Отрывок «{name}» не скачался — звук к нему не подтягивал.\n"
@@ -2378,6 +2409,25 @@ TALK_KNOBS = ("style", "design", "voice", "echo", "at")
 TALK_ASK = ("✏️ Что поменять — напиши словами, как другу: «слов не слышно», «голос входит на дропе», "
             "«голос на долю позже», «эха меньше», «погрязнее», «как у Travis Scott».")
 DROP_NOTE = "Голос входит на {voice}, а бас в бите — на {drop}. Если голос уехал — жми «🎯 голос с {drop}».\n"
+# Справка для ответа «почему трек звучит так»: что сведение делает с каждым треком — из тех же
+# констант, что крутят звук. Модель трек не слышала, и без справки объяснение было бы выдумкой
+# (владелец 30.09.2026). Стили и пределы ручек уже в limits — здесь не повторяются.
+FACTS = {
+    "баланс": f"голос в строке на {-VOCAL_OVER_BEAT:g} дБ тише бита, как в среднем у релизов; голос и бит одной длины "
+              f"из одного проекта сохраняют баланс артиста, от {BALANCE_RANGE[0]:g} до +{BALANCE_RANGE[1]:g} дБ",
+    "райдер": f"где голос под битом проваливается ниже своего баланса больше чем на {-RIDE_TARGET:g} дБ, он поднимается, "
+              f"но не больше чем на {RIDE_MAX:g} дБ; вниз не ведёт — громкие места ровняет сжатие",
+    "мастер": f"громкость как у релизов, {MASTER_LUFS:g} LUFS, пик не выше {CEILING:g} дБ; верхушки ударов до {CLIP:g} дБ "
+              "срезает клиппер; площадки сами выравнивают громкость треков",
+    "эхо стилей": {name: f"отзвук {kind['reverb'][0]:g} с на {kind['reverb'][1]:.0%} к голосу, эхо {kind['delay'][0]} "
+                         f"на {kind['delay'][1]:.0%}" if "reverb" in kind else "у главного голоса ни отзвука, ни эха"
+                   for name, kind in STYLES.items()},
+    "like": f"подгонка к отрывку чужого трека: тембр до {LIKE_TONE:g} дБ, ширина до {LIKE_WIDTH:g} дБ, громкость "
+            f"от {LIKE_LUFS[0]:g} до {LIKE_LUFS[1]:g} LUFS — наклон, а не копия",
+    "at": "секунда бита, где встаёт первое слово; голос двигается целиком, со всеми дорожками",
+    "лимиты": f"пересборок на трек {config.SKLEYKA_TWEAKS}, разговоров о треке {TALKS}, "
+              f"кнопки и слова работают {TRACK_DAYS} дней с первой сборки",
+}
 
 
 def heard(knobs: dict, answer: dict) -> dict:
@@ -2397,7 +2447,8 @@ def heard(knobs: dict, answer: dict) -> dict:
 
 
 def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
-    """Просьба словами — в ручки и ответ человеку (prompts/skleyka.md). timing — замер
+    """Просьба словами — в ручки и ответ человеку (prompts/skleyka.md); вопрос «почему так» —
+    только ответ, по ручкам, timing и FACTS. timing — замер
     сведения (run_job): где первое слово в присланном файле, дропы бита, длина доли;
     по нему модель ставит голос «на дроп» или «на долю позже». Зовёт его только
     сведение (heed): там замер уже есть, а дежурство не ждёт генератор."""
@@ -2408,6 +2459,7 @@ def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
         "knobs": {**now, "like": (knobs.get("like") or {}).get("title", "")},
         "limits": {"voice": [-VOICE_LIMIT, VOICE_LIMIT], "echo": list(ECHO_LIMITS),
                    "style": {name: kind["about"] for name, kind in STYLES.items()}},
+        "facts": FACTS,
         "timing": timing and {**timing, "voice": timing["sent"] if knobs.get("at") is None else knobs["at"]}})
     new = heard(knobs, answer)
     words = html.escape(str(answer.get("reply", "")).strip())[:400]
@@ -2454,6 +2506,43 @@ def fresh(chat_id: str | int) -> str:
     return max(ready, key=lambda key: tracks[key]["done"], default="")
 
 
+def _last(data: dict, chat_id: str) -> str:
+    """Последний трек человека — к нему просьба, если сообщение не называет трек."""
+    return max((key for key, track in data["tracks"].items() if track["chat"] == chat_id),
+               key=lambda key: data["tracks"][key]["at"], default="")
+
+
+# Позже TALK_WINDOW простой текст бывает и о треке, и о вкусе: до 30.09.2026 он молча уходил
+# в ПРОЯВКУ, и «сделай голос громче» через два часа получал разбор вкуса. Пока трек жив
+# (tick стирает его через TRACK_DAYS), бот переспрашивает. Текст ждёт в самом треке —
+# в приватном хранилище — и стирается вместе с ним.
+WHICH = "✏️ Это про твой трек из СВЕДЕНИЯ или разобрать вкус?"
+WHICH_KEYS = [[{"text": "🎛 Это к треку", "callback_data": f"{PREFIX}k"},
+               {"text": "🔍 Разбор вкуса", "callback_data": f"{PREFIX}q"}]]
+
+
+def which(chat_id: str | int, text: str) -> bool:
+    """Простой текст при готовом живом треке — переспрос кнопками WHICH. «К треку» ведёт
+    в talk (callback), «разбор вкуса» — туда, куда текст шёл раньше (service). Трека нет — False."""
+    chat_id, data = str(chat_id), load()
+    track = data["tracks"].get(_last(data, chat_id))
+    if not track or not track.get("done"):
+        return False
+    track["ask"] = text[:1000]
+    save(data)
+    telegram.send_message(chat_id, WHICH, buttons=WHICH_KEYS)
+    return True
+
+
+def asked(chat_id: str | int) -> str:
+    """Текст, ждавший переспроса, — один раз: повторное нажатие ничего не повторит."""
+    chat_id, data = str(chat_id), load()
+    track = data["tracks"].get(_last(data, chat_id), {})
+    if text := track.pop("ask", ""):
+        save(data)
+    return text
+
+
 def wish(chat_id: str | int, text: str) -> bool:
     """Просьба словами заранее: копится в заявке, а разбирает её само сведение —
     там уже известны дропы бита и первое слово голоса (run_job). Заявка закрыта, а сведение
@@ -2483,8 +2572,7 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
     codes = [button.get("callback_data", "") for row in (reply.get("reply_markup") or {}).get("inline_keyboard", [])
              for button in row]
     track_id = next((code[len(PREFIX):].partition(":")[0] for code in codes if code.startswith(PREFIX)), "") \
-        or max((key for key, track in data["tracks"].items() if track["chat"] == chat_id),
-               key=lambda key: data["tracks"][key]["at"], default="")
+        or _last(data, chat_id)
     track = data["tracks"].get(track_id)
     if not track or track["chat"] != chat_id:
         telegram.send_message(chat_id, STALE, markup=REMOVE)
@@ -2639,7 +2727,7 @@ def check(parts: list[tuple[str, Path, str]]) -> tuple[str, str]:
             return SILENT.format(name=name), ""
     voice = max(length[name] for name, _, part in parts if part in VOCAL_SIDE)
     beat = max(length[name] for name, _, part in parts if part not in VOCAL_SIDE)
-    if not 60 <= beat <= 480:
+    if not BEAT_MINUTES[0] * 60 <= beat <= BEAT_MINUTES[1] * 60:
         return LENGTH.format(length=_minutes(beat)), ""
     return "", MISMATCH.format(a=_minutes(voice), b=_minutes(beat)) if abs(voice - beat) > SAME_PROJECT else ""
 
@@ -3058,7 +3146,8 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
         sent = telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(clips.probe_seconds(movie)))
         film = (sent.get("video") or {}).get("file_id", "")
     ask, left = bool(film) and not spec.get("agreed"), spec["left"]
-    telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}")
+    telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}",
+                                            days=TRACK_DAYS)
                           + (FILM_TERMS if ask else ""), buttons=buttons(spec["track"], knobs, swap=swap, drop=drop, film=ask))
     return film
 
@@ -3188,6 +3277,12 @@ def _selftest() -> None:
         assert not wants(file(2, "vocal.wav"))
         start(7, 7)
         assert sent[-1] == INTRO and wants(file(3, "a.wav")) and not wants(file(3, "a.wav", reply="Пришли трек"))
+        # Справка кнопкой под INTRO: числа — из констант, под ней снова выбор режима.
+        assert keys[-1] == [*MODES, [HELP_BUTTON]]
+        callback(7, 7, "h")
+        assert sent[-1] == HELP and keys[-1] == MODES and all(
+            str(n) in HELP for n in (config.SKLEYKA_MAX_MB, DRAFT_MINUTES, TRACK_DAYS, config.SKLEYKA_PER_DAY,
+                                     config.SKLEYKA_TWEAKS, *BEAT_MINUTES)), HELP
         assert not wants({"message_id": 4, "chat": {"id": 7, "type": "private"}, "text": "привет"})
 
         # Шаг назад: выбрал «вокал + бит», прислал вокал — и передумал; присланное сбрасывается.
@@ -3201,6 +3296,7 @@ def _selftest() -> None:
         # «Вокал + бит»: вопрос за вопросом, роль — шаг, имена файлов не нужны; потом — звук.
         callback(7, 7, "m:1")
         assert sent[-1].startswith("<b>Шаг 1 из 2</b> · пришли вокал") and wants(file(3, "a.wav", reply=sent[-1]))
+        assert sent[-1].endswith(WAIT), "срок заявки — в первом вопросе о дорожке"
         take(file(3, "take 1.wav"))
         take(file(3, "take 1.wav"))  # повтор того же сообщения — дорожка одна
         later("7")
@@ -3399,6 +3495,7 @@ def _selftest() -> None:
         answers[:] = [{"style": "мелодично", "design": True, "voice": -6, "echo": 0, "at": 12.95, "like": "", "reply": "На дроп."}]
         knobs = heed(knobs, "голос раньше дропа", {"sent": 2.75, "drops": [12.95], "beat": 0.857, "length": 153.0}, talk=True)[0]
         assert payloads[-1]["timing"]["voice"] == 2.75 and payloads[-1]["knobs"]["at"] == -1, payloads[-1]
+        assert payloads[-1]["facts"] == FACTS and set(FACTS["эхо стилей"]) == set(STYLES), "справка для «почему так»"
         assert knobs["at"] == 12.95 and "голос с 0:13" in look(knobs), look(knobs)
         llm.generate_skleyka = model
         answers[:] = [RuntimeError("сеть"), RuntimeError("сеть")]
@@ -3478,7 +3575,7 @@ def _selftest() -> None:
         start(7, 7)
         assert sent[-1].startswith("Треков в сутки — 2.") and keys[-1] == WAYS, "упёрся — два выхода кнопками"
         start(1, 1, admin=True)
-        assert sent[-1] == INTRO and keys[-1] == MODES
+        assert sent[-1] == INTRO and keys[-1] == [*MODES, [HELP_BUTTON]]
 
         # Позвал артиста: бонус не за переход, а за его первый готовый трек, и один раз.
         callback(7, 7, "r")
@@ -3499,6 +3596,23 @@ def _selftest() -> None:
         assert len(data["bonus"]["7"]) == 1 and sent[-2:] == [BONUS, BONUS_SENT], "второй раз бонуса нет"
         save(data)
         assert fresh(40) == "t40" and not fresh(41), "час после готового трека простой текст — к нему"
+        # Позже часа, пока трек жив, — переспрос: «к треку» ставит работу, как ответ на ручки;
+        # текст ждёт в треке и забирается один раз. Трека нет — текст в разборы.
+        assert not which(41, "громче")
+        data = load()
+        data["tracks"]["t40"]["done"] = state.iso(state.now() - timedelta(seconds=TALK_WINDOW + 1))
+        save(data)
+        assert not fresh(40) and which(40, "сделай голос громче") and sent[-1] == WHICH and keys[-1] == WHICH_KEYS
+        callback(40, 40, "k", message_id=9)
+        data = load()
+        assert data["jobs"][-1]["track"] == "t40" and data["jobs"][-1]["wish"] == "сделай голос громче" \
+            and "ask" not in data["tracks"]["t40"] and sent[-1].startswith("✏️ Принял — разберу"), sent[-1]
+        data["jobs"].pop()
+        data["tracks"]["t40"]["tweaks"] = 0
+        save(data)
+        which(40, "что послушать")
+        assert asked(40) == "что послушать" and not asked(40), "текст — один раз"
+        data = load()
         invited(40, code)
         assert not load()["invited_by"], "сводивший по ссылке второй раз не приглашённый"
         assert not _limit(data, "7"), "бонус — трек сверх лимита"
@@ -3558,8 +3672,8 @@ def _selftest() -> None:
         (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
          itunes.find_song, telegram._call) = real
         shutil.rmtree(tmp, ignore_errors=True)
-    print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, звук заранее, "
-          "ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
+    print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
+          "переспрос после часа, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
           "реферал за трек и звёзды, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик — ок")
 
 

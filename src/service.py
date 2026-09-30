@@ -1274,8 +1274,9 @@ _STARTS: dict[str, tuple[str, int]] = {}
 START_REPEAT = 30
 
 
-def handle_message(message: dict, data: dict) -> bool:
+def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
     """Обрабатывает одно сообщение. True — разбор был выдан (потрачен токен).
+    ask=False — текст уже переспрошен (skleyka.which), и выбран разбор: второй раз не спрашивать.
 
     Состояние лимитов передаётся снаружи: за один запуск поллера сообщений
     может прийти несколько, и общий счётчик должен быть у них один.
@@ -1429,6 +1430,10 @@ def handle_message(message: dict, data: dict) -> bool:
     if not kind and skleyka.fresh(chat_id):
         # Простой текст в первый час после сведения — просьба к нему: «сделай голос громче».
         skleyka.talk(chat_id, text, {}, admin=admin)
+        return False
+    if not kind and ask and not otbor.URL.search(text) and skleyka.which(chat_id, text):
+        # Позже, пока трек жив, простой текст бывает и о нём, и о вкусе — переспрос кнопками.
+        # Ссылки не переспрашиваются: это трек, артист или плейлист, а не просьба к сведению.
         return False
     if kind == "proyavka" and body:
         kind, text = "", body
@@ -1590,6 +1595,14 @@ def handle_callback(query: dict, data: dict) -> None:
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
         skleyka.cancel(chat_id)
         otbor.callback(chat_id, user_id, subject, admin=admin)
+        return
+
+    if action == "sk" and subject == "q":
+        # «🔍 Разбор вкуса» под переспросом СВЕДЕНИЯ: текст идёт туда же, куда шёл до переспроса.
+        telegram.edit_markup(chat_id, query.get("message", {}).get("message_id"), None)
+        if text := skleyka.asked(chat_id):
+            handle_message({"chat": {"id": chat_id, "type": "private"}, "from": query.get("from", {}), "text": text},
+                           data, ask=False)
         return
 
     if action in ("skleyka", "sk"):
@@ -1989,6 +2002,25 @@ def _selftest() -> None:
             skleyka.start, skleyka.invited = real_sk
         assert invited[-1] == ("55501", "ab12cd34") and "ab12cd34" not in SOURCES_FILE.read_text()
         assert state.read_json(SOURCES_FILE, {})[_today()]["skleyka_ref"] == 1
+        # Переспрос СВЕДЕНИЯ (skleyka.which): простой текст при живом треке — вопрос, а не разбор;
+        # «🔍 Разбор вкуса» ведёт тот же текст прежним путём и второй раз не переспрашивает.
+        whiches, taken = [], []
+        real_ask = (skleyka.which, skleyka.asked, globals()["analyse"], globals()["_deliver"],
+                    telegram.send_chat_action, telegram.edit_markup)
+        skleyka.which = lambda chat, text: whiches.append(text) or True
+        skleyka.asked = lambda chat: "Баста"
+        globals()["analyse"] = lambda kind, body: taken.append((kind, body)) or ("разбор", None)
+        globals()["_deliver"] = lambda *a, **kw: True
+        telegram.send_chat_action = telegram.edit_markup = lambda *a, **kw: None
+        try:
+            handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "message_id": 300,
+                            "date": 30000, "text": "сделай голос громче"}, {})
+            handle_callback({"id": "q", "data": skleyka.WHICH_KEYS[0][1]["callback_data"],
+                             "message": {"chat": {"id": 55501}, "message_id": 5}, "from": {"id": 77701}}, {})
+        finally:
+            (skleyka.which, skleyka.asked, globals()["analyse"], globals()["_deliver"],
+             telegram.send_chat_action, telegram.edit_markup) = real_ask
+        assert whiches == ["сделай голос громче"] and taken == [(guess_kind("Баста"), "Баста")], (whiches, taken)
     finally:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
@@ -1996,7 +2028,7 @@ def _selftest() -> None:
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню шесть разделов; "
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал; "
-          "skleyka_r<код> — метка skleyka_ref, код в приглашение")
+          "skleyka_r<код> — метка skleyka_ref, код в приглашение; переспрос СВЕДЕНИЯ: «разбор вкуса» — прежним путём")
 
 
 # ─────────────────────────── командная строка ───────────────────────────
