@@ -2795,8 +2795,14 @@ STORY_ACCENT, STORY_GREY, STORY_AHEAD = (255, 181, 71), (220, 220, 220), (90, 90
 # Полоски спектра слева (низ) направо: малиновый, к верхам — янтарь и жёлтый.
 STORY_HUES = ((0.0, (255, 46, 99)), (0.5, (255, 138, 61)), (1.0, (255, 214, 90)))
 STORY_VIZ_Y, STORY_VIZ_HALF, STORY_WAVE = 1100, 330, 130  # центр графики, полвысоты спектра ПОСЛЕ и волны ДО
-STORY_BARS, STORY_MORPH, STORY_MEMO = 40, 0.4, 1.6  # полосок; перетекание, с; окно волны ДО вокруг «сейчас», с
+STORY_BARS, STORY_BACK, STORY_MEMO = 40, 0.6, 1.6  # полосок; перетекание обратно в ПОСЛЕ, с; окно волны ДО, с
 STORY_COUNT_Y = 1350  # отсчёт до ПОСЛЕ — под волной ДО, выше SAFE_BOTTOM
+# Волна ДО въезжает в спектр лентой на кассе: сыгранное выходит из середины и едет влево, дойдя
+# до края — несыгранное въезжает справа и доезжает до середины; спектр, куда лента не дошла, стоит
+# (владелец 30.09.2026: смена разом — это смена кадра, а не превращение). Обратно в ПОСЛЕ — вся
+# волна разом с «1»: вспыхивает, растёт до спектра и остывает в цвет.
+STORY_BELT, STORY_EDGE = 0.8, 0.08  # лента заполняет ширину, с (быстрее самой волны); мягкость края, с
+STORY_FADE = 0.25  # надписи и цифры отсчёта перетекают, а не сменяются, с
 
 def _frame(items: list, ground: tuple = (0, 0, 0, 0)):
     """Надписи кадром 1080×1920 шрифтом роликов канала — (текст, кегль, центр по y, цвет, вес).
@@ -2865,7 +2871,7 @@ def _ease(x: float) -> float:
 
 def _story_frames(sound: Path, pictures: list[Path], do0: float, do1: float, total: float, fps: int):
     """Кадры RGB ролика под концовкой: фон с ореолом, полоски, надпись ПОСЛЕ или ДО и отсчёт.
-    m — насколько кадр ПОСЛЕ: 1 — спектр в цвете, 0 — серая волна; между ними полоски перетекают."""
+    m — насколько полоска в ПОСЛЕ: 1 — спектр в цвете, 0 — серая волна; между ними перетекает."""
     from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
     spectrum, envelope = _story_levels(sound, fps)
@@ -2884,7 +2890,11 @@ def _story_frames(sound: Path, pictures: list[Path], do0: float, do1: float, tot
         (a, ca), (b, cb) = next((s, STORY_HUES[k + 1]) for k, s in enumerate(STORY_HUES[:-1]) if f <= STORY_HUES[k + 1][0])
         hues.append(tuple(ca[c] + (cb[c] - ca[c]) * (f - a) / (b - a) for c in range(3)))
     top = 200  # полоса надписей — от адреса бота до «Как записал»
-    words = [Image.open(path).convert("RGBA").crop((0, top, width, 800)) for path in pictures[:2]]
+    # Адрес бота в обоих кадрах один — он стоит, перетекают только надписи под ним.
+    split = 362
+    shown = [Image.open(path).convert("RGBA") for path in pictures[:2]]
+    handle = shown[0].crop((0, top, width, split))
+    words = [image.crop((0, split, width, 800)) for image in shown]
     base = Image.new("RGB", (width, clips.HEIGHT), reels.PLATE_BG)
     # Ореол за спектром — мягкий овал цвета середины спектра, дышит с громкостью; в ДО гаснет.
     halo_box = (0, STORY_VIZ_Y - 650, width, STORY_VIZ_Y + 650)
@@ -2899,44 +2909,62 @@ def _story_frames(sound: Path, pictures: list[Path], do0: float, do1: float, tot
         digits[k] = image.crop(image.getbbox())
     count = (do1 - do0) / 3
     level = [0.0] * STORY_BARS
+    # Когда полоска становится волной ДО: сперва от середины влево, потом от правого края к середине.
+    centre = STORY_BARS // 2
+    lane = STORY_BELT / STORY_BARS
+    lags = [(centre - i - 0.5) * lane if i < centre else STORY_BELT / 2 + (STORY_BARS - i - 0.5) * lane
+            for i in range(STORY_BARS)]
     for f in range(math.ceil(total * fps)):
         t = f / fps
-        m = 1 - _ease((t - do0) / STORY_MORPH + 0.5) + _ease((t - do1) / STORY_MORPH + 0.5)
+        into = [_ease((t - do0 - lag) / STORY_EDGE + 0.5) for lag in lags]
+        back = _ease((t - do1) / STORY_BACK)
+        ms = [1 - v + back for v in into]
+        flash = 4 * back * (1 - back)  # вспышка обратного перехода
         # Спектр подскакивает сразу, а опадает плавно — иначе полоски дрожат.
         level = [r if r > old else old + (r - old) * 0.25
                  for r, old in zip(spectrum[f] if f < len(spectrum) else [0.0] * STORY_BARS, level)]
         at = (t - STORY_MEMO / 2) / step
         first, frac = math.floor(at), at - math.floor(at)
-        half = STORY_WAVE + (STORY_VIZ_HALF - STORY_WAVE) * m
-        band = Image.new("RGBA", (width, band_h))
-        draw = ImageDraw.Draw(band)
+        band, lit = Image.new("RGBA", (width, band_h)), Image.new("RGB", (width, band_h))
+        draw, glow_draw = ImageDraw.Draw(band), ImageDraw.Draw(lit)
         for i in range(STORY_BARS):
+            m = ms[i]
+            half = STORY_WAVE + (STORY_VIZ_HALF - STORY_WAVE) * m
             wave = memo[first + i] if 0 <= first + i < len(memo) else 0.0
             x = side + (i + 0.5 - frac * (1 - m)) * pitch  # волна ДО бежит влево, спектр стоит
             grey = STORY_GREY if x <= width / 2 else STORY_AHEAD
-            color = tuple(round(g + (h - g) * m) for g, h in zip(grey, hues[i]))
+            color = tuple(round(c + (255 - c) * flash) for c in (g + (h - g) * m for g, h in zip(grey, hues[i])))
             h = max(thick / 2, (wave + (level[i] - wave) * m) * half)
-            draw.rounded_rectangle((x - thick / 2, mid - h, x + thick / 2, mid + h), radius=thick / 2, fill=color)
+            box = (x - thick / 2, mid - h, x + thick / 2, mid + h)
+            draw.rounded_rectangle(box, radius=thick / 2, fill=color)
+            shine = min(1.0, m + flash)  # свечение — у цветных полосок и у вспышки, у волны ДО его нет
+            if shine > 0.01:
+                glow_draw.rounded_rectangle(box, radius=thick / 2, fill=tuple(round(c * shine) for c in color))
         frame = base.copy()
-        if m > 0.01:
+        m = sum(ms) / STORY_BARS
+        if m > 0.01 or flash > 0.01:
             bright = m * (0.1 + 0.35 * sum(level) / STORY_BARS)
             frame.paste(ImageChops.screen(frame.crop(halo_box), halo.point(lambda v: round(v * bright))), halo_box)
-            glow = (band.convert("RGB").reduce(4).filter(ImageFilter.GaussianBlur(4)).resize(band.size, Image.BILINEAR)
-                    .point(lambda v: round(v * 0.9 * m)))
+            glow = (lit.reduce(4).filter(ImageFilter.GaussianBlur(4)).resize(band.size, Image.BILINEAR)
+                    .point(lambda v: round(v * 0.9)))
             frame.paste(ImageChops.screen(frame.crop(band_box), glow), band_box)
         frame.paste(band, band_box[:2], band)
-        raw_on = do0 <= t < do1
-        frame.paste(words[raw_on], (0, top), words[raw_on])
-        if raw_on:
-            k = 3 - min(2, int((t - do0) / count))
-            local = t - do0 - (3 - k) * count
+        frame.paste(handle, (0, top), handle)
+        raw = _ease((t - do0) / STORY_FADE) - _ease((t - do1) / STORY_FADE)
+        for image, share in zip(words, (1 - raw, raw)):
+            if share > 0.01:
+                frame.paste(image, (0, split), image.getchannel("A").point(lambda v, a=share: round(v * a)))
+        for k in (3, 2, 1):  # уходящая цифра тает и мельчает, пока следующая проступает и садится на место
+            begin = do0 + (3 - k) * count
+            a = min(_ease((t - begin) / STORY_FADE), 1 - _ease((t - begin - count) / STORY_FADE))
+            if a <= 0.01:
+                continue
             digit = digits[k]
-            grow = 1 + 0.35 * max(0.0, 1 - local / 0.15) ** 2  # цифра впрыгивает на свою долю
-            if grow > 1:
+            grow = 1 + 0.12 * (1 - _ease((t - begin) / (2 * STORY_FADE))) - 0.1 * _ease((t - begin - count) / STORY_FADE)
+            if abs(grow - 1) > 0.005:
                 digit = digit.resize((round(digit.width * grow), round(digit.height * grow)), Image.BILINEAR)
-            shown = min(1.0, local / 0.08, (do1 - t) / 0.15)
             frame.paste(digit, (round((width - digit.width) / 2), round(STORY_COUNT_Y - digit.height / 2)),
-                        digit.getchannel("A").point(lambda v: round(v * shown)))
+                        digit.getchannel("A").point(lambda v, a=a: round(v * a)))
         yield frame.tobytes()
 
 def story_cuts(length: float) -> tuple[float, float, float]:
