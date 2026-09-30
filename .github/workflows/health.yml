@@ -44,3 +44,8 @@ jobs:
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: python -m src.skleyka --talk-check
+
+      # Дорожки ссылкой на облако (src/oblako.py) качает дежурство с адресов GitHub, и отвечают ли
+      # ему облака, видно только отсюда. Адреса заведомо пустые: ни чужих ссылок, ни имён в журнале.
+      - name: Проверить, отвечают ли облака
+        run: python -m src.oblako --probe

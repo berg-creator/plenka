@@ -84,6 +84,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ffmpeg x42-plugins
 
+      # 7z распаковывает архивы дорожек по ссылке на облако (src/oblako.py): zip бот открывает
+      # сам, а 7z и rar — только им. rar — отдельный пакет из multiverse; не встал — rar-архиву
+      # честный отказ, остальное работает.
+      - name: Поставить 7z
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y --no-install-recommends 7zip 7zip-rar \
+            || sudo apt-get install -y --no-install-recommends 7zip
+          (command -v 7zz || command -v 7z) && (7zz i 2>/dev/null || 7z i) | grep -c -i rar || true
+
       - name: Представиться для коммитов
         run: |
           git config user.name "plenka-bot"

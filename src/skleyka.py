@@ -95,10 +95,11 @@ import tempfile
 import urllib.parse
 import urllib.request
 import wave
+import zipfile
 from datetime import timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from . import clips, config, llm, reels, state, telegram
+from . import clips, config, llm, oblako, reels, state, telegram
 from .sources import itunes
 
 RATE = 44100
@@ -1589,6 +1590,9 @@ SILENT = "В «{name}» тишина — похоже, выгрузилась п
 BEAT_MINUTES = (1, 8)
 LENGTH = f"Бит длится {{length}}, а свожу треки от {BEAT_MINUTES[0]} до {BEAT_MINUTES[1]} минут. Другой — /svedenie."
 NEED = "Нужны и вокал, и бит, а {what}. Пришли все дорожки заново — /svedenie."
+FOUND = "\nПо ссылкам нашёл: {names}."
+LINK_MORE = "\n\nЕщё ссылки или файлы — присылай до выбора звука."
+LINK_LATE = "Дорожки ссылкой — в новую заявку: жми /svedenie и пришли ссылку снова."
 FAILED = ("Не вышло — что-то сломалось у меня. Попробуй ещё раз: /svedenie. Лимит на сутки не потрачен. "
           "Снова не вышло — напиши /vopros.")
 STALE = "Это сведение устарело — пришли дорожки заново: /svedenie."
@@ -1620,8 +1624,12 @@ QUIET = 2
 DRAFT_MINUTES = 30
 # Срок — в первом же вопросе о дорожке: до 30.09.2026 о нём узнавали только из EXPIRED.
 WAIT = f" Жду их {DRAFT_MINUTES} минут — потом заявка закроется."
+# Ссылкой на облако — для тех, кому гигабайт стемов на телефон не скачать (src/oblako.py).
+BY_LINK = "\nМожно и ссылкой на Яндекс Диск, Dropbox или файл Google Диска — папкой или архивом, файлы по ролям: vocal, beat, adlib, bass."
 # Сколько минут занимает сведение на машине дежурства: скачать, свести, отправить.
 MINUTES = 4
+# Ссылка на облако — ещё столько: скачать до гигабайта стемов и распаковать архив.
+LINK_MINUTES = 3
 # Сведение, оборванное концом смены, следующая доделывает, если ему меньше часа;
 # сведение, что идёт дольше JOB_MINUTES, дежурство снимает.
 RESUME_MINUTES = 60
@@ -1658,6 +1666,8 @@ HELP = ("❓ <b>Как это работает</b>\n\n"
         f"• Бит — от {BEAT_MINUTES[0]} до {BEAT_MINUTES[1]} минут. Дорожки жду {DRAFT_MINUTES} минут.\n"
         f"• Треков в сутки — {config.SKLEYKA_PER_DAY}, пересборок на трек — {config.SKLEYKA_TWEAKS}. "
         f"Кнопки и слова под треком работают {TRACK_DAYS} дней.\n"
+        "• Можно ссылкой на Яндекс Диск, Dropbox или файл Google Диска — папкой или архивом (zip, 7z). "
+        "Назови файлы по ролям: vocal, beat, adlib, bass, kick…\n"
         "• Спроси словами, почему трек звучит так, — объясню.\n"
         "• Что-то сломалось или другой вопрос, в том числе об оплате, — /vopros.\n\n"
         "Как пришлёшь?")
@@ -1684,13 +1694,15 @@ ROLES = (
     ("дабл", ("дабл", "double", "dbl", "dub")),
     ("бэк", ("бэк", "бек", "back", "bgv", "bvox", "harm", "гармон", "хор", "подпев")),
     ("барабаны", ("drum", "барабан", "kick", "бочк", "snare", "снейр", "снэр", "clap", "hat", "hihat", "хэт", "хет",
-                  "perc", "перкус")),
+                  "perc", "перкус", "crash", "cymbal", "тарел", "shaker", "шейкер", "tamb")),
     ("бас", ("808", "bass", "бас", "sub", "саб")),
     ("музыка", ("melod", "мелод", "keys", "piano", "пиан", "synth", "синт", "pad", "пэд", "guitar", "гитар", "sample",
-                "сэмпл", "семпл", "string", "loop", "луп", "chord", "аккорд", "music", "музык")),
+                "сэмпл", "семпл", "string", "loop", "луп", "chord", "аккорд", "accord", "accrd", "brass", "horn",
+                "music", "музык")),
     ("вокал", ("вокал", "vocal", "vox", "voc", "acapella", "acappella", "a cappella", "акапел", "голос", "lead",
-               "лид", "rap", "рэп", "реп")),
-    ("бит", ("бит", "beat", "минус", "instr", "инстр", "karaoke", "караоке")),
+               "лид", "rap", "рэп", "реп", "основ", "main")),
+    # master, mix, full — сведённый бит рядом со стемами: его не берут (_stems).
+    ("бит", ("бит", "beat", "минус", "instr", "инстр", "karaoke", "караоке", "master", "mix", "full")),
 )
 VOCAL_SIDE = ("вокал", "дабл", "бэк", "эдлиб")
 AUDIO_EXT = (".wav", ".wave", ".flac", ".mp3", ".m4a", ".aac", ".aif", ".aiff", ".ogg", ".opus", ".mp4")
@@ -1710,13 +1722,14 @@ def _low(path: Path) -> float:
     return _channels(path, f"{mono}lowpass=f=120,lowpass=f=120,")[0] - _channels(path, mono)[0]
 
 
-def sides(files: list[tuple[str, Path]], swap: bool = False) -> tuple[list[tuple[str, Path, str]], bool]:
+def sides(files: list[tuple[str, Path]], swap: bool = False, preset: list[str] = ()) -> tuple[list[tuple[str, Path, str]], bool]:
     """Роль каждой дорожки: (имя, путь, роль), и понят ли вокал по звуку, а не по имени.
 
     Имя не сказало — решает низ: из безымянных вокал та, где его меньше всего, а если
     вокал назван, безымянные уходят в бит. swap меняет вокал и бит местами — кнопка
-    «поменять», когда их всего две."""
-    parts = [(name, path, role(name)) for name, path in files]
+    «поменять», когда их всего две. preset — роли, уже известные по шагу заявки или соседям
+    по ссылке (_neighbors); пустая — по имени."""
+    parts = [(name, path, (preset[n] if n < len(preset) else "") or role(name)) for n, (name, path) in enumerate(files)]
     guessed = False
     unknown = [n for n, (*_, part) in enumerate(parts) if not part]
     if unknown:
@@ -1974,15 +1987,16 @@ def _ask(chat_id: str, draft: dict) -> None:
     what = "лид-вокал — главный голос" if part == "вокал" and len(plan) > 2 else ASKS[part]
     telegram.send_message(chat_id, f"<b>Шаг {step + 1} из {len(plan)}</b> {ASK_MARK} {what}"
                           + ("; можно несколькими файлами" if part in MULTI else "") + "."
-                          + (FROM_START + WAIT if step == 0 else ""),
+                          + (FROM_START + WAIT + BY_LINK if step == 0 else ""),
                           buttons=[*([[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]]
                                      if part in MULTI else []), [BACK]])
     draft["asked"], draft["acked"] = step, len(draft["files"])
 
 
 def _got(draft: dict) -> str:
-    """Всё принятое с ролями: человек видит, куда бот поставил каждый файл."""
-    return _what([(f["n"], f["r"]) for f in draft["files"]])
+    """Всё принятое с ролями: человек видит, куда бот поставил каждый файл, и что увидел по ссылкам."""
+    seen = "; ".join(link["say"] for link in draft.get("links", []))
+    return ", ".join(filter(None, (_what([(f["n"], f["r"]) for f in draft["files"]]), seen and f"по ссылкам: {seen}")))
 
 
 def _checklist(pick: list[str]) -> list[list[dict]]:
@@ -2044,14 +2058,17 @@ def take(message: dict) -> None:
         draft.update(plan=draft.get("pick") or ["вокал", "бит"], step=0, asked=0)
         if draft.get("menu"):
             telegram.edit_markup(chat_id, draft["menu"], None)
-    if draft["step"] >= len(draft["plan"]) or len(draft["files"]) >= MAX_PARTS \
+    if draft["step"] >= len(draft["plan"]) and not draft.get("links") or len(draft["files"]) >= MAX_PARTS \
             or any(known["m"] == item["m"] for known in draft["files"]):
         return
     plan, named = draft["plan"], role(item["n"])
-    part = named if named in plan and (named in MULTI or all(f["r"] != named for f in draft["files"])) \
-        else plan[draft["step"]]
+    if draft["step"] >= len(plan):
+        part = named  # шаги кончились на ссылке: роль — по имени, безымянное решит звук (sides)
+    else:
+        part = named if named in plan and (named in MULTI or all(f["r"] != named for f in draft["files"])) \
+            else plan[draft["step"]]
     draft["files"].append(dict(item, r=part))
-    if part == plan[draft["step"]] and part not in MULTI:
+    if draft["step"] < len(plan) and part == plan[draft["step"]] and part not in MULTI:
         draft["step"] += 1
     draft["at"] = state.iso()
     save(data)
@@ -2062,7 +2079,10 @@ def _what(parts: list[tuple[str, str]]) -> str:
     groups: dict[str, list[str]] = {}
     for name, part in parts:
         groups.setdefault(part, []).append(f"«{name}»")
-    return ", ".join(f"{NAMES[part]} {' и '.join(groups[part])}" for part in ORDER if part in groups)
+    # Больше трёх файлов роли — числом: папка по ссылке несёт их десятками, а подпись к треку — 1024 знака,
+    # и строки после списка (сдвиг голоса, дроп) обрезались бы.
+    return ", ".join(f"{NAMES[part]} " + (f"({len(groups[part])})" if len(groups[part]) > 3 else " и ".join(groups[part]))
+                     for part in ORDER if part in groups)
 
 
 def _enqueue(data: dict, track: str, knobs: dict, tweak: bool = False, wish: str = "", answer: bool = False) -> int:
@@ -2071,7 +2091,7 @@ def _enqueue(data: dict, track: str, knobs: dict, tweak: bool = False, wish: str
     answer — пересборки кончились: только ответ словами, без сборки и без счёта пересборок."""
     data["jobs"].append({"id": secrets.token_hex(3), "track": track, "knobs": knobs, "at": state.iso(), "tweak": tweak,
                          **({"wish": wish} if wish else {}), **({"answer": True} if answer else {})})
-    return MINUTES * len(data["jobs"])
+    return MINUTES * len(data["jobs"]) + (0 if answer else LINK_MINUTES * len(data["tracks"][track].get("links", [])))
 
 
 def _queue(data: dict, chat_id: str, draft: dict) -> None:
@@ -2080,7 +2100,8 @@ def _queue(data: dict, chat_id: str, draft: dict) -> None:
     knobs = draft.get("knobs") or dict(KNOBS)
     data["tracks"][track] = {"chat": chat_id, "admin": draft.get("admin", False), "files": files,
                              "knobs": knobs, "tweaks": 0, "at": state.iso(),
-                             **({"wish": draft["wish"]} if draft.get("wish") else {})}
+                             **({"wish": draft["wish"]} if draft.get("wish") else {}),
+                             **({"links": draft["links"]} if draft.get("links") else {})}
     recent, base, bonus = _allowance(data, chat_id)
     if len(recent) >= base and bonus:
         # Сверх лимита — тратится бонус, ближайший к сгоранию; не вышло — вернётся (_finish).
@@ -2089,7 +2110,7 @@ def _queue(data: dict, chat_id: str, draft: dict) -> None:
     data["used"].setdefault(chat_id, []).append(state.iso())
     del data["drafts"][chat_id]
     minutes = _enqueue(data, track, dict(knobs))
-    telegram.send_message(chat_id, ACCEPTED.format(parts=_what([(f["n"], f["r"]) for f in files]), minutes=minutes))
+    telegram.send_message(chat_id, ACCEPTED.format(parts=_got(draft), minutes=minutes))
 
 
 def _drafts(data: dict) -> bool:
@@ -2601,10 +2622,17 @@ def wish(chat_id: str | int, text: str) -> bool:
     где поправить. Ни заявки, ни трека в очереди — текст не о треке (False), он идёт в разборы."""
     chat_id, data = str(chat_id), load()
     job = next((job for job in data["jobs"] if data["tracks"].get(job["track"], {}).get("chat") == chat_id), None)
-    if draft := _draft(data, chat_id):
+    found = oblako.links(text)
+    if (draft := _draft(data, chat_id)) and found:
+        _links(data, chat_id, draft, found)
+        return True
+    if draft:
         draft["at"] = state.iso()  # человек пишет — вопрос о звуке не закрывается сам (STYLE_WAIT)
     elif not job:
         return False
+    elif found:
+        telegram.send_message(chat_id, LINK_LATE)
+        return True
     elif job.get("started") or job.get("tweak"):
         telegram.send_message(chat_id, WISH_LATE)
         return True
@@ -2614,6 +2642,31 @@ def wish(chat_id: str | int, text: str) -> bool:
     save(data)
     telegram.send_message(chat_id, WISHED)
     return True
+
+
+def _links(data: dict, chat_id: str, draft: dict, found: list[str]) -> None:
+    """Ссылки на облако при открытой заявке — дорожки, а не просьба: до 30.09.2026 бот отвечал
+    на них «Записал — учту при сведении», не получив ни одной дорожки. Что по ссылке, человек
+    видит сразу (oblako.look), качает только сведение. Ссылок бывает несколько — копятся;
+    шаги по одной дорожке на этом кончаются, дальше — вопрос о звуке."""
+    said = []
+    for url in found:
+        try:
+            seen = oblako.look(url)
+        except oblako.Refused as exc:
+            said.append(str(exc))
+            continue
+        if all(link["u"] != url for link in draft.setdefault("links", [])):
+            draft["links"].append({"u": url, "say": seen})
+        said.append(f"🔗 {seen[:1].upper()}{seen[1:]}.")
+    if draft.get("links") and (draft["plan"] is None or draft["step"] < len(draft["plan"])):
+        if draft["plan"] is None and draft.get("menu"):
+            telegram.edit_markup(chat_id, draft["menu"], None)
+        plan = draft["plan"] or draft.get("pick") or ["вокал", "бит"]
+        draft.update(plan=plan, step=len(plan))
+    draft["at"] = state.iso()
+    save(data)
+    telegram.send_message(chat_id, "\n".join(said) + (LINK_MORE if draft.get("links") else ""))
 
 
 def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> None:
@@ -2687,7 +2740,8 @@ def _spawn(data: dict, job: dict) -> tuple[subprocess.Popen, dict, Path]:
     spec = {"job": job["id"], "track": job["track"], "chat": track["chat"], "files": track["files"],
             "knobs": job["knobs"], "left": None if track.get("admin") else config.SKLEYKA_TWEAKS - track["tweaks"],
             "wish": job.get("wish") or (None if job.get("tweak") else track.get("wish")), "talk": "wish" in job,
-            "agreed": "agreed" in track, **({"answer": True, "timing": track.get("timing")} if job.get("answer") else {})}
+            "agreed": "agreed" in track, "links": track.get("links", []),
+            **({"answer": True, "timing": track.get("timing")} if job.get("answer") else {})}
     (work / "job.json").write_text(json.dumps(spec, ensure_ascii=False))
     job["started"] = state.iso()
     print(f"  сведение {job['id']}: пошло, в очереди ещё {len(data['jobs']) - 1}")
@@ -2819,15 +2873,139 @@ def _fetch(spec: dict, folder: Path, service) -> list[tuple[str, Path]]:
     return files
 
 
-def _roles(items: list[dict], files: list[tuple[str, Path]], swap: bool) -> tuple[list[tuple[str, Path, str]], bool]:
+def _roles(items: list[dict], files: list[tuple[str, Path]], swap: bool,
+           linked: list[tuple[str, Path, str]] = ()) -> tuple[list[tuple[str, Path, str]], bool]:
     """Роль дорожки — шаг, на который она пришла. Вокал и бит одним альбомом — по имени
     и звуку (sides): порядок в альбоме тот, в каком человек отметил файлы, ему верить нельзя.
-    Второе — понята ли роль по звуку: тогда под треком кнопка «поменять»."""
+    Второе — понята ли роль по звуку: тогда под треком кнопка «поменять».
+    linked — файлы по ссылкам на облако (имя, файл, папка): роли по имени и соседям."""
+    if linked:
+        preset = [item.get("r", "") for item in items] + _neighbors(linked)
+        parts, guessed = sides([*files, *((name, path) for name, path, _ in linked)], swap, preset)
+        return _stems(parts), guessed
     album = len(items) == 2 and items[0].get("g") and items[0].get("g") == items[1].get("g")
     if album or not all(item.get("r") for item in items):
         return sides(files, swap)
     parts = [(name, path, item["r"]) for (name, path), item in zip(files, items)]
     return parts, False
+
+
+def _neighbors(linked: list[tuple[str, Path, str]]) -> list[str]:
+    """Роли файлов по ссылке: по имени, а безымянное — по соседям из той же папки или архива:
+    среди голосов — бэк, среди стемов бита — музыка. Иначе безымянный шейкер из папки стемов
+    звук принял бы за голос: низа в нём меньше всего (sides)."""
+    named = [role(name) for name, _, _ in linked]
+    roles = []
+    for (_, _, group), part in zip(linked, named):
+        near = [other for (_, _, where), other in zip(linked, named) if where == group and other]
+        voices = sum(other in VOCAL_SIDE for other in near)
+        roles.append(part or ("" if not near else "бэк" if voices > len(near) - voices else "музыка"))
+    return roles
+
+
+def _stems(parts: list[tuple[str, Path, str]]) -> list[tuple[str, Path, str]]:
+    """Стемы бита пришли по отдельности — сведённый бит рядом (master, «бит») не берётся:
+    он зазвучал бы дважды. Безымянное, что sides отнёс к биту, — к стемам, «музыка»."""
+    if not any(part in INSTRUMENTS for *_, part in parts):
+        return parts
+    return [(name, path, "музыка" if part == "бит" else part) for name, path, part in parts
+            if part != "бит" or role(name) != "бит"]
+
+
+def _groups(parts: list[tuple[str, Path, str]], work: Path) -> list[tuple[str, Path, str]]:
+    """Дорожек больше MAX_PARTS — стемы бита складываются по ролям в три: барабаны, бас, музыка,
+    каждый с уровнем, как его выгрузил артист. Сведение всё равно делит бит только так (mix),
+    а девятнадцать входов ffmpeg прошёл бы в каждом замере. Голоса остаются по одному:
+    у каждого своя панорама (voices)."""
+    if len(parts) <= MAX_PARTS:
+        return parts
+    kept = [item for item in parts if item[2] not in INSTRUMENTS]
+    for group in INSTRUMENTS:
+        paths = [path for _, path, part in parts if part == group]
+        if len(paths) > 1:
+            kept.append((f"стемов: {len(paths)}", _sum([(path, 0.0) for path in paths], work / f"group-{group}.wav", FORMAT), group))
+        elif paths:
+            kept += [item for item in parts if item[2] == group]
+    print(f"  дорожек {len(parts)}: стемы бита сложены по ролям, осталось {len(kept)}")
+    return kept
+
+
+# Бит из проекта артиста рядом со стемами битмейкера: сам он не звучит (_stems), но по нему видно,
+# где бит стоял в проекте, из которого выгружен голос. 30.09.2026 в первой такой заявке бит
+# в проекте артиста начинался после 6,1 с тишины, а стемы — с нуля: голос, выгруженный как надо,
+# с начала проекта, встал бы на 6 с позже. Сдвиг — по взаимной корреляции огибающих: грубо
+# шагом ALIGN_STEP в пределах ±ALIGN_RANGE, потом по 10 мс; слабое сходство — не трогаем.
+ALIGN_RANGE, ALIGN_STEP = 30.0, 5
+ALIGN_SURE, ALIGN_GAIN = 0.6, 0.2  # сходство не ниже и настолько лучше, чем без сдвига
+ALIGNED = "Голос выровнял по биту из твоего проекта: там бит начинался на {shift} {side}, чем в стемах.\n"
+
+
+def _similar(a: list[float], b: list[float], lag: int) -> float:
+    """Сходство огибающих при сдвиге: a[i] против b[i - lag], корреляция Пирсона."""
+    pairs = [(a[i], b[i - lag]) for i in range(max(0, lag), min(len(a), len(b) + lag))]
+    if len(pairs) < 100:
+        return -1.0
+    ma, mb = sum(x for x, _ in pairs) / len(pairs), sum(y for _, y in pairs) / len(pairs)
+    num = sum((x - ma) * (y - mb) for x, y in pairs)
+    den = math.sqrt(sum((x - ma) ** 2 for x, _ in pairs) * sum((y - mb) ** 2 for _, y in pairs))
+    return num / den if den else 0.0
+
+
+def offset(reference: Path, beat: Path) -> float:
+    """На сколько секунд бит в reference позже, чем в beat; не уверены — 0."""
+    a, b = ([max(level, -60.0) for level in _envelope(path)] for path in (reference, beat))
+    coarse = [[max(x[i:i + ALIGN_STEP]) for i in range(0, len(x), ALIGN_STEP)] for x in (a, b)]
+    span = int(ALIGN_RANGE * ENV_RATE / ALIGN_STEP)
+    rough = max(range(-span, span + 1), key=lambda lag: _similar(*coarse, lag)) * ALIGN_STEP
+    lag = max(range(rough - ALIGN_STEP, rough + ALIGN_STEP + 1), key=lambda lag: _similar(a, b, lag))
+    sure, still = _similar(a, b, lag), _similar(a, b, 0)
+    print(f"  бит проекта к стемам: {lag / ENV_RATE:+.2f} с, сходство {sure:.2f} против {still:.2f} без сдвига")
+    return lag / ENV_RATE if sure >= ALIGN_SURE and sure - still >= ALIGN_GAIN and abs(lag) >= 5 else 0.0
+
+
+def _reference(parts: list[tuple[str, Path, str]], linked: list[tuple[str, Path, str]]) -> Path | None:
+    """Бит, выгруженный вместе с голосом: не взят в сведение и лежит в одной папке с ведущим."""
+    kept = {path for _, path, _ in parts}
+    lead = {group for _, path, group in linked if path in {p for _, p, part in parts if part == "вокал"}}
+    return next((path for name, path, group in linked if path not in kept and group in lead and role(name) == "бит"), None)
+
+
+def _linked(spec: dict, work: Path) -> list[tuple[str, Path, str]]:
+    """Файлы по ссылкам заявки: (имя файла, файл, папка) — папка с номером ссылки, чтобы соседи
+    из разных ссылок не смешались. Имена — только человеку и в роли, в журнал не пишутся."""
+    budget, found = oblako.Budget(), []
+    for n, link in enumerate(spec.get("links", [])):
+        found += [(PurePosixPath(name).name, path, f"{n}:{PurePosixPath(name).parent}")
+                  for name, path in oblako.fetch(link["u"], work / f"link{n}", budget)]
+    return found
+
+
+def link_check(url: str) -> int:
+    """Сухой прогон ссылки: что бот ответит, какие файлы увидит и какие роли раздаст по именам —
+    без скачивания звука. Имена печатаются: это для владельца на своей машине, не для Actions."""
+    try:
+        print(f"Бот ответит: {oblako.look(url)}")
+        entries = oblako.listing(url)
+    except oblako.Refused as exc:
+        print(f"Отказ: {exc}")
+        return 1
+    if not entries:
+        print("Список без скачивания есть только у Яндекса — здесь состав будет виден при сведении.")
+        return 0
+    sounds = [entry for entry in entries if PurePosixPath(entry["name"]).suffix.lower() in oblako.AUDIO]
+    linked = [(PurePosixPath(e["name"]).name, Path(str(n)), str(PurePosixPath(e["name"]).parent))
+              for n, e in enumerate(sounds)]
+    kept = {path for _, path, _ in _stems([(name, path, part or "бит") for (name, path, _), part
+                                             in zip(linked, _neighbors(linked))])}
+    for (name, path, _), part, entry in zip(linked, _neighbors(linked), sounds):
+        why = "" if path in kept else " — не возьму: сведённый бит рядом со стемами"
+        print(f"  {part or 'по звуку':9} {entry['size'] / 2**20:6.1f} МБ  {entry['name']}{why}")
+    for entry in entries:
+        if PurePosixPath(entry["name"]).suffix.lower() in oblako.ARCHIVES:
+            print(f"  {'архив':9} {entry['size'] / 2**20:6.1f} МБ  {entry['name']} — состав при распаковке")
+    print(f"Звуковых файлов: {len(sounds)}, возьму {len(kept)}"
+          + (f"; больше {MAX_PARTS} — стемы бита сложатся по ролям" if len(kept) > MAX_PARTS else ""))
+    return 0
 
 
 def run_job(spec_path: Path) -> int:
@@ -2847,14 +3025,27 @@ def run_job(spec_path: Path) -> int:
     try:
         with contextlib.ExitStack() as login:
             service = _service(login)
-            files = _fetch(spec, work / "in", service)
-            parts, guessed = _roles(spec["files"], files, knobs.get("swap", False))
+            files, linked = _fetch(spec, work / "in", service), _linked(spec, work)
+            parts, guessed = _roles(spec["files"], files, knobs.get("swap", False), linked)
+            reference = _reference(parts, linked)
+            parts = _groups(parts, work)
             refusal, note = check(parts)
             if refusal:
+                if spec.get("links"):
+                    names = [name for name, _, _ in linked]
+                    refusal += FOUND.format(names=", ".join(f"«{html.escape(name)}»" for name in names[:20])
+                                            + (f" и ещё {len(names) - 20}" if len(names) > 20 else "")
+                                            if names else "ни одного звукового файла")
                 telegram.send_message(chat, refusal)
                 result["why"] = "отказ"
                 return 0
             vocal, beat = _bus(parts, True, work / "vocal.wav"), _bus(parts, False, work / "beat.wav")
+            if shift := reference and offset(reference, beat):
+                parts = [(name, _moved(path, -shift, work / f"aligned{n}.wav") if part in VOCAL_SIDE else path, part)
+                         for n, (name, path, part) in enumerate(parts)]
+                vocal = _bus(parts, True, work / "vocal.wav")
+                # Длины после сдвига и так разные — «выгрузи с начала проекта» тут неправда.
+                note = ALIGNED.format(shift=f"{abs(shift):.1f} с".replace(".", ","), side="позже" if shift > 0 else "раньше")
             rhythm = grid(beat)
             timing = {"sent": first_word(vocal), "drops": drops(beat, rhythm), "beat": round(rhythm[0], 3),
                       "length": round(clips.probe_seconds(beat), 1)}
@@ -2912,6 +3103,9 @@ def run_job(spec_path: Path) -> int:
                     result["keyed"] = _offer(spec, clip, rhythm, timing, voice)
                 except Exception as exc:  # noqa: BLE001 — трек уже у человека
                     print(f"  сведение {spec['job']}: кнопка приложения не ушла: {type(exc).__name__}")
+    except oblako.Refused as exc:  # по ссылке нельзя взять — человеку отказ, лимит вернётся
+        telegram.send_message(chat, str(exc))
+        result["why"] = "отказ"
     except Exception as exc:  # noqa: BLE001 — человеку честный ответ, в журнал — без его данных
         print(f"  сведение {spec['job']}: сбой {type(exc).__name__}: {str(exc)[:200]}")
         telegram.send_message(chat, FAILED)
@@ -3357,7 +3551,7 @@ def _selftest() -> None:
         # «Вокал + бит»: вопрос за вопросом, роль — шаг, имена файлов не нужны; потом — звук.
         callback(7, 7, "m:1")
         assert sent[-1].startswith("<b>Шаг 1 из 2</b> · пришли вокал") and wants(file(3, "a.wav", reply=sent[-1]))
-        assert sent[-1].endswith(WAIT), "срок заявки — в первом вопросе о дорожке"
+        assert sent[-1].endswith(WAIT + BY_LINK), "срок заявки и ссылка — в первом вопросе о дорожке"
         take(file(3, "take 1.wav"))
         take(file(3, "take 1.wav"))  # повтор того же сообщения — дорожка одна
         later("7")
@@ -3774,12 +3968,74 @@ def _selftest() -> None:
         left, right = _scatter([(1.0, 1.5), (2.0, 2.3), (4.0, 4.2)])
         assert left[0][1] > right[0][1] and left[-1][1] > right[-1][1] and left[2][1] < right[2][1], (left, right)
         assert all(1.5 < t < 2.0 for t, _ in left[1:3]) and len(left) == len(right) == 5
+
+        # Ссылка на облако при открытой заявке — дорожки, а не просьба; облако без скачивания — отказ.
+        real_look = oblako.look
+        oblako.look = lambda url: "папка, 3 WAV" if "yandex" in url else real_look(url)
+        start(60, 60)
+        callback(60, 60, "m:1")
+        assert wish(60, "вот https://disk.yandex.ru/d/abc и https://cloud.mail.ru/public/x/y")
+        draft = load()["drafts"]["60"]
+        assert draft["links"] == [{"u": "https://disk.yandex.ru/d/abc", "say": "папка, 3 WAV"}] and "wish" not in draft \
+            and draft["step"] == len(draft["plan"]), draft
+        assert sent[-1] == f"🔗 Папка, 3 WAV.\n{oblako.REFUSE}{LINK_MORE}" and WISHED not in sent[-3:], sent[-1]
+        later("60")
+        assert sent[-1].startswith("Дорожки есть: по ссылкам: папка, 3 WAV. Какой звук?"), sent[-1]
+        callback(60, 60, "y:0")
+        data = load()
+        job = data["jobs"][-1]
+        assert data["tracks"][job["track"]]["links"] == draft["links"] and sent[-1].startswith("Принял: по ссылкам") \
+            and f"минут через {MINUTES * len(data['jobs']) + LINK_MINUTES}." in sent[-1], sent[-1]
+        del data["tracks"][job["track"]]
+        data["jobs"].pop()
+        data["used"]["60"].pop()
+        save(data)
+        oblako.look = real_look
+
+        # Стемы папкой с master и голоса zip-архивом: роли по именам и соседям, master и «бит»
+        # рядом со стемами не берутся, стемы сверх MAX_PARTS складываются в три группы.
+        tone = tmp / "tone.wav"
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=330:d=1", tone)
+        wav = tone.read_bytes()
+        stems = ("kick", "snare", "hat", "crash", "shaker", "bass", "sub", "piano", "brass", "fx", "master")
+        folder = {"type": "dir", "_embedded": {"total": len(stems), "items": [
+            {"type": "file", "name": f"track_{stem}.wav", "size": len(wav), "file": f"http://f/{stem}"} for stem in stems]}}
+        pack = tmp / "voices.zip"
+        with zipfile.ZipFile(pack, "w") as packed:
+            for name in ("Voices/основной голос.wav", "Voices/дабл.wav", "Voices/верх.wav", "Voices/бит.wav"):
+                packed.writestr(name, wav)
+        real_get = oblako._get
+        oblako._get = lambda url, **kw: (
+            oblako.Answer(data=folder) if url == oblako.YANDEX_API
+            else oblako.Answer(body=pack.read_bytes(), headers={"Content-Disposition": 'attachment; filename="voices.zip"'})
+            if "dropbox" in url else oblako.Answer(body=wav, headers={"Content-Length": str(len(wav))}))
+        try:
+            linked = _linked({"links": [{"u": "https://disk.yandex.ru/d/stems"},
+                                        {"u": "https://www.dropbox.com/scl/fo/a/b?rlkey=c&dl=0"}]}, tmp / "links")
+        finally:
+            oblako._get = real_get
+        parts, _ = _roles([], [], False, linked)
+        got = {name: part for name, _, part in parts}
+        assert got == {**{f"track_{stem}.wav": part for stem, part in zip(stems[:10], ["барабаны"] * 5 + ["бас"] * 2 + ["музыка"] * 3)},
+                       "основной голос.wav": "вокал", "дабл.wav": "дабл", "верх.wav": "бэк"}, got
+        grouped = _groups(parts, tmp / "links")
+        assert sorted((name, part) for name, _, part in grouped if part in INSTRUMENTS) == \
+            [("стемов: 2", "бас"), ("стемов: 3", "музыка"), ("стемов: 5", "барабаны")] and len(grouped) == 6, grouped
+        assert check(grouped)[0].startswith("Бит длится 0:01"), "сложенные стемы — обычные дорожки бита"
+        assert _reference(parts, linked) == next(path for name, path, _ in linked if name == "бит.wav"), \
+            "бит из проекта голоса — ориентир, master стемов — нет"
+        # Бит проекта начинается позже стемов — голос сдвигается на столько же; тот же бит — не трогается.
+        pattern = "0.5*sin(2*PI*60*t)*gt(sin(2*PI*1.7*t)+sin(2*PI*0.37*t),0.8)"
+        stems_sum, project = tmp / "stems-sum.wav", tmp / "project-beat.wav"
+        _ffmpeg("-f", "lavfi", "-i", f"aevalsrc='{pattern}':d=20", stems_sum)
+        _ffmpeg("-i", stems_sum, "-af", "adelay=2000:all=1", project)
+        assert abs(offset(project, stems_sum) - 2.0) <= 0.05 and offset(stems_sum, stems_sum) == 0.0
     finally:
         (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
          itunes.find_song, telegram._call) = real
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
-          "переспрос после часа, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
+          "переспрос после часа, ссылки на облако, стемы и master, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
           "реферал за трек и звёзды, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик — ок")
 
 
@@ -3818,6 +4074,8 @@ def main() -> int:
     parser.add_argument("--job", type=Path, metavar="ФАЙЛ", help="сведение заявки из бота (её запускает дежурство)")
     parser.add_argument("--selftest", action="store_true", help="роли, маршрут, заявка, ручки, лимиты — без сети")
     parser.add_argument("--dry-run", action="store_true", help="заявки и очередь сведения, ничего не делая")
+    parser.add_argument("--link-check", metavar="ССЫЛКА",
+                        help="что бот возьмёт по ссылке на облако: файлы и роли, без скачивания звука")
     parser.add_argument("--talk-check", action="store_true",
                         help="просьбы о месте голоса — живому генератору: куда он ставит голос (только из Actions)")
     args = parser.parse_args()
@@ -3827,6 +4085,8 @@ def main() -> int:
         return 0
     if args.talk_check:
         return 1 if talk_check() else 0
+    if args.link_check:
+        return link_check(args.link_check)
     if args.job:
         return run_job(args.job)
     if args.dry_run:
