@@ -1271,7 +1271,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
         _ffmpeg("-i", path, "-i", ridden, "-filter_complex", _tempo_delay(rhythm[0], level, "[1:a]"),
                 "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
         wets.append((wet, loudness(path)[0] + gain + ADLIB_ECHO + echo))
-    own = len(wets)  # шины самого голоса; дальше — трюки саунд-дизайна
+    # Голос и его шины до трюков саунд-дизайна (телефон меняет и сам голос).
+    own, plain = len(wets), [(ridden, 0.0), *((path, gain) for path, gain, _ in placed)]
     bed, tricks = ducked, []
     if design and lines:
         length, first = rhythm[0], lines[0][0]
@@ -1323,8 +1324,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     total = _sum([(ridden, 0.0), (bed, 0.0), *((path, gain) for path, gain, _ in placed), *gains.items()], work / "sum.wav")
     # Голос без бита — звук приложения «🎚 Двигать голос»: сырой голос там тонул под битом.
     # Трюки саунд-дизайна привязаны к месту голоса и к биту — при сдвиге они были бы не там.
-    _sum([(ridden, 0.0), *((path, gain) for path, gain, _ in placed), *((wet, gains[wet]) for wet, _ in wets[:own])],
-         work / VOICES)
+    _sum([*plain, *((wet, gains[wet]) for wet, _ in wets[:own])], work / VOICES)
     if tricks:
         print("  слышно: " + _audible(bed, [(name, path, gains.get(path, 0.0), spans, ref)
                                             for name, path, _, spans, ref in tricks if path and spans]))
