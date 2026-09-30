@@ -451,7 +451,7 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
     # Сверка по словам, а не по именам как у релиза: у новости никакой описи нет.
     if rubric == "news" and (payload or {}).get("snippet"):
         facts = payload or {}
-        given = set(_WORDS.findall(f"{facts.get('title', '')} {facts.get('summary', '')}".lower()))
+        given = set(_WORDS.findall(f"{facts.get('title', '')} {facts.get('summary', '')} {facts.get('article', '')}".lower()))
         own = " ".join(w for w in _WORDS.findall(_LINK.sub(" ", lowered)) if w not in given)
         sound = INVENTED_SOUND.findall(own)
         if sound:

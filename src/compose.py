@@ -663,7 +663,11 @@ def _news_payload(item: dict) -> dict:
         "lang": item.get("lang", "en"),
         # Новость из Telegram издания ведёт на его канал — такую ссылку
         # не отдаём, и строки «Источник» у поста нет (prompts/rubrics/news.md).
-        "url": "" if urlparse(item.get("url", "")).netloc.casefold() == "t.me" else item.get("url", ""),
+        # Статья издания, на которую ведёт пост, — законный источник.
+        "url": (item.get("link", "") if urlparse(item.get("url", "")).netloc.casefold() == "t.me"
+                else item.get("url", "")),
+        # Полный текст статьи: в посте Telegram от новости две строки.
+        "article": item.get("article", ""),
         "artists": item.get("artists", []),
         # Модели метка говорит, что у поста будет звук, а quality.py по ней
         # ловит выдуманное звучание: сниппет никто не слушал.

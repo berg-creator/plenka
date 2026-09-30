@@ -32,7 +32,7 @@ import os
 from datetime import timedelta
 
 from . import compose, config, publish, state, telegram
-from .sources import deezer, telegram_web
+from .sources import deezer, feeds, telegram_web
 
 log = logging.getLogger("urgent")
 
@@ -83,6 +83,24 @@ def sweep() -> int:
             path.unlink()
             removed += 1
     return removed
+
+
+def with_article(item: dict) -> dict:
+    """Новость со статьёй издания, на которую ведёт пост Telegram.
+
+    Пост издания в Telegram — две строки и «Подробнее»: 30.09.2026 новость
+    об альбоме Quavo вышла без названия, даты и слов артиста о Фаррелле,
+    хотя всё это стояло в статье по ссылке. Её картинка заменяет стоп-кадр
+    ролика; не нашлась — стоп-кадр тоже уходит, и дальше ищется портрет.
+    У сниппета кадр ролика остаётся: сам ролик потом встанет на его место.
+    """
+    page = feeds.article(item.get("link", ""))
+    item = {**item, "article": page["text"]}
+    if item.get("video_cover") and not item.get("snippet"):
+        item["cover"] = ""
+    if page["image"] and not item.get("cover"):
+        item["cover"] = page["image"]
+    return item
 
 
 def with_portrait(item: dict) -> dict:
@@ -209,6 +227,7 @@ def run(limit: int, dry_run: bool, target: str) -> int:
             used.append(item["fingerprint"])
             print(f"  — пропущено (сниппет не достаётся): {item.get('title', '')[:50]}")
             continue
+        item = with_article(item)
         result = compose.generate_checked("news", compose._news_payload(item))
 
         if result["skip"] or not result["text"]:

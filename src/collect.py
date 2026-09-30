@@ -571,6 +571,10 @@ def collect_news(artists: list[dict], seen: state.Seen) -> list[dict]:
                 # и только когда лента её не отдала: лишний заход по сети на шум
                 # не нужен, а без картинки пост теряется в ленте.
                 "cover": entry.get("cover", "") or feeds.page_image(entry.get("url", "")),
+                # Статью по ссылке из поста Telegram и её картинку берёт urgent.with_article:
+                # в канал уходит одна новость в день, качать все незачем.
+                "link": entry.get("link", ""),
+                "video_cover": entry.get("video_cover", False),
                 "released_at": entry.get("published_at"),
                 # Откуда пришла новость, видно по записи: посту о релизе нужно
                 # мнение издания (compose.outside_voice), а чужой RSS этим

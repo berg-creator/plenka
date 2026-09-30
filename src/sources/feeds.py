@@ -92,6 +92,9 @@ def _entry_image(entry) -> str:
 # Картинка статьи в разметке страницы. og:image кладут все издания — по нему
 # ссылку на новость показывают соцсети, и картинка там ровно та, которой
 # издание эту новость проиллюстрировало.
+# Статья идёт модели данными к новости: больше — это уже чужой текст целиком.
+ARTICLE_LIMIT = 1500
+
 OG_IMAGE = re.compile(
     r'<meta[^>]+(?:property|name)=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']'
     r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']og:image["\']',
@@ -111,17 +114,29 @@ def page_image(url: str) -> str:
     Своей картинки у новости быть не может — рисовать иллюстрацию к чужому
     событию значит выдумывать. Нет og:image — пост уходит текстом, как раньше.
     """
+    return article(url)["image"]
+
+
+def article(url: str) -> dict:
+    """Статья издания: {"image": og:image, "text": её абзацы}, не скачалась — пустые.
+
+    Текст — строки от 60 знаков после снятия тегов: общей разметки у сайтов
+    изданий нет (у RAP.RU статья в div'ах Tilda, не в <p>), а меню и подписи
+    короче абзаца."""
+    empty = {"image": "", "text": ""}
     if not url.startswith("http"):
-        return ""
+        return empty
     response = get(url, min_interval=0.5)
     if response is None:
-        return ""
+        return empty
     found = OG_IMAGE.search(response.text)
-    if not found:
-        return ""
     # Адрес в атрибуте экранирован: NBC Chicago отдаёт «&#038;» вместо «&»,
     # и без разбора параметры размера уходят серверу мусором.
-    return _usable(html.unescape(found.group(1) or found.group(2) or "").strip())
+    image = _usable(html.unescape(found.group(1) or found.group(2) or "").strip()) if found else ""
+    body = re.sub(r"<(script|style|nav|header|footer)\b.*?</\1>", " ", response.text, flags=re.S | re.I)
+    lines = (" ".join(html.unescape(line).split()) for line in re.sub(r"<[^>]+>", "\n", body).split("\n"))
+    text = "\n".join(dict.fromkeys(line for line in lines if len(line) >= 60))
+    return {"image": image, "text": text[:ARTICLE_LIMIT]}
 
 
 def _entry_date(entry) -> datetime | None:

@@ -3,12 +3,12 @@
   "telegramNote": "Каналы изданий читаются через веб-превью t.me/s/<канал> — см. src/sources/telegram_web.py. Проверены вживую командой `python -m src.sources.telegram_web --check`, неподходящие помечаются enabled:false. Поле only сужает канал до постов с этими словами.",
   "telegram": [
     {
-      "name": "The Flow",
+      "name": "The Flow", "site": "the-flow.ru",
       "channel": "superslowflow",
       "enabled": true
     },
     {
-      "name": "RAP.RU",
+      "name": "RAP.RU", "site": "rap.ru",
       "channel": "rapruchannel",
       "enabled": true
     },

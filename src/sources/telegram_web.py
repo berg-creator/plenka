@@ -36,6 +36,7 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .. import config
 from .feeds import FEEDS_FILE
@@ -58,6 +59,7 @@ PHOTO_RE = re.compile(r"background-image:url\('([^']+)'\)")
 BOLD_RE = re.compile(r"<b>(.*?)</b>", re.DOTALL)
 BREAK_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 TAG_RE = re.compile(r"<[^>]+>")
+LINK_RE = re.compile(r'<a[^>]+href="(https?://[^"]+)"')
 VIDEO_RE = re.compile(r'<video[^>]*src="([^"]+)"')
 # Размер кадра превью пишет в стиль обёртки: ширина и высота процентом от неё.
 VIDEO_BOX_RE = re.compile(r'message_video_wrap" style="width:(\d+)px;padding-top:([\d.]+)%')
@@ -95,7 +97,7 @@ def fetch_recent(max_age_hours: int = 30) -> list[dict]:
         # бульварщину про вес и внешность артистов — каналу она запрещена тоном,
         # и отсеивать её потом пришлось бы генерацией, то есть за деньги.
         only = tuple(word.casefold() for word in channel.get("only", ()))
-        for post in parse(response.text, channel.get("name", "")):
+        for post in parse(response.text, channel.get("name", ""), channel.get("site", "")):
             if post["_published"] < cutoff:
                 continue
             if only and not any(word in post["summary"].casefold() for word in only):
@@ -104,7 +106,7 @@ def fetch_recent(max_age_hours: int = 30) -> list[dict]:
     return items
 
 
-def parse(page: str, outlet: str) -> list[dict]:
+def parse(page: str, outlet: str, site: str = "") -> list[dict]:
     """Разбирает страницу превью в записи того же вида, что отдаёт RSS."""
     posts: list[dict] = []
 
@@ -125,6 +127,13 @@ def parse(page: str, outlet: str) -> list[dict]:
         if len(title) < 15:
             title = body.split(". ")[0]
         photo = PHOTO_RE.search(block)
+        # У поста с роликом «фото» — стоп-кадр превью в 320 пикселей: под новостью
+        # об альбоме Quavo 30.09.2026 вышла пустая комната с коробками из тизера.
+        thumb = bool(photo) and "video_thumb" in block[block.rfind("class=", 0, photo.start()):photo.start()]
+        # «Подробнее» ведёт на статью издания: в посте две строки, в статье —
+        # название, дата и слова артиста. Ссылки на площадки и чужие сайты мимо.
+        link = next((u for u in map(html.unescape, LINK_RE.findall(text.group(1)))
+                     if site and urlparse(u).netloc.removeprefix("www.") == site), "")
 
         posts.append(
             {
@@ -135,6 +144,8 @@ def parse(page: str, outlet: str) -> list[dict]:
                 "url": f"https://t.me/{post_id.group(1)}",
                 "summary": body[:600],
                 "cover": photo.group(1) if photo else "",
+                "video_cover": thumb,
+                "link": link,
                 "published_at": stamp.group(1),
                 "external_id": f"tg:{post_id.group(1)}",
                 "_published": datetime.fromisoformat(stamp.group(1)),
@@ -341,6 +352,16 @@ def _selftest() -> None:
     assert post["url"] == "https://t.me/rapruchannel/1", post["url"]
     assert post["cover"] == "https://cdn.telesco.pe/x.jpg", post["cover"]
     assert "«без анонса»" in post["summary"], post["summary"]
+    assert not post["video_cover"] and post["link"] == "", post
+    clip = ('class="tgme_widget_message_wrap"><div data-post="rapruchannel/5603">'
+            '<i class="tgme_widget_message_video_thumb" style="background-image:url(\'https://cdn/t.jpg\')"></i>'
+            '<div class="tgme_widget_message_text">Тизер нового альбома Quavo, который спродюсировал Фаррелл.'
+            ' <a href="https://music.yandex.ru/album/1">Слушать</a>'
+            ' <a href="https://www.rap.ru/read/quavo?a=1&amp;b=2">Подробнее</a></div>'
+            '<time datetime="2026-09-29T14:50:10+00:00" class="time">14:50</time>')
+    video = parse(clip, "RAP.RU", "rap.ru")[0]
+    assert video["video_cover"] and video["link"] == "https://www.rap.ru/read/quavo?a=1&b=2", video
+    assert parse(clip, "РЭП СМИ")[0]["link"] == "", "без сайта издания ссылку не берём"
     assert "<" not in post["summary"], post["summary"]
     assert post["external_id"] == "tg:rapruchannel/1", post["external_id"]
     print("✓ разбор превью: заголовок, ссылка, фото, чистый текст и отбор по only")
