@@ -2,6 +2,13 @@
   "artist": "Bones",
   "cover": "",
   "created_at": "2026-09-15T12:52:39+00:00",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 220
+  },
+  "photo": "e94b9e45336526e683b327a662e240e13942216824f10b940d4b95e783769269",
   "preview": "",
   "release": "",
   "released_at": "",
