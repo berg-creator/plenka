@@ -1701,7 +1701,17 @@ HAND_LOST = "⚠️ Не переслал: {what}. Сообщения удале
 STARS = {"pack": f"+{config.SKLEYKA_PACK} трека на сутки",
          "month": f"30 дней по {config.SKLEYKA_MONTH_PER_DAY} треков в сутки"}
 MODES = [[{"text": "🎤 Вокал + бит", "callback_data": f"{PREFIX}m:1"}],
-         [{"text": "🎚 По дорожкам — даблы, бэки, инструменты", "callback_data": f"{PREFIX}m:2"}]]
+         [{"text": "🎚 По дорожкам — даблы, бэки, инструменты", "callback_data": f"{PREFIX}m:2"}],
+         [{"text": "🔗 Ссылкой на облако — хоть одним архивом", "callback_data": f"{PREFIX}m:3"}]]
+# Третий режим — для дорожек на облаке: 01.10.2026 владелец с двумя ссылками (все голоса
+# архивом, бит отдельно) выбрал «по дорожкам» и не понял, как одну ссылку разложить по шагам.
+# Шагов у ссылки нет: роли — по именам файлов (_links, _neighbors), поэтому ни галочек,
+# ни вопросов по одной дорожке — только куда кидать. План остаётся пустым, его ставит
+# первая ссылка, а файл вместо ссылки идёт как «вокал + бит» (take).
+LINKS = ("🔗 Кидай ссылку на Яндекс Диск, Dropbox или файл Google Диска — папку или архив (zip, 7z). "
+         "Можно несколько: голоса одной, бит другой.\n\n"
+         "Делить на дорожки не надо — разложу сам по именам файлов: вокал, дабл, бэк, эдлиб, бит, бас "
+         "или vocal, double, adlib, beat, kick…" + FROM_START + WAIT)
 # Шаг назад — к выбору режима, под каждым вопросом до сведения (владелец 28.09.2026: выбрал
 # «вокал + бит», а вернуться к «по дорожкам» было нечем).
 BACK = {"text": "↩️ Сменить режим", "callback_data": f"{PREFIX}b"}
@@ -1715,9 +1725,13 @@ HELP = ("❓ <b>Как это работает</b>\n\n"
         f"• Бит — от {BEAT_MINUTES[0]} до {BEAT_MINUTES[1]} минут. Дорожки жду {DRAFT_MINUTES} минут.\n"
         f"• Треков в сутки — {config.SKLEYKA_PER_DAY}, пересборок на трек — {config.SKLEYKA_TWEAKS}. "
         f"Кнопки и слова под треком работают {TRACK_DAYS} дней.\n"
-        "• Можно ссылкой на Яндекс Диск, Dropbox или файл Google Диска — папкой или архивом (zip, 7z). "
-        "Назови файлы по ролям: vocal, beat, adlib, bass, kick…\n"
+        "• Дорожки на облаке — «🔗 Ссылкой на облако»: Яндекс Диск, Dropbox или файл Google Диска, "
+        f"папкой или архивом (zip, 7z), всего до {config.SKLEYKA_LINK_MB // 1024} ГБ и {config.SKLEYKA_LINK_FILES} файлов. "
+        "Делить на дорожки не надо — разложу по именам файлов: vocal, beat, adlib, bass, kick… или по-русски.\n"
+        "• Упрёшься в лимит — докупи треки за звёзды или позови артиста: за его первый трек — ещё один тебе.\n"
         "• Спроси словами, почему трек звучит так, — объясню.\n"
+        f"• Нужен живой звукорежиссёр — «🎧 Свести руками» под готовым треком: от {config.SKLEYKA_HAND_RUB[0]} ₽, "
+        f"готово {config.SKLEYKA_HAND_TERM}.\n"
         "• Что-то сломалось или другой вопрос, в том числе об оплате, — /vopros.\n\n"
         "Как пришлёшь?")
 REMODE = "↩️ Выбираем заново{files}. Как пришлёшь?"
@@ -2316,6 +2330,8 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         if code == "1":
             draft.update(plan=["вокал", "бит"], step=0)
             _ask(chat_id, draft)
+        elif code == "3":
+            telegram.send_message(chat_id, LINKS, buttons=[[BACK]])
         else:
             draft["pick"] = ["вокал", "бит"]
             draft["menu"] = telegram.send_message(chat_id, PICK, buttons=_checklist(draft["pick"]))["message_id"]
@@ -4129,7 +4145,9 @@ def _selftest() -> None:
         real_look = oblako.look
         oblako.look = lambda url: "папка, 3 WAV" if "yandex" in url else real_look(url)
         start(60, 60)
-        callback(60, 60, "m:1")
+        callback(60, 60, "m:3")
+        assert sent[-1] == LINKS and keys[-1] == [[BACK]] and load()["drafts"]["60"]["plan"] is None, \
+            "«Ссылкой на облако»: ни галочек, ни шагов — только куда кидать"
         assert wish(60, "вот https://disk.yandex.ru/d/abc и https://cloud.mail.ru/public/x/y")
         draft = load()["drafts"]["60"]
         assert draft["links"] == [{"u": "https://disk.yandex.ru/d/abc", "say": "папка, 3 WAV"}] and "wish" not in draft \
