@@ -124,6 +124,10 @@ WAIT_STEP = timedelta(seconds=15)
 WAIT_TRIES = 4
 
 
+# Под треком отбора — опрос: послушал и тут же отметился, не выходя из ветки.
+# Анонимный: «не моё» под треком человека, которого знаешь, вслух не ставят.
+OTBOR_POLL = ("Как вам трек?", ["🔥 Огонь", "👍 Норм", "😐 Не моё"])
+
 # Длиннее вопрос не нужен: он стоит подписью под плеером, а не абзацем.
 MAX_QUESTION = 120
 
@@ -245,6 +249,12 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
         try:
             if track:
                 telegram.send_audio(chat_id, track, ask(post, rubric, "трек"), reply_to=message_id)
+                if rubric == "otbor":
+                    try:
+                        telegram.send_poll(chat_id, *OTBOR_POLL, reply_to=message_id)
+                    except telegram.TelegramError as exc:
+                        # Трек уже в ветке — без опроса она всё равно живая.
+                        log.warning("Опрос под отбором не ушёл: %s", exc)
             elif snippet and into_post(post, snippet, message):
                 telegram.send_message(chat_id, ask(post, "snippet", "сниппет"), reply_to=message_id)
             elif snippet:
@@ -324,6 +334,7 @@ def _selftest() -> None:
     real_video, real_msg = telegram_web.preview_video, telegram.send_message
     real_account, real_file = telegram_web.account_video, telegram.send_video_file
     real_comment, real_edit = llm.generate_comment, telegram.edit_video
+    real_audio, real_poll = telegram.send_audio, telegram.send_poll
     llm.generate_comment = lambda payload: {"skip": True}
     telegram.edit_video = lambda chat, msg, path, caption, **_: sent.append(("в пост", path.name, caption))
     telegram_web.preview_video = lambda url, folder: {
@@ -349,7 +360,16 @@ def _selftest() -> None:
         sent.clear()
         telegram_web.account_video = lambda url, folder: {}
         assert seed(forwarded) and sent[0][0] == "вопрос", sent
+        # Отбор: трек артиста первым, опрос — следом, в ту же ветку.
+        sent.clear()
+        posted[0]["rubric"] = "otbor"
+        snippet = {"message": {"chat": -200, "message_id": 200}, "full_track_file_id": "T"}
+        telegram.send_audio = lambda chat, track, caption, reply_to=None, **_: sent.append(("трек", track))
+        telegram.send_poll = lambda chat, question, options, reply_to=None, **_: sent.append(
+            ("опрос", question, reply_to))
+        assert seed(forwarded) and sent == [("трек", "T"), ("опрос", OTBOR_POLL[0], 5)], sent
     finally:
+        telegram.send_audio, telegram.send_poll = real_audio, real_poll
         state.read_json = real_read
         telegram_web.preview_video = real_video
         telegram_web.account_video, telegram.send_video_file = real_account, real_file

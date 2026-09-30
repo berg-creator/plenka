@@ -702,16 +702,17 @@ def send_audio(
     return _call("sendAudio", payload, files or None)
 
 
-def send_poll(chat_id: str, question: str, options: list[str], *, anonymous: bool = True) -> dict:
-    return _call(
-        "sendPoll",
-        {
-            "chat_id": chat_id,
-            "question": question[:300],
-            "options": json.dumps([o[:100] for o in options[:10]], ensure_ascii=False),
-            "is_anonymous": anonymous,
-        },
-    )
+def send_poll(chat_id: str, question: str, options: list[str], *, anonymous: bool = True,
+              reply_to: int | None = None) -> dict:
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "question": question[:300],
+        "options": json.dumps([o[:100] for o in options[:10]], ensure_ascii=False),
+        "is_anonymous": anonymous,
+    }
+    if reply_to is not None:
+        payload["reply_parameters"] = json.dumps({"message_id": reply_to})
+    return _call("sendPoll", payload)
 
 
 # Пояснение к викторине Telegram обрезает жёстко — двести знаков и ни одним
