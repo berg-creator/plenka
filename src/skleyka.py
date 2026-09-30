@@ -2752,7 +2752,7 @@ def run_job(spec_path: Path) -> int:
                 except Exception as exc:  # noqa: BLE001 — без приложения трек всё равно уходит
                     print(f"  сведение {spec['job']}: превью не собралось: {type(exc).__name__}")
             try:
-                movie = story(vocal, beat, master, work, rhythm, knobs["design"])
+                movie = story(vocal, beat, master, work, rhythm)
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
                 print(f"  сведение {spec['job']}: ролик не собрался: {type(exc).__name__}")
                 movie = None
@@ -2774,31 +2774,34 @@ def run_job(spec_path: Path) -> int:
 
 # Ролик ДО/ПОСЛЕ — реклама СВЕДЕНИЯ и ролик, который артист выложит у себя. Ролик 28.09.2026
 # начинался с ДО: 3,6 с чёрного экрана с «Как записал», серой волной и сырым голосом — и в Shorts
-# его досмотрели 22 % против 51–69 % у новостей (prompts/reels.md, «Удержание»). Потом с первого
-# кадра шёл ПОСЛЕ, а 30.09.2026 владелец вернул ДО в начало, но с отсчётом 3-2-1 с первого кадра:
-# он обещает дроп в ПОСЛЕ и держит до него. ДО — с битом: голос без бита бьёт сильнее, но разницу
-# делает появление бита, а не сведение, — зритель решит, что бот пишет биты; и сырой голос
-# в ленте на 10 дБ тише дропа, а там пролистывают. ДО не дольше 3,5 с, дальше ПОСЛЕ и концовка:
-# колесо канала, адрес бота и команда, а последние полсекунды перетекают в первый кадр — Shorts
-# крутят по кругу. Трек идёт подряд, меняется только обработка, дроп — на доле сетки бита.
-# Громкость одна, посчитанная на отрезке ДО (как в compare): слышно, что сделало сведение,
-# а не насколько громче.
+# его досмотрели 22 % против 51–69 % у новостей (prompts/reels.md, «Удержание»). Поэтому с первого
+# кадра — ПОСЛЕ: самое громкое место трека, крупная надпись и спектр в янтаре; потом ДО не дольше
+# 3,5 с — голос как записан, под ним светлая волна; потом снова ПОСЛЕ и концовка: колесо канала,
+# адрес бота и команда, а последние полсекунды перетекают в первый кадр — Shorts крутят по кругу.
+# Трек идёт подряд, меняется только обработка, стыки — на долях сетки бита. Громкость одна,
+# посчитанная на отрезке ДО (как в compare): слышно, что сделало сведение, а не насколько громче.
 # Адрес бота — мелко сверху весь ролик: в Shorts и сторис ссылка не нажимается, а из YouTube
 # за месяц в бота пришёл один человек.
 # «Записал на телефон», как в ролике канала, бот не пишет: где записан чужой трек, он не знает.
-# Графика — одни и те же полоски: в ДО серая волна голосового сообщения с бегущей серединой —
-# «как записал», в ПОСЛЕ спектр в цвете с подсветкой. На дропе волна разом вспыхивает, растёт
-# до спектра и остывает в цвет (владелец 30.09.2026: щелчок между двумя картинками выглядел склейкой).
+# Графика — одни и те же полоски: в ПОСЛЕ спектр в цвете с подсветкой, в ДО серая волна голосового
+# сообщения с бегущей серединой — «как записал». На стыке полоски сами меняют высоту и цвет (владелец
+# 30.09.2026: щелчок между двумя картинками выглядел склейкой). Под волной ДО — отсчёт 3-2-1
+# до ПОСЛЕ: сырой кусок — самое скучное место ролика, отсчёт даёт причину его дослушать.
 # Рисует Pillow по кадру: ffmpeg умеет только готовые виды волн, а numpy ради ролика не берём.
-STORY_DO, STORY_TOTAL = 3.5, 13.5  # ДО (не дольше) и весь ролик, с — по долям
+STORY_HOOK, STORY_DO, STORY_TOTAL = 3.0, 3.5, 13.5  # ПОСЛЕ до ДО, ДО (не дольше) и весь ролик, с — по долям
 STORY_OUTRO, STORY_LOOP = 2.0, 0.5  # затухание с концовкой; из него полсекунды — переход в первый кадр
 STORY_CAPTION = "Для сторис и Shorts: ДО и ПОСЛЕ одной громкости."
 STORY_ACCENT, STORY_GREY, STORY_AHEAD = (255, 181, 71), (220, 220, 220), (90, 90, 96)  # AHEAD — ещё не сыгранное
 # Полоски спектра слева (низ) направо: малиновый, к верхам — янтарь и жёлтый.
 STORY_HUES = ((0.0, (255, 46, 99)), (0.5, (255, 138, 61)), (1.0, (255, 214, 90)))
 STORY_VIZ_Y, STORY_VIZ_HALF, STORY_WAVE = 1100, 330, 130  # центр графики, полвысоты спектра ПОСЛЕ и волны ДО
-STORY_BARS, STORY_BACK, STORY_MEMO = 40, 0.6, 1.6  # полосок; перетекание в ПОСЛЕ на дропе, с; окно волны ДО, с
-STORY_COUNT_Y = 1350  # отсчёт до дропа — под волной ДО, выше SAFE_BOTTOM
+STORY_BARS, STORY_BACK, STORY_MEMO = 40, 0.6, 1.6  # полосок; перетекание обратно в ПОСЛЕ, с; окно волны ДО, с
+STORY_COUNT_Y = 1350  # отсчёт до ПОСЛЕ — под волной ДО, выше SAFE_BOTTOM
+# Волна ДО въезжает в спектр лентой на кассе: сыгранное выходит из середины и едет влево, дойдя
+# до края — несыгранное въезжает справа и доезжает до середины; спектр, куда лента не дошла, стоит
+# (владелец 30.09.2026: смена разом — это смена кадра, а не превращение). Обратно в ПОСЛЕ — вся
+# волна разом с «1»: вспыхивает, растёт до спектра и остывает в цвет.
+STORY_BELT, STORY_EDGE = 0.8, 0.08  # лента заполняет ширину, с (быстрее самой волны); мягкость края, с
 STORY_FADE = 0.25  # надписи и цифры отсчёта перетекают, а не сменяются, с
 
 def _frame(items: list, ground: tuple = (0, 0, 0, 0)):
@@ -2866,16 +2869,16 @@ def _ease(x: float) -> float:
     return x * x * (3 - 2 * x)
 
 
-def _story_frames(sound: Path, pictures: list[Path], do1: float, total: float, fps: int):
-    """Кадры RGB ролика под концовкой: фон с ореолом, полоски, надпись ДО или ПОСЛЕ и отсчёт.
-    m — насколько полоски в ПОСЛЕ: 0 — серая волна, 1 — спектр в цвете; на дропе перетекает."""
+def _story_frames(sound: Path, pictures: list[Path], do0: float, do1: float, total: float, fps: int):
+    """Кадры RGB ролика под концовкой: фон с ореолом, полоски, надпись ПОСЛЕ или ДО и отсчёт.
+    m — насколько полоска в ПОСЛЕ: 1 — спектр в цвете, 0 — серая волна; между ними перетекает."""
     from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
     spectrum, envelope = _story_levels(sound, fps)
     step = STORY_MEMO / STORY_BARS
     # Волна — по децибелам от тихого места ДО до громкого: плотный бит в линейной шкале — сплошной брусок.
     decibels = [20 * math.log10(max(e, 1.0)) for e in envelope]
-    during = sorted(decibels[:int(do1 / step) + 1]) or [0.0]
+    during = sorted(decibels[int(do0 / step):int(do1 / step) + 1]) or [0.0]
     low, span = during[len(during) // 10], max(during[-1] - during[len(during) // 10], 1.0)
     memo = [0.12 + 0.88 * min(1.0, max(0.0, (d - low) / span)) for d in decibels]
     width, side = clips.WIDTH, 60
@@ -2904,14 +2907,19 @@ def _story_frames(sound: Path, pictures: list[Path], do1: float, total: float, f
     for k in (1, 2, 3):
         image, _ = _frame([(str(k), 240, 400, STORY_ACCENT, 700)])
         digits[k] = image.crop(image.getbbox())
-    count = do1 / 3
+    count = (do1 - do0) / 3
     level = [0.0] * STORY_BARS
+    # Когда полоска становится волной ДО: сперва от середины влево, потом от правого края к середине.
+    centre = STORY_BARS // 2
+    lane = STORY_BELT / STORY_BARS
+    lags = [(centre - i - 0.5) * lane if i < centre else STORY_BELT / 2 + (STORY_BARS - i - 0.5) * lane
+            for i in range(STORY_BARS)]
     for f in range(math.ceil(total * fps)):
         t = f / fps
-        if t > total - STORY_OUTRO / 2:  # под непрозрачной концовкой уже начало: конец перетечёт в первый кадр
-            t -= total
-        m = _ease((t - do1) / STORY_BACK)
-        flash = 4 * m * (1 - m)  # вспышка на дропе
+        into = [_ease((t - do0 - lag) / STORY_EDGE + 0.5) for lag in lags]
+        back = _ease((t - do1) / STORY_BACK)
+        ms = [1 - v + back for v in into]
+        flash = 4 * back * (1 - back)  # вспышка обратного перехода
         # Спектр подскакивает сразу, а опадает плавно — иначе полоски дрожат.
         level = [r if r > old else old + (r - old) * 0.25
                  for r, old in zip(spectrum[f] if f < len(spectrum) else [0.0] * STORY_BARS, level)]
@@ -2920,6 +2928,7 @@ def _story_frames(sound: Path, pictures: list[Path], do1: float, total: float, f
         band, lit = Image.new("RGBA", (width, band_h)), Image.new("RGB", (width, band_h))
         draw, glow_draw = ImageDraw.Draw(band), ImageDraw.Draw(lit)
         for i in range(STORY_BARS):
+            m = ms[i]
             half = STORY_WAVE + (STORY_VIZ_HALF - STORY_WAVE) * m
             wave = memo[first + i] if 0 <= first + i < len(memo) else 0.0
             x = side + (i + 0.5 - frac * (1 - m)) * pitch  # волна ДО бежит влево, спектр стоит
@@ -2932,6 +2941,7 @@ def _story_frames(sound: Path, pictures: list[Path], do1: float, total: float, f
             if shine > 0.01:
                 glow_draw.rounded_rectangle(box, radius=thick / 2, fill=tuple(round(c * shine) for c in color))
         frame = base.copy()
+        m = sum(ms) / STORY_BARS
         if m > 0.01 or flash > 0.01:
             bright = m * (0.1 + 0.35 * sum(level) / STORY_BARS)
             frame.paste(ImageChops.screen(frame.crop(halo_box), halo.point(lambda v: round(v * bright))), halo_box)
@@ -2940,14 +2950,13 @@ def _story_frames(sound: Path, pictures: list[Path], do1: float, total: float, f
             frame.paste(ImageChops.screen(frame.crop(band_box), glow), band_box)
         frame.paste(band, band_box[:2], band)
         frame.paste(handle, (0, top), handle)
-        raw = 1 - _ease((t - do1) / STORY_FADE)
+        raw = _ease((t - do0) / STORY_FADE) - _ease((t - do1) / STORY_FADE)
         for image, share in zip(words, (1 - raw, raw)):
             if share > 0.01:
                 frame.paste(image, (0, split), image.getchannel("A").point(lambda v, a=share: round(v * a)))
         for k in (3, 2, 1):  # уходящая цифра тает и мельчает, пока следующая проступает и садится на место
-            begin = (3 - k) * count
-            # «3» стоит с первого кадра: он же первое, что видно в ленте.
-            a = min(1 if k == 3 else _ease((t - begin) / STORY_FADE), 1 - _ease((t - begin - count) / STORY_FADE))
+            begin = do0 + (3 - k) * count
+            a = min(_ease((t - begin) / STORY_FADE), 1 - _ease((t - begin - count) / STORY_FADE))
             if a <= 0.01:
                 continue
             digit = digits[k]
@@ -2958,19 +2967,17 @@ def _story_frames(sound: Path, pictures: list[Path], do1: float, total: float, f
                         digit.getchannel("A").point(lambda v, a=a: round(v * a)))
         yield frame.tobytes()
 
-def story_cuts(length: float) -> tuple[float, float]:
-    """Где дроп и длина ролика, с, при доле length: ДО — целыми долями не дольше STORY_DO
-    (хоть одна доля), ПОСЛЕ — долями, к STORY_TOTAL."""
-    do1 = max(1, math.floor(STORY_DO / length)) * length
-    return do1, do1 + max(1, round((STORY_TOTAL - STORY_OUTRO - do1) / length)) * length + STORY_OUTRO
+def story_cuts(length: float) -> tuple[float, float, float]:
+    """Где начинается и кончается ДО и длина ролика, с, при доле length: ДО — целыми долями
+    не дольше STORY_DO (хоть одна доля), ПОСЛЕ до и после него — долями, к STORY_TOTAL."""
+    do0 = max(1, round(STORY_HOOK / length)) * length
+    do1 = do0 + max(1, math.floor(STORY_DO / length)) * length
+    return do0, do1, do1 + max(1, round((STORY_TOTAL - STORY_OUTRO - do1) / length)) * length + STORY_OUTRO
 
 
-def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float, float],
-          design: bool = False) -> Path:
-    """Ролик 9:16 на 12–15 с: ДО под отсчёт, ПОСЛЕ тем же местом трека дальше, и концовка.
-    master — из mix(): рядом, в work, лежат голос сведения без бита и сумма до мастера.
-    design — ручка саунд-дизайна: подъём шума к вырезу бита и остановка плёнки под концовкой."""
-    do1, total = story_cuts(rhythm[0])
+def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float, float]) -> Path:
+    """Ролик 9:16 на 12–15 с: ПОСЛЕ, ДО тем же местом трека дальше, снова ПОСЛЕ и концовка."""
+    do0, do1, total = story_cuts(rhythm[0])
     end0, loop0 = total - STORY_OUTRO, total - STORY_LOOP - 0.1  # переход кончается за 3 кадра до конца
     _, trace = reels.meter(master)
     n = round(total / (trace[1][0] - trace[0][0]))
@@ -2982,7 +2989,7 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     def cut(a: float, b: float) -> str:
         return f"{FORMAT},atrim=start={a:.4f}:end={b:.4f},asetpts=PTS-STARTPTS"
 
-    a, b = start, start + do1
+    a, b = start + do0, start + do1
     raw_mix = f"[0:a]{cut(a, b)}[v];[1:a]{cut(a, b)}[b];[v][b]amix=inputs=2:normalize=0"
     before, after, sound, out = (work / f"story-{name}" for name in ("do.wav", "posle.wav", "zvuk.wav", "video.mp4"))
     _ffmpeg("-i", vocal, "-i", beat, "-filter_complex", raw_mix, *reels.VOICE_CODEC, before)
@@ -2990,28 +2997,14 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     (raw, peak), glued = loudness(before), loudness(after)[0]
     level = min(glued, raw + CEILING - peak)
     half = 0.0075  # полкроссфейда на стыке: 15 мс
-    # Перед дропом бит молчит две доли (владелец 30.09.2026): последняя доля ДО — сырой голос один,
-    # первая ПОСЛЕ — голос сведения один, дальше он же с битом. Без бита слышно, что сделано
-    # с голосом, и дроп бьёт из тишины, как на входах саунд-дизайна (ENTRY_BEATS). Голос сведения
-    # стоит, как в мастере: сумма до мастера — голос в той же громкости, мастер её поднимает.
-    # Удар склеек роликов не ставим: под полным битом его не слышно, а ниже 80 Гц телефон не играет.
-    length, voices = rhythm[0], master.parent / "work" / VOICES
-    gap, drop = do1 - length - 0.02, b + length
-    lift = level - glued + loudness(master)[0] - loudness(master.parent / "work" / "sum.wav")[0]
-    fade = "" if design else f",afade=t=out:st={end0:.4f}:d={STORY_OUTRO}"
-    _ffmpeg("-i", vocal, "-i", beat, "-i", master, "-i", voices, "-filter_complex",
-            f"[0:a]{cut(a, b + half)}[v];[1:a]{cut(a, b + half)},afade=t=out:st={gap:.4f}:d=0.02[b];"
+    _ffmpeg("-i", vocal, "-i", beat, "-i", master, "-filter_complex",
+            f"[0:a]{cut(a - half, b + half)}[v];[1:a]{cut(a - half, b + half)}[b];"
             f"[v][b]amix=inputs=2:normalize=0,volume={level - raw:.2f}dB[do];"
-            f"[3:a]{cut(b - half, drop + half)},volume={lift:.2f}dB[s];"
-            f"[2:a]volume={level - glued:.2f}dB,{cut(drop - half, start + total)}[p];"
-            f"[do][s]acrossfade=d={2 * half}[ds];[ds][p]acrossfade=d={2 * half},afade=t=in:d=0.01{fade}[a]",
+            f"[2:a]volume={level - glued:.2f}dB,asplit=2[m1][m2];"
+            f"[m1]{cut(start, a + half)}[p1];[m2]{cut(b - half, start + total)}[p2];"
+            f"[p1][do]acrossfade=d={2 * half}[pd];[pd][p2]acrossfade=d={2 * half},"
+            f"afade=t=in:d=0.01,afade=t=out:st={end0:.4f}:d={STORY_OUTRO}[a]",
             "-map", "[a]", "-t", f"{total:.4f}", *reels.VOICE_CODEC, sound)
-    if design:
-        # Приёмы сведения с саунд-дизайном: подъём шума кончается на вырезе бита (такт короче —
-        # весь ДО до выреза), а под концовкой плёнка останавливается вместо затухания.
-        rise = _risers([gap], gap / 4, work)
-        _sum([(sound, 0.0), (rise, level + RISE_DB - loudness(rise)[0])], work / "story-rise.wav").replace(sound)
-        _tape_stop(sound, end0, length, work)
     pictures = _story_pictures(work)
     width, fps, side, top = clips.WIDTH, 30, 460, 360  # колесо: по центру, над адресом
     fade = f"fade=t=in:st={end0:.3f}:d=0.25:alpha=1,fade=t=out:st={loop0:.3f}:d={STORY_LOOP}:alpha=1"
@@ -3033,7 +3026,7 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
         stdin=subprocess.PIPE)
     try:
         with proc.stdin:
-            for frame in _story_frames(sound, pictures, do1, total, fps):
+            for frame in _story_frames(sound, pictures, do0, do1, total, fps):
                 proc.stdin.write(frame)
     finally:
         code = proc.wait()
@@ -3428,10 +3421,10 @@ def _selftest() -> None:
         _finish(data, done, {"id": "jk", "track": "t1", "tweak": True}, tmp / "keyed")
         save(data)
 
-        # Ролик ДО/ПОСЛЕ: при любом темпе сетки ДО — 2,5–3,5 с, весь ролик 12–15 с.
+        # Ролик ДО/ПОСЛЕ: при любом темпе сетки первым идёт ПОСЛЕ, ДО — не дольше 3,5 с, весь ролик 12–15 с.
         for beat_length in (0.5, 0.6, 0.75, 0.857, 1.0):
-            do1, total = story_cuts(beat_length)
-            assert 2.5 <= do1 <= STORY_DO and 12 <= total <= 15, (beat_length, do1, total)
+            do0, do1, total = story_cuts(beat_length)
+            assert 2.5 <= do0 < do1 <= do0 + STORY_DO and 12 <= total <= 15, (beat_length, do0, do1, total)
         # Согласие на ролик: кнопка — пока не согласился; владельцу ролик по file_id с именем
         # из Telegram, один раз.
         codes = [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False, film=True)]
@@ -3629,7 +3622,7 @@ def main() -> int:
         master = mix(*args.mix, args.out, args.style, args.design, args.voice, args.echo,
                      [(part, Path(path)) for part, path in args.part], args.like)
         compare(*args.mix, master, args.out)
-        movie = story(*args.mix, master, args.out, grid(args.mix[1]), args.design)
+        movie = story(*args.mix, master, args.out, grid(args.mix[1]))
         print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}, {movie}")
         return 0
     parser.print_help()
