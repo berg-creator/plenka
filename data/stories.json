@@ -317,6 +317,12 @@
       "published_at": "2026-09-29T14:15:09+00:00",
       "rubric": "release",
       "story_id": "456239069"
+    },
+    {
+      "key": "f04837a138d3d19f",
+      "published_at": "2026-09-30T14:06:37+00:00",
+      "rubric": "lineage",
+      "story_id": "опубликовано"
     }
   ]
 }
