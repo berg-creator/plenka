@@ -1644,10 +1644,24 @@ KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swa
 # Кнопки идут через service.handle_callback: префикс service.CALLBACK_PREFIX
 # и действие sk. Импортировать service отсюда нельзя — он импортирует нас.
 PREFIX = "s:sk:"
-# Два выхода — только под отказом по лимиту: платное предложение в первом же ответе
+# Три выхода — только под отказом по лимиту: платное предложение в первом же ответе
 # отпугнуло бы тех, у кого нет денег на звукаря, а бесплатная функция остаётся бесплатной.
+HAND_BUTTON = {"text": "🎧 Свести руками", "callback_data": f"{PREFIX}u"}
 WAYS = [[{"text": "👥 Позвать артиста", "callback_data": f"{PREFIX}r"}],
-        [{"text": "⭐️ Больше треков", "callback_data": f"{PREFIX}s"}]]
+        [{"text": "⭐️ Больше треков", "callback_data": f"{PREFIX}s"}],
+        [HAND_BUTTON]]
+# «🎧 Свести руками» — под готовым треком и под лимитом, больше нигде. Бот себя не ругает:
+# его сведение — для демо, к релизу сводят руками. Про звукорежиссёра — только имя: опыт
+# и отзывы были бы выдумкой. Оплата не через бота — договаривается он сам.
+HAND = ("🎧 <b>Свести руками</b>\n\n"
+        "Бот выставляет баланс и громкость — для демо и показать друзьям этого хватает. "
+        "К релизу трек сводят руками: чистка, тюн, автоматизация, эффекты по смыслу песни. "
+        f"Это делает звукорежиссёр ПЛЁНКИ — {config.SKLEYKA_HAND_ENGINEER}.\n\n"
+        f"Вокал + бит — {config.SKLEYKA_HAND_RUB[0]} ₽, по дорожкам — {config.SKLEYKA_HAND_RUB[1]} ₽. "
+        f"Готово {config.SKLEYKA_HAND_TERM}.\n\n"
+        "Напиши ему, что хочешь получить")
+HAND_TRACKS = ", — дорожки у него уже есть."
+HAND_LOST = "⚠️ Не переслал: {what}. Сообщения удалены или трек сведён раньше этой кнопки — попроси у человека."
 # Товары за звёзды: payload счёта → название (до 32 знаков).
 STARS = {"pack": f"+{config.SKLEYKA_PACK} трека на сутки",
          "month": f"30 дней по {config.SKLEYKA_MONTH_PER_DAY} треков в сутки"}
@@ -2155,7 +2169,8 @@ def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film
     """Ручки под готовым треком: просьба словами первой — 26.09 из семи треков ни одного
     не поправили словами, о подсказке в тексте не знали; голос с дропа, если он входит
     раньше (DROP_NOTE); стиль, голос, эхо, саунд-дизайн; «поменять» — когда вокал понят
-    по звуку; согласие на ролик ПЛЁНКИ, пока его не дали (FILM_TERMS); «В ОТБОР» — дорога дальше."""
+    по звуку; согласие на ролик ПЛЁНКИ, пока его не дали (FILM_TERMS); «В ОТБОР» — дорога дальше;
+    последним — «🎧 Свести руками» (_hand), без строки о нём в самом сообщении."""
     def cb(code: str) -> str:
         return f"{PREFIX}{track}:{code}"
 
@@ -2173,6 +2188,7 @@ def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film
         rows.append([{"text": "🎬 Можно в ролик ПЛЁНКИ", "callback_data": cb("f")}])
     # Метка skleyka доходит до поста отбора: под ним строка про СВЕДЕНИЕ (otbor.build_post).
     rows.append([{"text": "🎙 Выложил — в ОТБОР", "callback_data": "s:otbor:skleyka"}])
+    rows.append([dict(HAND_BUTTON, callback_data=cb("u"))])
     return rows
 
 
@@ -2216,7 +2232,8 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     """Кнопки сведения. Под готовым треком — пересборка с новыми ручками новой заявкой,
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y), саунд-дизайн (e),
-    справка (h) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service) —
+    справка (h) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
+    «🎧 Свести руками» (u) — под треком и под лимитом —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
     keyboard — кнопки того сообщения."""
     chat_id = str(chat_id)
@@ -2228,6 +2245,9 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         return
     if len(head) != 1 and code == "f":
         _film(data, chat_id, head, who or {}, message_id, keyboard or [])
+        return
+    if subject == "u" or len(head) != 1 and code == "u":
+        _hand(data, chat_id, "" if subject == "u" else head, who or {})
         return
     if len(head) != 1:
         _tweak(data, chat_id, head, code, admin)
@@ -2325,6 +2345,53 @@ def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | 
     if message_id and keyboard:
         telegram.edit_markup(chat_id, message_id, [row for row in keyboard
                                                    if all(b.get("callback_data") != f"{PREFIX}{track_id}:f" for b in row)])
+
+
+def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
+    """«🎧 Свести руками»: человеку — цена и контакт звукорежиссёра, владельцу — карточка заявки
+    и следом копии дорожек и версии бота (copyMessage: без пределов 20 и 50 МБ). Под лимитом
+    трек не назван — берётся последний готовый; нет его — только текст, без карточки: пересылать
+    нечего. Заявка одна на трек (hand): повтор владельцу ничего не шлёт, человеку — тот же текст.
+    Отметка ставится после карточки: карточка не ушла — следующее нажатие пошлёт её снова."""
+    tracks = data["tracks"]
+    track_id = track_id or max((key for key, track in tracks.items() if track["chat"] == chat_id and track.get("done")),
+                               key=lambda key: tracks[key]["done"], default="")
+    track = tracks.get(track_id)
+    track = track if track and track["chat"] == chat_id else None
+    telegram.send_message(chat_id, HAND + (HAND_TRACKS if track else "."))
+    if not track or track.get("hand"):
+        return
+    admin, files = config.secret("TELEGRAM_ADMIN_ID"), track["files"]
+    name = " ".join(filter(None, (who.get("first_name"), who.get("last_name")))) or "без имени"
+    contact = f"@{who['username']}" if who.get("username") else f"без username · chat_id <code>{chat_id}</code>"
+    split = not {f["r"] for f in files} <= {"вокал", "бит"}
+    # Что в ссылке на облако, узнаёт только сведение — режим и цену по ней не угадываем.
+    mode = "дорожки по ссылке" if track.get("links") else \
+        f"{'по дорожкам' if split else 'вокал + бит'}, {config.SKLEYKA_HAND_RUB[split]} ₽"
+    words = "\n".join(filter(None, (track.get("wish"), track.get("said"))))
+    card = telegram.send_message(admin, "\n".join([
+        f"🎧 <b>Свести руками</b> · {mode}",
+        f"{html.escape(name)} · {contact}",
+        *([f"Дорожки: {html.escape(_what([(f['n'], f['r']) for f in files]))}"] if files else []),
+        *(f"Ссылка: {html.escape(link['u'])} — {html.escape(link.get('say', ''))}" for link in track.get("links", [])),
+        f"Ручки: {html.escape(look(track['knobs']))}; пересборок — {track['tweaks']}",
+        *([f"Словами: «{html.escape(words)}»"] if words else []),
+        "", f"{QUESTION_TAG}{chat_id}",
+        "<i>Ответь на это сообщение — перешлю человеку. Файлы — следом.</i>"]))
+    track["hand"] = state.iso()
+    save(data)
+    lost = []
+    for message, caption, what in [*((f["m"], f"{NAMES[f['r']]} · {html.escape(f['n'])}", f"«{html.escape(f['n'])}»")
+                                     for f in files),
+                                   (track.get("mix"), "🎛 Версия бота", "версию бота")]:
+        try:
+            if not message:  # трек сведён до того, как бот начал запоминать свою версию
+                raise telegram.TelegramError("нет номера")
+            telegram.copy_message(admin, chat_id, message, caption, reply_to=card.get("message_id"))
+        except telegram.TelegramError:
+            lost.append(what)
+    if lost:
+        telegram.send_message(admin, HAND_LOST.format(what=", ".join(lost)))
 
 
 def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> None:
@@ -2689,6 +2756,8 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
         telegram.send_message(chat_id, TALKED)
         return
     track["talks"] = track.get("talks", 0) + 1
+    # Что просил словами после сборки — для заявки звукорежиссёру (_hand); стирается с треком.
+    track["said"] = f"{track.get('said', '')}\n{text[:500]}".strip()[-1000:]
     # Прошлая просьба ещё ждёт в очереди — эта к ней: иначе пересборка вышла бы без неё.
     if queued := next((job for job in data["jobs"] if job["track"] == track_id
                        and "wish" in job and "started" not in job), None):
@@ -2763,7 +2832,7 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     if not track:
         return
     if result.get("ok"):
-        track.update({key: result[key] for key in ("timing", "knobs", "film") if result.get(key)}, done=state.iso())
+        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix") if result.get(key)}, done=state.iso())
         if result.get("keyed"):
             data["keys"][track["chat"]] = state.iso()
         if not job.get("tweak"):
@@ -3096,8 +3165,8 @@ def run_job(spec_path: Path) -> int:
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
                 print(f"  сведение {spec['job']}: ролик не собрался: {type(exc).__name__}")
                 movie = None
-            result.update(ok=True, film=_send(spec, master, parts, note + (GUESSED if guessed else ""), service, work,
-                                              movie, swap=guessed, drop=drop))
+            result.update(ok=True, **_send(spec, master, parts, note + (GUESSED if guessed else ""), service, work,
+                                           movie, swap=guessed, drop=drop))
             if clip:
                 try:
                     result["keyed"] = _offer(spec, clip, rhythm, timing, voice)
@@ -3378,17 +3447,18 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     return out
 
 def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path, movie: Path | None,
-          swap: bool = False, drop: float | None = None) -> str:
+          swap: bool = False, drop: float | None = None) -> dict:
     """MP3 плеером — его пересылают, WAV документом — его льют на площадки, ручки — отдельным
     сообщением: кнопки на плеере ушли бы вместе с пересылкой. Возвращает file_id ролика ДО/ПОСЛЕ —
-    по нему ролик уйдёт владельцу, если артист согласится (_film); нет ролика — пусто."""
+    по нему ролик уйдёт владельцу, если артист согласится (_film); нет ролика — пусто, — и номер
+    сообщения с MP3: его копию получит звукорежиссёр, если человек попросит свести руками (_hand)."""
     chat, knobs = spec["chat"], spec["knobs"]
     lead = next(name for name, _, part in parts if part in VOCAL_SIDE)
     title = Path(lead).stem[:60]
     mp3 = work / "skleyka.mp3"
     _ffmpeg("-i", master, *MP3, mp3)
     what = _what([(name, part) for name, _, part in parts])
-    telegram.send_audio(chat, mp3.read_bytes(), READY.format(look=look(knobs), parts=what[:1].upper() + what[1:], note=note),
+    mix = telegram.send_audio(chat, mp3.read_bytes(), READY.format(look=look(knobs), parts=what[:1].upper() + what[1:], note=note),
         title=title, performer=f"сведение · {config.BOT_HANDLE}")
     wav = work / f"{title} (сведение).wav"
     master.replace(wav)
@@ -3404,7 +3474,7 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
     telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}",
                                             days=TRACK_DAYS)
                           + (FILM_TERMS if ask else ""), buttons=buttons(spec["track"], knobs, swap=swap, drop=drop, film=ask))
-    return film
+    return {"film": film, "mix": mix.get("message_id")}
 
 
 def _selftest() -> None:
@@ -3678,7 +3748,8 @@ def _selftest() -> None:
         for _ in range(config.SKLEYKA_TWEAKS):
             callback(7, 7, f"{track}:v-")
         assert sent[-1] == NO_TWEAKS and marks[-1] == REMOVE
-        assert [row[0]["callback_data"] for row in buttons(track, KNOBS, swap=True)][-2:] == [f"{PREFIX}{track}:sw", "s:otbor:skleyka"]
+        assert [row[0]["callback_data"] for row in buttons(track, KNOBS, swap=True)][-3:] == [f"{PREFIX}{track}:sw", "s:otbor:skleyka",
+                                                                                   f"{PREFIX}{track}:u"]
         assert _roles([{"r": "вокал", "g": "a"}, {"r": "бит", "g": "a"}], [("take1.wav", low), ("take2.wav", mid)],
                       False) == ([("take1.wav", low, "бит"), ("take2.wav", mid, "вокал")], True), "альбом — по звуку"
 
@@ -3720,6 +3791,7 @@ def _selftest() -> None:
         data = load()
         assert data["jobs"][-1]["wish"] == "автотюн\nи эха меньше" and data["tracks"]["t1"]["tweaks"] == 1 and sent[-1] == WISHED, \
             "вторая просьба, пока первая ждёт, — к ней"
+        assert data["tracks"]["t1"]["said"] == "автотюн\nи эха меньше", "просьбы словами — в треке, для звукорежиссёра"
         job = data["jobs"][-1]
         (tmp / job["id"]).mkdir()
         (tmp / job["id"] / "result.json").write_text(json.dumps({"ok": False, "why": "без перемен"}))
@@ -3810,7 +3882,7 @@ def _selftest() -> None:
         # Согласие на ролик: кнопка — пока не согласился; владельцу ролик по file_id с именем
         # из Telegram, один раз.
         codes = [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False, film=True)]
-        assert codes[-2:] == [f"{PREFIX}t1:f", "s:otbor:skleyka"] and f"{PREFIX}t1:f" not in \
+        assert codes[-3:] == [f"{PREFIX}t1:f", "s:otbor:skleyka", f"{PREFIX}t1:u"] and f"{PREFIX}t1:f" not in \
             [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False)]
         calls.clear()
         callback(8, 8, "t1:f", who={"first_name": "Лил"})
@@ -3858,7 +3930,50 @@ def _selftest() -> None:
         data["used"]["7"] = [state.iso(), state.iso()]
         save(data)
         start(7, 7)
-        assert sent[-1].startswith("Треков в сутки — 2.") and keys[-1] == WAYS, "упёрся — два выхода кнопками"
+        assert sent[-1].startswith("Треков в сутки — 2.") and keys[-1] == WAYS, "упёрся — три выхода кнопками"
+
+        # Свести руками: кнопка последней под треком и под лимитом; человеку — цена, срок и ник;
+        # владельцу — карточка и копии файлов один раз; без готового трека — ни слова о дорожках.
+        assert buttons("t1", KNOBS, swap=False)[-1] == [dict(HAND_BUTTON, callback_data=f"{PREFIX}t1:u")] \
+            and WAYS[-1] == [HAND_BUTTON]
+        assert all(part in HAND for part in ("1500 ₽", "2500 ₽", "Готово за сутки", "@molodyedengi"))
+        data = load()
+        data["tracks"]["t5"] = {"chat": "5", "knobs": dict(KNOBS), "tweaks": 1, "at": state.iso(),
+                                "wish": "голос на дропе", "said": "эха меньше",
+                                "files": [{"m": 11, "f": "F11", "n": "vox.wav", "s": 1, "g": "", "r": "вокал"},
+                                          {"m": 12, "f": "F12", "n": "dbl.wav", "s": 1, "g": "", "r": "дабл"},
+                                          {"m": 13, "f": "F13", "n": "beat.wav", "s": 1, "g": "", "r": "бит"}]}
+        save(data)
+        mock, calls[:] = telegram._call, []
+        telegram._call = lambda method, payload, files=None: calls.append((method, payload)) or {} \
+            if payload.get("message_id") != 12 else (_ for _ in ()).throw(telegram.TelegramError("not found"))
+        callback(5, 5, "u", who={"first_name": "Лил", "last_name": "Пи"})
+        assert sent[-1] == HAND + "." and not calls, "под лимитом трек ещё сводится — без карточки и без дорожек"
+        data = load()
+        data["tracks"]["t5"].update(done=state.iso(), mix=99)
+        save(data)
+        callback(5, 5, "u", who={"first_name": "Лил", "last_name": "Пи"})
+        person, card, lost = sent[-3:]
+        assert person == HAND + HAND_TRACKS and person.endswith("что хочешь получить, — дорожки у него уже есть.")
+        assert "по дорожкам, 2500 ₽" in card and "Лил Пи · без username · chat_id <code>5</code>" in card \
+            and "Словами: «голос на дропе\nэха меньше»" in card and f"{QUESTION_TAG}5" in card, card
+        assert [(m, p["chat_id"], p["from_chat_id"], p["message_id"], json.loads(p["reply_parameters"])["message_id"])
+                for m, p in calls] == [("copyMessage", "1", "5", n, len(sent) - 1) for n in (11, 13, 99)], calls
+        assert lost == HAND_LOST.format(what="«dbl.wav»") and load()["tracks"]["t5"]["hand"], "пропавший файл — строкой"
+        count, calls[:] = len(sent), []
+        callback(5, 5, "t5:u", who={"username": "lilpi"})
+        assert sent[count:] == [HAND + HAND_TRACKS] and not calls, "второе нажатие — владельцу ничего"
+        callback(8, 8, "t5:u")
+        assert sent[-1] == HAND + "." and not calls, "чужой трек — как без трека"
+        data = load()
+        data["tracks"]["t6"] = {"chat": "6", "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(), "done": state.iso(),
+                                "mix": 98, "files": [], "links": [{"u": "https://disk.yandex.ru/d/x", "say": "папка, 5 WAV"}]}
+        save(data)
+        callback(6, 6, "t6:u", who={"username": "lilpi"})
+        assert "· дорожки по ссылке" in sent[-1] and "₽" not in sent[-1] \
+            and "Ссылка: https://disk.yandex.ru/d/x — папка, 5 WAV" in sent[-1] and "@lilpi" in sent[-1] \
+            and "Дорожки:" not in sent[-1] and [p["message_id"] for _, p in calls] == [98], "дорожки по ссылке — ссылкой"
+        telegram._call = mock
         start(1, 1, admin=True)
         assert sent[-1] == INTRO and keys[-1] == [*MODES, [HELP_BUTTON]]
 
@@ -4036,7 +4151,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
-          "реферал за трек и звёзды, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик — ок")
+          "реферал за трек и звёзды, «свести руками» один раз, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик — ок")
 
 
 def talk_check() -> list[str]:

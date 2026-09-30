@@ -207,6 +207,19 @@ def delete_message(chat_id: str | int, message_id: int) -> None:
     _call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
 
 
+def copy_message(chat_id: str | int, from_chat_id: str | int, message_id: int, caption: str | None = None, *,
+                 reply_to: int | None = None) -> dict:
+    """Копия сообщения без «переслано от»: файл Telegram копирует у себя, не скачивая, —
+    поэтому ни предел getFile в 20 МБ, ни предел загрузки в 50 МБ здесь не действуют.
+    caption — новая подпись; None — как у оригинала."""
+    payload: dict[str, Any] = {"chat_id": chat_id, "from_chat_id": from_chat_id, "message_id": message_id}
+    if caption is not None:
+        payload.update(caption=clip(sanitize(caption), MAX_CAPTION), parse_mode="HTML")
+    if reply_to is not None:
+        payload["reply_parameters"] = json.dumps({"message_id": reply_to, "allow_sending_without_reply": True})
+    return _call("copyMessage", payload)
+
+
 def get_chat(chat_id: str) -> dict:
     """Карточка чата: описание, привязанный чат обсуждений, реакции."""
     return _call("getChat", {"chat_id": chat_id})
