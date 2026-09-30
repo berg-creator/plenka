@@ -2783,13 +2783,20 @@ def run_job(spec_path: Path) -> int:
 # Адрес бота — мелко сверху весь ролик: в Shorts и сторис ссылка не нажимается, а из YouTube
 # за месяц в бота пришёл один человек.
 # «Записал на телефон», как в ролике канала, бот не пишет: где записан чужой трек, он не знает.
+# Графика — одни и те же полоски: в ПОСЛЕ спектр в цвете с подсветкой, в ДО серая волна голосового
+# сообщения с бегущей серединой — «как записал». На стыке полоски сами меняют высоту и цвет (владелец
+# 30.09.2026: щелчок между двумя картинками выглядел склейкой). Под волной ДО — отсчёт 3-2-1
+# до ПОСЛЕ: сырой кусок — самое скучное место ролика, отсчёт даёт причину его дослушать.
+# Рисует Pillow по кадру: ffmpeg умеет только готовые виды волн, а numpy ради ролика не берём.
 STORY_HOOK, STORY_DO, STORY_TOTAL = 3.0, 3.5, 13.5  # ПОСЛЕ до ДО, ДО (не дольше) и весь ролик, с — по долям
 STORY_OUTRO, STORY_LOOP = 2.0, 0.5  # затухание с концовкой; из него полсекунды — переход в первый кадр
 STORY_CAPTION = "Для сторис и Shorts: ДО и ПОСЛЕ одной громкости."
-STORY_ACCENT, STORY_GREY = (255, 181, 71), (220, 220, 220)
-STORY_VIZ_Y, STORY_VIZ_HALF, STORY_WAVE = 1100, 330, 260  # центр графики, полвысоты спектра, высота волны ДО
-STORY_BLEND = 0.3  # цветной спектр растворяется в серую волну и обратно, с — поровну по обе стороны стыка
-
+STORY_ACCENT, STORY_GREY, STORY_AHEAD = (255, 181, 71), (220, 220, 220), (90, 90, 96)  # AHEAD — ещё не сыгранное
+# Полоски спектра слева (низ) направо: малиновый, к верхам — янтарь и жёлтый.
+STORY_HUES = ((0.0, (255, 46, 99)), (0.5, (255, 138, 61)), (1.0, (255, 214, 90)))
+STORY_VIZ_Y, STORY_VIZ_HALF, STORY_WAVE = 1100, 330, 130  # центр графики, полвысоты спектра ПОСЛЕ и волны ДО
+STORY_BARS, STORY_MORPH, STORY_MEMO = 40, 0.4, 1.6  # полосок; перетекание, с; окно волны ДО вокруг «сейчас», с
+STORY_COUNT_Y = 1350  # отсчёт до ПОСЛЕ — под волной ДО, выше SAFE_BOTTOM
 
 def _frame(items: list, ground: tuple = (0, 0, 0, 0)):
     """Надписи кадром 1080×1920 шрифтом роликов канала — (текст, кегль, центр по y, цвет, вес).
@@ -2810,10 +2817,8 @@ def _frame(items: list, ground: tuple = (0, 0, 0, 0)):
 
 
 def _story_pictures(work: Path) -> list[Path]:
-    """Кадры ролика: ПОСЛЕ, ДО, концовка (непрозрачная — закрывает графику) и градиент спектра.
+    """Кадры ролика: надписи ПОСЛЕ и ДО и концовка (непрозрачная — закрывает графику).
     Над ПОСЛЕ и ДО — адрес бота мелко, в верхнем краю безопасной зоны."""
-    from PIL import Image
-
     white, width = (255, 255, 255), clips.WIDTH
     after, _ = _frame([("ПОСЛЕ", 250, 470, STORY_ACCENT, 700), ("Свёл бот. Бесплатно", 96, 690, white, 700)])
     before, _ = _frame([("ДО", 250, 470, STORY_GREY, 700), ("Как записал", 96, 690, white, 700)])
@@ -2824,21 +2829,115 @@ def _story_pictures(work: Path) -> list[Path]:
     ending, _ = _frame([("/svedenie", 120, 1050, white, 700)], reels.PLATE_BG + (255,))
     mark = reels.handle_mark(110, pill=False, words=config.BOT_HANDLE)
     ending.alpha_composite(mark, ((width - mark.width) // 2, 905 - mark.height // 2))
-    # Спектр ПОСЛЕ: слева (низ) малиновый, к верхам — янтарь и жёлтый.
-    stops = [(0.0, (255, 46, 99)), (0.5, (255, 138, 61)), (1.0, (255, 214, 90))]
-    row = []
-    for x in range(width):
-        f = x / (width - 1)
-        (a, ca), (b, cb) = next((s, stops[i + 1]) for i, s in enumerate(stops[:-1]) if f <= stops[i + 1][0])
-        row.append(tuple(round(ca[c] + (cb[c] - ca[c]) * (f - a) / (b - a)) for c in range(3)))
-    gradient = Image.new("RGB", (width, 1))
-    gradient.putdata(row)
-    gradient = gradient.resize((width, 2 * STORY_VIZ_HALF), Image.NEAREST)
-    paths = [work / f"story-{name}.png" for name in ("posle", "do", "end", "grad")]
-    for image, path in zip((after, before, ending, gradient), paths):
+    paths = [work / f"story-{name}.png" for name in ("posle", "do", "end")]
+    for image, path in zip((after, before, ending), paths):
         image.save(path)
     return paths
 
+
+def _story_levels(sound: Path, fps: int) -> tuple[list[list[float]], list[float]]:
+    """Звук ролика в высоты полосок 0–1: спектр на каждый кадр и огибающая волны ДО шагом
+    STORY_MEMO / STORY_BARS. Спектр — showcqt ffmpeg: кадр повёрнут, чтобы столбец стал
+    строкой, и высота столбца — число светлых байт в ней."""
+    width, height = STORY_BARS * 4, 64
+    raw = subprocess.run([clips.ffmpeg(), "-hide_banner", "-v", "error", "-i", str(sound), "-filter_complex",
+                          # Эквалайзер только для картинки: иначе 808 забивает левую треть, а верхов не видно.
+                          f"bass=g=-10:f=150,treble=g=18:f=2000,showcqt=s={width}x{height}:fps={fps}:sono_h=0:"
+                          f"bar_h={height}:axis=0:bar_g=3:bar_v=8:basefreq=45:endfreq=8000:cscheme=1|1|1|1|1|1,"
+                          "transpose=clock,format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+    lit, size = bytes(int(v > 96) for v in range(256)), width * height
+    spectrum = []
+    for at in range(0, len(raw) - size + 1, size):
+        rows = [raw[at + x * height:at + (x + 1) * height].translate(lit).count(1) / height for x in range(width)]
+        spectrum.append([max(rows[b * 4:b * 4 + 4]) for b in range(STORY_BARS)])
+    rate = 8000
+    pcm = array.array("h", subprocess.run([clips.ffmpeg(), "-hide_banner", "-v", "error", "-i", str(sound), "-ac", "1",
+                                           "-ar", str(rate), "-f", "s16le", "-"], capture_output=True, check=True).stdout)
+    n = round(rate * STORY_MEMO / STORY_BARS)
+    envelope = [math.sqrt(sum(v * v for v in chunk) / len(chunk)) for chunk in (pcm[i:i + n] for i in range(0, len(pcm), n))]
+    return spectrum, envelope
+
+
+def _ease(x: float) -> float:
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
+
+
+def _story_frames(sound: Path, pictures: list[Path], do0: float, do1: float, total: float, fps: int):
+    """Кадры RGB ролика под концовкой: фон с ореолом, полоски, надпись ПОСЛЕ или ДО и отсчёт.
+    m — насколько кадр ПОСЛЕ: 1 — спектр в цвете, 0 — серая волна; между ними полоски перетекают."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+    spectrum, envelope = _story_levels(sound, fps)
+    step = STORY_MEMO / STORY_BARS
+    # Волна — по децибелам от тихого места ДО до громкого: плотный бит в линейной шкале — сплошной брусок.
+    decibels = [20 * math.log10(max(e, 1.0)) for e in envelope]
+    during = sorted(decibels[int(do0 / step):int(do1 / step) + 1]) or [0.0]
+    low, span = during[len(during) // 10], max(during[-1] - during[len(during) // 10], 1.0)
+    memo = [0.12 + 0.88 * min(1.0, max(0.0, (d - low) / span)) for d in decibels]
+    width, side = clips.WIDTH, 60
+    pitch = (width - 2 * side) / STORY_BARS
+    thick = round(pitch * 0.55)
+    hues = []
+    for i in range(STORY_BARS):
+        f = i / (STORY_BARS - 1)
+        (a, ca), (b, cb) = next((s, STORY_HUES[k + 1]) for k, s in enumerate(STORY_HUES[:-1]) if f <= STORY_HUES[k + 1][0])
+        hues.append(tuple(ca[c] + (cb[c] - ca[c]) * (f - a) / (b - a) for c in range(3)))
+    top = 200  # полоса надписей — от адреса бота до «Как записал»
+    words = [Image.open(path).convert("RGBA").crop((0, top, width, 800)) for path in pictures[:2]]
+    base = Image.new("RGB", (width, clips.HEIGHT), reels.PLATE_BG)
+    # Ореол за спектром — мягкий овал цвета середины спектра, дышит с громкостью; в ДО гаснет.
+    halo_box = (0, STORY_VIZ_Y - 650, width, STORY_VIZ_Y + 650)
+    ring = Image.radial_gradient("L").resize((width, 1300)).point(lambda v: round(max(0, 255 - v) ** 2 / 255))
+    halo = Image.merge("RGB", [ring.point(lambda v, c=c: round(v * c / 255)) for c in STORY_HUES[1][1]])
+    band_h = 2 * STORY_VIZ_HALF + 120
+    band_box = (0, STORY_VIZ_Y - band_h // 2, width, STORY_VIZ_Y + band_h - band_h // 2)
+    mid = band_h // 2
+    digits = {}
+    for k in (1, 2, 3):
+        image, _ = _frame([(str(k), 240, 400, STORY_ACCENT, 700)])
+        digits[k] = image.crop(image.getbbox())
+    count = (do1 - do0) / 3
+    level = [0.0] * STORY_BARS
+    for f in range(math.ceil(total * fps)):
+        t = f / fps
+        m = 1 - _ease((t - do0) / STORY_MORPH + 0.5) + _ease((t - do1) / STORY_MORPH + 0.5)
+        # Спектр подскакивает сразу, а опадает плавно — иначе полоски дрожат.
+        level = [r if r > old else old + (r - old) * 0.25
+                 for r, old in zip(spectrum[f] if f < len(spectrum) else [0.0] * STORY_BARS, level)]
+        at = (t - STORY_MEMO / 2) / step
+        first, frac = math.floor(at), at - math.floor(at)
+        half = STORY_WAVE + (STORY_VIZ_HALF - STORY_WAVE) * m
+        band = Image.new("RGBA", (width, band_h))
+        draw = ImageDraw.Draw(band)
+        for i in range(STORY_BARS):
+            wave = memo[first + i] if 0 <= first + i < len(memo) else 0.0
+            x = side + (i + 0.5 - frac * (1 - m)) * pitch  # волна ДО бежит влево, спектр стоит
+            grey = STORY_GREY if x <= width / 2 else STORY_AHEAD
+            color = tuple(round(g + (h - g) * m) for g, h in zip(grey, hues[i]))
+            h = max(thick / 2, (wave + (level[i] - wave) * m) * half)
+            draw.rounded_rectangle((x - thick / 2, mid - h, x + thick / 2, mid + h), radius=thick / 2, fill=color)
+        frame = base.copy()
+        if m > 0.01:
+            bright = m * (0.1 + 0.35 * sum(level) / STORY_BARS)
+            frame.paste(ImageChops.screen(frame.crop(halo_box), halo.point(lambda v: round(v * bright))), halo_box)
+            glow = (band.convert("RGB").reduce(4).filter(ImageFilter.GaussianBlur(4)).resize(band.size, Image.BILINEAR)
+                    .point(lambda v: round(v * 0.9 * m)))
+            frame.paste(ImageChops.screen(frame.crop(band_box), glow), band_box)
+        frame.paste(band, band_box[:2], band)
+        raw_on = do0 <= t < do1
+        frame.paste(words[raw_on], (0, top), words[raw_on])
+        if raw_on:
+            k = 3 - min(2, int((t - do0) / count))
+            local = t - do0 - (3 - k) * count
+            digit = digits[k]
+            grow = 1 + 0.35 * max(0.0, 1 - local / 0.15) ** 2  # цифра впрыгивает на свою долю
+            if grow > 1:
+                digit = digit.resize((round(digit.width * grow), round(digit.height * grow)), Image.BILINEAR)
+            shown = min(1.0, local / 0.08, (do1 - t) / 0.15)
+            frame.paste(digit, (round((width - digit.width) / 2), round(STORY_COUNT_Y - digit.height / 2)),
+                        digit.getchannel("A").point(lambda v: round(v * shown)))
+        yield frame.tobytes()
 
 def story_cuts(length: float) -> tuple[float, float, float]:
     """Где начинается и кончается ДО и длина ролика, с, при доле length: ДО — целыми долями
@@ -2878,51 +2977,34 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
             f"[p1][do]acrossfade=d={2 * half}[pd];[pd][p2]acrossfade=d={2 * half},"
             f"afade=t=in:d=0.01,afade=t=out:st={end0:.4f}:d={STORY_OUTRO}[a]",
             "-map", "[a]", "-t", f"{total:.4f}", *reels.VOICE_CODEC, sound)
-    posle, first, ending, gradient = _story_pictures(work)
+    pictures = _story_pictures(work)
     width, fps, side, top = clips.WIDTH, 30, 460, 360  # колесо: по центру, над адресом
-    hexed = "0x{:02x}{:02x}{:02x}".format
-    viz, bg, grey = STORY_VIZ_Y - STORY_VIZ_HALF, hexed(*reels.PLATE_BG), hexed(*STORY_GREY)
-    raw_on = f"gte(t,{do0:.3f})*lt(t,{do1:.3f})"
-    # Цвет в серое и обратно — растворением, а не щелчком: плашка цвета фона гасит спектр, волна ДО
-    # проявляется поверх. Звук и надписи меняются на доле, графика перетекает вокруг неё.
-    blend = (f"fade=t=in:st={do0 - STORY_BLEND / 2:.3f}:d={STORY_BLEND}:alpha=1,"
-             f"fade=t=out:st={do1 - STORY_BLEND / 2:.3f}:d={STORY_BLEND}:alpha=1")
     fade = f"fade=t=in:st={end0:.3f}:d=0.25:alpha=1,fade=t=out:st={loop0:.3f}:d={STORY_LOOP}:alpha=1"
-    _ffmpeg("-i", sound, *(arg for image in (posle, first, ending, gradient)
-                           for arg in ("-loop", "1", "-framerate", fps, "-t", f"{total:.3f}", "-i", image)),
-            "-stream_loop", "-1", "-t", f"{STORY_OUTRO:.3f}", "-i", reels.WHEEL,
-            "-filter_complex",
-            # ПОСЛЕ: спектр showcqt белым — маска для градиента, зеркально вверх и вниз от средней линии.
-            # Эквалайзер только для картинки: иначе 808 забивает левую треть, а верхов не видно.
-            "[0:a]asplit=2[s1][s2];"
-            f"[s1]bass=g=-10:f=150,treble=g=18:f=2000,showcqt=s={width}x{STORY_VIZ_HALF}:fps={fps}:sono_h=0:"
-            f"bar_h={STORY_VIZ_HALF}:axis=0:bar_g=3:bar_v=8:basefreq=45:endfreq=8000:cscheme=1|1|1|1|1|1,"
-            "format=gray,split[q1][q2];[q2]vflip[q3];[q1][q3]vstack[mask];"
-            "[4:v]format=rgb24[gr];[gr][mask]alphamerge,split[bars][glow0];"
-            "[glow0]gblur=sigma=14,colorchannelmixer=aa=0.9[glow];"
-            # ДО: светлая волна без цвета — видно, что звук есть, но он сырой. draw=full — иначе
-            # showwaves приглушает цвет, и светлая волна на чёрном выходит тёмно-серой.
-            f"[s2]showwaves=s={width}x{STORY_WAVE}:mode=cline:draw=full:rate={fps}:colors={grey}:scale=sqrt,"
-            f"format=rgba,{blend}[wave];"
-            f"color=c={bg}:s={width}x{2 * STORY_VIZ_HALF}:r={fps}:d={total:.3f},format=rgba,{blend}[hide];"
-            f"color=c={bg}:s={width}x{clips.HEIGHT}:r={fps}:d={total:.3f},format=rgba[bg];"
-            "[1:v]split[f1][f2];"
-            # Спектр под концовкой тоже идёт: в последние полсекунды она тает, и конец перетекает в начало.
-            f"[bg][glow]overlay=0:{viz}[v0];[v0][bars]overlay=0:{viz}[hb];[hb][hide]overlay=0:{viz}[v1];"
-            f"[v1][wave]overlay=0:{STORY_VIZ_Y - STORY_WAVE // 2}[v2];"
-            f"[v2][f1]overlay=0:0:enable='lt(t,{do0:.3f})+gte(t,{do1:.3f})*lt(t,{end0:.3f})'[v3];"
-            f"[v3][2:v]overlay=0:0:enable='{raw_on}'[v4];"
-            f"[3:v]format=rgba,{fade}[e];[v4][e]overlay=0:0:enable='gte(t,{end0:.3f})'[v5];"
-            f"[5:v]scale={side}:{side},fps={fps},format=rgba,"
-            f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='255*clip({side / 2 - 1}-hypot(X-{side / 2},Y-{side / 2}),0,1)',"
-            f"setpts=PTS-STARTPTS+{end0:.3f}/TB,{fade}[w];"
-            f"[v5][w]overlay={(width - side) // 2}:{top}:eof_action=pass[v6];"
-            f"[f2]format=rgba,fade=t=in:st={loop0:.3f}:d={STORY_LOOP}:alpha=1[l];"
-            f"[v6][l]overlay=0:0:enable='gte(t,{loop0:.3f})',format=yuv420p[v]",
-            "-map", "[v]", "-map", "0:a", "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-            "-r", fps, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-movflags", "+faststart", out)
+    # Графика идёт и под концовкой: в последние полсекунды концовка тает, и конец перетекает в начало.
+    proc = subprocess.Popen(
+        [clips.ffmpeg(), "-y", "-hide_banner", "-v", "error",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{clips.HEIGHT}", "-r", str(fps), "-i", "-",
+         "-i", str(sound), "-loop", "1", "-framerate", str(fps), "-t", f"{total:.3f}", "-i", str(pictures[2]),
+         "-stream_loop", "-1", "-t", f"{STORY_OUTRO:.3f}", "-i", str(reels.WHEEL),
+         "-filter_complex",
+         f"[2:v]format=rgba,{fade}[e];[0:v][e]overlay=0:0:enable='gte(t,{end0:.3f})'[v5];"
+         f"[3:v]scale={side}:{side},fps={fps},format=rgba,"
+         f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='255*clip({side / 2 - 1}-hypot(X-{side / 2},Y-{side / 2}),0,1)',"
+         f"setpts=PTS-STARTPTS+{end0:.3f}/TB,{fade}[w];"
+         f"[v5][w]overlay={(width - side) // 2}:{top}:eof_action=pass,format=yuv420p[v]",
+         "-map", "[v]", "-map", "1:a", "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+         "-r", str(fps), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k", "-ar", "48000",
+         "-movflags", "+faststart", str(out)],
+        stdin=subprocess.PIPE)
+    try:
+        with proc.stdin:
+            for frame in _story_frames(sound, pictures, do0, do1, total, fps):
+                proc.stdin.write(frame)
+    finally:
+        code = proc.wait()
+    if code:
+        raise RuntimeError(f"ролик ДО/ПОСЛЕ: ffmpeg вернул {code}")
     return out
-
 
 def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path, movie: Path | None,
           swap: bool = False, drop: float | None = None) -> str:
