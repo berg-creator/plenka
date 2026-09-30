@@ -2925,10 +2925,11 @@ def beats(chat_id: str | int, text: str) -> None:
 _RUNNING: tuple[subprocess.Popen, dict, Path] | None = None
 
 
-def busy() -> bool:
-    """Ждёт ли что-то хода: тогда дежурство опрашивает Telegram чаще."""
+def busy(drafts: bool = True) -> bool:
+    """Ждёт ли что-то хода: тогда дежурство опрашивает Telegram чаще. drafts=False — только
+    сведение, идущее и в очереди: открытая заявка лежит в хранилище и переживёт смену."""
     data = load()
-    return bool(_RUNNING or data["jobs"] or data["drafts"])
+    return bool(_RUNNING or data["jobs"] or drafts and data["drafts"])
 
 
 def tick() -> None:
