@@ -1591,6 +1591,11 @@ GUESSED = "Вокал и бит пришли одним альбомом — г�
 TUNE = ("Не так? Подкрути — пересоберу{left}. Или просто напиши словами, что поменять, как другу: "
         "«слов не слышно», «погрязнее», «эха меньше», «голос на дропе», «как у Travis Scott».\n\n"
         "Выложишь трек на площадки — жми «В ОТБОР»: он выйдет в канале с твоим именем.")
+# Согласие на ролик ДО/ПОСЛЕ: одна строка условий под ручками, пока артист не согласился.
+# Бит — главный риск: чужой бит без права на видео в рекламе канала не покажешь.
+FILM_TERMS = "\n\n🎬 Покажем твоё ДО/ПОСЛЕ с твоим именем в роликах ПЛЁНКИ — если бит твой или куплен с правом на видео."
+FILM_OWNER = "🎬 Можно в ролик ПЛЁНКИ: {name}. Бит, по словам артиста, свой или куплен с правом на видео."
+FILM_THANKS = "🎬 Спасибо! Ролик у ПЛЁНКИ — выйдет с твоим именем."
 
 # Альбом в Telegram — до десяти файлов: хватает на вокал, даблы, бэки, эдлибы и бит по частям.
 MAX_PARTS = 10
@@ -2049,11 +2054,11 @@ def _drafts(data: dict) -> bool:
     return changed
 
 
-def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None) -> list[list[dict]]:
+def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film: bool = False) -> list[list[dict]]:
     """Ручки под готовым треком: просьба словами первой — 26.09 из семи треков ни одного
     не поправили словами, о подсказке в тексте не знали; голос с дропа, если он входит
     раньше (DROP_NOTE); стиль, голос, эхо, саунд-дизайн; «поменять» — когда вокал понят
-    по звуку; «В ОТБОР» — дорога дальше."""
+    по звуку; согласие на ролик ПЛЁНКИ, пока его не дали (FILM_TERMS); «В ОТБОР» — дорога дальше."""
     def cb(code: str) -> str:
         return f"{PREFIX}{track}:{code}"
 
@@ -2067,6 +2072,8 @@ def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None) -> l
             [{"text": "✨ саунд-дизайн: " + ("убрать" if knobs["design"] else "добавить"), "callback_data": cb("d")}]]
     if swap:
         rows.append([{"text": "↔ поменять вокал и бит", "callback_data": cb("sw")}])
+    if film:
+        rows.append([{"text": "🎬 Можно в ролик ПЛЁНКИ", "callback_data": cb("f")}])
     # Метка skleyka доходит до поста отбора: под ним строка про СВЕДЕНИЕ (otbor.build_post).
     rows.append([{"text": "🎙 Выложил — в ОТБОР", "callback_data": "s:otbor:skleyka"}])
     return rows
@@ -2108,17 +2115,20 @@ def look(knobs: dict) -> str:
 
 
 def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: bool = False,
-             message_id: int | None = None) -> None:
+             message_id: int | None = None, who: dict | None = None) -> None:
     """Кнопки сведения. Под готовым треком — пересборка с новыми ручками новой заявкой,
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y) и саунд-дизайн (e) —
-    message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте."""
+    message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram."""
     chat_id = str(chat_id)
     head, _, code = subject.partition(":")
     data = load()
     if len(head) != 1 and code == "w":
         # Telegram сам открывает ответ на этот вопрос, а метка в нём ведёт ответ в talk.
         telegram.send_message(chat_id, TALK_ASK, ask="голос входит на дропе")
+        return
+    if len(head) != 1 and code == "f":
+        _film(data, chat_id, head, who or {})
         return
     if len(head) != 1:
         _tweak(data, chat_id, head, code, admin)
@@ -2182,6 +2192,24 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     if chat_id in data["drafts"]:
         draft["at"] = state.iso()
     save(data)
+
+
+def _film(data: dict, chat_id: str, track_id: str, who: dict) -> None:
+    """«🎬 Можно в ролик ПЛЁНКИ»: владельцу — уже отправленный ролик ДО/ПОСЛЕ по file_id с именем,
+    как артист назвал себя в Telegram. Файлов бот не хранит; согласие — в треке, второй раз
+    ролик не уходит и кнопка под новыми сборками не появляется (_spawn, agreed)."""
+    track = data["tracks"].get(track_id)
+    if not track or track["chat"] != chat_id or not track.get("film"):
+        telegram.send_message(chat_id, STALE)
+        return
+    if not track.get("agreed"):
+        name = " ".join(filter(None, (who.get("first_name"), who.get("last_name")))) or "без имени"
+        if who.get("username"):
+            name += f" @{who['username']}"
+        telegram.send_video_url(config.secret("TELEGRAM_ADMIN_ID"), track["film"], FILM_OWNER.format(name=html.escape(name)))
+        track["agreed"] = state.iso()
+        save(data)
+    telegram.send_message(chat_id, FILM_THANKS)
 
 
 def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> None:
@@ -2500,7 +2528,8 @@ def _spawn(data: dict, job: dict) -> tuple[subprocess.Popen, dict, Path]:
     work = Path(tempfile.mkdtemp(prefix="skleyka-"))
     spec = {"job": job["id"], "track": job["track"], "chat": track["chat"], "files": track["files"],
             "knobs": job["knobs"], "left": None if track.get("admin") else config.SKLEYKA_TWEAKS - track["tweaks"],
-            "wish": job.get("wish") or (None if job.get("tweak") else track.get("wish")), "talk": "wish" in job}
+            "wish": job.get("wish") or (None if job.get("tweak") else track.get("wish")), "talk": "wish" in job,
+            "agreed": "agreed" in track}
     (work / "job.json").write_text(json.dumps(spec, ensure_ascii=False))
     job["started"] = state.iso()
     print(f"  сведение {job['id']}: пошло, в очереди ещё {len(data['jobs']) - 1}")
@@ -2522,7 +2551,7 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     if not track:
         return
     if result.get("ok"):
-        track.update({key: result[key] for key in ("timing", "knobs") if result.get(key)}, done=state.iso())
+        track.update({key: result[key] for key in ("timing", "knobs", "film") if result.get(key)}, done=state.iso())
         if result.get("keyed"):
             data["keys"][track["chat"]] = state.iso()
         if not job.get("tweak"):
@@ -2706,8 +2735,8 @@ def run_job(spec_path: Path) -> int:
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
                 print(f"  сведение {spec['job']}: ролик не собрался: {type(exc).__name__}")
                 movie = None
-            _send(spec, master, parts, note + (GUESSED if guessed else ""), service, work, movie, swap=guessed, drop=drop)
-            result["ok"] = True
+            result.update(ok=True, film=_send(spec, master, parts, note + (GUESSED if guessed else ""), service, work,
+                                              movie, swap=guessed, drop=drop))
             if clip:
                 try:
                     result["keyed"] = _offer(spec, clip, rhythm, timing, voice)
@@ -2722,17 +2751,21 @@ def run_job(spec_path: Path) -> int:
     return 0
 
 
-# Ролик ДО/ПОСЛЕ — как тот, что 28.09.2026 ушёл на YouTube (владелец: «пусть бот делает так же»).
-# ДО — голос как записан, на бит, под ним тусклая серая волна; ПОСЛЕ продолжает трек с места,
-# где кончился ДО, спектром в янтаре; звук гаснет на концовке — колесо канала, адрес бота
-# и команда, а последние полсекунды перетекают в первый кадр: Shorts крутят ролик по кругу.
-# Громкость одна, посчитанная на отрезке ДО (как в compare): слышно, что сделало сведение,
-# а не насколько стало громче. Кусок — самый громкий в треке, стык — на доле сетки бита.
+# Ролик ДО/ПОСЛЕ — реклама СВЕДЕНИЯ и ролик, который артист выложит у себя. Ролик 28.09.2026
+# начинался с ДО: 3,6 с чёрного экрана с «Как записал», серой волной и сырым голосом — и в Shorts
+# его досмотрели 22 % против 51–69 % у новостей (prompts/reels.md, «Удержание»). Поэтому с первого
+# кадра — ПОСЛЕ: самое громкое место трека, крупная надпись и спектр в янтаре; потом ДО не дольше
+# 2,5 с — голос как записан, под ним светлая волна; потом снова ПОСЛЕ и концовка: колесо канала,
+# адрес бота и команда, а последние полсекунды перетекают в первый кадр — Shorts крутят по кругу.
+# Трек идёт подряд, меняется только обработка, стыки — на долях сетки бита. Громкость одна,
+# посчитанная на отрезке ДО (как в compare): слышно, что сделало сведение, а не насколько громче.
+# Адрес бота — мелко сверху весь ролик: в Shorts и сторис ссылка не нажимается, а из YouTube
+# за месяц в бота пришёл один человек.
 # «Записал на телефон», как в ролике канала, бот не пишет: где записан чужой трек, он не знает.
-STORY_DO, STORY_BODY = 3.6, 10.0  # ДО и продолжение ПОСЛЕ, секунды — округляются до долей
+STORY_HOOK, STORY_DO, STORY_TOTAL = 3.0, 2.5, 13.5  # ПОСЛЕ до ДО, ДО (не дольше) и весь ролик, с — по долям
 STORY_OUTRO, STORY_LOOP = 2.0, 0.5  # затухание с концовкой; из него полсекунды — переход в первый кадр
 STORY_CAPTION = "Для сторис и Shorts: ДО и ПОСЛЕ одной громкости."
-STORY_ACCENT, STORY_GREY = (255, 181, 71), (140, 140, 140)
+STORY_ACCENT, STORY_GREY = (255, 181, 71), (220, 220, 220)
 STORY_VIZ_Y, STORY_VIZ_HALF, STORY_WAVE = 1100, 330, 260  # центр графики, полвысоты спектра, высота волны ДО
 
 
@@ -2755,19 +2788,16 @@ def _frame(items: list, ground: tuple = (0, 0, 0, 0)):
 
 
 def _story_pictures(work: Path) -> list[Path]:
-    """Кадры ролика: ДО с меткой, ПОСЛЕ, концовка (непрозрачная — закрывает графику) и градиент спектра."""
+    """Кадры ролика: ПОСЛЕ, ДО, концовка (непрозрачная — закрывает графику) и градиент спектра.
+    Над ПОСЛЕ и ДО — адрес бота мелко, в верхнем краю безопасной зоны."""
     from PIL import Image
 
-    from . import stories
-
     white, width = (255, 255, 255), clips.WIDTH
-    first, draw = _frame([("Как", 170, 470, white, 700), ("записал", 170, 657, white, 700)])
-    font = stories.font(46, 700)
-    left, _, right, _ = draw.textbbox((0, 0), "ДО", font=font)
-    side = (width - (right - left + 56)) / 2
-    draw.rounded_rectangle((side, 262, width - side, 338), radius=38, fill=STORY_GREY)
-    draw.text((width / 2, 300), "ДО", font=font, fill=reels.PLATE_BG, anchor="mm")
-    after, _ = _frame([("ПОСЛЕ", 250, 420, STORY_ACCENT, 700), ("Свёл бот. Бесплатно", 96, 640, white, 700)])
+    after, _ = _frame([("ПОСЛЕ", 250, 470, STORY_ACCENT, 700), ("Свёл бот. Бесплатно", 96, 690, white, 700)])
+    before, _ = _frame([("ДО", 250, 470, STORY_GREY, 700), ("Как записал", 96, 690, white, 700)])
+    handle = reels.handle_mark(64, pill=True, words=config.BOT_HANDLE)
+    for image in (after, before):
+        image.alpha_composite(handle, ((width - handle.width) // 2, 290 - handle.height // 2))
     # Ссылки в концовке нет: в сторис и Shorts её не нажать, а адрес бота и команду запомнят и так.
     ending, _ = _frame([("/svedenie", 120, 1050, white, 700)], reels.PLATE_BG + (255,))
     mark = reels.handle_mark(110, pill=False, words=config.BOT_HANDLE)
@@ -2782,17 +2812,23 @@ def _story_pictures(work: Path) -> list[Path]:
     gradient = Image.new("RGB", (width, 1))
     gradient.putdata(row)
     gradient = gradient.resize((width, 2 * STORY_VIZ_HALF), Image.NEAREST)
-    paths = [work / f"story-{name}.png" for name in ("do", "posle", "end", "grad")]
-    for image, path in zip((first, after, ending, gradient), paths):
+    paths = [work / f"story-{name}.png" for name in ("posle", "do", "end", "grad")]
+    for image, path in zip((after, before, ending, gradient), paths):
         image.save(path)
     return paths
 
 
+def story_cuts(length: float) -> tuple[float, float, float]:
+    """Где начинается и кончается ДО и длина ролика, с, при доле length: ДО — целыми долями
+    не дольше STORY_DO (хоть одна доля), ПОСЛЕ до и после него — долями, к STORY_TOTAL."""
+    do0 = max(1, round(STORY_HOOK / length)) * length
+    do1 = do0 + max(1, math.floor(STORY_DO / length)) * length
+    return do0, do1, do1 + max(1, round((STORY_TOTAL - STORY_OUTRO - do1) / length)) * length + STORY_OUTRO
+
+
 def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float, float]) -> Path:
-    """Ролик 9:16 на 12–21 с (зависит от темпа): ДО, ПОСЛЕ дальше по треку и концовка."""
-    length = rhythm[0]
-    seg = max(1, round(STORY_DO / length)) * length
-    total = 2 * seg + round(STORY_BODY / length) * length + STORY_OUTRO
+    """Ролик 9:16 на 12–15 с: ПОСЛЕ, ДО тем же местом трека дальше, снова ПОСЛЕ и концовка."""
+    do0, do1, total = story_cuts(rhythm[0])
     end0, loop0 = total - STORY_OUTRO, total - STORY_LOOP - 0.1  # переход кончается за 3 кадра до конца
     _, trace = reels.meter(master)
     n = round(total / (trace[1][0] - trace[0][0]))
@@ -2804,25 +2840,29 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     def cut(a: float, b: float) -> str:
         return f"{FORMAT},atrim=start={a:.4f}:end={b:.4f},asetpts=PTS-STARTPTS"
 
-    raw_mix = f"[0:a]{cut(start, start + seg)}[v];[1:a]{cut(start, start + seg)}[b];[v][b]amix=inputs=2:normalize=0"
+    a, b = start + do0, start + do1
+    raw_mix = f"[0:a]{cut(a, b)}[v];[1:a]{cut(a, b)}[b];[v][b]amix=inputs=2:normalize=0"
     before, after, sound, out = (work / f"story-{name}" for name in ("do.wav", "posle.wav", "zvuk.wav", "video.mp4"))
     _ffmpeg("-i", vocal, "-i", beat, "-filter_complex", raw_mix, *reels.VOICE_CODEC, before)
-    _ffmpeg("-i", master, "-af", cut(start, start + seg), *reels.VOICE_CODEC, after)
+    _ffmpeg("-i", master, "-af", cut(a, b), *reels.VOICE_CODEC, after)
     (raw, peak), glued = loudness(before), loudness(after)[0]
     level = min(glued, raw + CEILING - peak)
     half = 0.0075  # полкроссфейда на стыке: 15 мс
     _ffmpeg("-i", vocal, "-i", beat, "-i", master, "-filter_complex",
-            f"[0:a]{cut(start, start + seg + half)}[v];[1:a]{cut(start, start + seg + half)}[b];"
+            f"[0:a]{cut(a - half, b + half)}[v];[1:a]{cut(a - half, b + half)}[b];"
             f"[v][b]amix=inputs=2:normalize=0,volume={level - raw:.2f}dB[do];"
-            f"[2:a]{cut(start + seg - half, start + total)},volume={level - glued:.2f}dB[pb];"
-            f"[do][pb]acrossfade=d={2 * half},afade=t=in:d=0.01,afade=t=out:st={end0:.4f}:d={STORY_OUTRO}[a]",
+            f"[2:a]volume={level - glued:.2f}dB,asplit=2[m1][m2];"
+            f"[m1]{cut(start, a + half)}[p1];[m2]{cut(b - half, start + total)}[p2];"
+            f"[p1][do]acrossfade=d={2 * half}[pd];[pd][p2]acrossfade=d={2 * half},"
+            f"afade=t=in:d=0.01,afade=t=out:st={end0:.4f}:d={STORY_OUTRO}[a]",
             "-map", "[a]", "-t", f"{total:.4f}", *reels.VOICE_CODEC, sound)
-    first, posle, ending, gradient = _story_pictures(work)
+    posle, first, ending, gradient = _story_pictures(work)
     width, fps, side, top = clips.WIDTH, 30, 460, 360  # колесо: по центру, над адресом
-    viz, bg = STORY_VIZ_Y - STORY_VIZ_HALF, "0x{:02x}{:02x}{:02x}".format(*reels.PLATE_BG)
-    shown = f"between(t,{seg:.3f},{loop0:.3f})"
+    hexed = "0x{:02x}{:02x}{:02x}".format
+    viz, bg, grey = STORY_VIZ_Y - STORY_VIZ_HALF, hexed(*reels.PLATE_BG), hexed(*STORY_GREY)
+    raw_on, shown = f"gte(t,{do0:.3f})*lt(t,{do1:.3f})", f"lt(t,{do0:.3f})+gte(t,{do1:.3f})"
     fade = f"fade=t=in:st={end0:.3f}:d=0.25:alpha=1,fade=t=out:st={loop0:.3f}:d={STORY_LOOP}:alpha=1"
-    _ffmpeg("-i", sound, *(arg for image in (first, posle, ending, gradient)
+    _ffmpeg("-i", sound, *(arg for image in (posle, first, ending, gradient)
                            for arg in ("-loop", "1", "-framerate", fps, "-t", f"{total:.3f}", "-i", image)),
             "-stream_loop", "-1", "-t", f"{STORY_OUTRO:.3f}", "-i", reels.WHEEL,
             "-filter_complex",
@@ -2834,16 +2874,16 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
             "format=gray,split[q1][q2];[q2]vflip[q3];[q1][q3]vstack[mask];"
             "[4:v]format=rgb24[gr];[gr][mask]alphamerge,split[bars][glow0];"
             "[glow0]gblur=sigma=14,colorchannelmixer=aa=0.9[glow];"
-            # ДО: тонкая серая волна, тусклая.
-            f"[s2]showwaves=s={width}x{STORY_WAVE}:mode=p2p:rate={fps}:colors=0x9a9a9a:scale=sqrt,format=rgba,"
-            "colorchannelmixer=aa=0.8[wave];"
+            # ДО: светлая волна без цвета — видно, что звук есть, но он сырой.
+            f"[s2]showwaves=s={width}x{STORY_WAVE}:mode=cline:rate={fps}:colors={grey}:scale=sqrt,"
+            "format=rgba[wave];"
             f"color=c={bg}:s={width}x{clips.HEIGHT}:r={fps}:d={total:.3f},format=rgba[bg];"
             "[1:v]split[f1][f2];"
+            # Спектр под концовкой тоже идёт: в последние полсекунды она тает, и конец перетекает в начало.
             f"[bg][glow]overlay=0:{viz}:enable='{shown}'[v0];[v0][bars]overlay=0:{viz}:enable='{shown}'[v1];"
-            # Волна и надпись ДО — в начале и снова в последние полсекунды: конец перетекает в начало.
-            f"[v1][wave]overlay=0:{STORY_VIZ_Y - STORY_WAVE // 2}:enable='lt(t,{seg:.3f})+gte(t,{loop0:.3f})'[v2];"
-            f"[v2][f1]overlay=0:0:enable='lt(t,{seg:.3f})'[v3];"
-            f"[v3][2:v]overlay=0:0:enable='between(t,{seg:.3f},{end0:.3f})'[v4];"
+            f"[v1][wave]overlay=0:{STORY_VIZ_Y - STORY_WAVE // 2}:enable='{raw_on}'[v2];"
+            f"[v2][f1]overlay=0:0:enable='lt(t,{do0:.3f})+gte(t,{do1:.3f})*lt(t,{end0:.3f})'[v3];"
+            f"[v3][2:v]overlay=0:0:enable='{raw_on}'[v4];"
             f"[3:v]format=rgba,{fade}[e];[v4][e]overlay=0:0:enable='gte(t,{end0:.3f})'[v5];"
             f"[5:v]scale={side}:{side},fps={fps},format=rgba,"
             f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='255*clip({side / 2 - 1}-hypot(X-{side / 2},Y-{side / 2}),0,1)',"
@@ -2857,9 +2897,10 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
 
 
 def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path, movie: Path | None,
-          swap: bool = False, drop: float | None = None) -> None:
+          swap: bool = False, drop: float | None = None) -> str:
     """MP3 плеером — его пересылают, WAV документом — его льют на площадки, ручки — отдельным
-    сообщением: кнопки на плеере ушли бы вместе с пересылкой."""
+    сообщением: кнопки на плеере ушли бы вместе с пересылкой. Возвращает file_id ролика ДО/ПОСЛЕ —
+    по нему ролик уйдёт владельцу, если артист согласится (_film); нет ролика — пусто."""
     chat, knobs = spec["chat"], spec["knobs"]
     lead = next(name for name, _, part in parts if part in VOCAL_SIDE)
     title = Path(lead).stem[:60]
@@ -2874,11 +2915,14 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
         telegram.send_document(chat, wav)
     else:
         telegram.send_big(service(), chat, wav, "", via=spec["files"][0]["m"])
+    film = ""
     if movie:
-        telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(clips.probe_seconds(movie)))
-    left = spec["left"]
-    telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}"),
-                          buttons=buttons(spec["track"], knobs, swap=swap, drop=drop))
+        sent = telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(clips.probe_seconds(movie)))
+        film = (sent.get("video") or {}).get("file_id", "")
+    ask, left = bool(film) and not spec.get("agreed"), spec["left"]
+    telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}")
+                          + (FILM_TERMS if ask else ""), buttons=buttons(spec["track"], knobs, swap=swap, drop=drop, film=ask))
+    return film
 
 
 def _selftest() -> None:
@@ -3233,11 +3277,30 @@ def _selftest() -> None:
         # Кнопка приложения: отметку ставит сборка, что её прислала; человек пишет не словами
         # о треке — её снимает первый ответ бота без своих кнопок, и один раз.
         (tmp / "keyed").mkdir()
-        (tmp / "keyed" / "result.json").write_text(json.dumps({"ok": True, "keyed": True}))
+        (tmp / "keyed" / "result.json").write_text(json.dumps({"ok": True, "keyed": True, "film": "FILM1"}))
         done = subprocess.Popen(["true"])
         done.wait()
         _finish(data, done, {"id": "jk", "track": "t1", "tweak": True}, tmp / "keyed")
         save(data)
+
+        # Ролик ДО/ПОСЛЕ: при любом темпе сетки первым идёт ПОСЛЕ, ДО — не дольше 2,5 с, весь ролик 12–15 с.
+        for beat_length in (0.5, 0.6, 0.75, 0.857, 1.0):
+            do0, do1, total = story_cuts(beat_length)
+            assert 2.5 <= do0 < do1 <= do0 + STORY_DO and 12 <= total <= 15, (beat_length, do0, do1, total)
+        # Согласие на ролик: кнопка — пока не согласился; владельцу ролик по file_id с именем
+        # из Telegram, один раз.
+        codes = [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False, film=True)]
+        assert codes[-2:] == [f"{PREFIX}t1:f", "s:otbor:skleyka"] and f"{PREFIX}t1:f" not in \
+            [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False)]
+        calls.clear()
+        callback(8, 8, "t1:f", who={"first_name": "Лил"})
+        assert sent[-1] == STALE and not calls, "чужой трек"
+        for _ in range(2):
+            callback(7, 7, "t1:f", who={"first_name": "Лил", "last_name": "<Пи>", "username": "lilpi"})
+        assert [(method, payload["chat_id"], payload["video"]) for method, payload in calls] == [("sendVideo", "1", "FILM1")] \
+            and "Лил &lt;Пи&gt; @lilpi" in calls[0][1]["caption"] and sent[-1] == FILM_THANKS, "владельцу — один раз"
+        data = load()
+        assert data["tracks"]["t1"]["agreed"]
         # Молчит — кнопку снимает дежурство, когда звук протух: беззвучно и без следа.
         data["tracks"]["t9"] = {"chat": "9", "files": [], "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(),
                                 "done": "2026-09-27T12:00:00+00:00"}
@@ -3346,7 +3409,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, звук заранее, "
           "ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
-          "реферал за трек и звёзды, превью и подпись звука, место голоса из приложения — ок")
+          "реферал за трек и звёзды, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик — ок")
 
 
 def talk_check() -> list[str]:
