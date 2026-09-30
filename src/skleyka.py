@@ -1596,6 +1596,7 @@ TUNE = ("Не так? Подкрути — пересоберу{left}. Или п
 FILM_TERMS = "\n\n🎬 Покажем твоё ДО/ПОСЛЕ с твоим именем в роликах ПЛЁНКИ — если бит твой или куплен с правом на видео."
 FILM_OWNER = "🎬 Можно в ролик ПЛЁНКИ: {name}. Бит, по словам артиста, свой или куплен с правом на видео."
 FILM_THANKS = "🎬 Спасибо! Ролик у ПЛЁНКИ — выйдет с твоим именем."
+FILM_WAIT = "Ролик ещё уходит — нажми «🎬» через минуту."
 
 # Альбом в Telegram — до десяти файлов: хватает на вокал, даблы, бэки, эдлибы и бит по частям.
 MAX_PARTS = 10
@@ -2115,11 +2116,12 @@ def look(knobs: dict) -> str:
 
 
 def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: bool = False,
-             message_id: int | None = None, who: dict | None = None) -> None:
+             message_id: int | None = None, who: dict | None = None, keyboard: list | None = None) -> None:
     """Кнопки сведения. Под готовым треком — пересборка с новыми ручками новой заявкой,
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y) и саунд-дизайн (e) —
-    message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram."""
+    message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
+    keyboard — кнопки того сообщения."""
     chat_id = str(chat_id)
     head, _, code = subject.partition(":")
     data = load()
@@ -2128,7 +2130,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         telegram.send_message(chat_id, TALK_ASK, ask="голос входит на дропе")
         return
     if len(head) != 1 and code == "f":
-        _film(data, chat_id, head, who or {})
+        _film(data, chat_id, head, who or {}, message_id, keyboard or [])
         return
     if len(head) != 1:
         _tweak(data, chat_id, head, code, admin)
@@ -2194,13 +2196,18 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     save(data)
 
 
-def _film(data: dict, chat_id: str, track_id: str, who: dict) -> None:
+def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | None, keyboard: list) -> None:
     """«🎬 Можно в ролик ПЛЁНКИ»: владельцу — уже отправленный ролик ДО/ПОСЛЕ по file_id с именем,
     как артист назвал себя в Telegram. Файлов бот не хранит; согласие — в треке, второй раз
-    ролик не уходит и кнопка под новыми сборками не появляется (_spawn, agreed)."""
+    ролик не уходит и кнопка под новыми сборками не появляется (_spawn, agreed); с нажатого
+    сообщения она снимается, остальные ручки остаются."""
     track = data["tracks"].get(track_id)
-    if not track or track["chat"] != chat_id or not track.get("film"):
+    if not track or track["chat"] != chat_id:
         telegram.send_message(chat_id, STALE)
+        return
+    if not track.get("film"):
+        # file_id приносит итог сведения (_finish), а ручки уходят раньше: нажал сразу — кнопка ждёт.
+        telegram.send_message(chat_id, FILM_WAIT)
         return
     if not track.get("agreed"):
         name = " ".join(filter(None, (who.get("first_name"), who.get("last_name")))) or "без имени"
@@ -2210,6 +2217,9 @@ def _film(data: dict, chat_id: str, track_id: str, who: dict) -> None:
         track["agreed"] = state.iso()
         save(data)
     telegram.send_message(chat_id, FILM_THANKS)
+    if message_id and keyboard:
+        telegram.edit_markup(chat_id, message_id, [row for row in keyboard
+                                                   if all(b.get("callback_data") != f"{PREFIX}{track_id}:f" for b in row)])
 
 
 def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> None:
@@ -2874,8 +2884,9 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
             "format=gray,split[q1][q2];[q2]vflip[q3];[q1][q3]vstack[mask];"
             "[4:v]format=rgb24[gr];[gr][mask]alphamerge,split[bars][glow0];"
             "[glow0]gblur=sigma=14,colorchannelmixer=aa=0.9[glow];"
-            # ДО: светлая волна без цвета — видно, что звук есть, но он сырой.
-            f"[s2]showwaves=s={width}x{STORY_WAVE}:mode=cline:rate={fps}:colors={grey}:scale=sqrt,"
+            # ДО: светлая волна без цвета — видно, что звук есть, но он сырой. draw=full — иначе
+            # showwaves приглушает цвет, и светлая волна на чёрном выходит тёмно-серой.
+            f"[s2]showwaves=s={width}x{STORY_WAVE}:mode=cline:draw=full:rate={fps}:colors={grey}:scale=sqrt,"
             "format=rgba[wave];"
             f"color=c={bg}:s={width}x{clips.HEIGHT}:r={fps}:d={total:.3f},format=rgba[bg];"
             "[1:v]split[f1][f2];"
@@ -3295,8 +3306,21 @@ def _selftest() -> None:
         calls.clear()
         callback(8, 8, "t1:f", who={"first_name": "Лил"})
         assert sent[-1] == STALE and not calls, "чужой трек"
+        data = load()
+        film = data["tracks"]["t1"].pop("film")
+        save(data)
+        callback(7, 7, "t1:f", who={"first_name": "Лил"})
+        assert sent[-1] == FILM_WAIT and not calls, "ручки раньше итога сведения — кнопка ждёт"
+        data["tracks"]["t1"]["film"] = film
+        save(data)
+        edits: list = []
+        telegram.edit_markup = lambda chat, message, markup: edits.append(markup)
+        keyboard = buttons("t1", KNOBS, swap=False, film=True)
         for _ in range(2):
-            callback(7, 7, "t1:f", who={"first_name": "Лил", "last_name": "<Пи>", "username": "lilpi"})
+            callback(7, 7, "t1:f", who={"first_name": "Лил", "last_name": "<Пи>", "username": "lilpi"},
+                     message_id=5, keyboard=keyboard)
+        assert edits[0] == [row for row in keyboard if row[0]["callback_data"] != f"{PREFIX}t1:f"] \
+            and len(edits[0]) == len(keyboard) - 1, "снята только кнопка согласия"
         assert [(method, payload["chat_id"], payload["video"]) for method, payload in calls] == [("sendVideo", "1", "FILM1")] \
             and "Лил &lt;Пи&gt; @lilpi" in calls[0][1]["caption"] and sent[-1] == FILM_THANKS, "владельцу — один раз"
         data = load()

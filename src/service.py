@@ -1597,7 +1597,8 @@ def handle_callback(query: dict, data: dict) -> None:
         # Меню и «Подписался» открывают заявку, кнопки под готовым треком — пересборку.
         if action == "sk":
             skleyka.callback(chat_id, user_id, subject, admin=admin,
-                             message_id=query.get("message", {}).get("message_id"), who=query.get("from", {}))
+                             message_id=query.get("message", {}).get("message_id"), who=query.get("from", {}),
+                             keyboard=(query.get("message", {}).get("reply_markup") or {}).get("inline_keyboard"))
         elif _subscribed(chat_id, user_id, admin, retry="skleyka"):
             otbor.cancel(chat_id)
             skleyka.start(chat_id, user_id, admin=admin)
