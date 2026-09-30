@@ -2752,7 +2752,7 @@ def run_job(spec_path: Path) -> int:
                 except Exception as exc:  # noqa: BLE001 — без приложения трек всё равно уходит
                     print(f"  сведение {spec['job']}: превью не собралось: {type(exc).__name__}")
             try:
-                movie = story(vocal, beat, master, work, rhythm)
+                movie = story(vocal, beat, master, work, rhythm, knobs["design"])
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
                 print(f"  сведение {spec['job']}: ролик не собрался: {type(exc).__name__}")
                 movie = None
@@ -2965,8 +2965,11 @@ def story_cuts(length: float) -> tuple[float, float]:
     return do1, do1 + max(1, round((STORY_TOTAL - STORY_OUTRO - do1) / length)) * length + STORY_OUTRO
 
 
-def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float, float]) -> Path:
-    """Ролик 9:16 на 12–15 с: ДО под отсчёт, на дропе ПОСЛЕ тем же местом трека дальше, и концовка."""
+def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float, float],
+          design: bool = False) -> Path:
+    """Ролик 9:16 на 12–15 с: ДО под отсчёт, ПОСЛЕ тем же местом трека дальше, и концовка.
+    master — из mix(): рядом, в work, лежат голос сведения без бита и сумма до мастера.
+    design — ручка саунд-дизайна: подъём шума к вырезу бита и остановка плёнки под концовкой."""
     do1, total = story_cuts(rhythm[0])
     end0, loop0 = total - STORY_OUTRO, total - STORY_LOOP - 0.1  # переход кончается за 3 кадра до конца
     _, trace = reels.meter(master)
@@ -2987,16 +2990,28 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     (raw, peak), glued = loudness(before), loudness(after)[0]
     level = min(glued, raw + CEILING - peak)
     half = 0.0075  # полкроссфейда на стыке: 15 мс
-    # На последнюю долю ДО бит молчит, как на входах саунд-дизайна (ENTRY_BEATS): дроп бьёт из тишины.
-    # Удар и нарастание не ставим: удар ниже 80 Гц телефон не играет, а нарастание легло бы на ДО.
-    gap = do1 - rhythm[0] - 0.02
-    _ffmpeg("-i", vocal, "-i", beat, "-i", master, "-filter_complex",
+    # Перед дропом бит молчит две доли (владелец 30.09.2026): последняя доля ДО — сырой голос один,
+    # первая ПОСЛЕ — голос сведения один, дальше он же с битом. Без бита слышно, что сделано
+    # с голосом, и дроп бьёт из тишины, как на входах саунд-дизайна (ENTRY_BEATS). Голос сведения
+    # стоит, как в мастере: сумма до мастера — голос в той же громкости, мастер её поднимает.
+    # Удар склеек роликов не ставим: под полным битом его не слышно, а ниже 80 Гц телефон не играет.
+    length, voices = rhythm[0], master.parent / "work" / VOICES
+    gap, drop = do1 - length - 0.02, b + length
+    lift = level - glued + loudness(master)[0] - loudness(master.parent / "work" / "sum.wav")[0]
+    fade = "" if design else f",afade=t=out:st={end0:.4f}:d={STORY_OUTRO}"
+    _ffmpeg("-i", vocal, "-i", beat, "-i", master, "-i", voices, "-filter_complex",
             f"[0:a]{cut(a, b + half)}[v];[1:a]{cut(a, b + half)},afade=t=out:st={gap:.4f}:d=0.02[b];"
             f"[v][b]amix=inputs=2:normalize=0,volume={level - raw:.2f}dB[do];"
-            f"[2:a]volume={level - glued:.2f}dB,{cut(b - half, start + total)}[p];"
-            f"[do][p]acrossfade=d={2 * half},"
-            f"afade=t=in:d=0.01,afade=t=out:st={end0:.4f}:d={STORY_OUTRO}[a]",
+            f"[3:a]{cut(b - half, drop + half)},volume={lift:.2f}dB[s];"
+            f"[2:a]volume={level - glued:.2f}dB,{cut(drop - half, start + total)}[p];"
+            f"[do][s]acrossfade=d={2 * half}[ds];[ds][p]acrossfade=d={2 * half},afade=t=in:d=0.01{fade}[a]",
             "-map", "[a]", "-t", f"{total:.4f}", *reels.VOICE_CODEC, sound)
+    if design:
+        # Приёмы сведения с саунд-дизайном: подъём шума кончается на вырезе бита (такт короче —
+        # весь ДО до выреза), а под концовкой плёнка останавливается вместо затухания.
+        rise = _risers([gap], gap / 4, work)
+        _sum([(sound, 0.0), (rise, level + RISE_DB - loudness(rise)[0])], work / "story-rise.wav").replace(sound)
+        _tape_stop(sound, end0, length, work)
     pictures = _story_pictures(work)
     width, fps, side, top = clips.WIDTH, 30, 460, 360  # колесо: по центру, над адресом
     fade = f"fade=t=in:st={end0:.3f}:d=0.25:alpha=1,fade=t=out:st={loop0:.3f}:d={STORY_LOOP}:alpha=1"
@@ -3614,7 +3629,7 @@ def main() -> int:
         master = mix(*args.mix, args.out, args.style, args.design, args.voice, args.echo,
                      [(part, Path(path)) for part, path in args.part], args.like)
         compare(*args.mix, master, args.out)
-        movie = story(*args.mix, master, args.out, grid(args.mix[1]))
+        movie = story(*args.mix, master, args.out, grid(args.mix[1]), args.design)
         print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}, {movie}")
         return 0
     parser.print_help()
