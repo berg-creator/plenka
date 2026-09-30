@@ -2987,8 +2987,11 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     (raw, peak), glued = loudness(before), loudness(after)[0]
     level = min(glued, raw + CEILING - peak)
     half = 0.0075  # полкроссфейда на стыке: 15 мс
+    # На последнюю долю ДО бит молчит, как на входах саунд-дизайна (ENTRY_BEATS): дроп бьёт из тишины.
+    # Удар и нарастание не ставим: удар ниже 80 Гц телефон не играет, а нарастание легло бы на ДО.
+    gap = do1 - rhythm[0] - 0.02
     _ffmpeg("-i", vocal, "-i", beat, "-i", master, "-filter_complex",
-            f"[0:a]{cut(a, b + half)}[v];[1:a]{cut(a, b + half)}[b];"
+            f"[0:a]{cut(a, b + half)}[v];[1:a]{cut(a, b + half)},afade=t=out:st={gap:.4f}:d=0.02[b];"
             f"[v][b]amix=inputs=2:normalize=0,volume={level - raw:.2f}dB[do];"
             f"[2:a]volume={level - glued:.2f}dB,{cut(b - half, start + total)}[p];"
             f"[do][p]acrossfade=d={2 * half},"
