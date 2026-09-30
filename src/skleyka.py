@@ -64,8 +64,8 @@
 цифровой товар Telegram пускает только за звёзды (XTR), и платёжный провайдер для них
 не нужен — ни договора, ни ключа, provider_token пустой; возврат по просьбе покупателя —
 правило Telegram, поэтому /vozvrat владельца, а /paysupport покупателя (его Telegram
-тоже требует) шлёт владельцу вопрос вместе с номерами платежей: переписываться
-вручную не нужно. За звёзды — только число треков.
+тоже требует) — тот же /vopros: вопрос владельцу вместе с номерами платежей, и ответ
+владельца ответом на него бот пересылает человеку сам. За звёзды — только число треков.
 Коды, бонусы и номера платежей — в SKLEYKA_FILE, приватном хранилище.
 
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   сведение, пара ДО/ПОСЛЕ одной громкости и ролик
@@ -1589,7 +1589,8 @@ SILENT = "В «{name}» тишина — похоже, выгрузилась п
 BEAT_MINUTES = (1, 8)
 LENGTH = f"Бит длится {{length}}, а свожу треки от {BEAT_MINUTES[0]} до {BEAT_MINUTES[1]} минут. Другой — /svedenie."
 NEED = "Нужны и вокал, и бит, а {what}. Пришли все дорожки заново — /svedenie."
-FAILED = "Не вышло — что-то сломалось у меня. Попробуй ещё раз: /svedenie. Лимит на сутки не потрачен."
+FAILED = ("Не вышло — что-то сломалось у меня. Попробуй ещё раз: /svedenie. Лимит на сутки не потрачен. "
+          "Снова не вышло — напиши /vopros.")
 STALE = "Это сведение устарело — пришли дорожки заново: /svedenie."
 NO_TWEAKS = "Пересборки этого трека кончились. Новое сведение — /svedenie."
 SAME = "Так уже и есть."
@@ -1658,7 +1659,7 @@ HELP = ("❓ <b>Как это работает</b>\n\n"
         f"• Треков в сутки — {config.SKLEYKA_PER_DAY}, пересборок на трек — {config.SKLEYKA_TWEAKS}. "
         f"Кнопки и слова под треком работают {TRACK_DAYS} дней.\n"
         "• Спроси словами, почему трек звучит так, — объясню.\n"
-        "• Вопрос об оплате — /paysupport.\n\n"
+        "• Что-то сломалось или другой вопрос, в том числе об оплате, — /vopros.\n\n"
         "Как пришлёшь?")
 REMODE = "↩️ Выбираем заново{files}. Как пришлёшь?"
 # Части в том порядке, в каком бот их спрашивает; что можно прислать несколькими файлами.
@@ -1752,7 +1753,7 @@ def _item(message: dict) -> dict:
 def load() -> dict:
     data = state.read_json(config.SKLEYKA_FILE, {})
     for key, empty in (("drafts", {}), ("jobs", []), ("tracks", {}), ("used", {}), ("invite", {}), ("invited_by", {}),
-                       ("bonus", {}), ("paid", {}), ("keys", {})):
+                       ("bonus", {}), ("paid", {}), ("keys", {}), ("questions", {})):
         data.setdefault(key, empty)
     return data
 
@@ -1894,16 +1895,58 @@ def refund(charge: str) -> str:
     return ("Такого платежа нет. " if charge else "") + ("Последние:\n" + "\n".join(lines) if lines else "Платежей нет.")
 
 
-def support(chat_id: str | int, text: str) -> str:
-    """/paysupport — вопрос об оплате владельцу, с номерами платежей для /vozvrat."""
-    chat = str(chat_id)
-    own = [f"<code>{p['charge']}</code> · {p['stars']} ⭐️" for p in load()["paid"].get(chat, [])]
+# Вопрос владельцу — /vopros, и /paysupport туда же: его требует Telegram для оплаты звёздами,
+# а человеку всё равно, об оплате вопрос или «трек не пришёл» (владелец 30.09.2026). Метка
+# с chat_id стоит в самом сообщении владельцу: его ответ находит человека по ней, и помнить,
+# кто о чём спросил, не нужно. Отметки вопросов — в SKLEYKA_FILE, не больше QUESTIONS в сутки.
+QUESTION_TAG = "✉️ Вопрос · #"
+QUESTION_MARK = "вопрос ответом на это сообщение"
+QUESTION_ASK = f"✉️ Что случилось? Напиши {QUESTION_MARK} — передам владельцу."
+QUESTIONS = 3
+QUESTION_SENT = "✉️ Передал владельцу — ответ придёт сюда."
+QUESTION_LIMIT = f"✉️ Сегодня уже {QUESTIONS} вопроса — владелец ответит на них, новый можно завтра."
+ANSWER = "✉️ Ответ ПЛЁНКИ:\n\n{text}"
+GIFT = "Дали ещё один трек сверх лимита — жми /svedenie."
+
+
+def question(chat_id: str | int, text: str) -> None:
+    """Вопрос владельцу — с номерами платежей человека для /vozvrat. Без текста — просьба
+    написать его ответом (force_reply): ответ узнаётся по QUESTION_MARK."""
+    chat, data = str(chat_id), load()
+    if not text:
+        telegram.send_message(chat, QUESTION_ASK, ask="Вопрос")
+        return
+    recent = [stamp for stamp in data["questions"].get(chat, []) if _age(stamp) < 86400]
+    if len(recent) >= QUESTIONS:
+        telegram.send_message(chat, QUESTION_LIMIT)
+        return
+    data["questions"][chat] = [*recent, state.iso()]
+    save(data)
+    own = [f"<code>{p['charge']}</code> · {p['stars']} ⭐️" for p in data["paid"].get(chat, [])]
     telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), "\n".join(
-        ["💫 Вопрос об оплате: " + (text or "без текста"), *own] if own else
-        ["💫 Вопрос об оплате: " + (text or "без текста"), "Платежей у человека нет."]))
-    return ("Передал владельцу. Если нужен возврат звёзд — вернём, об этом придёт сообщение сюда."
-            if own else "Передал владельцу. Платежей звёздами от тебя не вижу — если платил, пришли "
-            "/paysupport и номер транзакции из истории звёзд.")
+        [f"{QUESTION_TAG}{chat}", "", html.escape(text[:2000]), *(["", "Платежи:", *own] if own else []),
+         "", "<i>Ответь на это сообщение — перешлю; «+1» — трек сверх лимита.</i>"]))
+    telegram.send_message(chat, QUESTION_SENT)
+
+
+def answer(asked: str, text: str) -> str:
+    """Ответ владельца на вопрос — ответом на сообщение с QUESTION_TAG: человеку — текст,
+    а «+1» — трек сверх лимита тем же бонусом, что за приглашённого. Возвращает строку владельцу."""
+    found = re.search(re.escape(QUESTION_TAG) + r"(-?\d+)", asked)
+    if not found:
+        return "Не нашёл, кому отвечать."
+    chat = found.group(1)
+    try:
+        if text.strip() != "+1":
+            telegram.send_message(chat, ANSWER.format(text=html.escape(text)))
+            return "Отправил."
+        telegram.send_message(chat, GIFT)
+    except telegram.TelegramError as exc:  # человек остановил бота — владельцу честно
+        return f"Не отправил: {exc}"
+    data = load()
+    data["bonus"].setdefault(chat, []).append(state.iso())
+    save(data)
+    return "Отправил: +1 трек сверх лимита."
 
 
 def _invoices(chat_id: str) -> None:
@@ -2022,11 +2065,12 @@ def _what(parts: list[tuple[str, str]]) -> str:
     return ", ".join(f"{NAMES[part]} {' и '.join(groups[part])}" for part in ORDER if part in groups)
 
 
-def _enqueue(data: dict, track: str, knobs: dict, tweak: bool = False, wish: str = "") -> int:
+def _enqueue(data: dict, track: str, knobs: dict, tweak: bool = False, wish: str = "", answer: bool = False) -> int:
     """Сведение трека с этими ручками — в очередь; сколько минут ждать. tweak — пересборка
-    кнопкой или словами (wish): не вышла — возвращается пересборка, а не трек суток."""
+    кнопкой или словами (wish): не вышла — возвращается пересборка, а не трек суток.
+    answer — пересборки кончились: только ответ словами, без сборки и без счёта пересборок."""
     data["jobs"].append({"id": secrets.token_hex(3), "track": track, "knobs": knobs, "at": state.iso(), "tweak": tweak,
-                         **({"wish": wish} if wish else {})})
+                         **({"wish": wish} if wish else {}), **({"answer": True} if answer else {})})
     return MINUTES * len(data["jobs"])
 
 
@@ -2449,7 +2493,7 @@ def heard(knobs: dict, answer: dict) -> dict:
     return new
 
 
-def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
+def understood(knobs: dict, text: str, timing: dict | None, spent: bool = False) -> tuple[dict, str]:
     """Просьба словами — в ручки и ответ человеку (prompts/skleyka.md); вопрос «почему так» —
     только ответ, по ручкам, timing и FACTS. timing — замер
     сведения (run_job): где первое слово в присланном файле, дропы бита, длина доли;
@@ -2463,6 +2507,7 @@ def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
         "limits": {"voice": [-VOICE_LIMIT, VOICE_LIMIT], "echo": list(ECHO_LIMITS),
                    "style": {name: kind["about"] for name, kind in STYLES.items()}},
         "facts": FACTS,
+        **({"rebuild": False} if spent else {}),
         "timing": timing and {**timing, "voice": timing["sent"] if knobs.get("at") is None else knobs["at"]}})
     new = heard(knobs, answer)
     words = html.escape(str(answer.get("reply", "")).strip())[:400]
@@ -2482,15 +2527,18 @@ def understood(knobs: dict, text: str, timing: dict | None) -> tuple[dict, str]:
     return new, words
 
 
-def heed(knobs: dict, wish: str, timing: dict, talk: bool = False) -> tuple[dict, str, str]:
+def heed(knobs: dict, wish: str, timing: dict, talk: bool = False, spent: bool = False) -> tuple[dict, str, str]:
     """Просьба словами в сведении (run_job): ручки, строка к треку и отказ. talk — просьба
     к готовому треку: не разобралась или ничего не поменяла — отказ, ответ человеку вместо
-    пересборки, и лимит вернёт _finish."""
+    пересборки, и лимит вернёт _finish. spent — пересборки кончились: всегда только ответ,
+    а захотела модель крутить ручки — к нему NO_TWEAKS."""
     try:
-        new, words = understood(knobs, wish, timing)
+        new, words = understood(knobs, wish, timing, spent)
     except Exception as exc:  # noqa: BLE001 — генератор недоступен, сведение идёт как есть
         print(f"  сведение: просьба не разобрана: {type(exc).__name__}")
         return knobs, "" if talk else WISH_FAILED, TALK_FAILED if talk else ""
+    if spent:
+        return knobs, "", "\n".join(filter(None, (words, NO_TWEAKS if new != knobs else ""))) or TALK_FAILED
     if talk and new == knobs:
         return knobs, "", words or TALK_FAILED
     return new, f"✏️ {words}\n" if words else "", ""
@@ -2581,9 +2629,9 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
         telegram.send_message(chat_id, STALE, markup=REMOVE)
         return
     owner = admin or track.get("admin")
-    if not owner and track["tweaks"] >= config.SKLEYKA_TWEAKS:
-        telegram.send_message(chat_id, NO_TWEAKS, markup=REMOVE)
-        return
+    # Пересборки кончились — вопрос «почему так» всё равно получает ответ (владелец 30.09.2026),
+    # от спама держит TALKS.
+    spent = not owner and track["tweaks"] >= config.SKLEYKA_TWEAKS
     if not owner and track.get("talks", 0) >= TALKS:
         telegram.send_message(chat_id, TALKED)
         return
@@ -2595,8 +2643,9 @@ def talk(chat_id: str | int, text: str, reply: dict, *, admin: bool = False) -> 
         save(data)
         telegram.send_message(chat_id, WISHED)
         return
-    track["tweaks"] += 1
-    minutes = _enqueue(data, track_id, dict(track["knobs"]), tweak=True, wish=text[:1000])
+    if not spent:
+        track["tweaks"] += 1
+    minutes = _enqueue(data, track_id, dict(track["knobs"]), tweak=True, wish=text[:1000], answer=spent)
     save(data)
     telegram.send_message(chat_id, TALK_QUEUED.format(minutes=minutes), markup=REMOVE)
 
@@ -2638,7 +2687,7 @@ def _spawn(data: dict, job: dict) -> tuple[subprocess.Popen, dict, Path]:
     spec = {"job": job["id"], "track": job["track"], "chat": track["chat"], "files": track["files"],
             "knobs": job["knobs"], "left": None if track.get("admin") else config.SKLEYKA_TWEAKS - track["tweaks"],
             "wish": job.get("wish") or (None if job.get("tweak") else track.get("wish")), "talk": "wish" in job,
-            "agreed": "agreed" in track}
+            "agreed": "agreed" in track, **({"answer": True, "timing": track.get("timing")} if job.get("answer") else {})}
     (work / "job.json").write_text(json.dumps(spec, ensure_ascii=False))
     job["started"] = state.iso()
     print(f"  сведение {job['id']}: пошло, в очереди ещё {len(data['jobs']) - 1}")
@@ -2668,7 +2717,8 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
         return
     used = data["used"].get(track["chat"], [])
     if job.get("tweak"):
-        track["tweaks"] = max(0, track["tweaks"] - 1)
+        if not job.get("answer"):  # ответ без сборки пересборку не тратил
+            track["tweaks"] = max(0, track["tweaks"] - 1)
     elif used:
         used.pop()
         if "bonus" in track:
@@ -2786,6 +2836,14 @@ def run_job(spec_path: Path) -> int:
     spec = json.loads(spec_path.read_text())
     work, chat, knobs = spec_path.parent, spec["chat"], spec["knobs"]
     result = {"ok": False}
+    if spec.get("answer"):
+        # Только ответ словами: дорожки не качаются, замер — от прошлой сборки трека.
+        try:
+            telegram.send_message(chat, heed(knobs, spec["wish"], spec.get("timing"), talk=True, spent=True)[2])
+            result["why"] = "ответ"
+        finally:
+            (work / "result.json").write_text(json.dumps(result))
+        return 0
     try:
         with contextlib.ExitStack() as login:
             service = _service(login)
@@ -3511,6 +3569,36 @@ def _selftest() -> None:
         save(data)
         talk(7, "эха", menu)
         assert sent[-1] == TALKED and not answers
+        # Пересборки кончились — вопрос всё равно получает ответ: работа только на ответ, без
+        # скачивания и без счёта пересборок; модель захотела крутить ручки — к ответу NO_TWEAKS.
+        data = load()
+        data["tracks"]["t1"].update(talks=0, tweaks=config.SKLEYKA_TWEAKS, timing={"sent": 1.0, "drops": [], "beat": 0.5})
+        used = list(data["used"].get("7", []))
+        save(data)
+        talk(7, "почему голос тихий?", menu)
+        data = load()
+        job = data["jobs"][-1]
+        assert job["answer"] and job["wish"] == "почему голос тихий?" and sent[-1].startswith("✏️ Принял") \
+            and data["tracks"]["t1"]["tweaks"] == config.SKLEYKA_TWEAKS, job
+        answer_spec = {"job": job["id"], "track": "t1", "chat": "7", "files": [], "knobs": dict(KNOBS),
+                       "wish": job["wish"], "answer": True, "timing": data["tracks"]["t1"]["timing"]}
+        (tmp / "answer").mkdir()
+        (tmp / "answer" / "job.json").write_text(json.dumps(answer_spec))
+        llm.generate_skleyka = lambda payload: payloads.append(payload) or answers.pop(0)
+        answers[:] = [dict(KNOBS, like="", reply="Голос на 2 дБ ниже бита, как у релизов.")]
+        run_job(tmp / "answer" / "job.json")
+        assert sent[-1] == "Голос на 2 дБ ниже бита, как у релизов." and payloads[-1]["rebuild"] is False \
+            and payloads[-1]["timing"]["sent"] == 1.0, payloads[-1]
+        answered = subprocess.Popen(["true"])
+        answered.wait()
+        _finish(data, answered, job, tmp / "answer")
+        assert job not in data["jobs"] and data["tracks"]["t1"]["tweaks"] == config.SKLEYKA_TWEAKS \
+            and data["used"].get("7", []) == used and sent[-1] != FAILED, "ответ не тратит и не возвращает лимиты"
+        save(data)
+        answers[:] = [dict(KNOBS, voice=2, like="", reply="Громче — это ручка голоса.")]
+        assert heed(dict(KNOBS), "громче", None, talk=True, spent=True) == \
+            (dict(KNOBS), "", "Громче — это ручка голоса.\n" + NO_TWEAKS), "ручки не крутятся"
+        llm.generate_skleyka = model
 
         # Кнопка приложения: отметку ставит сборка, что её прислала; человек пишет не словами
         # о треке — её снимает первый ответ бота без своих кнопок, и один раз.
@@ -3658,8 +3746,22 @@ def _selftest() -> None:
         assert refund("c2").startswith("Вернул") and calls[-1] == (
             "refundStarPayment", {"user_id": "7", "telegram_payment_charge_id": "c2"}) and _limit(load(), "7")
         assert sent[-1].startswith("Вернули"), "о возврате пишем покупателю"
-        assert support("7", "не пришло").startswith("Передал") and "c1" in sent[-1] and "не пришло" in sent[-1], \
-            "вопрос об оплате — владельцу с номером"
+        # Вопрос владельцу: без текста — просьба ответом; с текстом — владельцу с меткой и платежами,
+        # не больше QUESTIONS в сутки; ответ владельца — человеку, «+1» — трек сверх лимита.
+        question("7", "")
+        assert sent[-1] == QUESTION_ASK and QUESTION_MARK in QUESTION_ASK
+        question("7", "не пришло <b>")
+        owner_text = sent[-2]
+        assert owner_text.startswith(QUESTION_TAG + "7\n") and "c1" in owner_text and "не пришло &lt;b&gt;" in owner_text \
+            and sent[-1] == QUESTION_SENT, owner_text
+        for _ in range(QUESTIONS):
+            question("7", "ещё")
+        assert sent[-1] == QUESTION_LIMIT and len(load()["questions"]["7"]) == QUESTIONS, "три вопроса в сутки"
+        assert answer(owner_text, "Проверил <ок>") == "Отправил." and sent[-1] == ANSWER.format(text="Проверил &lt;ок&gt;")
+        bonus = len(load()["bonus"].get("7", []))
+        assert answer(owner_text, " +1 ").startswith("Отправил: +1") and sent[-1] == GIFT \
+            and len(load()["bonus"]["7"]) == bonus + 1, "«+1» — трек сверх лимита"
+        assert answer("просто текст", "привет") == "Не нашёл, кому отвечать."
         assert turn(KNOBS, "e+")["echo"] == ECHO_STEP and turn(dict(KNOBS, voice=VOICE_LIMIT), "v+")["voice"] == VOICE_LIMIT
         assert "с саунд-дизайном" in look(turn(KNOBS, "d")) and turn(KNOBS, "c1")["style"] == "мелодично"
         assert turn(KNOBS, "a12.95")["at"] == 12.95 and "голос с 0:13" in look(turn(KNOBS, "a12.95"))

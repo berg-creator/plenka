@@ -117,6 +117,7 @@ COMMANDS = {
     "dvoynik": "sved", "sved": "sved", "двойник": "sved",
     "proyavka": "proyavka", "проявка": "proyavka",
     "vkladysh": "vkladysh", "вкладыш": "vkladysh",
+    "vopros": "vopros", "вопрос": "vopros", "paysupport": "vopros",
 }
 
 # У бота шесть разделов, и называются они везде одинаково — в меню «/», на экране
@@ -1310,6 +1311,14 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
 
     # Ответ на вопрос слежения — намерение явное, заявку отбора он закрывает.
     asked = (message.get("reply_to_message") or {}).get("text", "")
+    if admin and not text.startswith("/") and skleyka.QUESTION_TAG in asked:
+        # Ответ владельца на вопрос человека (src/skleyka.py): кому — по метке в самом вопросе.
+        # Первым: в тексте вопроса человек мог написать чужую метку, «напиши словами» например.
+        telegram.send_message(chat_id, skleyka.answer(asked, text))
+        return False
+    if not text.startswith("/") and skleyka.QUESTION_MARK in asked:
+        skleyka.question(chat_id, text)
+        return False
     if not text.startswith("/") and svedenie.COMPARE_MARK in asked:
         if _subscribed(chat_id, user_id, admin):
             svedenie.compare(chat_id, text)
@@ -1338,10 +1347,11 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         # Возврат звёзд по просьбе покупателя — правило Telegram (src/skleyka.py).
         telegram.send_message(chat_id, skleyka.refund(text.partition(" ")[2].strip()))
         return False
-    if text.startswith("/paysupport"):
-        telegram.send_message(chat_id, skleyka.support(chat_id, text.partition(" ")[2].strip()))
-        return False
     kind, body = parse_command(text)
+    if kind == "vopros":
+        # /vopros и /paysupport — вопрос владельцу; второй требует Telegram для оплаты звёздами.
+        skleyka.question(chat_id, body)
+        return False
     # Отбор ведёт разговор в несколько сообщений (src/otbor.py): пока заявка
     # открыта, всё присланное идёт туда. Другая команда заявку закрывает —
     # человек передумал и ушёл в разборы, а не прислал трек.
@@ -2021,6 +2031,25 @@ def _selftest() -> None:
             (skleyka.which, skleyka.asked, globals()["analyse"], globals()["_deliver"],
              telegram.send_chat_action, telegram.edit_markup) = real_ask
         assert whiches == ["сделай голос громче"] and taken == [(guess_kind("Баста"), "Баста")], (whiches, taken)
+        # Вопрос владельцу: /vopros и /paysupport — в skleyka.question, ответ на просьбу — тоже;
+        # ответ владельца на вопрос — человеку, раньше прочих меток: в вопросе могла быть чужая.
+        questions: list = []
+        real_q = skleyka.question, skleyka.answer, config.secret
+        skleyka.question = lambda chat, text: questions.append((chat, text))
+        skleyka.answer = lambda asked, text: questions.append(("ответ", text)) or "Отправил."
+        config.secret = lambda name, required=True: "900" if name == "TELEGRAM_ADMIN_ID" else ""
+        try:
+            for n, (text, reply, who) in enumerate((
+                    ("/vopros", "", 77701), ("/paysupport звёзды не дошли", "", 77701),
+                    ("трек не пришёл", skleyka.QUESTION_ASK, 77701),
+                    ("+1", f"{skleyka.QUESTION_TAG}55501\n\n{skleyka.TALK_MARK}", 900))):
+                handle_message({"chat": {"id": who, "type": "private"}, "from": {"id": who}, "message_id": 400 + n,
+                                "date": 40000 + n, "text": text,
+                                **({"reply_to_message": {"text": reply}} if reply else {})}, {})
+        finally:
+            skleyka.question, skleyka.answer, config.secret = real_q
+        assert questions == [("77701", ""), ("77701", "звёзды не дошли"), ("77701", "трек не пришёл"), ("ответ", "+1")] \
+            and replies[-1][0] == "Отправил.", questions
     finally:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
@@ -2028,7 +2057,8 @@ def _selftest() -> None:
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню шесть разделов; "
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал; "
-          "skleyka_r<код> — метка skleyka_ref, код в приглашение; переспрос СВЕДЕНИЯ: «разбор вкуса» — прежним путём")
+          "skleyka_r<код> — метка skleyka_ref, код в приглашение; переспрос СВЕДЕНИЯ: «разбор вкуса» — прежним путём; "
+          "/vopros и /paysupport — вопрос владельцу, его ответ — человеку")
 
 
 # ─────────────────────────── командная строка ───────────────────────────
