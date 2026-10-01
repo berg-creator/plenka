@@ -149,14 +149,24 @@ CONSENT_BUTTONS = [[{"text": "Можно", "callback_data": _cb("yes")},
 # ─────────────────────────── поиск трека ───────────────────────────
 
 
+_SPLIT = re.compile(r"\s*(?:,(?=\s)|&|\bfeat\.?|\bft\.?|\bx\b)\s*", re.IGNORECASE)
+
+
 def _credits(artist: str) -> list[str]:
     """«A & B feat. C» → [A, B, C]: известность и повтор сверяются по каждому имени.
 
     Запятая делит только с пробелом после неё: «nothing,nowhere.» — одно имя, а половина
     «nothing» находила в Deezer чужую группу, и имя в посте вело бы на её карточку (01.10.2026).
+    Имя из базы идёт целиком: «Tyler, The Creator» делился на «Tyler» и «The Creator»,
+    и пост получал ссылку на тёзку Tyler, а ОТБОР не узнавал в половинке артиста из базы.
     """
-    parts = re.split(r"\s*(?:,(?=\s)|&|\bfeat\.?|\bft\.?|\bx\b)\s*", artist, flags=re.IGNORECASE)
-    return [p for p in parts if p] or [artist]
+    whole = [name for item in state.read_json(config.ARTISTS_FILE, {}).get("artists", [])
+             for name in (item.get("name") or "", *(item.get("aliases") or []))
+             if len(_SPLIT.split(name)) > 1 and name.casefold() in artist.casefold()]
+    for n, name in enumerate(whole):
+        artist = re.sub(re.escape(name), f"\0{n}\0", artist, flags=re.IGNORECASE)
+    parts = [p for p in _SPLIT.split(artist) if p] or [artist]
+    return [re.sub(r"\0(\d+)\0", lambda m: whole[int(m[1])], p) for p in parts]
 
 
 def _bare(title: str) -> str:

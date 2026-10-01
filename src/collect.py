@@ -372,9 +372,34 @@ def _bare(title: str) -> str:
 
 
 def deezer_tracks(item: dict) -> dict:
-    """Треклист из Deezer, когда iTunes отдал релиз без песен.
+    """Треклист из Deezer, когда iTunes отдал релиз без песен — см. deezer_twin."""
+    return deezer_twin(item)[1]
 
-    Так вышел «That's It» Yung Lean & Metro Boomin (17.09.2026): без названия
+
+def release_artists(item: dict) -> dict[str, int | None]:
+    """Артисты релиза для ссылок на карточки: {имя в нижнем регистре: id Deezer или None}.
+
+    Id называет сам релиз — карточка альбома в Deezer, у находки из iTunes — её двойник
+    там же. Поиск по одному имени находит тёзку: соавтору Ghost Mountain по имени Buckshot
+    досталась страница с 51 альбомом — похоже, другого Buckshot (01.10.2026). Поэтому имя из подписи
+    релиза, которого в карточке нет, получает None — ссылки не будет, и по имени его
+    уже не ищут (publish.artist_ids). Deezer не ответил — то же самое: пост важнее.
+    """
+    from .otbor import _credits  # otbor тянет publish, а тот — этот модуль
+
+    found: dict[str, int | None] = dict.fromkeys(name.casefold() for name in _credits(item.get("artist") or ""))
+    try:
+        album = item.get("external_id") if item.get("source") == "deezer" else deezer_twin(item)[0]
+        found |= {name.casefold(): artist_id for name, artist_id in (deezer.album_artists(album) if album else {}).items()}
+    except Exception as exc:  # noqa: BLE001 — магазин мог не ответить
+        log.warning("Артисты релиза не получены (%s): %s", item.get("title", ""), exc)
+    return found
+
+
+def deezer_twin(item: dict) -> tuple[int | None, dict]:
+    """Тот же релиз в Deezer: id альбома и его треклист; не нашёлся — (None, {}).
+
+    Нужен, когда iTunes отдал релиз без песен, и ссылкам на артистов релиза. Так вышел «That's It» Yung Lean & Metro Boomin (17.09.2026): без названия
     и длины трека запрос трека не ушёл, и пост остался без него. Deezer подписывает
     тот же релиз иначе («feat. Future & Metro Boomin»), поэтому сверяются название
     до скобок, артист и число треков — чужой релиз хуже никакого.
@@ -388,8 +413,8 @@ def deezer_tracks(item: dict) -> dict:
         if _bare(album.get("title", "")) == bare and artist in map(itunes._norm, names):
             data = deezer.album_tracks(album["id"])
             if len(data.get("tracks") or []) == item.get("track_count"):
-                return data
-    return {}
+                return album["id"], data
+    return None, {}
 
 
 def _needs_tracks(row: dict) -> bool:

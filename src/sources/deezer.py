@@ -47,6 +47,10 @@ def find_artist_id(name: str) -> int | None:
 
     База — первой: тёзок там разобрали по альбомам (16.09.2026), а поиску
     остаётся число фанатов, и у Salem оно выбирает поп-певицу вместо witch house.
+
+    Страница без единого альбома — не артист, а пустая карточка с тем же именем:
+    у Сони Мармеладовой записи лежат на странице Славы КПСС, и ссылка с имени вела
+    в пустоту (01.10.2026). Такую поиск не отдаёт никому — ни посту, ни базе.
     """
     known = stored_id(name)
     if known:
@@ -60,7 +64,7 @@ def find_artist_id(name: str) -> int | None:
     # Тёзок Deezer отдаёт вперемешку: первым на «Drake» идёт Drake со 155 фанатами,
     # настоящий — третьим. Из точных совпадений берём самого слушаемого.
     same = [item for item in (data or {}).get("data") or []
-            if item.get("name", "").casefold().strip() == target]
+            if item.get("name", "").casefold().strip() == target and item.get("nb_album", 1)]
     if same:
         return max(same, key=lambda item: item.get("nb_fan") or 0).get("id")
     return None
@@ -174,6 +178,17 @@ def _credit(card: dict) -> tuple[str, list[int]]:
     main = [c for c in card.get("contributors") or [] if c.get("role") == "Main"]
     main = main or [card.get("artist") or {}]
     return " & ".join(c.get("name", "") for c in main), [c.get("id") for c in main]
+
+
+def album_artists(album_id: str | int) -> dict[str, int]:
+    """Артисты релиза по карточке альбома — {имя: id}, и исполнители, и гости.
+
+    Это единственный id артиста, в котором не бывает тёзки: его называет сам релиз,
+    а не поиск по имени (publish.artist_ids).
+    """
+    card = get_json(f"{BASE}/album/{album_id}", min_interval=MIN_INTERVAL) or {}
+    people = card.get("contributors") or [card.get("artist") or {}]
+    return {c["name"]: c["id"] for c in people if c.get("name") and c.get("id")}
 
 
 def search_albums(title: str, limit: int = 25) -> list[dict]:

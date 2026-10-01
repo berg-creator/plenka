@@ -300,6 +300,8 @@ python -m src.reels --preview ФАЙЛ --voice ПАПКА --draft   рисова
   владелец 01.10.2026). В `text` их нет: `publish.artist_links` накладывает их при выходе и правке
   (иначе автопилот точности снимал бы их, как пост 219 30.09.2026), имена — база канала и поле `links`
   поста, куда `compose.save_post` кладёт id из данных и из поля `people` ответа модели (`publish.artist_ids`).
+  Артистам релиза id даёт сам релиз (`collect.release_artists`), а не поиск по имени: точное имя бывает тёзкой;
+  страницу Deezer без альбомов поиск не отдаёт вовсе (`deezer.find_artist_id`).
 - **[prompts/voice.md](prompts/voice.md)** — самый важный файл продукта, тон канала;
   правила отдельных рубрик — в `prompts/rubrics/*.md`, тон бота — в `prompts/service/`.
 

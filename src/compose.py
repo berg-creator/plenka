@@ -118,6 +118,7 @@ def save_post(
     # Кого из названных в посте сделать ссылкой на карточку артиста (publish.artist_links):
     # артист и гости релиза, артисты новости, артисты связи (ends) — из данных, остальных
     # назвала модель. Id Deezer ложатся в пост: при выходе и правке их заново не ищут.
+    # Артистам релиза id даёт сам релиз, остальных ищем по имени (publish.artist_ids).
     src = source or {}
     ends = src.get("ends") or []
     if rubric_key != "poll":
@@ -125,7 +126,8 @@ def save_post(
                  *_features(src.get("tracks") or []), *(src.get("artists") or []),
                  *(end.get("artist", "") for end in ends)]
         people = (answer or {}).get("people")  # GigaChat схему не держит: не список — никого
-        if links := publish.artist_ids(text, [*named, *(people if isinstance(people, list) else [])]):
+        if links := publish.artist_ids(text, [*named, *(people if isinstance(people, list) else [])],
+                                       src if src.get("kind") == "release" else None):
             post["links"] = links
     # Что послушать под разбором и новостью (владелец, 01.10.2026: «послушать нечего»):
     # треки идут тем же путём, что трек релиза, — запрос, YouTube, Mac, первый комментарий
@@ -1463,6 +1465,19 @@ def _selftest() -> int:
             deezer.find_artist_id = real_find
             otbor.from_link = real_link
     assert named["links"] == {"Quavo": 8, "Фаррелла Уильямса": 7} and "<a" not in named["text"], named
+    # Пост о релизе: id артистов — из карточки самого релиза, а не из поиска по имени, где сидит тёзка;
+    # имя из базы идёт целиком — половинка «Tyler» ссылки не получает.
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp) / "artists.json"
+        state.write_json(base, {"artists": [{"name": "Tyler, The Creator", "deezer_id": 4}]})
+        with (mock.patch.object(config, "ARTISTS_FILE", base),
+              mock.patch.object(deezer, "album_artists", {"9": {"Tyler, The Creator": 4, "Buckshot": 99}}.get),
+              mock.patch.object(deezer, "find_artist_id", {"Tyler": 397241, "Buckshot": 60450, "Quavo": 8}.get)):
+            credited = state.read_json(save_post(
+                "release", "Tyler, The Creator и Buckshot. Tyler позвал Quavo.",
+                {"kind": "release", "source": "deezer", "external_id": "9", "artist": "Tyler, The Creator & Buckshot",
+                 "title": "X"}, folder=Path(tmp), answer={"people": [{"shown": "Quavo", "name": "Quavo"}]}), {})
+    assert credited["links"] == {"Tyler, The Creator": 4, "Buckshot": 99, "Quavo": 8}, credited["links"]
     assert "listen" not in named and lineage["links"] == {"Three 6 Mafia": 291, "Bones": 5}, lineage
     assert lineage["listen"] == [{"artist": "Three 6 Mafia", "track": "Late Nite Tip", "seconds": 286, "url": "d/1"}], lineage
     assert heard == {"artist": "Quavo", "track": "Lead", "seconds": 181, "url": "d/3"} and lineage["track"] == "", heard

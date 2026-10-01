@@ -361,7 +361,7 @@ def _mention(text: str, name: str, taken: list[tuple[int, int]] = ()) -> tuple[i
     return None
 
 
-def artist_ids(text: str, people) -> dict[str, int]:
+def artist_ids(text: str, people, release: dict | None = None) -> dict[str, int]:
     """Единственная проверка ссылок на артистов: {как имя стоит в тексте: id Deezer}.
 
     people — имена из данных поста строкой и люди, которых назвала модель
@@ -370,8 +370,13 @@ def artist_ids(text: str, people) -> dict[str, int]:
     регистра (deezer.find_artist_id): похожий артист — чужая карточка под нашим именем,
     та же выдумка. Не нашёлся — ссылки нет. Зовётся при сохранении поста (compose.save_post),
     id ложатся полем links: при выходе и правке заново не ищем.
+
+    release — находка сбора, о которой пост: её артистам id даёт сам релиз
+    (collect.release_artists), а по имени их не ищем — точное имя бывает тёзкой.
+    В магазин идём, только когда в тексте правда стоит чьё-то имя.
     """
     found: dict[str, int] = {}
+    own: dict[str, int | None] | None = None
     for person in people or []:
         shown, name = (person.get("shown"), person.get("name")) if isinstance(person, dict) else (person, person)
         if not (isinstance(shown, str) and isinstance(name, str) and shown.strip() and name.strip()):
@@ -379,8 +384,13 @@ def artist_ids(text: str, people) -> dict[str, int]:
         shown = shown.strip()
         if shown in found or not _mention(text, shown):
             continue
+        if release and own is None:
+            from . import collect  # здесь, а не сверху: сбор тянет feedparser, а publish зовут и без него
+
+            own = collect.release_artists(release)
         try:
-            artist_id = deezer.find_artist_id(name.strip())
+            key = name.strip().casefold()
+            artist_id = own[key] if own and key in own else deezer.find_artist_id(name.strip())
         except Exception as exc:  # noqa: BLE001 — Deezer молчит: ссылки нет, пост важнее
             log.info("Deezer не ответил про «%s»: %s", name, exc)
             continue
@@ -881,6 +891,18 @@ def _selftest() -> None:
                 "Quavo", {"shown": "Фаррелла Уильямса", "name": "Pharrell Williams"},
                 {"shown": "Канье", "name": "Kanye West"}, {"shown": "позвал", "name": "Нет такого"}, "мусор", {"shown": 1}])
             assert ids == {"Quavo": 8, "Фаррелла Уильямса": 7}, ids
+            # Артистам релиза id даёт сам релиз: тёзку по имени не ищем, кого в карточке релиза нет — без ссылки,
+            # а в магазин идём, только когда имя правда стоит в тексте.
+            from . import collect
+
+            asked: list[dict] = []
+            own = lambda item: asked.append(item) or {"ghost mountain": None, "buckshot": 99}
+            with (mock.patch.object(collect, "release_artists", own),
+                  mock.patch.object(deezer, "find_artist_id", {"Buckshot": 60450, "Ghost Mountain": 1, "Quavo": 8}.get)):
+                assert artist_ids("Текст без имён.", ["Buckshot"], {"title": "X"}) == {} and not asked
+                credited = artist_ids("Ghost Mountain и Buckshot позвали Quavo.",
+                                      ["Ghost Mountain", "Buckshot", "Quavo"], {"title": "X"})
+            assert credited == {"Buckshot": 99, "Quavo": 8} and len(asked) == 1, (credited, asked)
             link = ARTIST_LINK.format
             text = "Nasty — не Nas. Nas снова, Lil Uzi Vert без Uzi. <b>Кино</b> — это «Kino» и «Фаррелла Уильямса»."
             linked = artist_links(text, {"links": ids})
@@ -899,7 +921,14 @@ def _selftest() -> None:
             assert telegram.visible_len(linked) == len(long)
             caption = "Nas. " + "а" * (telegram.MAX_CAPTION - 5)
             assert telegram.visible_len(artist_links(caption, {})) == telegram.MAX_CAPTION
-    print("имена артистов: ссылка одна на имя, внутри слова и без Deezer — нет, лимит соблюдён")
+        # Страница без альбомов — не артист: поиск по имени её не отдаёт (Соня Мармеладова, 01.10.2026).
+        pages = [{"id": 5, "name": "Соня", "nb_album": 0, "nb_fan": 29}, {"id": 6, "name": "соня", "nb_album": 2, "nb_fan": 1}]
+        with mock.patch.object(config, "ARTISTS_FILE", base), mock.patch.object(deezer, "get_json", lambda *a, **kw: {"data": pages}):
+            assert deezer.find_artist_id("Соня") == 6
+            del pages[1]
+            assert deezer.find_artist_id("Соня") is None, "пустая страница ссылкой не становится"
+    print("имена артистов: ссылка одна на имя, внутри слова и без Deezer — нет, лимит соблюдён; "
+          "артисты релиза — из самого релиза, пустая страница Deezer — не артист")
 
 
 def main() -> int:
