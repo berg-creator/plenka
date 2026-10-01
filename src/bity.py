@@ -154,7 +154,7 @@ def youtube_title(beat: dict) -> str:
 
 def tags(beat: dict) -> str:
     """Поле «Теги»: артист type beat, их пара, бесплатность, темп — по убыванию важности, в TAGS_LIMIT."""
-    names = [name.casefold() for name in beat["artists"]]
+    names = [name.casefold().replace("ё", "е") for name in beat["artists"]]  # как в youtube_title
     found = [*(f"{name} type beat" for name in names),
              *([f"{' x '.join(names)} type beat"] if len(names) > 1 else []),
              f"{names[0]} type beat free for profit", "free for profit type beat", "type beat",
@@ -167,7 +167,7 @@ def tags(beat: dict) -> str:
 def about(beat_id: str, beat: dict) -> str:
     """Описание ролика: скачать и свести — в боте, условия, темп, хэштеги."""
     tempo = " · ".join(filter(None, (beat["bpm"] and f"BPM: {beat['bpm']}", beat["key"] and f"Тональность: {beat['key']}")))
-    hashtags = " ".join([*(f"#{re.sub(r'\W', '', name.casefold())}typebeat" for name in beat["artists"][:3]),
+    hashtags = " ".join([*(f"#{re.sub(r'\W', '', name.casefold().replace('ё', 'е'))}typebeat" for name in beat["artists"][:3]),
                          "#typebeat", "#freeforprofit"])
     return ABOUT.format(format=(Path(beat.get("name", "")).suffix.lstrip(".").upper() or "WAV"), link=link(beat_id),
                         credit=config.BEAT_CREDIT, tempo=tempo + "\n" if tempo else "", hashtags=hashtags)
