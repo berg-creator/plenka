@@ -1708,6 +1708,10 @@ HAND = ("🎧 <b>Свести руками</b>\n\n"
         f"Это делает звукорежиссёр ПЛЁНКИ — {config.SKLEYKA_HAND_ENGINEER}.\n\n"
         f"Вокал + бит — {config.SKLEYKA_HAND_RUB[0]} ₽, по дорожкам — {config.SKLEYKA_HAND_RUB[1]} ₽. "
         f"Готово {config.SKLEYKA_HAND_TERM}.\n\n"
+        # Возврат за приведённого — только за оплаченный заказ: готовый трек в боте можно
+        # накрутить друзьями, а деньги нет. Считает звукорежиссёр сам, оплата мимо бота.
+        f"Приведёшь артиста, который закажет сведение руками, — вернёт тебе {config.SKLEYKA_HAND_BACK} ₽. "
+        "За каждого, пока не вернётся вся цена. Пусть при заказе назовёт твой ник.\n\n"
         "Напиши ему, что хочешь получить")
 HAND_TRACKS = ", — дорожки у него уже есть."
 HAND_LOST = "⚠️ Не переслал: {what}. Сообщения удалены или трек сведён раньше этой кнопки — попроси у человека."
@@ -4502,7 +4506,7 @@ def _selftest() -> None:
         # владельцу — карточка и копии файлов один раз; без готового трека — ни слова о дорожках.
         assert buttons("t1", KNOBS, swap=False)[-1] == [dict(HAND_BUTTON, callback_data=f"{PREFIX}t1:u")] \
             and WAYS[-1] == [HAND_BUTTON]
-        assert all(part in HAND for part in ("1500 ₽", "2500 ₽", "Готово за сутки", "@molodyedengi"))
+        assert all(part in HAND for part in ("1500 ₽", "2500 ₽", "Готово за сутки", "@molodyedengi", "вернёт тебе 500 ₽"))
         data = load()
         data["tracks"]["t5"] = {"chat": "5", "knobs": dict(KNOBS), "tweaks": 1, "at": state.iso(),
                                 "wish": "голос на дропе", "said": "эха меньше",
