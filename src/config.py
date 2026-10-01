@@ -121,6 +121,8 @@ SKLEYKA_APP_URL = "https://functions.yandexcloud.net/d4ee6akvq3r53vcq0a34"
 BEATS_FILE = DATA / "beats.json"
 # Условие бесплатного бита: подпись в названии трека. Меняется здесь — и в текстах бота, и в ролике.
 BEAT_CREDIT = "prod. ПЛЁНКА"
+# Кадр ролика и превью бита: две спины против света фар, имена артистов ложатся на них принтом (bity.cover).
+BEAT_BACK = ROOT / "assets" / "beats" / "back.jpg"
 
 # Какой генератор текстов используется, задаётся в .env переменной LLM_PROVIDER
 # (gemini — Google, по умолчанию; anthropic — платный Claude; gigachat — Сбер).
