@@ -303,8 +303,8 @@ TnTXD (Rod Wave): «less is more, in most cases»
 
 ## Звуки набора 09
 
-У владельца в браузере FL лежит набор `KITS/09 - Scene 2026 Kit` (81 звук, собран 02.10.2026
-под этот замер). В записке к биту называй файл на каждую сэмплерную партию — имя как в таблице.
+У владельца в браузере FL лежит набор `KITS/09 - Scene 2026 Kit` (146 звуков: 81 собран 02.10.2026
+под этот замер, 65 — детройт-набор Clark Audio целиком, слово `Detroit` в имени). В записке к биту называй файл на каждую сэмплерную партию — имя как в таблице.
 Набор отобран замером, на слух его никто не проверял: «не звучит» от владельца — повод
 заменить строку здесь, а не спорить.
 
@@ -314,15 +314,61 @@ TnTXD (Rod Wave): «less is more, in most cases»
 
 | партия | «ровный» | «сцена» | «детройт» |
 |---|---|---|---|
-| 808 | длинный: `808 - Rage Insaaane (C)` (самый ровный), `808 - Rage Motion (C)`, `808 - Rage Nuke (C)` | связки: `808 - Rage Monster Grit (C)`, `808 - Synth Short Snappy Sat (C)`; длинная нота: `808 - Rage Dystopia (C)` | короткий: `808 - Synth Short Tight Dist (C)`, `808 - Synth Short Snappy Clean (C)` |
-| бочка | `Kick - Rage Pie` (122 мс) | `Kick - Rage Hard`, `Kick - Short Clicky` | нет |
-| клэп | `Clap - Main Mid`, `Clap - Rage Yeat` | `Clap - Rage Money`; «2 и 4» — резкий: `Clap - Sharp Attack`, `Clap - Rage Double Tap` | `Clap - Rage Spitta`, добавочные — он же тише |
-| призраки | — | `Rim - Ghost Soft`, `Snare - Soft Dull (ghost)` | `Rim - Ghost Sidestick` |
-| хэт | `Hat - Rage Dust` (87 мс) | под дробь и триоли — самые короткие: `Hat - Rage Nice` (50 мс), `Hat - Dry Tick 01` (39 мс) | `Hat - Rage Pax` |
-| открытый хэт | `Open Hat - Rage Cope` | `Open Hat - Short Tight 01` | `Open Hat - Rage Dark Side` |
-| перк | `Perc - Rimshot 01` | `Shaker - Short 10`, `Perc - Click Tiny 06` | `Perc - Rimshot Bright 02` |
+| 808 | длинный: `808 - Rage Insaaane (C)` (самый ровный), `808 - Rage Motion (C)`, `808 - Rage Nuke (C)`, `808 - Detroit Bounce (C)` (1928 мс до −20 дБ) | связки: `808 - Rage Monster Grit (C)`, `808 - Synth Short Snappy Sat (C)`; длинная нота: `808 - Rage Dystopia (C)` | короткий: `808 - Synth Short Tight Dist (C)`, `808 - Synth Short Snappy Clean (C)`; записанный — не короткий (1135 и 1210 мс до −20 дБ), коротким его делает длина ноты: `808 - Detroit Standard (C)`, `808 - Detroit Cutit (C)` |
+| бочка | `Kick - Rage Pie` (122 мс) | `Kick - Rage Hard`, `Kick - Short Clicky` | нет; если одна в такт — `Kick - Detroit Crisp` (117 мс) |
+| клэп | `Clap - Main Mid`, `Clap - Rage Yeat` | `Clap - Rage Money`; «2 и 4» — резкий: `Clap - Sharp Attack`, `Clap - Rage Double Tap` | `Clap - Detroit Standard` (87 мс), `Clap - Detroit Press` (92 мс), `Clap - Rage Spitta`; добавочные — он же тише или самый короткий `Clap - Detroit Slick` (52 мс) |
+| призраки | — | `Rim - Ghost Soft`, `Snare - Soft Dull (ghost)` | `Rim - Ghost Sidestick`, `Snare - Detroit Rim` (62 мс) |
+| хэт | `Hat - Rage Dust` (87 мс) | под дробь и триоли — самые короткие: `Hat - Rage Nice` (50 мс), `Hat - Dry Tick 01` (39 мс), `Hat - Detroit Gutter` (35 мс), `Hat - Detroit Gess` (27 мс) | `Hat - Detroit Classic` (70 мс), `Hat - Rage Pax`; под дробь — `Hat - Detroit Gutter` (35 мс), `Hat - Detroit Gess` (27 мс) |
+| открытый хэт | `Open Hat - Rage Cope` | `Open Hat - Short Tight 01` | `Open Hat - Detroit Slap` (392 мс, самый короткий из пяти Detroit), `Open Hat - Rage Dark Side` (287 мс) |
+| перк | `Perc - Rimshot 01` | `Shaker - Short 10`, `Perc - Click Tiny 06` | `Perc - Detroit 05` (25 мс), `Perc - Detroit 04` (30 мс), `Perc - Detroit 06` (150 мс), `Perc - Rimshot Bright 02` |
 | вдох в полтакта | — | `FX - Reverse Swell 01` (конец файла — на первую долю), `FX - Noise Riser Short 03` | — |
 
-Бочка — тише 808. Дробь 1/32 на 150 BPM — 50 мс на ноту: хэт длиннее сольётся.
-Файлы с `Synth` синтезированы кодом; остальные — Clark Audio (`Rage`), MusicRadar и VCSL,
+Бочка — тише 808. Дробь 1/32 на 150 BPM — 50 мс на ноту, на 190 BPM — 39 мс: хэт длиннее сольётся.
+Записанного короткого 808 в наборе нет: самые короткие записанные — `808 - Detroit Stomper (C)` (726 мс
+до −20 дБ) и `808 - Detroit Topia (C)` (776 мс), и у обоих высота первые 0,25 с съезжает к ноте сверху —
+под короткую ноту их не бери, строй не успеет встать. `Detroit Standard` и `Detroit Cutit` встают
+на ноту за 0,1 с. `Detroit Bounce` и `Detroit Kicker` издатель выпустил в D и G, в наборе они опущены к C.
+Крэши (`Crash - Detroit …`, 5 штук) и `FX - Detroit Riser`, `Scratch`, `Scratch 2`, `Stomp` лежат в папке FX —
+в скелетах им места нет, ставь только фишкой.
+Файлы с `Synth` синтезированы кодом; остальные — Clark Audio (`Rage` — Free Rage Drum Kit,
+`Detroit` — Free Detroit Drum Kit, взят целиком, без отбора), MusicRadar и VCSL,
 лицензии — в README набора. Сами файлы в репозиторий не класть: раздавать их нельзя.
+
+## Тембры Serum
+
+У владельца в Serum 1 стоят два набора пресетов (02.10.2026), в меню пресетов:
+
+- `User → Monosounds - Starter` — 269: Bass 95, Leads 43, Keys 36, Atmospheres 14, Guitars 11,
+  Plucks 11, 808s 10, Bells 10, Chords 10, Piano 10, Cowbells 8, Arps 5, Synths 4, Pads 2;
+- `User → AngelicVibes 2021` — 83: Misc 21, Pads 18, Bells 12, Synths 11, Bass 10, Plucks 6, Keys 5.
+
+В записке к биту называй пресет на каждую партию Serum — папкой и именем, как в таблице.
+Пресеты никто не слушал: имена выбраны по категории и названию, другого знания нет.
+«Не звучит» от владельца — повод заменить строку здесь. Чередуй, не ставь один и тот же два бита подряд.
+
+| партия | Monosounds - Starter | AngelicVibes 2021 |
+|---|---|---|
+| аккорды | Keys: `KEYS - Felt Piano`, `KEYS - Dreamy Piano`; Piano: `Piano - Intimate Fingers`; Chords: `Chords - Modern 01`…`10` | Keys: `Keys - Piano`, `Keys - Aurora`, `Keys - LoFi Toy` |
+| перебор, плак | Plucks: `PL - Gem`, `PL - Lotus`, `PL - Moonstone`; Guitars: `AG - Muted Melody`, `AG - Intimate Feel` | Plucks: `Pluck - Chosen`, `Pluck - Tidal`, `Pluck - Limelight` |
+| мелодия, колокольчик | Bells: `Bell - Melodic 01`…`10`; Leads: `LD - Dreams`, `LEAD - Phazing Bell` | Bells: `Bell - Crystal Eye`, `Bell - Grey Tones`, `Bell - Persia`; Synths: `Synth - Soft Lead` |
+| пэд | Pads: `PD - Cloudlifter`, `PD - Wave After Wave`; Atmospheres: `Athmosphere - Elven Choir` | Pads: `Pad - Solitude`, `Pad - Heaven Knows`, `Pad - Blue Light`, `Pad - Cinematic` |
+
+Пресеты папки Chords, судя по названию, могут сами строить аккорд из одной ноты — не проверено:
+под свои аккорды из нескольких нот первым называй Keys или Piano, Chords — запасным.
+
+### Свой тембр
+
+Владелец 02.10.2026: звук должен быть свежим и уникальным, а не как у всех. Чужие паки этого
+не дают — они стоят у всех. Свой материал даёт: в Serum лежат 12 таблиц, собранных из его голоса
+(`Tables → PLENKA`), такого набора нет ни у кого.
+
+В каждом бите одну мелодическую партию — второй голос или мелодию — отдавай своей таблице
+и называй её в записке: «OSC A → PLENKA → `PLENKA Voice 04 i Guf`, ручку WT POS веди LFO
+или рукой». За основу — пресет Init или пресет партии из таблицы выше с заменой таблицы в OSC A.
+От бита к биту таблицу меняй.
+
+`PLENKA Voice 01 plenka`, `02 moej igre`, `03 chelovek`, `04 i Guf`, `05 otygrali bolshe`,
+`06 tam bylo`, `07 Ovechkin`, `08 nu`, `09 ves`, `10 temnyj`, `11 avgusta`, `12 vecher`.
+По замеру самые плавные — 08, 04, 11; больше всего движения по таблице — 05, 09, 10.
+На слух таблицы никто не проверял: слова в них не слышно, слышен тембр, который менялся,
+пока слово произносилось. Как собраны — в README рядом с таблицами.
