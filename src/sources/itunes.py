@@ -72,27 +72,32 @@ def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
     if not data:
         return []
 
-    releases = []
-    for item in data.get("results", []):
-        if item.get("wrapperType") != "collection":
-            continue
-        released = _parse_date(item.get("releaseDate"))
-        if released is None:
-            continue
-        releases.append(
-            {
-                "source": "itunes",
-                "artist": item.get("artistName", ""),
-                "artist_ids": [item.get("artistId")],
-                "title": item.get("collectionName", ""),
-                "url": item.get("collectionViewUrl", ""),
-                "cover": (item.get("artworkUrl100") or "").replace("100x100", "600x600"),
-                "track_count": item.get("trackCount"),
-                "released_at": released.isoformat(),
-                "external_id": str(item.get("collectionId", "")),
-            }
-        )
-    return releases
+    return [release for item in data.get("results", []) if (release := _release(item))]
+
+
+def _release(item: dict) -> dict:
+    """Альбом из ответа магазина в виде находки сбора. Пусто — не альбом или без даты выхода."""
+    released = _parse_date(item.get("releaseDate"))
+    if item.get("wrapperType") != "collection" or released is None:
+        return {}
+    return {
+        "source": "itunes",
+        "artist": item.get("artistName", ""),
+        "artist_ids": [item.get("artistId")],
+        "title": item.get("collectionName", ""),
+        "url": item.get("collectionViewUrl", ""),
+        "cover": (item.get("artworkUrl100") or "").replace("100x100", "600x600"),
+        "track_count": item.get("trackCount"),
+        "released_at": released.isoformat(),
+        "external_id": str(item.get("collectionId", "")),
+    }
+
+
+def album_release(collection_id: str | int) -> dict:
+    """Релиз по id альбома в том же виде, что recent_releases, — пара к deezer.album_release:
+    ВКЛАДЫШУ (src/vkladysh.py) прислали ссылку на альбом, и артист заранее неизвестен."""
+    data = get_json(LOOKUP_URL, params={"id": collection_id}, min_interval=MIN_INTERVAL)
+    return next((release for item in (data or {}).get("results", []) if (release := _release(item))), {})
 
 
 def album_credit(collection_id: str | int) -> tuple[str, list[int]]:

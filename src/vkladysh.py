@@ -15,6 +15,15 @@
 убил бы пересылку, а реклама здесь — сама карточка с маркой канала и ссылкой на бота.
 Подписку спрашивают кнопки под вкладышем — слежение и разбор вкуса (src/service.py).
 
+Альбом — та же карточка, а не вторая: ссылка на альбом (Deezer, Apple Music, Яндекс
+Музыка) или «Артист — Альбом» раньше кончались разбором вкуса или «не разобрал», хотя
+другу пересылают и альбомы. Словарь у него тот же, что у трека, плюс число треков и дата
+выхода — в виде релиза сбора (deezer.album_release), поэтому подпись, площадки, отправка
+и кнопки бота общие. Трек важнее альбома: сперва ищется трек, альбом — только когда
+трека нет. «Артист — Название» чаще про трек, а сингл магазины заводят альбомом из одного
+трека — он остаётся треком, как раньше. Тип релиза не пишем: альбом от EP iTunes
+не отличает. Короткие ссылки Deezer и альбомы Spotify не разбираются — бот отвечает прежним путём.
+
 КАРТОЧКА АРТИСТА — тот же вкладыш, но об артисте: имя в посте канала ведёт
 в бота ссылкой ?start=a_<id Deezer> (publish.artist_links), и бот сразу отвечает
 фото, кто это, тремя последними релизами и площадками. «Кто это» — первое предложение
@@ -26,8 +35,8 @@
 разбирает события по одному, и запрос из чужого чата ждал бы за разбором модели
 дольше, чем Telegram держит его открытым (NEXT.md, задача 57).
 
-    python -m src.vkladysh --selftest           разбор, карточка, отказ на мусоре — без сети
-    python -m src.vkladysh --dry-run "ССЫЛКА"   что бот ответит на ссылку или «Артист — Трек», без Telegram
+    python -m src.vkladysh --selftest           разбор, карточка, альбом, отказ на мусоре — без сети
+    python -m src.vkladysh --dry-run "ССЫЛКА"   что бот ответит на ссылку (трек, альбом) или «Артист — Название», без Telegram
     python -m src.vkladysh --artist 12345       карточка артиста по id Deezer, без Telegram
 """
 
@@ -41,7 +50,7 @@ import sys
 from urllib.parse import quote
 
 from . import card, collect, config, otbor, publish, state, telegram
-from .sources import afisha, deezer
+from .sources import afisha, deezer, itunes, yandex_music
 from .sources.http import get_json
 
 log = logging.getLogger("vkladysh")
@@ -49,18 +58,57 @@ log = logging.getLogger("vkladysh")
 KICKER = "ВКЛАДЫШ"
 
 
+# Ссылка на трек Яндекса тоже несёт album/<id>, но за ним идёт /track/ — это не альбом.
+YANDEX_ALBUM = re.compile(r"music\.yandex\.\w+/album/(\d+)(?!\d|/track)")
+
+
 def find(text: str) -> dict:
-    """Трек по ссылке или «Артист — Трек»: артист, название, ссылка, обложка.
-    Пусто — это не трек: куплет в несколько строк, альбом, мусор, нет в магазинах."""
+    """Трек или альбом по ссылке или «Артист — Название»: артист, название, ссылка, обложка;
+    у альбома ещё track_count и released_at. Трек важнее: альбом ищем, только когда трека нет.
+    Пусто — ни то ни другое: куплет в несколько строк, мусор, нет в магазинах."""
     text = text.strip()
     if "\n" in text:
         return {}
     if link := otbor.URL.search(text):
-        return otbor.by_link(link.group(0))
+        # Сперва трек: так сингл остаётся треком. Цена — ссылка на альбом Apple стоит двух
+        # запросов к iTunes с паузой в три секунды; мешает — спрашивать альбом первым.
+        return otbor.by_link(link.group(0)) or album_by_link(link.group(0))
     parts = otbor.DASH.split(text, maxsplit=1)
     if len(parts) != 2 or not parts[0].strip() or not parts[1].strip(" \"«»"):
         return {}
-    return otbor.lookup(parts[0].strip(), parts[1].strip(" \"«»"))
+    artist, title = parts[0].strip(), parts[1].strip(" \"«»")
+    return otbor.lookup(artist, title) or album_lookup(artist, title)
+
+
+def album_by_link(url: str) -> dict:
+    """Альбом по ссылке Deezer, Apple Music или Яндекс Музыки — в виде релиза сбора.
+    Ссылка остаётся на площадке человека, остальным площадкам — поиск (platforms)."""
+    if number := deezer.album_id_from_url(url):
+        found = deezer.album_release(number)
+    elif number := itunes.album_id_from_url(url):
+        found = itunes.album_release(number)
+    elif match := YANDEX_ALBUM.search(url):
+        # Через yandex_music._get, а не http: с адресов GitHub Яндекс отвечает 451, функция Облака — нет.
+        data = yandex_music._get(f"albums/{match.group(1)}") or {}
+        found = {"artist": ", ".join(a.get("name", "") for a in data.get("artists") or []),
+                 "title": data.get("title") or "", "url": f"https://music.yandex.ru/album/{match.group(1)}",
+                 "cover": f"https://{data['coverUri'].replace('%%', '600x600')}" if data.get("coverUri") else "",
+                 "track_count": data.get("trackCount"), "released_at": data.get("releaseDate") or ""}
+    else:
+        found = {}
+    return found if found.get("artist") and found.get("title") else {}
+
+
+def album_lookup(artist: str, title: str) -> dict:
+    """Альбом по имени. Сверка точная, как у трека (otbor._match): чужой альбом с тем же
+    названием хуже никакого. Deezer первым: iTunes только что спрашивали про трек,
+    а между запросами к нему три секунды — вкладыш должен приходить сразу."""
+    for item in deezer.search_albums(f"{artist} {title}", limit=10):
+        if otbor._match(item.get("artist", {}).get("name", ""), item.get("title", ""), artist, title):
+            if found := deezer.album_release(item["id"]):
+                return found
+    number = itunes.find_album(artist, title)
+    return itunes.album_release(number) if number else {}
 
 
 def concert(artist: str) -> str:
@@ -88,9 +136,20 @@ def platforms(track: dict) -> str:
         for label, search in config.LISTEN_SERVICES)
 
 
+def _day(iso: str) -> str:
+    """2024-03-06T… → 06.03.2024."""
+    return ".".join(reversed(iso[:10].split("-")))
+
+
 def caption(track: dict, show: str = "") -> str:
-    """Подпись под карточкой: имя, площадки строкой, концерт, откуда вкладыш."""
-    parts = [f"<b>{html.escape(track['artist'])} — {html.escape(track['title'])}</b>", platforms(track)]
+    """Подпись под карточкой: имя, у альбома — сколько треков и когда вышел, площадки строкой,
+    концерт, откуда вкладыш."""
+    head = f"<b>{html.escape(track['artist'])} — {html.escape(track['title'])}</b>"
+    if track.get("track_count"):  # альбом: у трека этого поля нет
+        # «Релиз», а не «вышел»: предзаказ тоже находится, и дата у него впереди.
+        head += f"\nТреков: {track['track_count']}" + (
+            f" · релиз {_day(track['released_at'])}" if track.get("released_at") else "")
+    parts = [head, platforms(track)]
     if show:
         parts.append(show)
     # Ссылка с меткой: кому переслали вкладыш, делает свой — приходы видны в --sources.
@@ -173,7 +232,7 @@ def artist_caption(found: dict) -> str:
     parts = [f"<b>{esc(found['name'])}</b>" + (f"\n{esc(found['who'])}" if found.get("who") else "")]
     if found["releases"]:
         parts.append("Последние релизы:\n" + "\n".join(
-            f'▸ <a href="{esc(r["url"])}">{esc(r["title"])}</a> · {".".join(reversed(r["released_at"][:10].split("-")))}'
+            f'▸ <a href="{esc(r["url"])}">{esc(r["title"])}</a> · {_day(r["released_at"])}'
             for r in found["releases"]))
     parts.append(platforms({"artist": found["name"], "title": "", "url": found["url"]}))
     parts.append(f'<a href="{publish.ARTIST_LINK.format(found["id"])}">{ARTIST_KICKER}</a> · {config.CHANNEL_HANDLE}')
@@ -192,11 +251,25 @@ def send_artist(chat_id: str, found: dict, buttons: list[list[dict]]) -> None:
 
 
 def _selftest() -> None:
-    real = otbor.by_link, otbor.lookup, collect.load_artists, afisha.find_artist, afisha.concerts
-    asked = []
-    otbor.by_link = lambda url: asked.append(url) or {
-        "artist": "Toxi$, Bushido Zho", "title": "Молния", "url": "https://music.yandex.ru/track/1", "cover": ""}
-    otbor.lookup = lambda artist, title: asked.append((artist, title)) or {}
+    real = (otbor.by_link, otbor.lookup, collect.load_artists, afisha.find_artist, afisha.concerts,
+            deezer.search_albums, deezer.album_release, itunes.find_album, yandex_music._get)
+    asked, albums = [], []
+    # Магазины самопроверки: ссылка на альбом треком не разбирается, трек «Intro» у Bones есть.
+    otbor.by_link = lambda url: asked.append(url) or ({} if "/album/" in url else {
+        "artist": "Toxi$, Bushido Zho", "title": "Молния", "url": "https://music.yandex.ru/track/1", "cover": ""})
+    otbor.lookup = lambda artist, title: asked.append((artist, title)) or (
+        {"artist": "Bones", "title": "Intro", "url": "https://music.apple.com/us/song/1", "cover": ""}
+        if (artist, title) == ("Bones", "Intro") else {})
+    release = {"artist": "Berg Chopper", "title": "INTRO", "url": "https://www.deezer.com/album/554626402",
+               "cover": "", "track_count": 18, "released_at": "2024-03-06T00:00:00+00:00"}
+    deezer.search_albums = lambda query, limit=25: albums.append(query) or [
+        {"id": 7, "title": "Intro", "artist": {"name": "Чужой"}},
+        {"id": 554626402, "title": "INTRO (Deluxe)", "artist": {"name": "Berg Chopper"}}]
+    deezer.album_release = lambda number: dict(release) if str(number) == "554626402" else {}
+    itunes.find_album = lambda artist, title: None
+    yandex_music._get = lambda path: {
+        "title": "INTRO", "artists": [{"name": "Berg Chopper"}], "trackCount": 18,
+        "releaseDate": "2024-03-06T00:00:00+03:00", "coverUri": "avatars.yandex.net/x/%%"} if path == "albums/30026308" else None
     collect.load_artists = lambda: [{"name": "Toxi$"}]
     afisha.find_artist = lambda name: "toxis"
     afisha.concerts = lambda page: [{"day": "2026-11-02", "when": "2 ноября", "city": "Москва", "url": "https://afisha.yandex.ru/e/2"},
@@ -208,7 +281,26 @@ def _selftest() -> None:
         assert asked[-1] == ("Bones", "Dirt"), asked
         for junk in ("привет", "Bones —", "строка — раз\nстрока — два", ""):
             assert find(junk) == {}, junk
-        assert asked[-1] == ("Bones", "Dirt"), "мусор не должен уходить в магазины"
+        assert asked[-1] == ("Bones", "Dirt") and albums == ["Bones Dirt"], "мусор не должен уходить в магазины"
+
+        # Альбом: ссылкой и «Артист — Альбом»; та же подпись, плюс треки и дата.
+        album = find("https://www.deezer.com/ru/album/554626402?utm=x")
+        assert album == release and find("Berg Chopper — INTRO") == release, album
+        text = caption(album)
+        assert text.startswith("<b>Berg Chopper — INTRO</b>\nТреков: 18 · релиз 06.03.2024\n\n"), text
+        assert 'href="https://www.deezer.com/album/554626402">Deezer' in text, "ссылка на альбом — своей площадке"
+        assert "music.yandex.ru/search?text=Berg%20Chopper%20INTRO" in text, "остальным площадкам — поиск"
+        assert text.count("<a href") == len(config.LISTEN_SERVICES) + 1, text
+        yandex = find("https://music.yandex.ru/album/30026308")
+        assert yandex["url"] == "https://music.yandex.ru/album/30026308" and yandex["cover"].endswith("/600x600"), yandex
+        assert 'album/30026308">Яндекс' in caption(yandex) and "релиз 06.03.2024" in caption(yandex)
+        assert find("https://music.yandex.ru/album/404") == {}, "Яндекс не ответил — карточки нет"
+        assert not YANDEX_ALBUM.search("https://music.yandex.ru/album/30026308/track/5"), "ссылка на трек — не альбом"
+        assert find("Чужой — Никакой") == {}, "альбом другого артиста с тем же названием не берём"
+        # Трек важнее альбома: нашёлся трек — альбом с тем же именем не ищем.
+        searched = len(albums)
+        assert "track_count" not in find("Bones — Intro") and len(albums) == searched, albums
+        assert "Треков" not in caption(track)
 
         show = concert(track["artist"])
         assert "12 октября, Казань" in show and "e/1" in show, show
@@ -221,8 +313,10 @@ def _selftest() -> None:
         collect.load_artists = lambda: []
         assert concert(track["artist"]) == "", "чужой артист — Афишу не спрашиваем"
     finally:
-        otbor.by_link, otbor.lookup, collect.load_artists, afisha.find_artist, afisha.concerts = real
+        (otbor.by_link, otbor.lookup, collect.load_artists, afisha.find_artist, afisha.concerts,
+         deezer.search_albums, deezer.album_release, itunes.find_album, yandex_music._get) = real
     print("vkladysh: ссылка и «Артист — Трек», отказ на мусоре, площадки и концерт в подписи — ок")
+    print("альбом: ссылка и «Артист — Альбом», треки и дата в подписи, трек важнее альбома — ок")
 
     # КАРТОЧКА АРТИСТА: Википедия только о музыканте, три последних релиза без предзаказа и дублей.
     assert first_sentence("Oxxxymiron (род. 31 января 1985, Ленинград) — российский рэпер. Основатель лейбла.") \
@@ -255,7 +349,7 @@ def _selftest() -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="ВКЛАДЫШ: карточка трека со всеми площадками")
+    parser = argparse.ArgumentParser(description="ВКЛАДЫШ: карточка трека или альбома со всеми площадками")
     parser.add_argument("--selftest", action="store_true", help="проверка без сети")
     parser.add_argument("--dry-run", metavar="ТЕКСТ", help="что бот ответит, без Telegram")
     parser.add_argument("--artist", metavar="ID", help="карточка артиста по id Deezer, без Telegram")
@@ -270,7 +364,7 @@ def main() -> int:
     if args.dry_run:
         track = find(args.dry_run)
         if not track:
-            print("Не трек: бот ответит прежним путём (разбор или «не разобрал»).")
+            print("Не трек и не альбом: бот ответит прежним путём (разбор или «не разобрал»).")
             return 1
         print(caption(track, concert(track["artist"])))
         image = card.cover({"cover": track.get("cover", ""), "artist": track["artist"],
