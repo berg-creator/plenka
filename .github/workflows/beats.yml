@@ -1,0 +1,56 @@
+name: Ноты для бита
+
+# Утренние ноты бита (src/noty.py). Облачный автор пушит content/beats/<id>/make.py
+# в ветку claude/beats-<id>; здесь из него собирается архив — партитуры FL Studio
+# и MIDI — и уходит владельцу в личку.
+#
+# Ветка не удаляется, в отличие от сценариев роликов: её имя и файл — память автора
+# о том, под кого, в каком темпе и с какими приёмами биты уже были.
+# ponytail: ветки копятся по одной в день; станет тесно — складывать make.py в main.
+on:
+  push:
+    branches: ["claude/beats-*"]
+
+# В data/ и content/ ничего не пишется, поэтому не state-write: там ожидающий
+# запуск вытесняется следующим.
+concurrency:
+  group: beats-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # make.py — код, написанный моделью, которая читала сеть. Он исполняется
+      # в шаге без секретов: токен бота увидит только готовый архив.
+      - name: Собрать архив
+        run: python -m src.noty --build "content/beats/${GITHUB_REF_NAME#claude/beats-}" --out build
+
+      - name: Отправить владельцу
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python -m src.noty --send build/*.zip
+
+      - name: Написать владельцу о поломке
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >
+          curl -sS -o /dev/null "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage"
+          --data-urlencode "chat_id=$TELEGRAM_ADMIN_ID"
+          --data-urlencode "text=⚠️ Ноты для бита не собрались, архива сегодня нет: $RUN"
