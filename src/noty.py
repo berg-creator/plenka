@@ -25,7 +25,7 @@ make.py исполняется как код, а пишет его модель,
 и отправка разведены: beats.yml собирает архив шагом без секретов, токен бота
 видит только готовый архив.
 
-    python -m src.noty --selftest          приёмы пианоролла и запись партитуры FL и MIDI, без сети
+    python -m src.noty --selftest          приёмы пианоролла, замер нот и запись партитуры FL и MIDI, без сети
     python -m src.noty --build ПАПКА       собрать и проверить бит из ПАПКА/make.py, без Telegram
     python -m src.noty --send АРХИВ        отправить собранный архив владельцу
 
@@ -147,6 +147,26 @@ def glide(pos: float, ln: float, key: int, to: int, at: float = 0, over: float =
     return [N(pos, ln, key, vel), N(pos + at, over, to, vel, slide=True)]
 
 
+def hits(pos: float, pattern: str, key: int = 60, vel: int = 100, ln: float = 1, ghost: float = .45,
+         accent: float = 1.15) -> list[N]:
+    """Рисунок строкой, по знаку на шестнадцатую: «x» — удар, «X» — акцент, «o» — тихий призрак, прочее — тишина;
+    «|» между тактами пропускается. Так рисунки записаны в замере (data/beats_zamer.json): переносятся как есть."""
+    scale = {"x": 1, "X": accent, "o": ghost}
+    return [N(pos + i, ln, key, max(1, min(127, round(vel * scale[c]))))
+            for i, c in enumerate(pattern.replace("|", "")) if c in scale]
+
+
+def mute(notes: list[N], start: float, end: float) -> list[N]:
+    """Вдох: в отрезке не звучит ничего. Ноты, начатые в нём, убираются, а тянущиеся в него — обрываются:
+    808, гудящий сквозь паузу, паузу съедает."""
+    out = []
+    for n in notes:
+        if start <= n.pos < end:
+            continue
+        out.append(n._replace(ln=start - n.pos) if n.pos < start < n.pos + n.ln else n)
+    return out
+
+
 def flat(notes: list[N]) -> list[N]:
     """Ноты без слайдов, для MIDI: нота под слайдом обрывается, дальше до её конца звучит
     высота слайда — внахлёст, чтобы канал с Mono и Porta подъехал сам."""
@@ -249,7 +269,7 @@ def read_mid(path: Path) -> tuple[int, int]:
 def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     """Что не так с битом. Пусто — годен."""
     out, end = [], info["bars"] * 16
-    out += [f"в паспорте нет поля {k}" for k in ("title", "bpm", "key", "scale", "bars", "like", "parts", "tricks")
+    out += [f"в паспорте нет поля {k}" for k in ("title", "bpm", "key", "scale", "bars", "skeleton", "like", "parts", "tricks")
             if not info.get(k)]
     for name, notes in tracks.items():
         if not notes:
@@ -266,6 +286,9 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED) \
                 and any(n.pan or n.fine or n.slide for n in notes):
             out.append(f"{name}: панорама, подстройка и слайд ноты в синтезаторе не работают — только в сэмплере")
+    # Замер 01.10.2026: у лидеров бочка стоит под 808 в каждой пятой ноте, в первом бите владельца — под каждой
+    if info.get("bpm") and shape(info, tracks).get("бочка под 808", 0) > .7:
+        out.append("бочка стоит почти под каждой нотой 808: у лидеров замера — под 10–30%, низ ведёт сам 808")
     tricky = sum(1 for notes in tracks.values()
                  if any(n.pan or n.fine or n.slide or n.ln < .5 for n in notes) or len({n.vel for n in notes}) > 3)
     if tricky < 3:
@@ -273,11 +296,50 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     return out[:20]
 
 
+def shape(info: dict, tracks: dict[str, list[N]]) -> dict:
+    """Рисунок бита числами — теми же, какими src/zamer.py меряет чужие биты: автор сверяет свои ноты
+    со скелетом из prompts/beats.md, не слыша звука. Такты считаются только те, где играют барабаны."""
+    from statistics import median, pstdev
+
+    def part(*words, skip=()):
+        return [n for name, notes in tracks.items() if any(w in name for w in words)
+                and not any(w in name for w in skip) for n in notes if not n.slide]
+
+    hat, kick, clap = part("хэт", skip=("открыт",)), part("бочка"), part("клэп", "снейр")
+    bass = [n for name, notes in tracks.items() if any(w in name for w in SAMPLED) for n in flat(notes)]
+    slides = sum(n.slide for name, notes in tracks.items() if any(w in name for w in SAMPLED) for n in notes)
+    live = sorted({int(n.pos // 16) for n in hat + kick + clap})
+    if not live:
+        return {}
+
+    def per_bar(notes):
+        return median(sum(int(n.pos // 16) == b for n in notes) for b in live)
+
+    def gaps(b):
+        at = sorted(n.pos for n in hat if int(n.pos // 16) == b)
+        return [y - x for x, y in zip(at, at[1:])]
+
+    rolls = sum(sum(g <= .55 for g in gaps(b)) >= 2 for b in live)
+    trips = sum(sum(abs(g - t) < .05 for g in gaps(b) for t in (1 / 3, 2 / 3, 4 / 3)) >= 2 for b in live)
+    sounding = sum(min(n.ln, 16 - n.pos % 16) for n in bass if int(n.pos // 16) in live)
+    return {
+        "тактов": info["bars"], "секунд": round(info["bars"] * 240 / info["bpm"]),
+        "хэт/такт": per_bar(hat), "такты с дробью": round(rolls / len(live), 2),
+        "с триолями": round(trips / len(live), 2), "хэт: разброс панорамы": round(pstdev([n.pan for n in hat]), 1) if hat else 0,
+        "бочка/такт": per_bar(kick), "808/такт": per_bar(bass),
+        "нота 808, 1/16": round(median(n.ln for n in bass), 1) if bass else 0,
+        "808 звучит": round(sounding / (16 * len(live)), 2), "разных нот 808": len({n.key for n in bass}),
+        "слайдов на 8 т.": round(slides / len(live) * 8, 1),
+        "бочка под 808": round(sum(any(abs(k.pos - n.pos) < .01 for k in kick) for n in bass) / len(bass), 2) if bass else 0,
+        "такты без барабанов": info["bars"] - len(live),
+    }
+
+
 def about(info: dict) -> str:
     """Записка владельцу: она же подпись к архиву."""
     return "\n".join([
         f"🎹 {info['title']}", f"{info['bpm']} BPM, {info['key']}, {info['bars']} тактов", "",
-        f"Темп и тональность — как у: {info['like']}", f"Части: {info['parts']}", "",
+        f"Скелет: {info['skeleton']}", f"С чего снято: {info['like']}", f"Части: {info['parts']}", "",
         "Что сделано нотами:", *(f"• {t}" for t in info["tricks"]), "",
         "Папка fl — партитуры FL Studio: перетащи файл в пианоролл своего канала "
         "(или меню пианоролла → File → Open score). В них панорама, подстройка и слайды каждой ноты — "
@@ -316,6 +378,7 @@ def build(folder: Path, out: Path) -> Path:
                                    ("слайды", any(n.slide for n in notes)),
                                    ("дроби", any(n.ln < .5 for n in notes))) if yes]
         print(f"{i:02} {name:16} нот {len(notes):4}, сил {len({n.vel for n in notes}):2}  {', '.join(tricks)}")
+    print("замер нот: " + ", ".join(f"{k} {v:g}" for k, v in shape(info, tracks).items()))
     mid(root / "00 всё вместе (черновик).mid", info["bpm"], *draft)
     (root / "о бите.txt").write_text(about(info), encoding="utf-8")
     archive = out / f"{folder.name}.zip"
@@ -357,6 +420,14 @@ def selftest() -> None:
     assert g[1].slide and g[1].pos == 6 and g[1].ln == 2 and g[1].key == 44
     assert sorted(flat(g)) == [N(0, 6.25, 32, 110), N(6, 2, 44, 110)], "в MIDI слайд — вторая нота внахлёст"
     assert grace(N(4, 4, 71)) == [N(4, .5, 70, 75), N(4.5, 3.5, 71)]
+    h = hits(16, "x.o.|X...", vel=100)
+    assert [(n.pos, n.vel) for n in h] == [(16, 100), (18, 45), (20, 115)], "рисунок строкой: удар, призрак, акцент"
+    assert mute([N(0, 12, 32), N(8, 1), N(12, 4, 32)], 8, 12) == [N(0, 8, 32), N(12, 4, 32)], "вдох обрывает хвост 808"
+    beat = {"хэт": hits(0, "x.x.x.x.x.x.x.x.") + hits(16, "x.x.x.x.x.x.") + roll(28, 4, 8),
+            "клэп": [N(8, 1), N(24, 1)], "бочка": [N(0, 1)], "808": [N(0, 6, 32), N(6, 2, 35), N(16, 12, 32), N(24, 4, 44, slide=True)]}
+    sh = shape(dict(bars=3, bpm=120), beat)
+    assert (sh["хэт/такт"], sh["такты с дробью"], sh["808/такт"], sh["разных нот 808"], sh["слайдов на 8 т."]) == (11, .5, 2, 3, 4), sh
+    assert sh["бочка под 808"] == .25 and sh["такты без барабанов"] == 1 and sh["секунд"] == 6 and sh["808 звучит"] == .63, sh
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         notes = r + g + [N(20, 2, 61, 90, -50, 30)]
@@ -371,7 +442,7 @@ def selftest() -> None:
         (tmp / "beat").mkdir()
         (tmp / "beat" / "make.py").write_text(
             "from src.noty import N, roll, spread, glide\n"
-            "INFO = dict(title='A x B — Тест', bpm=140, key='Fm', scale=[5, 7, 8, 10, 0, 1, 3], bars=2,\n"
+            "INFO = dict(title='A x B — Тест', bpm=140, key='Fm', scale=[5, 7, 8, 10, 0, 1, 3], bars=2, skeleton='сцена',\n"
             "            like='x', parts='x', tricks=['x'], tonal=['808'])\n"
             "def compose():\n"
             "    return {'808': glide(0, 16, 29, 41, at=12, over=4), 'хэт': spread([N(i, 1) for i in range(32)]),\n"
@@ -380,13 +451,15 @@ def selftest() -> None:
         names = zipfile.ZipFile(archive).namelist()
         assert "beat/fl/02 хэт.fsc" in names and "beat/midi/01 808.mid" in names and "beat/о бите.txt" in names
         assert "бит A x B — Тест, 140 Fm" in archive.with_suffix(".txt").read_text("utf-8")
-    info = dict(title="t", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=1, like="x", parts="x", tricks=["x"],
+    info = dict(title="t", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=1, like="x", parts="x", tricks=["x"], skeleton="x",
                 tonal=["мелодия"])
     plain = {"мелодия": [N(0, 4, 66)], "хэт": [N(i, 1) for i in range(16)], "бочка": [N(0, 1), N(20, 1)]}
     bad = "\n".join(problems(info, plain))
     assert "мимо тональности" in bad and "вне бита" in bad and "только в 0 партиях" in bad
     assert "в синтезаторе не работают" in "\n".join(problems(info, {"мелодия": glide(0, 4, 65, 77)}))
     assert "синтезатор" not in "\n".join(problems(info | {"tonal": ["808"]}, {"808": glide(0, 4, 29, 41)}))
+    doubled = {"808": [N(i * 4, 3, 29) for i in range(4)], "бочка": [N(i * 4, 1) for i in range(4)]}
+    assert "под каждой нотой 808" in "\n".join(problems(info | {"tonal": ["808"]}, doubled))
     print("ноты: приёмы, партитура FL, MIDI и отбраковка — в порядке")
 
 

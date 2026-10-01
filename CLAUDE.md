@@ -78,6 +78,8 @@ python -m src.skleyka --beats "Toxi$"   бесплатные биты как у 
 python -m src.bity --selftest           биты ПЛЁНКИ: подпись «бит …» от владельца, ссылка beat_ по file_id, «🎚 Свести с этим битом», обложка с именами на спинах, живой ролик в 50 МБ и превью
 python -m src.noty --selftest           ноты для бита: дробь с разгоном и съездом высоты, панорама, эхо нотами, слайды; партитура FL и MIDI; панорама и слайд в партии синтезатора — брак
 python -m src.noty --build content/beats/ID   архив нот бита из make.py: партитуры FL Studio и MIDI, без Telegram
+~/.cache/whisper-venv/bin/python -m src.zamer --selftest   замер бита: темп, клэп, хэт с дробью, бочка, 808 со слайдом и части — на синтетическом бите
+~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ… --group ГРУППА --out zamer.json   замер чужих битов для скелетов prompts/beats.md (только Мак, demucs; раз в месяц — NEXT.md)
 python -m src.bity --video БИТ --title "Kizaru x Toxi$ — Полёт, 140 Fm" --out ПАПКА  живой ролик 1920×1080, превью 1280×720 и тексты для YouTube, без Telegram
 python -m src.skleyka --beats Kizaru --bpm 142   то же в темпе голоса: BPM из описаний, чужой темп прочь
 python -m src.skleyka --mix ВОКАЛ БИТ --old СТАРЫЙ --out ПАПКА   голос с чужого бита на БИТ: темп до ±8 %, иначе отказ
