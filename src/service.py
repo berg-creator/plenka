@@ -39,7 +39,7 @@ from datetime import timedelta
 import pathlib
 from pathlib import Path
 
-from . import card, collect, config, llm, otbor, quality, skleyka, state, stories, svedenie, telegram, vkladysh
+from . import bity, card, collect, config, llm, otbor, quality, skleyka, state, stories, svedenie, telegram, vkladysh
 from .sources import afisha, deezer, itunes, lastfm
 
 log = logging.getLogger("service")
@@ -88,6 +88,8 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "vkladysh": "ВКЛАДЫШ, пересланная карточка",
            # Имя артиста в посте канала (?start=a_<id Deezer>, publish.artist_links): id сюда не пишется.
            "a": "КАРТОЧКА АРТИСТА, имя в посте",
+           # Бит ПЛЁНКИ из описания ролика на YouTube (?start=beat_<id>, src/bity.py): id сюда не пишется.
+           "beat": "БИТ ПЛЁНКИ, ролик на YouTube",
            "ad": "реклама, канал не распознан"}
 # Платный пост ведёт в ДВОЙНИКА ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
@@ -1413,6 +1415,12 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         if _subscribed(chat_id, user_id, admin, retry=f"sv:{code}"):
             svedenie.invite(chat_id, code)
         return False
+    if kind == "menu" and link == "beat":
+        # Бит ПЛЁНКИ — сразу и без подписки: за битом и шли. Подписку спросит
+        # «🎚 Свести с этим битом» под ним, как всё СВЕДЕНИЕ.
+        count_source("beat")
+        bity.give(chat_id, slug[:8])
+        return False
     if kind == "menu" and link == "a":
         # Имя артиста в посте канала — карточка сразу и без подписки, как вкладыш:
         # подписку спросит «🔔 Следить» под ней — та же кнопка СЛЕЖУ, что под разбором.
@@ -1632,6 +1640,14 @@ def handle_callback(query: dict, data: dict) -> None:
         if text := skleyka.asked(chat_id):
             handle_message({"chat": {"id": chat_id, "type": "private"}, "from": query.get("from", {}), "text": text},
                            data, ask=False)
+        return
+
+    if action == "bit":
+        # «🎚 Свести с этим битом» под битом ПЛЁНКИ (src/bity.py); «Подписался» несёт номер бита.
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        if _subscribed(chat_id, user_id, admin, retry=f"bit:{subject[:8]}"):
+            otbor.cancel(chat_id)
+            bity.callback(chat_id, user_id, subject[:8], admin=admin)
         return
 
     if action in ("skleyka", "sk"):

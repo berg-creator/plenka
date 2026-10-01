@@ -1736,7 +1736,9 @@ HELP = ("❓ <b>Как это работает</b>\n\n"
         f"папкой или архивом (zip, 7z), всего до {config.SKLEYKA_LINK_MB // 1024} ГБ и {config.SKLEYKA_LINK_FILES} файлов. "
         "Делить на дорожки не надо — разложу по именам файлов: vocal, beat, adlib, bass, kick… или по-русски.\n"
         "• Нет бита — «🔎 Нет бита — найти бесплатный» на шаге бита: найду на YouTube биты как у нужного артиста, "
-        "которые продюсеры отдают бесплатно и для релиза, — дам ссылки.\n"
+        "которые продюсеры отдают бесплатно и для релиза, — дам ссылки; биты ПЛЁНКИ с этим артистом — первыми.\n"
+        "• Бит ПЛЁНКИ по ссылке из описания на YouTube — бесплатно и для релиза, подпиши «"
+        f"{config.BEAT_CREDIT}»; «🎚 Свести с этим битом» — и бит уже в заявке, пришлёшь только голос.\n"
         "• Голос записан на чужом бите «[FREE]», а аренда дорогая — «🔁 Голос записан на чужом бите» там же: "
         f"пришли старый бит, найду бесплатный того же темпа и перенесу голос на него (темп — до ±{SWAP_TEMPO:.0%}).\n"
         "• Упрёшься в лимит — докупи треки за звёзды или позови артиста: за его первый трек — ещё один тебе.\n"
@@ -1908,10 +1910,21 @@ def _limit(data: dict, chat_id: str) -> str:
     return LIMIT.format(count=allowed, time=free.astimezone(MSK).strftime("%H:%M"))
 
 
-def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> None:
+def start(chat_id: str | int, user_id: str | int, *, admin: bool = False, beat: dict | None = None) -> None:
     """/svedenie, кнопка меню и ссылка ?start=skleyka: две строки и выбор кнопкой.
-    Подписку проверяет service."""
+    beat — бит ПЛЁНКИ (src/bity.py, «🎚 Свести с этим битом»): заявка «вокал + бит» с ним внутри,
+    вопрос — сразу о голосе. Открытая заявка ещё ждёт бит (пришёл из «🔎 Нет бита») — бит ложится
+    в неё: новая заявка потеряла бы присланный голос. Подписку проверяет service."""
     chat_id, data = str(chat_id), load()
+    draft = _draft(data, chat_id)
+    if beat and draft and draft["plan"] and "бит" in draft["plan"][draft["step"]:] \
+            and all(f["r"] != "бит" for f in draft["files"]):
+        draft["files"].append(dict(beat, r="бит"))
+        draft.update(beat="own", at=state.iso())
+        if draft["plan"][draft["step"]] == "бит":
+            draft["step"] += 1
+        save(data)  # следующий вопрос задаст круг дежурства (_drafts)
+        return
     denied = "" if admin else _limit(data, chat_id)
     if denied:
         data["drafts"].pop(chat_id, None)
@@ -1920,8 +1933,12 @@ def start(chat_id: str | int, user_id: str | int, *, admin: bool = False) -> Non
         return
     data["drafts"][chat_id] = {"user": str(user_id), "admin": admin, "at": state.iso(), "plan": None,
                                "step": 0, "files": []}
+    if beat:
+        data["drafts"][chat_id].update(plan=["вокал", "бит"], files=[dict(beat, r="бит")], beat="own")
+        _ask(chat_id, data["drafts"][chat_id])
+    else:
+        telegram.send_message(chat_id, INTRO, buttons=[*MODES, [HELP_BUTTON]])
     save(data)
-    telegram.send_message(chat_id, INTRO, buttons=[*MODES, [HELP_BUTTON]])
 
 
 def invited(chat_id: str | int, code: str) -> None:
@@ -2339,15 +2356,19 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
             talk(chat_id, text, {}, admin=admin)
         return
     draft = _draft(data, chat_id)
+    if head == "g":
+        # Без заявки тоже: «🔎 Нет бита» стоит и под неизвестной ссылкой на бит ПЛЁНКИ (src/bity.py).
+        if draft:
+            draft.update(beat="find", at=state.iso())
+            save(data)
+        _count(BEAT_COUNT["find"])
+        telegram.send_message(chat_id, BEATS_ASK, ask="Toxi$")
+        return
     if not draft:
         telegram.send_message(chat_id, OLD)
         return
     if head == "h":
         telegram.send_message(chat_id, HELP, buttons=MODES)
-    elif head == "g":
-        draft["beat"] = "find"
-        _count(BEAT_COUNT["find"])
-        telegram.send_message(chat_id, BEATS_ASK, ask="Toxi$")
     elif head == "o" and draft["plan"]:
         draft.pop("old", None)
         draft["beat"] = "swap"
@@ -2915,9 +2936,13 @@ def find_beats(artist: str, bpm: float | None = None) -> list[dict] | None:
         latin = itunes.resolve_name(names[0])
         if latin and not youtube_comments.CYRILLIC.search(latin):
             names.insert(0, latin)
+    from . import bity  # bity импортирует этот модуль
+
+    # Биты владельца с этим артистом — первыми, ссылкой на бота: YouTube молчит — они всё равно есть.
+    own = bity.matching(names, bpm)
     videos = youtube_comments.search(f"{names[0]} type beat free for profit", BEATS_SEARCH)
     if not videos or not bpm:
-        return pick_beats(videos, names) if videos else None
+        return (own + pick_beats(videos, names))[:BEATS_MAX] if videos or own else None
     pool = pick_beats(videos, names, BEATS_SEARCH)
     # Описание — отдельный заход на страницу ролика, 1–2 с каждый: разом, а не по очереди.
     with concurrent.futures.ThreadPoolExecutor(8) as workers:
@@ -2926,7 +2951,7 @@ def find_beats(artist: str, bpm: float | None = None) -> list[dict] | None:
         said = [int(a or b) for a, b in SAID_BPM.findall(f"{video['title']} {text}") if 50 <= int(a or b) <= 220]
         video["bpm"] = said[0] if said else None
     near = [video for video in pool if video["bpm"] and abs(_rate(video["bpm"], bpm) - 1) <= SWAP_TEMPO]
-    return (near + [video for video in pool if not video["bpm"]])[:BEATS_MAX]
+    return (own + near + [video for video in pool if not video["bpm"]])[:BEATS_MAX]
 
 
 def beats_text(artist: str, found: list[dict] | None, bpm: float | None = None) -> str:
@@ -2935,7 +2960,7 @@ def beats_text(artist: str, found: list[dict] | None, bpm: float | None = None) 
         return BEATS_DOWN
     if not found:
         return head + BEATS_NONE.format(artist=html.escape(artist), tempo=" в этом темпе" if bpm else "")
-    rows = [f'{n}. <a href="{youtube_comments.WATCH}{video["id"]}">{html.escape(video["title"])}</a>'
+    rows = [f'{n}. <a href="{video.get("link") or youtube_comments.WATCH + video["id"]}">{html.escape(video["title"])}</a>'
             f" — {html.escape(video['channel'])}" + (f" · {video['bpm']} BPM" if video.get("bpm") else "")
             for n, video in enumerate(found, 1)]
     return head + BEATS_FOUND.format(artist=html.escape(artist), rows="\n".join(rows))
@@ -2980,7 +3005,7 @@ SWAP_AGAIN = (f"{BEATS_MARK}? Напиши артиста ответом на э
 SWAPPED = ("🔁 Голос перенёс с {old} BPM на {new} BPM, первый такт — на первый такт бита. "
            "Встал не на ту долю — напиши словами, куда подвинуть.\n")
 # Счётчик (service --sources): нажатия и готовые треки после них, только числа по дню.
-BEAT_COUNT = {"find": "СВЕДЕНИЕ: нет бита", "swap": "СВЕДЕНИЕ: чужой бит"}
+BEAT_COUNT = {"find": "СВЕДЕНИЕ: нет бита", "swap": "СВЕДЕНИЕ: чужой бит", "own": "БИТ ПЛЁНКИ"}
 SAID_BPM = re.compile(r"\b(\d{2,3})\s*bpm\b|\bbpm\W{0,3}(\d{2,3})\b", re.IGNORECASE)
 
 
@@ -3074,7 +3099,10 @@ def tick() -> None:
     if _RUNNING and (_RUNNING[0].poll() is not None or _age(_RUNNING[1]["started"]) > limit * 60):
         _finish(data, *_RUNNING)
         _RUNNING, changed = None, True
-    if not _RUNNING and data["jobs"]:
+    from . import bity  # bity импортирует этот модуль
+
+    # Ролик бита ПЛЁНКИ тоже открывает служебный вход, а ключ, открытый дважды, Telegram гасит.
+    if not _RUNNING and data["jobs"] and not bity.rendering():
         _RUNNING, changed = _spawn(data, data["jobs"][0]), True
     changed = _sweep(data) or changed
     for chat_id in [chat_id for chat_id, search in _BEATS.items() if search.poll() is not None]:
@@ -4667,7 +4695,8 @@ def main() -> int:
             return 0
         for video in found or []:
             print(f"  {video['duration'] // 60}:{video['duration'] % 60:02d}  {video['channel']} — {video['title']}"
-                  + (f"  · {video['bpm']} BPM" if video.get("bpm") else "") + f"\n        {youtube_comments.WATCH}{video['id']}")
+                  + (f"  · {video['bpm']} BPM" if video.get("bpm") else "")
+                  + f"\n        {video.get('link') or youtube_comments.WATCH + video['id']}")
         print("YouTube не ответил" if found is None else f"Нашлось: {len(found)}")
         return 0
     if args.job:

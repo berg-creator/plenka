@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from . import comments, config, otbor, publish, quiz, reels, service, skleyka, state, svedenie, telegram, urgent
+from . import bity, comments, config, otbor, publish, quiz, reels, service, skleyka, state, svedenie, telegram, urgent
 
 log = logging.getLogger("moderate")
 
@@ -400,6 +400,17 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     comments.seed(message, refresh=push_state)
                 continue
 
+            # Бит ПЛЁНКИ (src/bity.py): файл владельца с подписью «бит …» — в каталог. Раньше роликов,
+            # дорожек сведения, трека к посту и ОТБОРА: аудиофайл владельца ушёл бы в любой из них.
+            if bity.wants(message, admin):
+                print("  бит ПЛЁНКИ")
+                if not args.dry_run:
+                    try:
+                        bity.add(message)
+                    except Exception as exc:  # noqa: BLE001 — сбой каталога не роняет дежурство
+                        log.error("Бит не принят: %s", exc)
+                continue
+
             # Ответ владельца на фразу ролика (src/reels.py): голосовое, аудио или видео —
             # дубль, фото или картинка файлом — кадр, «собери» — сборка, прочий
             # текст — правка черновика для Мака (reels.note). Раньше
@@ -669,6 +680,7 @@ def serve(minutes: int) -> int:
         # Telegram опрашивается чаще, иначе готовый трек ждал бы следующую до 25 секунд.
         try:
             skleyka.tick()
+            bity.tick()  # ролик к биту ПЛЁНКИ — тоже отдельным процессом
             wait = SKLEYKA_POLL if skleyka.busy() else POLL_TIMEOUT
         except Exception as exc:  # noqa: BLE001 — сведение не держит дежурство
             log.error("Очередь сведения сорвалась: %s", exc)
@@ -698,7 +710,7 @@ def serve(minutes: int) -> int:
             # ждал бы его без опроса, и кнопки у всех крутились бы впустую. Открытая заявка — нет:
             # она в хранилище, её доведёт свежая смена, а 01.10.2026 пустая заявка от каждого
             # /svedenie продлевала старую смену на полчаса, и новая кнопка не доходила до бота.
-            if code_changed() and not skleyka.busy(drafts=False):
+            if code_changed() and not skleyka.busy(drafts=False) and not bity.busy():
                 print("Код бота обновился — смена уступает место свежей.")
                 break
 

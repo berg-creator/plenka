@@ -564,6 +564,16 @@ def send_document(chat_id: str, path: Path, caption: str = "", *,
         return _call("sendDocument", payload, files={"document": (path.name, handle, "application/octet-stream")})
 
 
+def send_by_id(chat_id: str | int, kind: str, file_id: str, caption: str = "", *,
+               buttons: list[list[dict]] | None = None) -> dict:
+    """Файл, уже лежащий у Telegram, по file_id — тем видом, каким его прислали: audio или document.
+    Ничего не качается и не заливается, поэтому пределы 20 и 50 МБ здесь не действуют (src/bity.py)."""
+    payload = {"chat_id": chat_id, kind: file_id, "caption": clip(sanitize(caption), MAX_CAPTION), "parse_mode": "HTML"}
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
+    return _call(f"send{kind.capitalize()}", payload)
+
+
 @contextlib.contextmanager
 def service_login():
     """Служебный вход бота по MTProto — для файлов больше пределов Bot API.
