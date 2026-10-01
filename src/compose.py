@@ -132,6 +132,9 @@ def save_post(
     # (tracks.pieces). В самом посте их нет: пост остаётся одной плиткой.
     if heard := [track for track in map(_heard, ends) if track]:
         post["listen"] = heard
+    # Какую связь рассказал разбор: по этому полю plan не берёт её второй раз (told).
+    if src.get("link"):
+        post["link"] = src["link"]
 
     if rubric_key == "meme":
         # Надписи лежат отдельно от подписи: они рисуются поверх шаблона,
@@ -417,6 +420,16 @@ def fresh_releases(inbox: Iterable[dict], used: set[str]) -> list[dict]:
     return fresh
 
 
+def told() -> set[str]:
+    """Связи ОТКУДА НОГИ, о которых пост уже вышел или ждёт выхода, — их id из поля link.
+
+    Вышедший и потом удалённый из канала пост тоже считается: его прочли.
+    """
+    posts = (state.read_json(path, {}) for folder in (config.ARCHIVE, config.QUEUE)
+             for path in folder.glob("*-lineage.json"))
+    return {post["link"] for post in posts if post.get("link")}
+
+
 def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     """Составляет задания: (custom_id, ключ рубрики, данные для модели, исходник).
 
@@ -425,7 +438,12 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     """
     inbox = load_inbox_unused()
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
-    lineage = state.read_json(config.LINEAGE_FILE, {"links": []})["links"]
+    # Связь рассказывается один раз (владелец, 01.10.2026): база тасовалась без оглядки
+    # на вышедшее, 18 связей дали 30 постов и ещё 18 в очереди, и после очередного
+    # «фонк начался в Мемфисе» из канала ушёл человек. Навсегда, а не на N недель.
+    done = told()
+    lineage = [link for link in state.read_json(config.LINEAGE_FILE, {"links": []})["links"]
+               if link.get("id") and link["id"] not in done]
 
     news = [i for i in inbox if i["kind"] == "news"]
 
@@ -447,21 +465,25 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     weights = {
         r.key: r.weight for r in config.RUBRICS if r.weight > 0 and r.key not in config.RELEASE_RUBRICS
     }
+    if not lineage:  # новых связей нет — рубрика молчит, её долю делят остальные
+        weights.pop("lineage", None)
     total_weight = sum(weights.values())
     quota = {key: max(1, round(needed * w / total_weight)) for key, w in weights.items()}
 
     for item in news[: quota.get("news", 0)]:
         add("news", _news_payload(item), item)
 
-    # ОТКУДА НОГИ — из курируемой базы связей, сырьё из inbox не нужно.
+    # ОТКУДА НОГИ — из базы связей, сырьё из inbox не нужно.
     random.shuffle(lineage)
     # Артист связи едет в пост: разбор может не назвать ни одного имени
     # («фонк начался в Мемфисе»), и без него card.cover не найдёт лица —
     # пост уйдёт в ленту текстом. Где имени нет и в самой связи, его ставит
     # поле artist в lineage.json.
     for link in lineage[: quota.get("lineage", 0)]:
-        add("lineage", link, {"artist": link.get("artist") or footage.find_artist(str(link)),
-                              "ends": link.get("ends") or []})
+        # Служебные поля модели ни к чему, а имя артиста в id сбило бы поиск лица.
+        payload = {key: value for key, value in link.items() if key not in ("id", "by")}
+        add("lineage", payload, {"artist": link.get("artist") or footage.find_artist(str(payload)),
+                                 "ends": link.get("ends") or [], "link": link["id"]})
 
     # МЕЖДУ СТРОК — только из курируемой базы: цитаты не должны быть выдуманы.
     subtext = state.read_json(config.SUBTEXT_FILE, {"items": []})["items"]
@@ -1458,6 +1480,23 @@ def _selftest() -> int:
     assert [needs_track(piece) for piece in tracks.pieces({**lineage, "listen": [*lineage["listen"], {
         "artist": "Bones", "track": "HDMI", "track_request": {"message_id": 1}}]})] == [False, True, False]
     assert (saved["released_at"], saved["score"]) == (inbox[2]["released_at"], 95), saved
+    # Одна связь — один пост: вышедшая и ждущая в очереди в план не идут, пост несёт id связи,
+    # а когда нерассказанных нет, разборов в плане нет вовсе — рубрика молчит, а не ходит по кругу.
+    with tempfile.TemporaryDirectory() as tmp:
+        real_paths = config.ARCHIVE, config.QUEUE, config.LINEAGE_FILE
+        config.ARCHIVE, config.QUEUE, config.LINEAGE_FILE = Path(tmp) / "a", Path(tmp) / "q", Path(tmp) / "l.json"
+        try:
+            state.write_json(config.LINEAGE_FILE, {"links": [
+                {"id": "x", "modern": "X"}, {"id": "y", "modern": "Y"}, {"id": "z", "modern": "Z", "by": "auto"}]})
+            state.write_json(config.ARCHIVE / "1-lineage.json", {"link": "x"})
+            state.write_json(config.QUEUE / "2-lineage.json", {"link": "y"})
+            untold = [(job[2], job[3]["link"]) for job in plan(40) if job[1] == "lineage"]
+            assert untold == [({"modern": "Z"}, "z")], untold
+            again = save_post("lineage", "Текст.", {"link": "z"})
+            assert state.read_json(again, {})["link"] == "z" and told() == {"x", "y", "z"}, told()
+            assert not [job for job in plan(40) if job[1] == "lineage"]
+        finally:
+            config.ARCHIVE, config.QUEUE, config.LINEAGE_FILE = real_paths
     assert saved["release"] and news["release"] == "", (saved["release"], news["release"])
 
     print("релиз: предзаказ, старше суток и дубль магазина не пишутся, на релиз один пост; "
