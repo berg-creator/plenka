@@ -65,6 +65,11 @@ MAX_FILE = config.SKLEYKA_MAX_MB * MB
 MAX_TOTAL = config.SKLEYKA_LINK_MB * MB
 MAX_ENTRIES = 1000  # строк в оглавлении архива или в папке: больше — это не проект трека
 LOOK_TIMEOUT = 5  # дежурство ждёт метаданные не дольше — дальше «посмотрю при сведении»
+# Файл на Яндекс Диске лежит на нескольких узлах хранения, и ссылка каждый раз ведёт на случайный.
+# 01.10.2026 часть узлов не отвечала: одна такая попытка на девятнадцать файлов — и через минуту
+# ожидания соединения падало всё сведение. Повтор попадает на другой узел; соединения ждём
+# недолго, чтобы все попытки одного файла уложились в минуту.
+TRIES, CONNECT = 6, 10
 
 REFUSE = "Отсюда скачать не могу — пришли архивом или ссылкой на Яндекс Диск."
 GONE = "Ссылка не открылась — проверь, что доступ по ссылке открыт."
@@ -221,10 +226,21 @@ class Budget:
 
 def _download(url: str, dest: Path, cap: int, budget: Budget, params: dict | None = None) -> str:
     """Файл по ссылке — в dest, не больше cap байт: Content-Length до скачивания, счёт — по ходу.
-    Возвращает имя из Content-Disposition, если оно есть."""
+    Возвращает имя из Content-Disposition, если оно есть. Сбой сети или сервера — ещё попытка,
+    отказ (Refused) повтором не лечится."""
+    for left in range(TRIES - 1, -1, -1):
+        try:
+            return _once(url, dest, cap, budget, params)
+        except RuntimeError as exc:
+            if not left:
+                raise
+            print(f"  {exc} — ещё попытка, осталось {left}")
+
+
+def _once(url: str, dest: Path, cap: int, budget: Budget, params: dict | None) -> str:
     limit = min(cap, budget.left)
     why = TOO_BIG if limit == MAX_FILE else TOO_MUCH
-    with _get(url, params=params, stream=True, timeout=60, allow_redirects=True) as response:
+    with _get(url, params=params, stream=True, timeout=(CONNECT, 60), allow_redirects=True) as response:
         print(f"  облако: скачивание отвечает {response.status_code}")
         _check(response)
         if int(response.headers.get("Content-Length") or 0) > limit:
@@ -487,6 +503,21 @@ def _selftest() -> None:
         with contextlib.suppress(Refused):
             _download("u", tmp / "x.wav", 2000, Budget())
             raise AssertionError("скачалось больше, чем можно")
+        # Узел хранения не ответил — повтор берёт файл со следующего; не ответил ни один — сбой.
+        answers = [RuntimeError("облако: ConnectTimeout"), Answer(502), Answer(body=b"RIFF")]
+
+        def flaky(url, **kw):
+            answer = answers.pop(0) if len(answers) > 1 else answers[0]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        _get, budget = flaky, Budget()
+        _download("u", tmp / "retry.wav", MAX_FILE, budget)
+        assert (tmp / "retry.wav").read_bytes() == b"RIFF" and budget.left == MAX_TOTAL - 4, "в счёт идёт только удачная попытка"
+        answers = [RuntimeError("облако: ConnectTimeout")]
+        with contextlib.suppress(RuntimeError):
+            _download("u", tmp / "x.wav", MAX_FILE, Budget())
+            raise AssertionError("сеть не ответила ни разу — сбой, а не пустой файл")
         # Архив с «..» — отказ всему архиву, раньше распаковки.
         evil = tmp / "evil.zip"
         with zipfile.ZipFile(evil, "w") as packed:
@@ -512,7 +543,7 @@ def _selftest() -> None:
     finally:
         _get = real
         shutil.rmtree(tmp, ignore_errors=True)
-    print("oblako: облачные ссылки, отказ папке Google и Mail.ru, размеры до и после скачивания, «..» в архиве — ок")
+    print("oblako: облачные ссылки, отказ папке Google и Mail.ru, размеры до и после скачивания, повтор при сбое сети, «..» в архиве — ок")
 
 
 def main() -> int:

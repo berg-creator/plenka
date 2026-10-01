@@ -56,6 +56,12 @@
 Проверка — на слух: ДО (простая сумма дорожек) и ПОСЛЕ одной громкости по LUFS.
 Громкое всегда кажется лучше, и без этого сравнение нечестное.
 
+Слушать каждый трек некому, поэтому перед отправкой — контроль (control): то, что ухо ловит
+на первой секунде, а замеры громкости и тембра не видят. Пустое начало, хвост после конца
+бита и пик выше потолка бот чинит и говорит об этом строкой в подписи; пропавший голос, голос
+мимо бита и тишину внутри трека не починить — трек уходит всё равно, владельцу строка в личку.
+Отказ вместо трека отвергнут: человек ждал, и трек с изъяном ему полезнее, чем «не вышло».
+
 Выход из лимита суток — только тому, кто в него упёрся: две кнопки под отказом,
 бесплатная функция остаётся бесплатной. «Позвать артиста» — личная ссылка
 ?start=skleyka_r<код>, и трек сверх лимита даётся за первый готовый трек
@@ -1252,6 +1258,7 @@ def _shape(total: Path, gains: dict[int, float], wide: float, work: Path) -> Pat
 
 
 VOICES = "voices.wav"  # голос сведения без бита, в out/work
+TOTAL = "sum.wav"  # голос с битом до мастера, там же: к ней контроль меряет голос
 
 
 def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
@@ -1406,7 +1413,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
             lost += [part for path, _, part in placed if path in bad]
         placed = [item for item in placed if item[0] not in bad]
         gains = {wet: gain for wet, gain in gains.items() if wet not in bad}
-    total = _sum([(ridden, 0.0), (bed, 0.0), *((path, gain) for path, gain, _ in placed), *gains.items()], work / "sum.wav")
+    total = _sum([(ridden, 0.0), (bed, 0.0), *((path, gain) for path, gain, _ in placed), *gains.items()], work / TOTAL)
     # Голос без бита — звук приложения «🎚 Двигать голос»: сырой голос там тонул под битом.
     # Трюки саунд-дизайна привязаны к месту голоса и к биту — при сдвиге они были бы не там.
     _sum([(ridden, 0.0), *((path, gain) for path, gain, _ in placed), *((wet, gains[wet]) for wet, _ in wets[:own] if wet in gains)],
@@ -3299,7 +3306,8 @@ def _neighbors(linked: list[tuple[str, Path, str]]) -> list[str]:
 
 def _stems(parts: list[tuple[str, Path, str]]) -> list[tuple[str, Path, str]]:
     """Стемы бита пришли по отдельности — сведённый бит рядом (master, «бит») не берётся:
-    он зазвучал бы дважды. Безымянное, что sides отнёс к биту, — к стемам, «музыка»."""
+    он зазвучал бы дважды. В звук не идёт, но остаётся меркой: где бит кончается (_hush)
+    и где он стоял в проекте голоса (offset). Безымянное, что sides отнёс к биту, — к стемам, «музыка»."""
     if not any(part in INSTRUMENTS for *_, part in parts):
         return parts
     return [(name, path, "музыка" if part == "бит" else part) for name, path, part in parts
@@ -3357,11 +3365,106 @@ def offset(reference: Path, beat: Path) -> float:
     return lag / ENV_RATE if sure >= ALIGN_SURE and sure - still >= ALIGN_GAIN and abs(lag) >= 5 else 0.0
 
 
-def _reference(parts: list[tuple[str, Path, str]], linked: list[tuple[str, Path, str]]) -> Path | None:
-    """Бит, выгруженный вместе с голосом: не взят в сведение и лежит в одной папке с ведущим."""
+def _reference(parts: list[tuple[str, Path, str]], linked: list[tuple[str, Path, str]],
+               near: tuple[str, ...] = ("вокал",)) -> Path | None:
+    """Сведённый бит, не взятый в сведение, из одной папки с дорожками ролей near: рядом
+    с ведущим — бит из проекта артиста, рядом со стемами (INSTRUMENTS) — мастер битмейкера."""
     kept = {path for _, path, _ in parts}
-    lead = {group for _, path, group in linked if path in {p for _, p, part in parts if part == "вокал"}}
-    return next((path for name, path, group in linked if path not in kept and group in lead and role(name) == "бит"), None)
+    beside = {group for _, path, group in linked if path in {p for _, p, part in parts if part in near}}
+    return next((path for name, path, group in linked if path not in kept and group in beside and role(name) == "бит"), None)
+
+
+# Тишина для замеров конца и начала: тише громких мест на STILL дБ дольше GAP секунд.
+STILL, GAP = 50.0, 8.0
+BEAT_FADE = 1.0  # стемы после конца мастера гаснут за столько, с
+
+
+def _sound(path: Path) -> list[tuple[float, float]]:
+    """Куски звука, между которыми тишина не короче GAP: (начало, конец), секунды."""
+    return _lines(_envelope(path), STILL, GAP)
+
+
+def _hush(parts: list[tuple[str, Path, str]], master: Path | None, work: Path) -> list[tuple[str, Path, str]]:
+    """Стемы бита после конца мастера битмейкера — в тишину, с затуханием. 01.10.2026 в стемах
+    после конца бита шли 12 с тишины и 19 с одной гитары: битмейкер выгрузил проект до конца
+    последнего клипа, а в мастере этого хвоста нет. Мастер верен, пока он той же длины, что стемы:
+    одна выгрузка одного проекта. Длина файлов не меняется — по ней сведение судит, из одного ли
+    проекта голос и бит (mix), — а тишину в конце трека срежет контроль (control)."""
+    stems = [path for _, path, part in parts if part not in VOCAL_SIDE]
+    sound, length = master and _sound(master), master and clips.probe_seconds(master)
+    if not sound or length - sound[-1][1] < BEAT_FADE \
+            or abs(length - max(clips.probe_seconds(path) for path in stems)) > SAME_PROJECT:
+        return parts
+    end = sound[-1][1]
+    print(f"  мастер рядом со стемами кончается на {end:.1f} с из {length:.1f}: стемы дальше — в тишину")
+    hushed = []
+    for n, (name, path, part) in enumerate(parts):
+        if part not in VOCAL_SIDE:
+            _ffmpeg("-i", path, "-af", f"afade=t=out:st={end:.2f}:d={BEAT_FADE}", *reels.VOICE_CODEC, work / f"hushed{n}.wav")
+            path = work / f"hushed{n}.wav"
+        hushed.append((name, path, part))
+    return hushed
+
+
+# Контроль готового трека — то, что слышно сразу, а замеры сведения не видят: они меряют громкость
+# и тембр, а не где трек начинается и кончается. Чинится — чиним и говорим человеку одной строкой
+# в подписи; не чинится — трек всё равно уходит, а владельцу строка в личку: человек ждал
+# десять минут, и трек с изъяном ему полезнее отказа. Тишина в конце и начале режется до EDGE,
+# если её больше SLACK.
+EDGE, SLACK = 0.5, 2.0
+VOICE_HEARD = 0.8   # обработанный голос звучит меньше этой доли спетого — пропал
+VOICE_UNDER = 20.0  # голос тише суммы с битом больше чем на столько, дБ, — пропал
+APART = GAP         # голос дольше звучит до начала бита или после его конца — разошлись
+FIXED = "Проверил перед отправкой: {what}.\n"
+WRONG = "⚠️ СВЕДЕНИЕ, трек {track} · #{chat}: {what}. Трек человеку ушёл как есть."
+
+
+def _shared(a: list[tuple[float, float]], b: list[tuple[float, float]]) -> float:
+    """Сколько секунд куски a и b звучат одновременно."""
+    return sum(max(0.0, min(a1, b1) - max(a0, b0)) for a0, a1 in a for b0, b1 in b)
+
+
+def control(master: Path, vocal: Path, voices: Path, beat: Path, total: Path) -> tuple[list[str], list[str]]:
+    """Готовый трек перед отправкой: (что поправлено — человеку, что не чинится — владельцу).
+    vocal — голос, как пришёл и встал на бит, voices — он же после обработки, total — сумма до мастера."""
+    fixed, wrong = [], []
+    length, sound = clips.probe_seconds(master), _sound(master)
+    if not sound:
+        return fixed, ["в готовом треке тишина"]
+    # Хвост — кусок после долгой тишины во второй половине и короче всего, что до него:
+    # иначе щелчок в начале файла сошёл бы за трек, а сам трек — за хвост.
+    while len(sound) > 1 and sound[-1][0] > length / 2 and sound[-1][1] - sound[-1][0] < sum(b - a for a, b in sound[:-1]):
+        sound.pop()
+    if len(sound) > 1:
+        wrong.append(f"тишина внутри трека с {_minutes(sound[0][1])} по {_minutes(sound[1][0])}")
+    start = sound[0][0] - EDGE if sound[0][0] > SLACK else 0.0
+    end = sound[-1][1] + EDGE if length - sound[-1][1] > SLACK else length
+    # Мастер не сошёлся к потолку за свои проходы (_master): убавить весь трек — пик уйдёт на столько же.
+    peak = loudness(master)[1]
+    down = peak - CEILING + 0.1 if peak > CEILING else 0.0
+    if start:
+        fixed.append(f"обрезал {start:.0f} с тишины в начале")
+    if end < length:
+        fixed.append(f"обрезал {length - end:.0f} с хвоста после конца бита")
+    if down:
+        fixed.append(f"убавил громкость на {down:.1f} дБ — пик был выше нормы площадок".replace(".", ","))
+    if fixed:
+        _ffmpeg("-i", master, "-af", f"atrim=start={start:.2f}:end={end:.2f},asetpts=PTS-STARTPTS,volume={-down:.2f}dB",
+                "-c:a", "pcm_s24le", master.with_suffix(".fixed.wav"))
+        master.with_suffix(".fixed.wav").replace(master)
+
+    sung, heard = _lines(_envelope(vocal, f"{FORMAT},")), _lines(_envelope(voices))
+    seconds = sum(b - a for a, b in sung)
+    under = loudness(total)[0] - loudness(voices)[0]
+    if seconds and _shared(sung, heard) < VOICE_HEARD * seconds:
+        wrong.append(f"голос пропал: после обработки слышно {_shared(sung, heard):.0f} с из {seconds:.0f} спетых")
+    elif under > VOICE_UNDER:
+        wrong.append(f"голос пропал: тише суммы с битом на {under:.0f} дБ")
+    if played := _sound(beat):
+        alone = sum(b - a for a, b in heard) - _shared(heard, [(played[0][0], played[-1][1])])
+        if alone > APART:
+            wrong.append(f"голос разошёлся с битом: {alone:.0f} с звучит до начала бита или после его конца")
+    return fixed, wrong
 
 
 def _linked(spec: dict, work: Path) -> list[tuple[str, Path, str]]:
@@ -3392,7 +3495,7 @@ def link_check(url: str) -> int:
     kept = {path for _, path, _ in _stems([(name, path, part or "бит") for (name, path, _), part
                                              in zip(linked, _neighbors(linked))])}
     for (name, path, _), part, entry in zip(linked, _neighbors(linked), sounds):
-        why = "" if path in kept else " — не возьму: сведённый бит рядом со стемами"
+        why = "" if path in kept else " — в звук не пойдёт: сведённый бит рядом со стемами, только мерка конца бита"
         print(f"  {part or 'по звуку':9} {entry['size'] / 2**20:6.1f} МБ  {entry['name']}{why}")
     for entry in entries:
         if PurePosixPath(entry["name"]).suffix.lower() in oblako.ARCHIVES:
@@ -3421,7 +3524,7 @@ def run_job(spec_path: Path) -> int:
             service = _service(login)
             files, linked = _fetch(spec, work / "in", service), _linked(spec, work)
             parts, guessed = _roles(spec["files"], files, knobs.get("swap", False), linked)
-            reference = _reference(parts, linked)
+            reference, ended = _reference(parts, linked), _reference(parts, linked, INSTRUMENTS)
             parts = _groups(parts, work)
             refusal, note = check(parts)
             if refusal:
@@ -3433,6 +3536,7 @@ def run_job(spec_path: Path) -> int:
                 telegram.send_message(chat, refusal)
                 result["why"] = "отказ"
                 return 0
+            parts = _hush(parts, ended, work)
             vocal, beat = _bus(parts, True, work / "vocal.wav"), _bus(parts, False, work / "beat.wav")
             if shift := reference and offset(reference, beat):
                 parts = [(name, _moved(path, -shift, work / f"aligned{n}.wav") if part in VOCAL_SIDE else path, part)
@@ -3510,6 +3614,17 @@ def run_job(spec_path: Path) -> int:
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
                 print(f"  сведение {spec['job']}: ролик не собрался: {type(exc).__name__}")
                 movie = None
+            # Контроль — после ролика: ролик режет трек по сетке бита, и срезанное начало сдвинуло бы стыки.
+            try:
+                mixed = work / "out" / "work"
+                fixed, wrong = control(master, vocal, mixed / VOICES, beat, mixed / TOTAL)
+                note += FIXED.format(what=", ".join(fixed)) if fixed else ""
+                if wrong:
+                    print(f"  сведение {spec['job']}: контроль — {'; '.join(wrong)}")
+                    telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"),
+                                          WRONG.format(track=spec["track"], chat=chat, what="; ".join(wrong)))
+            except Exception as exc:  # noqa: BLE001 — без контроля трек всё равно уходит
+                print(f"  сведение {spec['job']}: контроль не прошёл: {type(exc).__name__}")
             result.update(ok=True, **_send(spec, master, parts, note + (GUESSED if guessed else ""), service, work,
                                            movie, swap=guessed, drop=drop))
             if clip:
@@ -3798,7 +3913,8 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
     по нему ролик уйдёт владельцу, если артист согласится (_film); нет ролика — пусто, — и номер
     сообщения с MP3: его копию получит звукорежиссёр, если человек попросит свести руками (_hand)."""
     chat, knobs = spec["chat"], spec["knobs"]
-    lead = next(name for name, _, part in parts if part in VOCAL_SIDE)
+    # Имя трека — с ведущего голоса: 01.10.2026 первой в архиве лежала «Back L», и трек ушёл под её именем.
+    lead = next(name for roles in (("вокал",), VOCAL_SIDE) for name, _, part in parts if part in roles)
     title = Path(lead).stem[:60]
     mp3 = work / "skleyka.mp3"
     _ffmpeg("-i", master, *MP3, mp3)
@@ -3810,7 +3926,9 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
     if wav.stat().st_size <= telegram.MAX_UPLOAD:
         telegram.send_document(chat, wav)
     else:
-        telegram.send_big(service(), chat, wav, "", via=spec["files"][0]["m"])
+        # Собеседника служебный вход узнаёт по любому сообщению чата: у заявки ссылками файлов нет —
+        # по сообщению с MP3. Раньше здесь падало, MP3 уже ушёл, и следом человек получал «не вышло».
+        telegram.send_big(service(), chat, wav, "", via=next((item["m"] for item in spec["files"]), mix.get("message_id")))
     film = ""
     if movie:
         sent = telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(clips.probe_seconds(movie)))
@@ -4614,6 +4732,55 @@ def _selftest() -> None:
         paths, told, _ = swap([sung], 1.0, clicks(140), clicks(157), tmp)
         assert paths is None and "разница 12 %" in told and "129–151 BPM" in told, told
 
+        # Мастер рядом со стемами не звучит, но он — мерка конца бита: стемы после него гаснут,
+        # длина файлов та же, голос не тронут; мастер, звучащий до конца, ничего не меняет.
+        assert _reference(parts, linked, INSTRUMENTS) == next(path for name, path, _ in linked if name == "track_master.wav")
+        guitar, short = tmp / "stem-guitar.wav", tmp / "stem-master.wav"
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=110:d=20", guitar)
+        _ffmpeg("-f", "lavfi", "-i", "aevalsrc='0.5*sin(2*PI*110*t)*lt(t,6)':d=20", short)
+        band = [("гитара.wav", guitar, "музыка"), ("вокал.wav", sung, "вокал")]
+        hushed = _hush(band, short, tmp)
+        assert hushed[1] == band[1] and abs(clips.probe_seconds(hushed[0][1]) - 20) < 0.05 \
+            and 6 <= _sound(hushed[0][1])[-1][1] <= 6.05 + BEAT_FADE, _sound(hushed[0][1])
+        assert _hush(band, guitar, tmp) == band and _hush(band, None, tmp) == band
+
+        # Контроль готового трека: пустое начало, хвост после долгой тишины и пик чинятся — строкой
+        # человеку; пропавший голос, голос мимо бита и тишина внутри трека — владельцу, трек цел.
+        def wave(name: str, hz: int, level: float, when: str, *codec: str) -> Path:
+            _ffmpeg("-f", "lavfi", "-i", f"aevalsrc='{level}*sin(2*PI*{hz}*t)*({when})':d=30", *codec, tmp / f"control-{name}.wav")
+            return tmp / f"control-{name}.wav"
+
+        ready = wave("master", 220, 0.95, "between(t,4.3,16.2)+between(t,26,29)", "-c:a", "pcm_s24le")
+        voice_in, bed = wave("vocal", 440, 0.3, "between(t,5,15)"), wave("beat", 220, 0.3, "between(t,4.3,16.2)")
+        fixed, wrong = control(ready, voice_in, voice_in, bed, ready)
+        assert fixed[:2] == ["обрезал 4 с тишины в начале", "обрезал 13 с хвоста после конца бита"] \
+            and fixed[2].startswith("убавил громкость на 1,") and not wrong, (fixed, wrong)
+        assert abs(clips.probe_seconds(ready) - 12.9) < 0.1 and loudness(ready)[1] <= CEILING, loudness(ready)
+        fixed, wrong = control(ready, voice_in, wave("voices", 440, 0.3, "between(t,5,8)"), bed, ready)
+        assert not fixed and wrong == ["голос пропал: после обработки слышно 3 с из 10 спетых"], (fixed, wrong)
+        holed = wave("holed", 220, 0.3, "between(t,0,5)+between(t,14,30)", "-c:a", "pcm_s24le")
+        fixed, wrong = control(holed, voice_in, voice_in, wave("late", 220, 0.3, "between(t,14,29)"), holed)
+        assert not fixed and wrong == ["тишина внутри трека с 0:05 по 0:14",
+                                       "голос разошёлся с битом: 9 с звучит до начала бита или после его конца"], (fixed, wrong)
+
+        # Готовый трек зовётся по ведущему голосу, а не по первой дорожке; WAV больше MAX_UPLOAD
+        # у заявки ссылками уходит по сообщению с MP3: файлов человека, чтобы узнать чат, у неё нет.
+        shipped: list[tuple] = []
+        real_send = (telegram.send_audio, telegram.send_document, telegram.send_big, telegram.MAX_UPLOAD)
+        telegram.send_audio = lambda chat, data, caption, **kw: shipped.append(("mp3", kw["title"])) or {"message_id": 77}
+        telegram.send_document = lambda chat, path, *_: shipped.append(("wav", path.name))
+        telegram.send_big = lambda client, chat, path, caption, via: shipped.append(("big", path.name, via))
+        try:
+            by_links = {"chat": "60", "track": "t9", "knobs": dict(KNOBS), "files": [], "left": 3}
+            named = [("Back L.wav", sung, "бэк"), ("Основа.wav", sung, "вокал"), ("бит.wav", stems_sum, "бит")]
+            _send(by_links, Path(shutil.copy(sung, tmp / "ready.wav")), named, "", lambda: "вход", tmp, None)
+            telegram.MAX_UPLOAD = 1
+            _send(by_links, Path(shutil.copy(sung, tmp / "ready.wav")), named, "", lambda: "вход", tmp, None)
+        finally:
+            telegram.send_audio, telegram.send_document, telegram.send_big, telegram.MAX_UPLOAD = real_send
+        assert shipped == [("mp3", "Основа"), ("wav", "Основа (сведение).wav"),
+                           ("mp3", "Основа"), ("big", "Основа (сведение).wav", 77)], shipped
+
         # Бесконечность в дорожке видна до суммы, а сумма, которую не намерить, идёт без склейки,
         # а не роняет мастер порогом ниже −60 дБ (сбой бэков 29–30.09).
         spoiled, silent = tmp / "inf.wav", tmp / "silent.wav"
@@ -4626,7 +4793,7 @@ def _selftest() -> None:
         service.SOURCES_FILE = real_sources
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
-          "переспрос после часа, ссылки на облако, стемы и master, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
+          "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
           "реферал за трек и звёзды, «свести руками» один раз, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик — ок")
 
 
