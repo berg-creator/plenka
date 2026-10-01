@@ -132,7 +132,7 @@ def save_post(
     # (tracks.pieces). В самом посте их нет: пост остаётся одной плиткой.
     if heard := [track for track in map(_heard, ends) if track]:
         post["listen"] = heard
-    # Какую связь рассказал разбор: по этому полю plan не берёт её второй раз (told).
+    # Какую связь рассказал разбор: по этому полю plan не берёт её второй раз (state.told_links).
     if src.get("link"):
         post["link"] = src["link"]
 
@@ -420,16 +420,6 @@ def fresh_releases(inbox: Iterable[dict], used: set[str]) -> list[dict]:
     return fresh
 
 
-def told() -> set[str]:
-    """Связи ОТКУДА НОГИ, о которых пост уже вышел или ждёт выхода, — их id из поля link.
-
-    Вышедший и потом удалённый из канала пост тоже считается: его прочли.
-    """
-    posts = (state.read_json(path, {}) for folder in (config.ARCHIVE, config.QUEUE)
-             for path in folder.glob("*-lineage.json"))
-    return {post["link"] for post in posts if post.get("link")}
-
-
 def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     """Составляет задания: (custom_id, ключ рубрики, данные для модели, исходник).
 
@@ -441,7 +431,7 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     # Связь рассказывается один раз (владелец, 01.10.2026): база тасовалась без оглядки
     # на вышедшее, 18 связей дали 30 постов и ещё 18 в очереди, и после очередного
     # «фонк начался в Мемфисе» из канала ушёл человек. Навсегда, а не на N недель.
-    done = told()
+    done = state.told_links()
     lineage = [link for link in state.read_json(config.LINEAGE_FILE, {"links": []})["links"]
                if link.get("id") and link["id"] not in done]
 
@@ -481,7 +471,7 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     # поле artist в lineage.json.
     for link in lineage[: quota.get("lineage", 0)]:
         # Служебные поля модели ни к чему, а имя артиста в id сбило бы поиск лица.
-        payload = {key: value for key, value in link.items() if key not in ("id", "by")}
+        payload = {key: value for key, value in link.items() if key not in config.LINEAGE_SERVICE}
         add("lineage", payload, {"artist": link.get("artist") or footage.find_artist(str(payload)),
                                  "ends": link.get("ends") or [], "link": link["id"]})
 
@@ -1493,7 +1483,7 @@ def _selftest() -> int:
             untold = [(job[2], job[3]["link"]) for job in plan(40) if job[1] == "lineage"]
             assert untold == [({"modern": "Z"}, "z")], untold
             again = save_post("lineage", "Текст.", {"link": "z"})
-            assert state.read_json(again, {})["link"] == "z" and told() == {"x", "y", "z"}, told()
+            assert state.read_json(again, {})["link"] == "z" and state.told_links() == {"x", "y", "z"}
             assert not [job for job in plan(40) if job[1] == "lineage"]
         finally:
             config.ARCHIVE, config.QUEUE, config.LINEAGE_FILE = real_paths

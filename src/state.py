@@ -101,6 +101,19 @@ def _parse(stamp: str) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def told_links() -> set[str]:
+    """Связи ОТКУДА НОГИ, о которых пост уже вышел или ждёт выхода, — их id из поля link.
+
+    Связь рассказывается один раз (владелец, 01.10.2026), поэтому вышедший и потом
+    удалённый из канала пост тоже считается: его прочли. Здесь, а не в compose:
+    тем же счётом review --lineage решает, искать ли новую связь, а зовёт его
+    облачная рутина, которой compose с его Pillow и requests не поднять.
+    """
+    posts = (read_json(path, {}) for folder in (config.ARCHIVE, config.QUEUE)
+             for path in folder.glob("*-lineage.json"))
+    return {post["link"] for post in posts if post.get("link")}
+
+
 def git_commit(message: str, paths: list[Path]) -> bool:
     """Коммитит изменения состояния. Возвращает False, если менять было нечего.
 

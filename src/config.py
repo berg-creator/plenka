@@ -25,6 +25,19 @@ TEMPLATES = ROOT / "assets" / "templates"
 ARTISTS_FILE = DATA / "artists.json"
 CANDIDATES_FILE = DATA / "artists_candidates.json"
 LINEAGE_FILE = DATA / "lineage.json"
+# База связей ОТКУДА НОГИ пополняется сама (review --lineage, владелец 01.10.2026): облачный
+# Claude ищет, код принимает только связь с адресом страницы и цитатой на ней слово в слово.
+# Ищем, когда нерассказанных связей меньше LINEAGE_MIN_UNTOLD, и не больше LINEAGE_PER_WEEK
+# новых за неделю: рубрика выходит редко, а каждый поиск — лимиты подписки. Не нашлось или
+# не прошло проверку — снова не раньше LINEAGE_RETRY_HOURS.
+LINEAGE_MIN_UNTOLD = 2
+LINEAGE_PER_WEEK = 2
+LINEAGE_RETRY_HOURS = 24
+# Чьей странице верим как источнику связи. Сверх списка — издания, которым уже верит сбор:
+# включённые ленты data/feeds.json и сайты его Telegram-каналов (review.trusted).
+LINEAGE_SITES = ("wikipedia.org",)
+# Служебные поля связи: модели, которая пишет разбор, они ни к чему.
+LINEAGE_SERVICE = ("id", "by", "added_at", "kind", "sources")
 SUBTEXT_FILE = DATA / "subtext.json"
 FACTS_FILE = DATA / "facts.json"
 CALENDAR_FILE = DATA / "calendar.json"

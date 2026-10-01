@@ -57,9 +57,25 @@ Gemini на бесплатном ключе отвечает 429, а подпи�
 выдумала артиста. --voices и --check на мнениях — та же стандартная
 библиотека; web_voice тянет requests и зовётся только из --apply.
 
+Третий вид — новые связи для ОТКУДА НОГИ (владелец, 01.10.2026). Связь рассказывается
+один раз, база из 18 ручных кончилась, и пополнять её руками владелец не будет. Правило
+«lineage.json только руками» держалось на том, что выдуманный год убивает доверие;
+смысл остался, сменился способ: рутина приносит полем lineage двух артистов, вид связи
+(сэмпл, кавер, слова артиста о влиянии, общий продюсер, объединение), факты и к каждому
+адрес страницы с дословной цитатой, а годится ли запись, решает код. --check без сети:
+сайт из списка (Википедия и издания сбора, trusted), числа в фактах — только из цитат.
+--apply: страница скачана, цитата стоит на ней слово в слово, хотя бы одна называет
+обоих артистов, оба трека по ссылкам Deezer — те самые, и ни одного из артистов в базе
+ещё нет. Не прошла — строка в лог. --lineage говорит рутине, искать ли вообще:
+нерассказанных меньше двух, за неделю добавлено меньше двух, искали не сегодня.
+Отвергнуто: сверять повтор по паре артистов — «Three 6 Mafia → ещё кто-то» прошло бы
+и вышло седьмым постом про Мемфис; и дописывать второй трек старым связям — они
+рассказаны, а рассказанная связь второго поста не получит.
+
     python -m src.review --check content/review/20260912-0835.json    проверка без сети
     python -m src.review --apply content/review/20260912-0835.json --dry-run
     python -m src.review --voices                                     кому рутина ищет мнение, без сети
+    python -m src.review --lineage                                    нужна ли новая связь ОТКУДА НОГИ, без сети
     python -m src.review --selftest
 """
 
@@ -71,6 +87,7 @@ import json
 import re
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Только лёгкое: --check зовёт облачный автор, и requests с Pillow ему ставить незачем.
 from . import config, quality, state
@@ -92,6 +109,14 @@ PUBLISHED = "пост вышел, а сообщение в канале не з�
 # а лимиты подписки те же, что у разбора постов.
 VOICES_PER_RUN = 5
 BY = ("", "critic", "listener")
+
+# Что считается связью для ОТКУДА НОГИ — только задокументированное: сэмпл, кавер, слова
+# самого артиста о влиянии, общий продюсер, общее объединение. У «звучит похоже» и общего
+# жанра вида нет, и запись без вида код не берёт.
+LINK_KINDS = ("sample", "cover", "said", "producer", "group")
+LINK_QUOTE = (30, 400)
+LINK_FACTS = 4
+DEEZER_TRACK = re.compile(r"https://(?:www\.)?deezer\.com/(?:[a-z]{2}/)?track/\d+")
 
 
 def _filled(value) -> bool:
@@ -241,6 +266,210 @@ def _voice_shape(voice) -> str:
     return ""
 
 
+def trusted() -> list[str]:
+    """Сайты, чьей странице верим как источнику связи: config.LINEAGE_SITES и издания,
+    которым уже верит сбор, — включённые ленты data/feeds.json и сайты его Telegram-каналов."""
+    feeds = state.read_json(config.DATA / "feeds.json", {})
+    hosts = [urlparse(feed.get("url", "")).netloc for feed in feeds.get("feeds", []) if feed.get("enabled")]
+    hosts += [channel.get("site", "") for channel in feeds.get("telegram", []) if channel.get("enabled")]
+    return sorted({*config.LINEAGE_SITES, *(re.sub(r"^www\.", "", host.lower()) for host in hosts if host)})
+
+
+def _trusted(url: str, sites: list[str]) -> bool:
+    host = urlparse(url).netloc.lower().split(":")[0]
+    return any(host == site or host.endswith("." + site) for site in sites)
+
+
+def _digits(text: str) -> set[str]:
+    return set(re.findall(r"\d+", text))
+
+
+def _link_artists(link: dict) -> set[str]:
+    """Артисты связи, как их сравнивать: концы и поле artist."""
+    names = [link.get("artist", ""), *(end.get("artist", "") for end in link.get("ends") or [])]
+    return {quality.norm(name) for name in names if name}
+
+
+def _link_id(link: dict) -> str:
+    return "--".join("-".join(re.findall(r"\w+", end["artist"].casefold())) for end in link["ends"])
+
+
+def lineage_need(base: dict) -> int:
+    """Сколько новых связей искать сейчас. Ноль — рутина не ищет и лимиты подписки не тратит.
+
+    Нужна, когда нерассказанных меньше config.LINEAGE_MIN_UNTOLD, и не больше
+    LINEAGE_PER_WEEK за неделю. Искали меньше LINEAGE_RETRY_HOURS назад — тоже ноль:
+    рутина ходит каждые два часа, и без этого пустой поиск повторялся бы каждым проходом.
+    """
+    now = state.now()
+
+    def within(stamp, **span) -> bool:
+        moment = state._parse(stamp or "")
+        return moment is not None and now - moment < timedelta(**span)
+
+    if within(base.get("searched_at"), hours=config.LINEAGE_RETRY_HOURS):
+        return 0
+    links, done = base.get("links", []), state.told_links()
+    untold = sum(link.get("id") not in done for link in links)
+    recent = sum(within(link.get("added_at"), days=7) for link in links)
+    return max(0, min(config.LINEAGE_MIN_UNTOLD - untold, config.LINEAGE_PER_WEEK - recent))
+
+
+def _link_shape(link, sites: list[str]) -> str:
+    """Что не так со связью, насколько это видно без сети. Пустая строка — годно;
+    цитату на странице и треки в Deezer сверит --apply.
+
+    Числа — только из цитат: год и счёт модель выдумывает первыми, а придуманный год
+    убивает доверие быстрее всего. Числа прописью («в девяностых») так не поймать.
+    """
+    if not isinstance(link, dict):
+        return "связь — это объект"
+    missing = [field for field in ("modern", "ancestor", "connection") if not _filled(link.get(field))]
+    if missing:
+        return "нет " + ", ".join(missing)
+    if link.get("kind") not in LINK_KINDS:
+        return f"kind: {', '.join(LINK_KINDS)} — «звучит похоже» и общий жанр не связь"
+    ends = link.get("ends")
+    if not (isinstance(ends, list) and len(ends) == 2 and all(
+            isinstance(end, dict) and _filled(end.get("artist")) and _filled(end.get("track"))
+            and isinstance(end.get("url"), str) and DEEZER_TRACK.fullmatch(end["url"]) for end in ends)):
+        return "ends: два конца, корень и наследник, у каждого artist, track и url — https://www.deezer.com/track/…"
+    if len(_link_artists({"ends": ends})) < 2:
+        return "ends: корень и наследник — один и тот же артист"
+    facts = link.get("facts")
+    if not (isinstance(facts, list) and 1 <= len(facts) <= LINK_FACTS):
+        return f"facts: от 1 до {LINK_FACTS} фактов"
+    quotes = ""
+    named = _digits(" ".join(f"{end['artist']} {end['track']}" for end in ends))  # «Three 6 Mafia» — не год
+    for fact in facts:
+        if not (isinstance(fact, dict) and _filled(fact.get("text"))
+                and isinstance(fact.get("sources"), list) and fact["sources"]):
+            return "facts: у каждого факта text и sources — хотя бы один источник"
+        for source in fact["sources"]:
+            if not (isinstance(source, dict) and _filled(source.get("url")) and _filled(source.get("quote"))
+                    and source["url"].startswith(("http://", "https://"))):
+                return "sources: url страницы http(s)://… и quote — дословная цитата с неё"
+            if not _trusted(source["url"], sites):
+                return f"{urlparse(source['url']).netloc}: этого сайта нет в списке sites из --lineage"
+            if not LINK_QUOTE[0] <= len(source["quote"].strip()) <= LINK_QUOTE[1]:
+                return f"quote: {LINK_QUOTE[0]}–{LINK_QUOTE[1]} знаков"
+        own = " ".join(source["quote"] for source in fact["sources"])
+        if extra := _digits(fact["text"]) - _digits(own) - named:
+            return f"факт «{fact['text'][:40]}»: чисел {', '.join(sorted(extra))} нет в его цитатах"
+        quotes += " " + own
+    said = " ".join(link[field] for field in ("modern", "ancestor", "connection"))
+    if extra := _digits(said) - _digits(quotes) - named:
+        return f"modern, ancestor, connection: чисел {', '.join(sorted(extra))} нет в цитатах"
+    return ""
+
+
+def _words(text: str) -> str:
+    """Одни буквы и цифры подряд — для сверки цитаты со страницей по словам.
+
+    Точного совпадения с пробелами и знаками, как у мнений (web_voice.verify), тут мало:
+    в Википедии почти каждая фраза идёт через ссылки и сноски, вместо тегов встают пробелы
+    («Paris , [ 29 ] Three 6 Mafia , UGK»), и списанная со страницы цитата не находилась бы.
+    Слова и их порядок остаются дословными, сноски в скобках выпадают с обеих сторон.
+    """
+    return "".join(re.findall(r"\w+", re.sub(r"\[[^\]]{0,20}\]", " ", quality.norm(text))))
+
+
+def _named(name: str, text: str) -> bool:
+    return bool(re.search(rf"(?<!\w){re.escape(quality.norm(name))}(?!\w)", text))
+
+
+def _unproven(link: dict, sites: list[str], aliases: dict[str, list[str]], from_link, bare, page) -> str:
+    """Почему связи нельзя верить; пустая строка — подтвердилась. Тут вся сеть.
+
+    Рутине верим не больше, чем модели, которая пишет посты: треки по ссылкам сверяет
+    Deezer, страницу код качает сам и цитату ищет на ней слово в слово (как
+    web_voice.verify). И хотя бы одна цитата должна связывать обоих: каждый артист
+    назван в ней или в заголовке её страницы — иначе из двух правдивых цитат о разных
+    людях складывается выдуманная связь между ними.
+    """
+    for end in link["ends"]:
+        found = from_link(end["url"])
+        if not (quality.norm(found.get("artist", "")) == quality.norm(end["artist"])
+                and bare(found.get("title", "")) == bare(end["track"])):
+            return f"трек «{end['artist']} — {end['track']}» по ссылке Deezer не подтвердился"
+    spellings = [[end["artist"], *aliases.get(end["artist"], [])] for end in link["ends"]]
+    pages: dict[str, tuple[str, str] | None] = {}
+    tied = False
+    for source in (source for fact in link["facts"] for source in fact["sources"]):
+        url = source["url"]
+        if url not in pages:
+            got = page(url)
+            # Переадресация могла увести на чужой сайт — такой странице не верим тоже.
+            pages[url] = (quality.norm(got[1]), _words(got[2])) if got and _trusted(got[0], sites) else None
+        if pages[url] is None:
+            return f"страница {url} не скачалась"
+        title, text = pages[url]
+        if _words(source["quote"]) not in text:
+            return f"цитаты нет на странице {url} слово в слово"
+        quote = quality.norm(source["quote"])
+        tied = tied or all(any(_named(name, quote) or _named(name, title) for name in names) for names in spellings)
+    return "" if tied else "ни одна цитата не называет обоих артистов — в самой цитате или в заголовке страницы"
+
+
+def _stored(link: dict) -> dict:
+    """Запись базы из находки рутины. facts остаются строками: их читают клипы и модель,
+    а адреса и цитаты лежат рядом в sources — по ним связь можно перепроверить руками."""
+    root, heir = link["ends"]
+    return {
+        "id": _link_id(link), "by": "auto", "added_at": state.iso(), "kind": link["kind"],
+        "modern": link["modern"].strip(), "ancestor": link["ancestor"].strip(),
+        "connection": link["connection"].strip(),
+        "facts": [fact["text"].strip() for fact in link["facts"]],
+        # Лицо поста — наследник: по этому полю card.cover ищет фотографию.
+        "artist": heir["artist"],
+        "ends": [{field: end[field] for field in ("artist", "track", "url")} for end in (root, heir)],
+        "sources": [{"fact": fact["text"].strip(), "url": source["url"], "quote": source["quote"].strip()}
+                    for fact in link["facts"] for source in fact["sources"]],
+    }
+
+
+def _links(found: list[dict], dry_run: bool) -> None:
+    """Новые связи из файла — в data/lineage.json, откуда их берёт следующий compose.
+
+    Не прошла проверку — строка в лог, а не красный запуск и не письмо владельцу: это
+    промах автора, а не поломка. Артист, который в базе уже есть, второй раз не берётся,
+    даже в паре с новым: шесть постов про Мемфис и Three 6 Mafia читались как один
+    и тот же, а повтор хуже молчания (владелец, 01.10.2026). Ручные связи не трогаются:
+    запись только дописывается. Проход запоминается и пустым — иначе искали бы каждые два часа.
+    """
+    base = state.read_json(config.LINEAGE_FILE, {"links": []})
+    need = lineage_need(base)
+    taken = {name for link in base["links"] for name in _link_artists(link)}
+    ids = {link.get("id") for link in base["links"]}
+    if not dry_run:
+        # Не наверху: --check и --lineage зовёт облачный автор, а эти модули тянут requests.
+        from . import otbor
+        from .sources import web_voice
+
+        aliases = {a["name"]: a.get("aliases") or []
+                   for a in state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]}
+        sites = trusted()
+    for link in found:
+        name = " → ".join(end["artist"] for end in link["ends"])
+        why = ("связь сейчас не нужна" if need <= 0
+               else "артист уже есть в базе связей" if _link_artists(link) & taken or _link_id(link) in ids
+               else "" if dry_run else _unproven(link, sites, aliases, otbor.from_link, otbor._bare, web_voice.page))
+        if why:
+            print(f"  — связь «{name}»: {why}")
+            continue
+        if dry_run:
+            print(f"  связь «{name}»: сверилась бы с Deezer и страницами источников")
+            continue
+        base["links"].append(_stored(link))
+        taken |= _link_artists(link)
+        need -= 1
+        print(f"  связь «{name}» принята: {link['connection']}")
+    if not dry_run:
+        base["searched_at"] = state.iso()
+        # Не state.write_json: тот сортирует ключи, а файл правят и читают руками.
+        config.LINEAGE_FILE.write_text(json.dumps(base, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def check(review, name: str = "") -> tuple[list[str], dict[int, str]]:
     """Ошибки файла правок и пропуски — {номер правки с нуля: почему}.
 
@@ -249,16 +478,21 @@ def check(review, name: str = "") -> tuple[list[str], dict[int, str]]:
     тоже ошибка (пост там лежит ровно как она его читала, значит, неверны путь
     или цитата), а на свежем main — обычная гонка, и правка просто не нужна.
     """
-    if not (isinstance(review, dict) and isinstance(review.get("edits", []), list)
-            and isinstance(review.get("voices", []), list)):
-        return ['файл правок — объект {"edits": [...], "voices": [...]}'], {}
-    edits, voices = review.get("edits", []), review.get("voices", [])
+    if not (isinstance(review, dict) and all(isinstance(review.get(field, []), list)
+                                            for field in ("edits", "voices", "lineage"))):
+        return ['файл правок — объект {"edits": [...], "voices": [...], "lineage": [...]}'], {}
+    edits, voices, links = review.get("edits", []), review.get("voices", []), review.get("lineage", [])
     errors: list[str] = []
     skipped: dict[int, str] = {}
     if name and not ID_FORMAT.fullmatch(name):
         errors.append(f"имя файла «{name}»: ГГГГММДД-ЧЧММ, например 20260912-0835")
-    if not edits and not voices:
+    # Пустой lineage — годный файл: связь искали и не нашли, и проход надо запомнить.
+    if not edits and not voices and "lineage" not in review:
         errors.append("edits и voices пусты — без выдумок и мнений файл не пушится")
+    sites = trusted()
+    errors += [f"связь {index + 1}: {wrong}" for index, link in enumerate(links) if (wrong := _link_shape(link, sites))]
+    if len(links) > config.LINEAGE_PER_WEEK:
+        errors.append(f"связей больше {config.LINEAGE_PER_WEEK} — столько за проход не берём")
     shapes = [_voice_shape(voice) for voice in voices]
     errors += [f"мнение {index + 1}: {wrong}" for index, wrong in enumerate(shapes) if wrong]
     if not any(shapes) and len({_voice_key(voice) for voice in voices}) > VOICES_PER_RUN:
@@ -337,6 +571,8 @@ def apply(review, name: str, dry_run: bool) -> int:
           f"не принял канал: {failed}.")
     if review.get("voices"):
         _voices(review["voices"], dry_run)
+    if "lineage" in review:
+        _links(review["lineage"], dry_run)
     return 1 if failed else 0
 
 
@@ -553,6 +789,117 @@ def _selftest() -> None:
                 # Выдуманный рутиной релиз в кэш не попадает.
                 assert apply({"voices": [{**voice, "artist": "Nobody"}]}, name, dry_run=False) == 0
                 assert list(state.read_json(config.WEB_VOICE_FILE, {})) == [key]
+
+            # Новые связи ОТКУДА НОГИ — третий вид правки. Форму, сайт и числа видит --check,
+            # страницу, цитату на ней и треки в Deezer — только --apply.
+            said = "Molchat Doma have named Kino as their main influence since the first album in 2017."
+            wiki = "https://en.wikipedia.org/wiki/Molchat_Doma"
+            link = {"kind": "said", "modern": "Molchat Doma", "ancestor": "Kino", "connection": "сами называют главным влиянием",
+                    "ends": [{"artist": "Kino", "track": "Gruppa krovi", "url": "https://www.deezer.com/track/1"},
+                             {"artist": "Molchat Doma", "track": "Sudno", "url": "https://www.deezer.com/track/2"}],
+                    "facts": [{"text": "Первый альбом вышел в 2017 году", "sources": [{"url": wiki, "quote": said}]}]}
+
+            def change(**fields) -> dict:
+                return {"lineage": [{**link, **fields}]}
+
+            def fact(text: str = link["facts"][0]["text"], url: str = wiki, quote: str = said) -> dict:
+                return change(facts=[{"text": text, "sources": [{"url": url, "quote": quote}]}])
+
+            state.write_json(data / "feeds.json", {
+                "feeds": [{"url": "https://www.pitchfork.com/feed", "enabled": True},
+                          {"url": "https://dead.example/rss", "enabled": False}],
+                "telegram": [{"site": "the-flow.ru", "enabled": True}, {"channel": "rapsmi", "enabled": True}]})
+            base = {"links": [{"id": "hand", "modern": "Bones", "ends": [{"artist": "Bones"}], "facts": ["Сам"]},
+                              {"id": "old", "modern": "Korn", "artist": "Korn"}]}
+            state.write_json(data / "lineage.json", base)
+            pages = {wiki: (wiki, "Molchat Doma - Wikipedia", quality.norm(f"<p>{said}</p> Bones met Korn in a studio once."))}
+            tracks = {"https://www.deezer.com/track/1": {"artist": "Kino", "title": "Gruppa krovi (Remastered)"},
+                      "https://www.deezer.com/track/2": {"artist": "Molchat Doma", "title": "Sudno"}}
+
+            def answer(review: dict) -> str:
+                with contextlib.redirect_stdout(io.StringIO()) as out:
+                    assert apply(review, name, dry_run=False) == 0  # отказ связи — не красный запуск
+                return out.getvalue()
+
+            def stored() -> dict:
+                return state.read_json(config.LINEAGE_FILE, {})
+
+            def forget() -> None:  # как будто прошлый поиск был давно
+                state.write_json(config.LINEAGE_FILE, {**stored(), "searched_at": ""})
+
+            from . import otbor
+
+            with (mock.patch.multiple(config, DATA=data, LINEAGE_FILE=data / "lineage.json", QUEUE=queue,
+                                      ARTISTS_FILE=data / "artists.json"),
+                  mock.patch.object(web_voice, "page", pages.get),
+                  mock.patch.object(otbor, "from_link", lambda url: tracks.get(url, {}))):
+                assert trusted() == ["pitchfork.com", "the-flow.ru", "wikipedia.org"], trusted()
+                # Википедия: ссылки и сноски рвут фразу пробелами — цитата находится по словам.
+                assert _words("Paris,[29] Three 6 Mafia, UGK") in _words("paris , [ 29 ] three 6 mafia , ugk , big l")
+                assert _words("Three 6 Mafia and UGK") not in _words("paris , [ 29 ] three 6 mafia , ugk , big l")
+                assert check({"lineage": [link]}, name) == ([], {}), check({"lineage": [link]}, name)
+                assert check({"lineage": []}, name) == ([], {}), "искали и не нашли — годный файл"
+                refused("объект", {"lineage": {}})
+                refused("не связь", change(kind="similar"))
+                refused("нет connection", change(connection=""))
+                refused("два конца", change(ends=link["ends"][:1]))
+                refused("два конца", change(ends=[link["ends"][0], {"artist": "Molchat Doma", "track": "Sudno", "url": "d/2"}]))
+                refused("один и тот же", change(ends=[link["ends"][0], {**link["ends"][1], "artist": "KINO"}]))
+                refused("хотя бы один источник", change(facts=[{"text": "Факт", "sources": []}]))
+                refused("нет в списке sites", fact(url="https://someblog.example/kino"))  # чужой домен
+                refused("нет в списке sites", fact(url="https://notwikipedia.org/wiki/Kino"))
+                refused("чисел 1984", fact(text="Kino собрались в 1984 году"))  # года нет в цитате
+                refused("чисел 80", change(connection="звук 80-х"))
+                refused("знаков", fact(quote="Kino."))
+                refused("за проход", {"lineage": [link] * (config.LINEAGE_PER_WEEK + 1)})
+                assert _link_shape({**link, "ancestor": "Three 6 Mafia", "ends": [
+                    {**link["ends"][0], "artist": "Three 6 Mafia"}, link["ends"][1]]}, trusted()) == "", "цифра в имени — не год"
+
+                # Обе связи базы не рассказаны — искать незачем, и готовая связь не берётся.
+                assert lineage_need(stored()) == 0
+                assert "сейчас не нужна" in answer({"lineage": [link]}) and len(stored()["links"]) == 2
+                state.write_json(config.ARCHIVE / "1-lineage.json", {"link": "hand"})
+                state.write_json(queue / "2-lineage.json", {"link": "old"})
+                # Проход запомнен: сутки не ищем, даже когда связи кончились.
+                assert lineage_need(stored()) == 0
+                forget()
+                assert lineage_need(stored()) == config.LINEAGE_MIN_UNTOLD
+
+                # Цитаты нет на странице — отказ, и промах запомнен.
+                lie = fact(quote="Molchat Doma recorded their first album in 2017 in the flat of Kino's drummer.")
+                assert "слово в слово" in answer(lie) and len(stored()["links"]) == 2
+                assert lineage_need(stored()) == 0
+                # Повтор: артист, о котором связь уже есть, — отказ без сети, и в паре с новым тоже.
+                for taken in ("Bones", "korn"):
+                    forget()
+                    repeat = change(ends=[{**link["ends"][0], "artist": taken}, link["ends"][1]])
+                    assert "уже есть в базе" in answer(repeat) and len(stored()["links"]) == 2, taken
+                # Трек по ссылке — не тот; страница не скачалась; цитата правдива, но связывает не этих двоих.
+                forget()
+                assert "Deezer не подтвердился" in answer(change(ends=[{**link["ends"][0], "track": "Pachka sigaret"},
+                                                                         link["ends"][1]]))
+                forget()
+                assert "не скачалась" in answer(fact(url="https://ru.wikipedia.org/wiki/Kino"))
+                forget()
+                assert "не называет обоих" in answer(fact(text="Встретились в студии", quote="Bones met Korn in a studio once."))
+                # Годная: дописана к ручным, те не тронуты, facts — строки, как их читают клипы.
+                forget()
+                assert "принята" in answer({"lineage": [link]})
+                hand, old_link, auto = stored()["links"]
+                assert [hand, old_link] == base["links"], "ручные связи не переписываются"
+                assert (auto["id"], auto["by"], auto["artist"]) == ("kino--molchat-doma", "auto", "Molchat Doma"), auto
+                assert auto["facts"] == ["Первый альбом вышел в 2017 году"] and auto["ends"] == link["ends"], auto
+                assert auto["sources"] == [{"fact": auto["facts"][0], "url": wiki, "quote": said}], auto
+                # Та же связь вторым проходом — повтор; а одна нерассказанная — искать ещё одну.
+                forget()
+                assert "уже есть в базе" in answer({"lineage": [link]}) and len(stored()["links"]) == 3
+                forget()
+                assert lineage_need(stored()) == 1
+                # Две за неделю — предел, сколько бы ни было рассказано.
+                state.write_json(config.LINEAGE_FILE, {"links": [auto, {**auto, "id": "second"}]})
+                state.write_json(queue / "3-lineage.json", {"link": auto["id"]})
+                state.write_json(queue / "4-lineage.json", {"link": "second"})
+                assert lineage_need(stored()) == 0
         finally:
             config.ROOT, config.ARCHIVE = saved
 
@@ -565,6 +912,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="с --apply: показать, что изменится, ничего не меняя")
     parser.add_argument("--voices", action="store_true",
                         help="каким свежим релизам рутине искать мнение в сети — строкой JSON на релиз, без сети")
+    parser.add_argument("--lineage", action="store_true",
+                        help="нужна ли ОТКУДА НОГИ новая связь: строка JSON — сколько искать, каким сайтам "
+                             "верим и кто уже рассказан; пусто — не искать. Без сети")
     parser.add_argument("--selftest", action="store_true",
                         help="правка, снятие, отказ на битом тексте и правка вышедшего поста — без сети")
     args = parser.parse_args()
@@ -572,11 +922,21 @@ def main() -> int:
     if args.selftest:
         _selftest()
         print("Правка, снятие, отказ на битом тексте, правка вышедшего поста в канале, "
-              "мнения о релизах — форма, список и сверка со страницей: все проверки прошли.")
+              "мнения о релизах — форма, список и сверка со страницей; новые связи — чужой сайт, "
+              "число не из цитаты, цитаты нет на странице, повтор артиста, трек не тот: все проверки прошли.")
         return 0
     if args.voices:
         for voice in list(_wanted().values())[:VOICES_PER_RUN]:
             print(json.dumps(voice, ensure_ascii=False))
+        return 0
+    if args.lineage:
+        base = state.read_json(config.LINEAGE_FILE, {"links": []})
+        if need := lineage_need(base):
+            names = [name for link in base["links"]
+                     for name in (link.get("artist", ""), *(end.get("artist", "") for end in link.get("ends") or []))]
+            print(json.dumps({"need": need, "sites": trusted(), "taken": sorted({n for n in names if n}),
+                              "told": [f"{link.get('ancestor', '')} → {link.get('modern', '')}"
+                                       for link in base["links"]]}, ensure_ascii=False))
         return 0
     if not (args.check or args.apply):
         parser.print_help()
@@ -613,8 +973,17 @@ def main() -> int:
         if _voice_key(voice) not in wanted:
             print(f"  ! «{voice['artist']} — {voice['release']}» нет в списке --voices: "
                   "применение его пропустит — перепиши artist и release оттуда буква в букву")
+    # То же со связями: проверку страниц и Deezer делает применение, а эти отказы видны уже сейчас.
+    base = state.read_json(config.LINEAGE_FILE, {"links": []})
+    taken = {name for link in base["links"] for name in _link_artists(link)}
+    for link in review.get("lineage", []):
+        name = " → ".join(end["artist"] for end in link["ends"])
+        if not lineage_need(base):
+            print(f"  ! связь «{name}»: --lineage пуст — связь сейчас не нужна, применение её пропустит")
+        elif _link_artists(link) & taken:
+            print(f"  ! связь «{name}»: артист уже есть в taken из --lineage — применение её пропустит")
     print(f"Правки {path.name} годны: переписать {actions.count('rewrite')}, снять {actions.count('drop')}, "
-          f"мнений {len(voices)}.")
+          f"мнений {len(voices)}, связей {len(review.get('lineage', []))}.")
     return 0
 
 
