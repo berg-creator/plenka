@@ -36,7 +36,7 @@ def stored_id(name: str) -> int | None:
     return None
 
 
-def find_artist_id(name: str) -> int | None:
+def find_artist_id(name: str, min_fans: int = 0) -> int | None:
     """Id артиста: то, что стоит в базе, иначе точное совпадение имени.
 
     «Самого похожего из выдачи» здесь больше нет намеренно. По запросу «Guf»
@@ -51,6 +51,9 @@ def find_artist_id(name: str) -> int | None:
     Страница без единого альбома — не артист, а пустая карточка с тем же именем:
     у Сони Мармеладовой записи лежат на странице Славы КПСС, и ссылка с имени вела
     в пустоту (01.10.2026). Такую поиск не отдаёт никому — ни посту, ни базе.
+
+    min_fans — для имени, которое назвала модель (config.PEOPLE_MIN_FANS): страница
+    с альбомами, но без слушателей — чаще тёзка, чем тот, о ком пост. Базы не касается.
     """
     known = stored_id(name)
     if known:
@@ -64,7 +67,8 @@ def find_artist_id(name: str) -> int | None:
     # Тёзок Deezer отдаёт вперемешку: первым на «Drake» идёт Drake со 155 фанатами,
     # настоящий — третьим. Из точных совпадений берём самого слушаемого.
     same = [item for item in (data or {}).get("data") or []
-            if item.get("name", "").casefold().strip() == target and item.get("nb_album", 1)]
+            if item.get("name", "").casefold().strip() == target and item.get("nb_album", 1)
+            and (item.get("nb_fan") or 0) >= min_fans]
     if same:
         return max(same, key=lambda item: item.get("nb_fan") or 0).get("id")
     return None

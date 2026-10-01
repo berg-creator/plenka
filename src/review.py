@@ -734,7 +734,8 @@ def _selftest() -> None:
 
             # Канал не принял — запуск красный, архив прежний. Тот же текст уже в канале
             # (прошлый запуск поправил, коммит не дошёл) — это успех.
-            for error, code, text in (("Forbidden: not enough rights", 1, old), ("message is not modified", 0, new)):
+            for error, code, text in (("Forbidden: not enough rights", 1, old), ("message is not modified", 0, new),
+                                      ("message to edit not found", 0, new)):
                 state.write_json(config.ARCHIVE / "e-verdict.json", released)
 
                 def refuse(*_, error=error, **__):

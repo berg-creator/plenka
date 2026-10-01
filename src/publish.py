@@ -373,6 +373,8 @@ def artist_ids(text: str, people, release: dict | None = None) -> dict[str, int]
 
     release — находка сбора, о которой пост: её артистам id даёт сам релиз
     (collect.release_artists), а по имени их не ищем — точное имя бывает тёзкой.
+    Названному моделью, кого нет ни в релизе, ни в базе, нужна страница со слушателями
+    (config.PEOPLE_MIN_FANS): тёзка с альбомами, но без фанатов ссылки не получает.
     В магазин идём, только когда в тексте правда стоит чьё-то имя.
     """
     found: dict[str, int] = {}
@@ -390,7 +392,9 @@ def artist_ids(text: str, people, release: dict | None = None) -> dict[str, int]
             own = collect.release_artists(release)
         try:
             key = name.strip().casefold()
-            artist_id = own[key] if own and key in own else deezer.find_artist_id(name.strip())
+            # Названному моделью — порог фанатов: точное имя с альбомами бывает тёзкой.
+            fans = (config.PEOPLE_MIN_FANS,) if isinstance(person, dict) else ()
+            artist_id = own[key] if own and key in own else deezer.find_artist_id(name.strip(), *fans)
         except Exception as exc:  # noqa: BLE001 — Deezer молчит: ссылки нет, пост важнее
             log.info("Deezer не ответил про «%s»: %s", name, exc)
             continue
@@ -884,7 +888,7 @@ def _selftest() -> None:
         state.write_json(base, {"artists": [{"name": "Nas", "deezer_id": 1}, {"name": "Lil Uzi Vert", "deezer_id": 3},
                                             {"name": "Uzi", "deezer_id": 4},
                                             {"name": "Кино", "aliases": ["Kino"], "deezer_id": 2}]})
-        known = {"Pharrell Williams": 7, "Quavo": 8}.get
+        known = lambda name, min_fans=0: {"Pharrell Williams": 7, "Quavo": 8}.get(name)
         with mock.patch.object(config, "ARTISTS_FILE", base), mock.patch.object(deezer, "find_artist_id", known):
             # shown, которого нет в тексте, и имя, которого Deezer не знает, ссылки не получают.
             ids = artist_ids("Quavo позвал «Фаррелла Уильямса».", [
@@ -927,8 +931,17 @@ def _selftest() -> None:
             assert deezer.find_artist_id("Соня") == 6
             del pages[1]
             assert deezer.find_artist_id("Соня") is None, "пустая страница ссылкой не становится"
+            # Тёзка с альбомами (SHYM, 01.10.2026): названному моделью ссылки нет, пока у страницы
+            # нет слушателей; имя из данных поста и артист базы порога не знают.
+            pages[:] = [{"id": 60648852, "name": "SHYM", "nb_album": 4, "nb_fan": 15}]
+            model = [{"shown": "Shym", "name": "Shym"}, {"shown": "Nas", "name": "Nas"}]
+            assert artist_ids("Бит — Shym, куплет — Nas.", model) == {"Nas": 1}
+            assert artist_ids("Бит — Shym.", ["Shym"]) == {"Shym": 60648852}
+            pages[0]["nb_fan"] = config.PEOPLE_MIN_FANS
+            assert artist_ids("Бит — Shym.", model) == {"Shym": 60648852}
     print("имена артистов: ссылка одна на имя, внутри слова и без Deezer — нет, лимит соблюдён; "
-          "артисты релиза — из самого релиза, пустая страница Deezer — не артист")
+          "артисты релиза — из самого релиза, пустая страница Deezer — не артист, "
+          "названный моделью тёзка без слушателей — без ссылки")
 
 
 def main() -> int:
