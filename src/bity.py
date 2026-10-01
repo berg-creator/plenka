@@ -258,10 +258,11 @@ def callback(chat_id: str | int, user_id: str | int, beat_id: str, *, admin: boo
 def matching(names: list[str], bpm: float | None = None) -> list[dict]:
     """Биты владельца для «🔎 Нет бита» (skleyka.find_beats): артист среди названных — строкой выдачи,
     но со ссылкой на бота вместо YouTube, новые первыми. Темп далёк от голоса — прочь, неназванный — годится."""
-    wanted = {name.casefold() for name in names}
+    plain = lambda name: name.casefold().replace("ё", "е")  # набирают «темный принц», в каталоге — «Тёмный»
+    wanted = {plain(name) for name in names}
     found = []
     for beat_id, beat in reversed(load().items()):
-        if not wanted & {name.casefold() for name in beat["artists"]}:
+        if not wanted & {plain(name) for name in beat["artists"]}:
             continue
         if bpm and beat["bpm"] and abs(skleyka._rate(beat["bpm"], bpm) - 1) > skleyka.SWAP_TEMPO:
             continue
