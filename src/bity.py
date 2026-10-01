@@ -40,6 +40,7 @@ BEAT_CREDIT, и кнопкой «🎚 Свести с этим битом» от
 
     python -m src.bity --selftest
     python -m src.bity --video БИТ.wav --title "Kizaru x Toxi$ — Полёт, 140 Fm" --out ПАПКА   ролик, превью и тексты без Telegram
+    python -m src.bity --demand [АРТИСТ ...]   под кого делать бит: сколько смотрят type beat'ы за месяц
 """
 
 from __future__ import annotations
@@ -49,9 +50,11 @@ import html
 import math
 import random
 import re
+import statistics
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
@@ -82,6 +85,11 @@ LABEL_MAX = 40
 RISING_DAYS = 14
 RISING_TOP = 5
 NOT_RAP = re.compile(r"metal|grunge|punk|rock")
+# Под кого делать бит (--demand). Бот говорит по-русски, и в СВЕДЕНИЕ придёт тот, кто по-русски читает:
+# сам на подъёме считается только среди этих уровней базы; чужое имя меряется, если его назвали.
+DEMAND_TIERS = ("ru", "ru_pop")
+# Параметр sp выдачи YouTube: загружено за этот месяц. Меньше DEMAND_MIN роликов — мерить нечем.
+THIS_MONTH, DEMAND_RESULTS, DEMAND_MIN = "EgIIBA%3D%3D", 20, 3
 # Поле «Теги» на YouTube — до 500 знаков на все.
 TAGS_LIMIT = 500
 WIDTH, HEIGHT = 1920, 1080
@@ -214,6 +222,41 @@ def rising(rows, artists: list[dict], now) -> list[str]:
                 count[name] += 1
                 last[name] = max(last.get(name, ""), stamp)
     return sorted(count, key=lambda name: (count[name], last[name]), reverse=True)[:RISING_TOP]
+
+
+def _plain(text: str) -> str:
+    return text.casefold().replace("ё", "е")
+
+
+def demand(name: str, entries: list[dict]) -> dict:
+    """Спрос на type beat'ы под артиста по выдаче YouTube за месяц: ролики с его именем в названии.
+    Мерка — медиана просмотров, а не сумма верхних: новый канал получит столько, сколько
+    рядовой ролик под это имя, а не лидер ниши."""
+    views = sorted((entry.get("view_count") or 0 for entry in entries
+                    if _plain(name) in _plain(entry.get("title") or "") and "type beat" in _plain(entry.get("title") or "")),
+                   reverse=True)
+    return {"name": name, "videos": len(views), "median": int(statistics.median(views)) if views else 0,
+            "top": views[0] if views else 0}
+
+
+def month(name: str) -> list[dict]:
+    """Выдача YouTube «<артист> type beat» за месяц, с просмотрами; YouTube не ответил — пусто."""
+    from yt_dlp import YoutubeDL
+
+    url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(name + ' type beat')}&sp={THIS_MONTH}"
+    try:
+        with YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "playlistend": DEMAND_RESULTS}) as ydl:
+            return (ydl.extract_info(url, download=False) or {}).get("entries") or []
+    except Exception:  # noqa: BLE001 — без выдачи артист остаётся без мерки, выбор идёт по остальным
+        return []
+
+
+def demand_table(names: list[str]) -> str:
+    """Кандидаты по убыванию медианы; кому мерить нечем — в конце."""
+    rows = sorted((demand(name, month(name)) for name in dict.fromkeys(names)),
+                  key=lambda row: (row["videos"] >= DEMAND_MIN, row["median"]), reverse=True)
+    return "\n".join(f"{row['name']}: роликов за месяц {row['videos']}, рядовой собрал {row['median']}, верхний {row['top']}"
+                     + ("" if row["videos"] >= DEMAND_MIN else " — мерить нечем") for row in rows)
 
 
 def texts(beat_id: str, beat: dict, hot: list[str]) -> str:
@@ -694,10 +737,16 @@ def _selftest() -> None:
             assert load()["1"]["video"] is True and not busy() and _RENDER is None
             tick()
             assert len(spawned) == 1, "ролик один раз"
+    found = demand("Тёмный принц", [{"title": "[FREE] ТЕМНЫЙ ПРИНЦ type beat", "view_count": 900},
+                                    {"title": "темный принц x madk1d Type Beat", "view_count": 100},
+                                    {"title": "[FREE] Темный принц type beat - ночь", "view_count": 300},
+                                    {"title": "Тёмный принц — клип", "view_count": 10 ** 6}])
+    assert found == {"name": "Тёмный принц", "videos": 3, "median": 300, "top": 900}, found
+    assert demand("Никто", [])["median"] == 0
     print("bity: подпись и маршрут бита, каталог и тексты для YouTube, описание без ссылки, на подъёме, "
           "ссылка beat_ по file_id, «🎚 БИТЫ»: один бит — сразу файл, несколько — список, метка меню, "
           "кнопка — заявка с битом, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, "
-          "обложка на спинах, живой ролик в 50 МБ и превью — ок")
+          "обложка на спинах, живой ролик в 50 МБ и превью, спрос по медиане без «ё» — ок")
 
 
 def main() -> int:
@@ -706,6 +755,8 @@ def main() -> int:
     parser.add_argument("--video", type=Path, metavar="ФАЙЛ", help="сухой прогон: ролик, превью и тексты для YouTube, без Telegram")
     parser.add_argument("--title", default="", help="подпись бита: «Kizaru x Toxi$ — Полёт, 140 Fm»")
     parser.add_argument("--out", type=Path, default=Path("bity-out"), help="папка для ролика и превью")
+    parser.add_argument("--demand", nargs="*", metavar="АРТИСТ", help="под кого делать бит: сколько смотрят type beat'ы "
+                        "за месяц под названных и под русскоязычных артистов канала на подъёме")
     parser.add_argument("--render", help=argparse.SUPPRESS)  # так ролик запускает дежурство (tick)
     args = parser.parse_args()
     if args.selftest:
@@ -713,6 +764,10 @@ def main() -> int:
         return 0
     if args.render:
         return render(args.render)
+    if args.demand is not None:
+        local = [artist for artist in collect.load_artists() if artist.get("tier") in DEMAND_TIERS]
+        print(demand_table([*args.demand, *rising(state.read_jsonl(config.INBOX_FILE), local, state.now())]))
+        return 0
     if args.video:
         beat = parse(args.title)
         if not beat:
