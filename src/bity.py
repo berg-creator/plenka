@@ -125,7 +125,10 @@ def _tempo(beat: dict, sep: str = ", ") -> str:
 
 
 def youtube_title(beat: dict) -> str:
-    return f"[FREE FOR PROFIT] {' x '.join(beat['artists'])} Type Beat — «{beat['title']}»"
+    """Формат лидеров выдачи type beat'ов: [FREE], имена заглавными через «+», название в кавычках.
+    Без «ё»: в поиске набирают «темный принц», и подсказки YouTube пишут так же."""
+    title = f'[FREE] {" + ".join(beat["artists"]).upper()} type beat - "{beat["title"]}"'
+    return title.replace("ё", "е").replace("Ё", "Е")
 
 
 def tags(beat: dict) -> str:
@@ -414,7 +417,7 @@ def _selftest() -> None:
         beat = load()["1"]
         assert list(load()) == ["1"] and beat["file_id"] == "F5" and beat["kind"] == "audio" and beat["message"] == 5
         reply = sent[0][2]
-        assert "?start=beat_1" in reply and "[FREE FOR PROFIT] Kizaru x Toxi$ Type Beat — «Полёт»" in reply
+        assert "?start=beat_1" in reply and "[FREE] KIZARU + TOXI$ type beat - &quot;Полет&quot;" in reply
         assert config.BEAT_CREDIT in reply and "BPM: 140 · Тональность: Fm" in reply and "kizaru type beat" in reply
         assert "(WAV)" in reply and "#toxitypebeat" in reply and "На подъёме" not in reply, "пустой сбор — без подъёма"
         add(message("бит Kizaru без тире", message_id=8))
