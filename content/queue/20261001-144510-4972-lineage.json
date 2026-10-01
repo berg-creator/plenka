@@ -1,0 +1,44 @@
+{
+  "artist": "Kasta",
+  "cover": "",
+  "created_at": "2026-10-01T14:45:10+00:00",
+  "link": "wu-tang-clan--kasta",
+  "links": {
+    "Kasta": 2795521,
+    "RZA": 4918,
+    "Баста": 4170146
+  },
+  "listen": [
+    {
+      "artist": "Wu-Tang Clan",
+      "seconds": 252,
+      "track": "C.R.E.A.M.",
+      "track_request": {
+        "message_id": 3399,
+        "sent_at": "2026-10-01T14:52:00+00:00",
+        "youtube": "https://www.youtube.com/watch?v=4yNQ7_7I5aE"
+      },
+      "url": "https://www.deezer.com/track/541322"
+    },
+    {
+      "artist": "Kasta",
+      "seconds": 215,
+      "track": "Вокруг шум",
+      "track_request": {
+        "message_id": 3400,
+        "sent_at": "2026-10-01T14:52:01+00:00",
+        "youtube": "https://www.youtube.com/watch?v=8zHjanBzZt8"
+      },
+      "url": "https://www.deezer.com/track/3407955491"
+    }
+  ],
+  "preview": "",
+  "release": "",
+  "released_at": "",
+  "rubric": "lineage",
+  "score": 0,
+  "seconds": 0,
+  "source_url": "",
+  "text": "<b>КАК KASTA ВЫРОСЛА ИЗ ГРЯЗИ WU-TANG CLAN</b>\n\nЮжный стиль русского рэпа начался с копирования Нью-Йорка. Влади писал биты, ориентируясь на грязные петли RZA.\n\nИмя Kasta родилось как аналог американского клана: Баста предлагал вариант Fu-Blood-Casta.\n\n<blockquote>Ростовский звук собрали по лекалам Бруклина.</blockquote>\n\n<code>Kasta · Wu-Tang Clan · 90-е</code>\n\nТак юг стал севером.",
+  "track": ""
+}
