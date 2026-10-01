@@ -1425,14 +1425,17 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         return False
     if kind == "menu" and link == "a":
         # Имя артиста в посте канала — карточка сразу и без подписки, как вкладыш:
-        # подписку спросит «🔔 Следить» под ней — та же кнопка СЛЕЖУ, что под разбором.
+        # подписку спросят кнопки под ней — те же «Следить» и «Разбор вкуса», что под вкладышем
+        # трека (обработчики watch и razbor): обоим хватает имени, трек им не нужен.
         count_source("a")
         found = vkladysh.artist(slug) if slug.isdigit() else {}
         if not found:
             telegram.send_message(chat_id, ARTIST_MISSING)
             return False
         # Двадцать знаков — как у кнопок под разбором (_subject): кириллица в 64 байта.
-        vkladysh.send_artist(chat_id, found, [[{"text": "🔔 Следить", "callback_data": _cb("watch", found["name"][:20])}]])
+        who = found["name"][:20]
+        vkladysh.send_artist(chat_id, found, [[{"text": "🔔 Следить", "callback_data": _cb("watch", who)}],
+                                              [{"text": "🎞 Разбор вкуса", "callback_data": _cb("razbor", who)}]])
         return False
     if kind == "sved" or kind == "menu" and link in ("sved", "ad"):
         if kind == "menu":
@@ -2062,17 +2065,28 @@ def _selftest() -> None:
         assert [text for text, _ in replies[-2:]] == [VKLADYSH] * 2, replies[-2:]
         assert state.read_json(SOURCES_FILE, {})[_today()]["vkladysh"] == 1
         # Имя артиста в посте: /start a_<id> — карточка сразу, «🔔 Следить» ведёт в СЛЕЖУ, метка одна — a.
-        shown, real_art = [], (vkladysh.artist, vkladysh.send_artist)
+        # «🎞 Разбор вкуса» под карточкой — та же кнопка, что под вкладышем трека: разбор по имени артиста.
+        shown, taken, real_art = [], [], (vkladysh.artist, vkladysh.send_artist, globals()["analyse"],
+                                          globals()["_deliver"], telegram.send_chat_action)
         vkladysh.artist = lambda artist_id: {"name": "Bones", "caption": "<b>Bones</b>"} if artist_id == "123" else {}
         vkladysh.send_artist = lambda chat, found, buttons: shown.append((found["name"], buttons))
+        globals()["analyse"] = lambda kind, body: taken.append((kind, body)) or ("разбор", None)
+        globals()["_deliver"] = lambda chat, answer, image, subject="": taken.append((answer, subject))
+        telegram.send_chat_action = lambda *a, **kw: None
         try:
             for n, text in enumerate(("/start a_123", "/start a_мусор")):
                 handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
                                 "message_id": 250 + n, "date": 25000 + n * 60, "text": text}, {})
+            missing = replies[-1]
+            handle_callback({"id": "q", "data": shown[0][1][1][0]["callback_data"], "from": {"id": 77701},
+                             "message": {"chat": {"id": 55501}, "message_id": 1}}, {})
         finally:
-            vkladysh.artist, vkladysh.send_artist = real_art
-        assert shown == [("Bones", [[{"text": "🔔 Следить", "callback_data": _cb("watch", "Bones")}]])], shown
-        assert replies[-1][0] == ARTIST_MISSING, replies[-1]
+            (vkladysh.artist, vkladysh.send_artist, globals()["analyse"], globals()["_deliver"],
+             telegram.send_chat_action) = real_art
+        assert shown == [("Bones", [[{"text": "🔔 Следить", "callback_data": _cb("watch", "Bones")}],
+                                    [{"text": "🎞 Разбор вкуса", "callback_data": _cb("razbor", "Bones")}]])], shown
+        assert taken == [("taste", "Bones"), ("разбор", "Bones")], taken
+        assert missing[0] == ARTIST_MISSING, missing
         saved = SOURCES_FILE.read_text()
         assert state.read_json(SOURCES_FILE, {})[_today()]["a"] == 2 and "123" not in saved, saved
         # Артист позвал артиста из-под лимита треков: метка одна, код — в приглашение.
@@ -2131,7 +2145,7 @@ def _selftest() -> None:
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ, одноимённый альбом — кнопкой «💿 Альбом»; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал; "
           "skleyka_r<код> — метка skleyka_ref, код в приглашение; переспрос СВЕДЕНИЯ: «разбор вкуса» — прежним путём; "
-          "/vopros и /paysupport — вопрос владельцу, его ответ — человеку; a_<id> — карточка артиста с «Следить»")
+          "/vopros и /paysupport — вопрос владельцу, его ответ — человеку; a_<id> — карточка артиста с «Следить» и «Разбор вкуса»")
 
 
 # ─────────────────────────── командная строка ───────────────────────────
