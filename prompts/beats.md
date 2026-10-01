@@ -300,3 +300,29 @@ TnTXD (Rod Wave): «less is more, in most cases»
 
 В конце — короткий отчёт: пара, скелет и образец замера, темп и тональность, с чего сняты,
 какие приёмы и где.
+
+## Звуки набора 09
+
+У владельца в браузере FL лежит набор `KITS/09 - Scene 2026 Kit` (81 звук, собран 02.10.2026
+под этот замер). В записке к биту называй файл на каждую сэмплерную партию — имя как в таблице.
+Набор отобран замером, на слух его никто не проверял: «не звучит» от владельца — повод
+заменить строку здесь, а не спорить.
+
+808 набора настроены на ноту 24 (C1, 32,7 Гц). Ноты 27–39 звучат своей высотой, когда корневая
+нота канала — 24 (в FL подписана C2); владелец ставит её один раз, как — в README набора.
+Чем выше нота, тем короче хвост: на 39 — в 2,4 раза короче, чем на 24.
+
+| партия | «ровный» | «сцена» | «детройт» |
+|---|---|---|---|
+| 808 | длинный: `808 - Rage Insaaane (C)` (самый ровный), `808 - Rage Motion (C)`, `808 - Rage Nuke (C)` | связки: `808 - Rage Monster Grit (C)`, `808 - Synth Short Snappy Sat (C)`; длинная нота: `808 - Rage Dystopia (C)` | короткий: `808 - Synth Short Tight Dist (C)`, `808 - Synth Short Snappy Clean (C)` |
+| бочка | `Kick - Rage Pie` (122 мс) | `Kick - Rage Hard`, `Kick - Short Clicky` | нет |
+| клэп | `Clap - Main Mid`, `Clap - Rage Yeat` | `Clap - Rage Money`; «2 и 4» — резкий: `Clap - Sharp Attack`, `Clap - Rage Double Tap` | `Clap - Rage Spitta`, добавочные — он же тише |
+| призраки | — | `Rim - Ghost Soft`, `Snare - Soft Dull (ghost)` | `Rim - Ghost Sidestick` |
+| хэт | `Hat - Rage Dust` (87 мс) | под дробь и триоли — самые короткие: `Hat - Rage Nice` (50 мс), `Hat - Dry Tick 01` (39 мс) | `Hat - Rage Pax` |
+| открытый хэт | `Open Hat - Rage Cope` | `Open Hat - Short Tight 01` | `Open Hat - Rage Dark Side` |
+| перк | `Perc - Rimshot 01` | `Shaker - Short 10`, `Perc - Click Tiny 06` | `Perc - Rimshot Bright 02` |
+| вдох в полтакта | — | `FX - Reverse Swell 01` (конец файла — на первую долю), `FX - Noise Riser Short 03` | — |
+
+Бочка — тише 808. Дробь 1/32 на 150 BPM — 50 мс на ноту: хэт длиннее сольётся.
+Файлы с `Synth` синтезированы кодом; остальные — Clark Audio (`Rage`), MusicRadar и VCSL,
+лицензии — в README набора. Сами файлы в репозиторий не класть: раздавать их нельзя.
