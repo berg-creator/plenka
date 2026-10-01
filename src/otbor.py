@@ -260,7 +260,9 @@ def _from_link(url: str) -> dict:
         return _apple(items[0]) if items else {}
 
     if "deezer" in host:
-        if "deezer.com" not in host:  # link.deezer.com, deezer.page.link — короткая ссылка
+        # link.deezer.com, deezer.page.link — короткая ссылка. Сверка точная: «deezer.com»
+        # есть и в link.deezer.com, и до 01.10.2026 такая ссылка не раскрывалась вовсе.
+        if host != "deezer.com":
             url = requests.get(url, timeout=20, headers={"User-Agent": http.BROWSER_UA}).url
         track = next(iter(re.findall(r"/track/(\d+)", url)), "")
         if not track and (album := deezer.album_id_from_url(url)):
@@ -791,6 +793,10 @@ def _selftest() -> None:
         "cover": "https://i1.sndcdn.com/a.jpg", "published": True}}
     subscribed = {"1": True, "2": True, "3": True, "4": True, "5": False, "6": True}
     now = datetime(2026, 9, 17, 10, 0, tzinfo=timezone.utc)  # 13:00 МСК
+
+    with mock.patch.object(requests, "get", lambda url, **_: mock.Mock(url="https://www.deezer.com/de/track/7?host=1")), \
+            mock.patch.object(http, "get_json", lambda url, **_: {"title": "Подвал", "link": url}):
+        assert _from_link("https://link.deezer.com/s/abc")["url"].endswith("/track/7"), "короткая ссылка Deezer"
 
     with tempfile.TemporaryDirectory() as tmp, mock.patch.multiple(
         config, OTBOR_FILE=Path(tmp) / "otbor.json", OTBOR_POSTS=Path(tmp) / "posts",
