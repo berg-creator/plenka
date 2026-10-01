@@ -296,7 +296,26 @@ def _label(what: str) -> str:
     return f"{skleyka.BEAT_COUNT['own']}{what}"
 
 
-def give(chat_id: str | int, beat_id: str) -> None:
+def _hit(beat_id: str, what: str) -> None:
+    """Счёт по номеру бита — в самом каталоге: бит выкладывается, чтобы привести людей в бота,
+    и пару для следующего выбирают по тому, какой привёл (score, шаг 1 брифа). В источниках
+    (service.SOURCES) бит идёт без номера. Это число на бит, не данные о людях."""
+    catalog = load()
+    if beat_id in catalog:
+        hits = catalog[beat_id].setdefault("hits", {})
+        hits[what] = hits.get(what, 0) + 1
+        save(catalog)
+
+
+def score() -> str:
+    """Свои биты по числу взявших: что сработало у нас, весомее чужих просмотров."""
+    rows = [(beat.get("hits", {}), beat_id, beat) for beat_id, beat in newest()]
+    rows.sort(key=lambda row: row[0].get("link", 0) + row[0].get("menu", 0), reverse=True)
+    return "\n".join(f"№{beat_id} «{beat['title']}» — {' x '.join(beat['artists'])}: взяли из меню {hits.get('menu', 0)}, "
+                     f"по ссылке {hits.get('link', 0)}, нажали «Свести» {hits.get('mix', 0)}" for hits, beat_id, beat in rows)
+
+
+def give(chat_id: str | int, beat_id: str, via: str = "link") -> None:
     """Переход ?start=beat_<id>: бит по file_id с условиями и кнопкой сведения. Без подписки —
     за битом и шли; подписку, как всегда, спросит СВЕДЕНИЕ."""
     beat = load().get(beat_id)
@@ -308,6 +327,7 @@ def give(chat_id: str | int, beat_id: str) -> None:
     telegram.send_by_id(chat_id, beat["kind"], beat["file_id"], caption,
                         buttons=[[{"text": MAKE, "callback_data": f"{PREFIX}{beat_id}"}]])
     skleyka._count(_label(": выдан"))
+    _hit(beat_id, via)
 
 
 def _button(beat: dict) -> str:
@@ -340,7 +360,7 @@ def pick(chat_id: str | int, beat_id: str) -> None:
     """Бит из меню или списка: та же выдача, что по ссылке, но со своей меткой — владелец видит,
     откуда берут бит."""
     skleyka._count(MENU_LABEL)
-    give(chat_id, beat_id)
+    give(chat_id, beat_id, via="menu")
 
 
 def callback(chat_id: str | int, user_id: str | int, beat_id: str, *, admin: bool = False) -> None:
@@ -352,6 +372,7 @@ def callback(chat_id: str | int, user_id: str | int, beat_id: str, *, admin: boo
         return
     item = {"m": beat["message"], "f": beat["file_id"], "n": f"{beat['title'][:50]}{Path(beat['name']).suffix}",
             "s": beat["size"], "g": ""}
+    _hit(beat_id, "mix")
     skleyka.start(chat_id, user_id, admin=admin, beat=item)
 
 
@@ -683,6 +704,11 @@ def _selftest() -> None:
         assert not PICK.startswith(PREFIX) and not PREFIX.startswith(PICK), "кнопки списка и сведения не путаются"
         pick(46, "2")
         assert sent[-1][:3] == ("audio", "46", "F5") and counted[-2:] == [MENU_LABEL, "БИТ ПЛЁНКИ: выдан"]
+        # Счёт по номеру бита: меню, ссылка и «Свести» — врозь; в списке первым тот, кого взяли больше.
+        assert (load()["1"]["hits"], load()["2"]["hits"]) == ({"link": 1, "menu": 1, "mix": 3}, {"menu": 1})
+        assert score().splitlines()[0] == "№1 «Полёт» — Kizaru x Toxi$: взяли из меню 1, по ссылке 1, нажали «Свести» 3"
+        _hit("404", "menu")
+        assert "404" not in load(), "ссылка на бит, которого нет, каталог не трогает"
         save({str(n): beat for n in range(1, LIST_MAX + 5)})
         listing(46)
         assert [row[0]["callback_data"] for row in sent[-1][3]["buttons"]] == \
@@ -745,7 +771,7 @@ def _selftest() -> None:
     assert demand("Никто", [])["median"] == 0
     print("bity: подпись и маршрут бита, каталог и тексты для YouTube, описание без ссылки, на подъёме, "
           "ссылка beat_ по file_id, «🎚 БИТЫ»: один бит — сразу файл, несколько — список, метка меню, "
-          "кнопка — заявка с битом, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, "
+          "кнопка — заявка с битом, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, счёт по номеру бита, "
           "обложка на спинах, живой ролик в 50 МБ и превью, спрос по медиане без «ё» — ок")
 
 
@@ -766,6 +792,8 @@ def main() -> int:
         return render(args.render)
     if args.demand is not None:
         local = [artist for artist in collect.load_artists() if artist.get("tier") in DEMAND_TIERS]
+        if load():
+            print(f"Свои биты, счёт бота:\n{score()}\n\nЧужие type beat'ы на YouTube:")
         print(demand_table([*args.demand, *rising(state.read_jsonl(config.INBOX_FILE), local, state.now())]))
         return 0
     if args.video:
