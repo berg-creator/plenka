@@ -11,6 +11,11 @@
 Это список корней с живых постов, а не вторая модель-проверщик: та стоит денег,
 а выдумку своего же рода охотно одобрит.
 
+Разбор (ОТКУДА НОГИ, МЕЖДУ СТРОК) проверяется на имя и длину: 01.10.2026 вышел разбор
+про фонк без единого артиста — значит, без ссылок на карточки в боте, — и на 520 знаков,
+а длиннее новости владелец не дочитывает. Оба брака не прощаются: очередь вечнозелёная,
+разбор ни к какому дню не привязан, и потерянная попытка дешевле такого поста.
+
     python -m src.quality --selftest   опись, выдуманные звук и прошлое ловятся, законное проходит
 """
 
@@ -18,6 +23,8 @@ from __future__ import annotations
 
 import html
 import re
+
+from .telegram import visible_len
 
 # Обороты, которые прямо запрещены голосом канала. Их наличие означает,
 # что модель сползла в интонацию школьного реферата.
@@ -81,6 +88,12 @@ MAX_LENGTH = 1500
 # и теряет картинку (card.cover). Это не враньё, а многословие, поэтому брак
 # мягкий: просим переписать короче, но упрямый пост всё равно выпускаем.
 CAPTION_LIMIT = 1024
+
+# Разборы: связь из data/lineage.json и строчка из data/subtext.json. Длина — как у новости
+# (prompts/rubrics/news.md), видимых знаков, как их считает Telegram: разметка не в счёт.
+ANALYSIS = ("lineage", "subtext")
+ANALYSIS_LENGTH = (250, 450)
+NAMELESS_ISSUE = "в разборе нет ни одного имени из данных"
 
 # Рубрики, где пост открывается заголовком. У мема и опроса его нет,
 # у разборов бота (service.py) — своя форма.
@@ -305,6 +318,17 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
         issues.append(f"слишком длинный ({len(stripped)} знаков)")
     elif len(stripped) > CAPTION_LIMIT:
         issues.append(f"{LONG_ISSUE} ({len(stripped)} знаков, влезает 1024)")
+
+    if rubric in ANALYSIS:
+        shown = visible_len(stripped)
+        if not ANALYSIS_LENGTH[0] <= shown <= ANALYSIS_LENGTH[1]:
+            issues.append("разбор не в {}–{} знаков ({})".format(*ANALYSIS_LENGTH, shown))
+        # Имя артиста — ровно как в данных: по этому написанию publish.artist_links ставит
+        # ссылку на карточку в боте, и «BONES» из заголовка или «Три 6 Мафия» её не дадут.
+        names = [name for name in (
+            (payload or {}).get("artist"), *(end.get("artist") for end in (payload or {}).get("ends") or [])) if name]
+        if names and not any(re.search(rf"(?<!\w){re.escape(name)}(?!\w)", stripped) for name in names):
+            issues.append(f"{NAMELESS_ISSUE} — назови ровно так: {', '.join(dict.fromkeys(names))}")
 
     # Служебный JSON, просочившийся в текст поста.
     if stripped.startswith("{") or '"skip"' in stripped or '"text":' in stripped:
@@ -750,8 +774,38 @@ def _selftest() -> None:
     # брак мягкий, compose.generate_checked такой выпускает.
     long_post = "<b>ЗАГОЛОВОК</b>\n\n" + "Ровно то, что проверяется по данным. " * 30
     assert CAPTION_LIMIT < len(long_post) <= MAX_LENGTH, len(long_post)
-    assert [p for p in problems(long_post, "lineage") if p.startswith(LONG_ISSUE)]
-    assert all(p.startswith(SOFT_ISSUES) for p in problems(long_post, "lineage"))
+    assert [p for p in problems(long_post, "legend") if p.startswith(LONG_ISSUE)]
+    assert all(p.startswith(SOFT_ISSUES) for p in problems(long_post, "legend"))
+
+    # Разбор без имени из данных связи и разбор длиннее новости — брак, и не мягкий:
+    # такой пост пропадает, а не выходит после трёх попыток. Живой пример — пост 222 от 01.10.2026.
+    link = {"modern": "Дрифт-фонк", "artist": "Three 6 Mafia",
+            "ends": [{"artist": "Three 6 Mafia", "track": "Late Nite Tip"}, {"artist": "Bones"}]}
+    body = ("Сегодня это звук роликов с машинами: замедленный темп, перегруженный бас и шипение кассеты. "
+            "А собрали его в Мемфисе в начале девяностых: музыку писали на кассетные деки "
+            "и раздавали тейпами из рук в руки. Грязный звук был следствием дешёвой техники.")
+    nameless = f"<b>ФОНК ВЫРОС ИЗ МЕМФИССКИХ КАССЕТ</b>\n\n{body}"
+    issues = problems(nameless, "lineage", link)
+    assert [p for p in issues if p.startswith(NAMELESS_ISSUE)] and not all(p.startswith(SOFT_ISSUES) for p in issues), issues
+    # Имя капсом в заголовке или по-русски ссылки не даст — нужно написание из данных.
+    assert problems(nameless.replace("ФОНК", "THREE 6 MAFIA:").replace("в Мемфисе", "Три 6 Мафия"), "lineage", link)
+    named = nameless.replace("собрали его в Мемфисе", "собрали его Three 6 Mafia в Мемфисе")
+    assert problems(named, "lineage", link) == [], problems(named, "lineage", link)
+    # Имя внутри слова — не имя; любого из концов связи достаточно.
+    assert problems(nameless.replace("Грязный", "Bonesовский"), "lineage", link)
+    assert problems(nameless.replace("А собрали", "Bones помнит: собрали"), "lineage", link) == []
+    # МЕЖДУ СТРОК сверяется с артистом своей записи; без данных проверка молчит (review.py).
+    assert [p for p in problems(nameless, "subtext", {"artist": "Bladee"}) if p.startswith(NAMELESS_ISSUE)]
+    assert problems(nameless, "lineage") == []
+    # Длина — видимые знаки, разметка не в счёт: 250–450, как у новости.
+    wordy = named + "\n\n" + "Ровно то, что проверяется по данным. " * 5
+    assert visible_len(named) <= 450 < visible_len(wordy)
+    assert [p for p in problems(wordy, "lineage", link) if p.startswith("разбор не в 250–450")]
+    assert not all(p.startswith(SOFT_ISSUES) for p in problems(wordy, "lineage", link))
+    assert [p for p in problems("<b>BONES БЕЗ ЛЕЙБЛА</b>\n\n" + "Bones выпускает музыку сам. " * 3, "lineage", link)
+            if p.startswith("разбор не в 250–450")]
+    tagged = named.replace("Three 6 Mafia в", '<a href="https://t.me/bot?start=a_291">Three 6 Mafia</a> в')
+    assert problems(tagged, "news") == [] and visible_len(tagged) == visible_len(named)
 
     print("quality: самопроверка пройдена")
 
@@ -760,6 +814,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Отбраковка постов перед очередью.")
-    parser.add_argument("--selftest", action="store_true", help="опись, выдуманные звук и прошлое ловятся, законное проходит")
+    parser.add_argument("--selftest", action="store_true",
+                        help="опись, выдуманные звук и прошлое ловятся, разбор без имени и длиннее новости — брак, законное проходит")
     if parser.parse_args().selftest:
         _selftest()

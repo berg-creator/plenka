@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from . import bity, comments, config, otbor, publish, quiz, reels, service, skleyka, state, svedenie, telegram, urgent
+from . import bity, comments, config, otbor, publish, quiz, reels, service, skleyka, state, svedenie, telegram, tracks, urgent
 
 log = logging.getLogger("moderate")
 
@@ -229,8 +229,9 @@ def _post_by_request(message_id: int) -> Path | None:
     """
     for folder in (config.QUEUE, config.ARCHIVE):
         for path in folder.glob("*.json"):
-            request = state.read_json(path, {}).get("track_request") or {}
-            if request.get("message_id") == message_id:
+            # У разбора и новости запросов несколько — по одному на трек (tracks.pieces).
+            if any((piece.get("track_request") or {}).get("message_id") == message_id
+                   for piece in tracks.pieces(state.read_json(path, {}))):
                 return path
     return None
 
@@ -256,27 +257,30 @@ def attach_track(message: dict, admin: str) -> str:
     # дежурства подтягивается раз в десять минут: без свежей очереди бот ответил
     # бы «не нашёл пост» на настоящий запрос.
     push_state()
-    path = _post_by_request(message["reply_to_message"]["message_id"])
+    asked = message["reply_to_message"]["message_id"]
+    path = _post_by_request(asked)
     if path is None:
         return "Не нашёл пост под этот запрос — похоже, его удалили из очереди."
 
     post = state.read_json(path, {})
-    name = f"«{post.get('artist', '')} — {post.get('track', '')}»"
+    # Трек, о котором спрашивали: у релиза это сам пост, у разбора — один из listen.
+    piece = next(p for p in tracks.pieces(post) if (p.get("track_request") or {}).get("message_id") == asked)
+    name = f"«{piece.get('artist', '')} — {piece.get('track', '')}»"
     # Вышедший пост берёт трек, пока знает свою ветку комментариев (comments.seed
     # запоминает её, когда трека к выходу нет): Mac владельца ночью спит, и трек
     # приходит утром, когда пост уже в канале (18.09.2026).
     published = path.parent == config.ARCHIVE
-    if published and (post.get("full_track_file_id") or not post.get("thread")):
-        how = "с полным треком" if post.get("full_track_file_id") else "без ветки комментариев"
+    if published and (piece.get("full_track_file_id") or not post.get("thread")):
+        how = "с полным треком" if piece.get("full_track_file_id") else "без ветки комментариев"
         return f"Пост {name} уже вышел — {how}. Этот файл к нему не приложить."
 
     try:
         with tempfile.TemporaryDirectory() as work:
-            clip, seconds, thumb = normalize_track(track, post, Path(work))
+            clip, seconds, thumb = normalize_track(track, piece, Path(work))
         # Подтверждение — сам плеер: владелец сразу слышит и видит то, что уйдёт в канал.
         sent = telegram.send_audio(
             admin, clip, f"Принял: {name}. Так трек выйдет в канале.",
-            title=post.get("track", ""), performer=post.get("artist", ""),
+            title=piece.get("track", ""), performer=piece.get("artist", ""),
             thumb=thumb, seconds=seconds,
         )
         if "audio" not in sent:
@@ -286,20 +290,25 @@ def attach_track(message: dict, admin: str) -> str:
         return f"Не смог принять трек к {name}: {exc}. Пост не тронут — пришли файл ещё раз."
 
     # В пост — file_id перезалитого файла: у присланного теги и обложка свои.
-    post["full_track_file_id"] = sent["audio"]["file_id"]
+    piece["full_track_file_id"] = sent["audio"]["file_id"]
     if published:
         # Первым комментарием, как у трека к выходу, и строкой «▸ Или в комментариях ↓»
         # в самом посте: publish.edit ставит её, раз трек у поста есть.
         thread = post["thread"]
         try:
-            telegram.send_audio(thread["chat"], post["full_track_file_id"],
-                                comments.ask(post, post.get("rubric", ""), "трек"), reply_to=thread["message_id"])
+            # Под разбором вопрос уже задан вместе со ссылками на площадки (comments.seed).
+            telegram.send_audio(thread["chat"], piece["full_track_file_id"],
+                                comments.ask(post, post.get("rubric", ""), "трек") if piece is post else "",
+                                reply_to=thread["message_id"])
         except telegram.TelegramError as exc:
             log.error("Трек к %s не встал в комментарии: %s", path.name, exc)
             return f"Трек к {name} не встал в комментарии: {exc}."
         state.write_json(path, post)
         try:
-            publish.edit(post)
+            # У разбора строка «что послушать — в комментариях» стоит с выхода: править нечего,
+            # а Telegram на правку без изменений отвечает ошибкой.
+            if piece is post:
+                publish.edit(post)
         except telegram.TelegramError as exc:
             # Трек уже под постом — не повод его откатывать, строки просто нет.
             log.error("Строка о треке в пост %s не встала: %s", path.name, exc)
@@ -937,6 +946,20 @@ def _selftest() -> int:
             assert "уже вышел" in attach_track(reply(1, audio={"file_id": "a"}), "1") and not sent
             state.write_json(Path(tmp) / "r.json", {k: v for k, v in post.items() if k != "thread"})
             assert "уже вышел" in attach_track(reply(1, audio={"file_id": "a"}), "1") and not sent
+            # Разбор: треков два, запрос у каждого свой — файл встаёт своему треку и уходит
+            # в ветку без вопроса: он задан вместе со ссылками на площадки (comments.seed).
+            captions = []
+            lineage = {"rubric": "lineage", "artist": "A", "thread": {"chat": -200, "message_id": 31},
+                       "listen": [{"artist": "Корень", "track": "R", "track_request": {"message_id": 561}},
+                                  {"artist": "Наследник", "track": "H", "track_request": {"message_id": 562}}]}
+            state.write_json(Path(tmp) / "r.json", lineage)
+            with mock.patch.object(telegram, "send_audio", lambda chat, audio, caption, **kw:
+                                   captions.append((chat, caption)) or {"audio": {"file_id": "F"}}):
+                assert attach_track(reply(1, audio={"file_id": "a", "mime_type": "audio/mpeg"}), "1") == ""
+            assert captions[1] == (-200, "") and "Наследник — H" in captions[0][1], captions
+            assert len(edited) == 1, edited  # пост разбора не правится: строка в нём уже есть
+            saved = state.read_json(Path(tmp) / "r.json", {})["listen"]
+            assert "full_track_file_id" not in saved[0] and saved[1]["full_track_file_id"] == "F", saved
     print("приём трека: все проверки прошли")
 
     # Конфликт при подтягивании: ребейз откатывается, а не висит до конца смены.

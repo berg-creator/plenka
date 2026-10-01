@@ -74,6 +74,23 @@ NOT_THE_TRACK = re.compile(r"instrumental|acapella|a cappella|karaoke|slowed|spe
                            r"|reverb|remix|\bcover\b|\b8d\b|минус|инструментал", re.IGNORECASE)
 
 
+def pieces(post: dict) -> list[dict]:
+    """Все треки поста, у каждого те же ключи: artist, track, seconds, track_request, full_track_file_id.
+
+    У поста о релизе трек один и лежит в самом посте. У разбора и новости пост не о треке,
+    и то, что под ним можно послушать, лежит списком в поле listen: треки концов связи,
+    трек названного в новости релиза (compose.save_post). Весь путь файла — запрос, YouTube,
+    Mac, приём, комментарий — идёт по этому списку и о рубрике не спрашивает.
+    """
+    return [post, *(post.get("listen") or [])]
+
+
+def label(name: str, number: int) -> str:
+    """Имя запроса трека: по нему Mac находит в личке сообщение, на которое отвечать.
+    У поста с двумя треками запросов два, и одного имени файла на них мало."""
+    return f"{name}#{number}" if number else name
+
+
 def pick(entries: list[dict], artist: str, seconds: int, title: str = "") -> dict:
     """Видео из выдачи поиска, у которого длина как в магазине, или {}.
     Инструментал, ремикс и прочие версии — мимо, если сам релиз не такой."""
@@ -132,7 +149,7 @@ def _git(*args: str) -> str:
 
 
 def pending() -> list[tuple[str, dict]]:
-    """Посты на GitHub, к которым найдено видео, а трека ещё нет.
+    """Треки постов на GitHub, к которым найдено видео, а файла ещё нет: (имя запроса, трек).
 
     Очередь читается из свежего origin/main, а не с диска: рабочую папку
     владельца трогать нельзя, и она отстаёт от автоматики на часы.
@@ -151,8 +168,9 @@ def pending() -> list[tuple[str, dict]]:
             post = json.loads(_git("show", f"origin/main:{path}"))
             if folder == config.ARCHIVE and not post.get("thread"):
                 continue
-            if (post.get("track_request") or {}).get("youtube") and not post.get("full_track_file_id"):
-                found.append((name, post))
+            for number, piece in enumerate(pieces(post)):
+                if (piece.get("track_request") or {}).get("youtube") and not piece.get("full_track_file_id"):
+                    found.append((label(name, number), piece))
     return found
 
 
@@ -276,8 +294,12 @@ def _selftest() -> int:
     sent = {"sent": ["a.json"], "failed": {"b.json": GIVE_UP, "c.json": GIVE_UP - 1}}
     assert [name for name, _ in waiting(found, sent)] == ["c.json"]
     assert [name for name, _ in waiting(found, {"sent": []})] == ["a.json", "b.json", "c.json"]
+    # У разбора треков два, и оба не в самом посте: запросы различаются номером.
+    post = {"rubric": "lineage", "artist": "Bones", "listen": [{"track": "Late Nite Tip"}, {"track": "HDMI"}]}
+    assert [label("d.json", n) for n, piece in enumerate(pieces(post)) if piece.get("track")] == ["d.json#1", "d.json#2"]
+    assert pieces({"track": "T"}) == [{"track": "T"}] and label("e.json", 0) == "e.json"
     print("✓ видео: длина как в магазине, официальный канал первым, тёзки и заливки мимо;"
-          " мёртвая ссылка бросается после трёх попыток")
+          " мёртвая ссылка бросается после трёх попыток; у разбора два трека — два запроса")
     return 0
 
 

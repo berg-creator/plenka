@@ -2,6 +2,17 @@
   "artist": "DJ Screw",
   "cover": "",
   "created_at": "2026-09-22T08:50:31+00:00",
+  "links": {
+    "DJ Screw": 97514
+  },
+  "listen": [
+    {
+      "artist": "DJ Screw",
+      "seconds": 193,
+      "track": "Pimp Tha Pen (Screwed)",
+      "url": "https://www.deezer.com/track/64347221"
+    }
+  ],
   "preview": "",
   "release": "",
   "released_at": "",
@@ -9,6 +20,6 @@
   "score": 0,
   "seconds": 0,
   "source_url": "",
-  "text": "<b>SLOWED + REVERB ВОЗВРАЩАЕТ ХЬЮСТОНСКИЙ ЗВУК НА 30 ЛЕТ НАЗАД</b>\n\nСейчас это целая индустрия замедленных версий.\n\nА вообще эту технику изобрели в Хьюстоне в 90-е. DJ Screw ставил пластинку медленнее обычного и нарезал повторы вручную — на двух вертушках, а не плагином.\n\nТак появился chopped and screwed: замедление трека и разрезание его на повторы.\n\n<code>slowed + reverb · chopped and screwed</code>\n\nЧто слушать сегодня, придумали вчера.",
+  "text": "<b>SLOWED + REVERB ПРИДУМАЛИ В ХЬЮСТОНЕ НА ДВУХ ВЕРТУШКАХ</b>\n\nSlowed + reverb сегодня — целая индустрия замедленных версий.\n\nСама техника — chopped and screwed из Хьюстона: трек замедляют и режут на повторы. Придумал её DJ Screw, замедляя пластинки на своих микстейпах. Делалось это вручную, на двух вертушках, а не плагином.\n\n<code>Хьюстон · chopped and screwed</code>\n\nПлагин появился позже, чем приём.",
   "track": ""
 }

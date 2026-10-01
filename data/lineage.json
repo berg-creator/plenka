@@ -1,5 +1,5 @@
 {
-  "note": "База связей для рубрики ОТКУДА НОГИ. Сюда попадают только широко задокументированные влияния — те, что артисты признавали сами или которые общепризнаны на сцене. Поле facts содержит безопасные обобщения без точных дат: конкретику модель додумывать не должна. Пополняется вручную — это ядро уникальности канала.",
+  "note": "База связей для рубрики ОТКУДА НОГИ. Сюда попадают только широко задокументированные влияния — те, что артисты признавали сами или которые общепризнаны на сцене. Поле facts содержит безопасные обобщения без точных дат: конкретику модель додумывать не должна. Пополняется вручную — это ядро уникальности канала. Поле ends — артисты связи от корня к наследнику, имена ровно так, как их пишет пост: по ним quality.py проверяет, что разбор назвал хоть кого-то. У кого есть track и url (трек в Deezer, сверенный руками), того трек встаёт под постом в комментарии; артиста и трек, которых не проверил, сюда не пишем.",
   "links": [
     {
       "modern": "Дрифт-фонк, который играет в каждом втором ролике с машинами",
@@ -11,7 +11,14 @@
         "Грязный, пересжатый звук был следствием дешёвой техники, а не художественным приёмом"
       ],
       "artist": "Three 6 Mafia",
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Three 6 Mafia",
+          "track": "Late Nite Tip",
+          "url": "https://www.deezer.com/track/472047342"
+        }
+      ]
     },
     {
       "modern": "SpaceGhostPurrp и вся Raider Klan",
@@ -21,7 +28,19 @@
         "Purrp никогда не скрывал, что строит звук на мемфисском наследии",
         "Из Raider Klan вышли Chris Travis, Xavier Wulf, Denzel Curry, Yung Simmie"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Three 6 Mafia",
+          "track": "Late Nite Tip",
+          "url": "https://www.deezer.com/track/472047342"
+        },
+        {
+          "artist": "SpaceGhostPurrp",
+          "track": "Bringing the Phonk",
+          "url": "https://www.deezer.com/track/32936161"
+        }
+      ]
     },
     {
       "modern": "$uicideboy$",
@@ -31,7 +50,14 @@
         "Дуэт из Нового Орлеана открыто называл мемфисскую сцену своим фундаментом",
         "Один из участников — племянник другого, они начинали вдвоём без лейбла"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "$uicideboy$",
+          "track": "Paris",
+          "url": "https://www.deezer.com/track/1211000292"
+        }
+      ]
     },
     {
       "modern": "Slowed + reverb — целая индустрия замедленных версий",
@@ -41,7 +67,14 @@
         "Технику придумал DJ Screw, замедляя пластинки на своих микстейпах",
         "Изначально это делалось вручную на двух вертушках, а не плагином"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "DJ Screw",
+          "track": "Pimp Tha Pen (Screwed)",
+          "url": "https://www.deezer.com/track/64347221"
+        }
+      ]
     },
     {
       "modern": "Эмо-рэп: Lil Peep, Lil Tracy, вся GothBoiClique",
@@ -51,7 +84,17 @@
         "Peep открыто строил треки на гитарных сэмплах из эмо-групп нулевых",
         "GothBoiClique собралась в интернете, а не в одном городе"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Lil Peep",
+          "track": "Hellboy",
+          "url": "https://www.deezer.com/track/2479847641"
+        },
+        {
+          "artist": "Lil Tracy"
+        }
+      ]
     },
     {
       "modern": "Trap-metal: City Morgue, Scarlxrd, Ghostemane",
@@ -61,7 +104,20 @@
         "Ghostemane пришёл в рэп из метал- и хардкор-групп",
         "Приём тот же, что был у ню-метала: соединить тяжёлую гитару с ритмикой хип-хопа"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Ghostemane",
+          "track": "Mercury: Retrograde",
+          "url": "https://www.deezer.com/track/1810839377"
+        },
+        {
+          "artist": "City Morgue"
+        },
+        {
+          "artist": "Scarlxrd"
+        }
+      ]
     },
     {
       "modern": "Ню-метал вообще",
@@ -71,7 +127,19 @@
         "Korn популяризировали семиструнную гитару и предельно низкий строй",
         "Rage Against The Machine соединили хип-хоп подачу с гитарным риффом раньше большинства"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Rage Against The Machine",
+          "track": "Killing In The Name",
+          "url": "https://www.deezer.com/track/62082829"
+        },
+        {
+          "artist": "Korn",
+          "track": "Blind",
+          "url": "https://www.deezer.com/track/13378870"
+        }
+      ]
     },
     {
       "modern": "Drain Gang и Bladee",
@@ -81,7 +149,19 @@
         "Сцена выросла из шведского интернет-андеграунда вокруг Yung Lean и Sad Boys",
         "Автотюн здесь используется не для чистоты вокала, а ради искажения"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Yung Lean",
+          "track": "Ginseng Strip 2002",
+          "url": "https://www.deezer.com/track/1692471257"
+        },
+        {
+          "artist": "Bladee",
+          "track": "Be Nice 2 Me",
+          "url": "https://www.deezer.com/track/610773232"
+        }
+      ]
     },
     {
       "modern": "Русский клауд-рэп: Dead Dynasty, PHARAOH, Boulevard Depo",
@@ -91,7 +171,17 @@
         "Dead Dynasty ориентировались на американскую андеграунд-сцену того времени",
         "Это был первый случай, когда клауд-рэп по-русски зазвучал органично, а не как калька"
       ],
-      "confidence": "medium"
+      "confidence": "medium",
+      "ends": [
+        {
+          "artist": "PHARAOH",
+          "track": "Black Siemens",
+          "url": "https://www.deezer.com/track/3892414581"
+        },
+        {
+          "artist": "Boulevard Depo"
+        }
+      ]
     },
     {
       "modern": "Молчат Дома и русскоязычный пост-панк",
@@ -101,7 +191,19 @@
         "Группа из Минска, ставшая популярной за рубежом раньше, чем дома",
         "Та же связка приёмов, что использовало Кино и британские группы того периода"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Кино",
+          "track": "Группа крови",
+          "url": "https://www.deezer.com/track/448260732"
+        },
+        {
+          "artist": "Молчат Дома",
+          "track": "Судно (Борис Рыжий)",
+          "url": "https://www.deezer.com/track/836932812"
+        }
+      ]
     },
     {
       "modern": "Sematary и Haunted Mound",
@@ -111,7 +213,14 @@
         "Звук намеренно сделан грязным — это художественный выбор, а не нехватка техники",
         "Визуальный код взят у блэк-метала: лес, шрифты, зернистая плёнка"
       ],
-      "confidence": "medium"
+      "confidence": "medium",
+      "ends": [
+        {
+          "artist": "Sematary",
+          "track": "Slaughter House",
+          "url": "https://www.deezer.com/track/1117928612"
+        }
+      ]
     },
     {
       "modern": "Хайпи-подача современного рэпа: Lil Yachty, Lil Uzi Vert",
@@ -121,7 +230,22 @@
         "Lil B первым сделал ставку на интернет-распространение и огромное количество релизов",
         "Многие артисты следующего поколения называли его влияние напрямую"
       ],
-      "confidence": "medium"
+      "confidence": "medium",
+      "ends": [
+        {
+          "artist": "Lil B",
+          "track": "I'm God",
+          "url": "https://www.deezer.com/track/4286436062"
+        },
+        {
+          "artist": "Lil Uzi Vert",
+          "track": "XO Tour Llif3",
+          "url": "https://www.deezer.com/track/144949268"
+        },
+        {
+          "artist": "Lil Yachty"
+        }
+      ]
     },
     {
       "modern": "Фонк в СНГ как массовое явление",
@@ -132,7 +256,14 @@
         "Большинство слушателей узнали этот звук раньше, чем узнали его происхождение"
       ],
       "artist": "Three 6 Mafia",
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Three 6 Mafia",
+          "track": "Tear Da Club Up '97",
+          "url": "https://www.deezer.com/track/472047332"
+        }
+      ]
     },
     {
       "modern": "Витч-хаус и вся эстетика перевёрнутых крестов в оформлении",
@@ -142,7 +273,17 @@
         "Жанр во многом существовал как интернет-явление с самого начала",
         "Crystal Castles и Salem — имена, вокруг которых сцена оформилась"
       ],
-      "confidence": "medium"
+      "confidence": "medium",
+      "ends": [
+        {
+          "artist": "Crystal Castles",
+          "track": "Crimewave",
+          "url": "https://www.deezer.com/track/128239611"
+        },
+        {
+          "artist": "Salem"
+        }
+      ]
     },
     {
       "modern": "Современный русский андеграунд-рэп",
@@ -152,7 +293,17 @@
         "УННВ годами оставались одной из самых закрытых и мифологизированных групп сцены",
         "Кровосток пришли из литературной и художественной среды, а не из рэп-тусовки"
       ],
-      "confidence": "medium"
+      "confidence": "medium",
+      "ends": [
+        {
+          "artist": "Кровосток",
+          "track": "Биография",
+          "url": "https://www.deezer.com/track/614840892"
+        },
+        {
+          "artist": "УННВ"
+        }
+      ]
     },
     {
       "modern": "Rage-звук: Playboi Carti и то, что после него",
@@ -162,7 +313,14 @@
         "Тексты здесь сознательно вторичны по отношению к звучанию голоса",
         "Приём построен на искажении и предельно плотном миксе"
       ],
-      "confidence": "medium"
+      "confidence": "medium",
+      "ends": [
+        {
+          "artist": "Playboi Carti",
+          "track": "Stop Breathing",
+          "url": "https://www.deezer.com/track/1189531082"
+        }
+      ]
     },
     {
       "modern": "Bones и Team Sesh",
@@ -172,7 +330,14 @@
         "Bones выпускает музыку самостоятельно с начала десятых",
         "Модель распространения — прямая, через интернет, минуя индустрию"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Bones",
+          "track": "HDMI",
+          "url": "https://www.deezer.com/track/608439842"
+        }
+      ]
     },
     {
       "modern": "Гитарный саунд современного альт-метала",
@@ -182,7 +347,14 @@
         "Deftones десятилетиями остаются точкой отсчёта для тяжёлой музыки с атмосферой",
         "Их влияние признают артисты далеко за пределами метал-сцены"
       ],
-      "confidence": "high"
+      "confidence": "high",
+      "ends": [
+        {
+          "artist": "Deftones",
+          "track": "Change (In the House of Flies)",
+          "url": "https://www.deezer.com/track/7337324"
+        }
+      ]
     }
   ]
 }

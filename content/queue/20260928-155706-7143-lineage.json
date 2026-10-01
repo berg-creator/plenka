@@ -2,6 +2,28 @@
   "artist": "SpaceGhostPurrp",
   "cover": "",
   "created_at": "2026-09-28T15:57:06+00:00",
+  "links": {
+    "Chris Travis": 7138333,
+    "Denzel Curry": 5131091,
+    "SpaceGhostPurrp": 2489141,
+    "Three 6 Mafia": 291,
+    "Xavier Wulf": 10957770,
+    "Yung Simmie": 4919855
+  },
+  "listen": [
+    {
+      "artist": "Three 6 Mafia",
+      "seconds": 286,
+      "track": "Late Nite Tip",
+      "url": "https://www.deezer.com/track/472047342"
+    },
+    {
+      "artist": "SpaceGhostPurrp",
+      "seconds": 190,
+      "track": "Bringing the Phonk",
+      "url": "https://www.deezer.com/track/32936161"
+    }
+  ],
   "preview": "",
   "release": "",
   "released_at": "",
@@ -9,6 +31,6 @@
   "score": 0,
   "seconds": 0,
   "source_url": "",
-  "text": "<b>SPACEGHOSTPURRP ВОССТАНОВИЛ ЗВУК MEMPHIS RAP 90-Х</b>\n\nСегодня SpaceGhostPurrp и вся Raider Klan строят звук на мемфисском наследии — на том, что Three 6 Mafia и мемфисская сцена делали в девяностых.\n\nPurrp этого никогда не скрывал: у него не вдохновение задним числом, а прямая пересадка мемфисской эстетики в интернет-эпоху.\n\nИз Raider Klan вышли Chris Travis, Xavier Wulf, Denzel Curry и Yung Simmie.\n\n<code>Raider Klan (2010-е) · Three 6 Mafia (1990-е)</code>\n\nВот так интернет помог вернуться мемфисскому звуку.",
+  "text": "<b>RAIDER KLAN ВЫРОСЛА НА THREE 6 MAFIA</b>\n\nSpaceGhostPurrp и вся Raider Klan строят звук на мемфисском наследии — на том, что делали Three 6 Mafia и мемфисская сцена.\n\nPurrp этого никогда не скрывал: это прямая пересадка мемфисской эстетики в интернет-эпоху. Из Raider Klan вышли Chris Travis, Xavier Wulf, Denzel Curry и Yung Simmie.\n\n<code>Raider Klan · мемфисская сцена</code>\n\nИнтернет тут сработал как грузовое такси.",
   "track": ""
 }

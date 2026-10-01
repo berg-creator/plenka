@@ -215,11 +215,7 @@ def releases_from_news(news: list[dict], artists: list[dict], seen: state.Seen) 
         for match in _QUOTED.finditer(row.get("title", "")):
             quoted = next(group for group in match.groups() if group)
             try:
-                hits = deezer.search_albums(quoted)
-                # ponytail: карточка на каждый альбом с тем же названием — на частом названии
-                # до 25 запросов за новость; сверять имя ещё по поиску, если сбор начнёт тормозить.
-                items = [deezer.album_release(h["id"]) for h in hits
-                         if itunes._norm(h.get("title", "")) == itunes._norm(quoted)]
+                items = _albums(quoted)
             except Exception as exc:  # магазин отвалился — новость выйдет как раньше
                 log.warning("«%s»: поиск релиза не удался (%s)", quoted, exc)
                 continue
@@ -256,6 +252,35 @@ def releases_from_news(news: list[dict], artists: list[dict], seen: state.Seen) 
                 log.info("%s: «%s» — релиз из новости %s", credit, item["title"], row.get("outlet", ""))
                 found.append(record)
     return found
+
+
+def _albums(quoted: str) -> list[dict]:
+    """Альбомы Deezer, чьё название равно названию из кавычек, — карточками релизов."""
+    # ponytail: карточка на каждый альбом с тем же названием — на частом названии
+    # до 25 запросов за новость; сверять имя ещё по поиску, если сбор начнёт тормозить.
+    return [deezer.album_release(hit["id"]) for hit in deezer.search_albums(quoted)
+            if itunes._norm(hit.get("title", "")) == itunes._norm(quoted)]
+
+
+def named_release(row: dict) -> dict:
+    """Релиз с треклистом, который новость назвала в заголовке, — чтобы под ней было что послушать.
+
+    Сверка та же, что у releases_from_news: название альбома равно названию из кавычек,
+    а исполнитель из магазина стоит в заголовке — похожий альбом хуже никакого. Срока давности
+    и базы артистов здесь нет: свежий релиз своего артиста и так выходит постом о релизе,
+    а новость о старом альбоме или чужом артисте остаётся новостью, и трек первым комментарием
+    (comments.seed) — единственное, что под ней можно включить. Не нашёлся — пусто.
+    """
+    title = row.get("title", "")
+    for match in _QUOTED.finditer(title):
+        quoted = next(group for group in match.groups() if group)
+        try:
+            for item in _albums(quoted):
+                if item and re.search(rf"(?<!\w){re.escape(item['artist'])}(?!\w)", title, re.IGNORECASE):
+                    return {**item, **fetch_tracks(item)}
+        except Exception as exc:  # noqa: BLE001 — магазин отвалился: новость выйдет без трека
+            log.warning("«%s»: релиз из новости не найден (%s)", quoted, exc)
+    return {}
 
 
 def store_credit(item: dict) -> tuple[str, list]:

@@ -116,15 +116,22 @@ def save_post(
         post["video"] = True
 
     # Кого из названных в посте сделать ссылкой на карточку артиста (publish.artist_links):
-    # артист и гости релиза, артисты новости, артист связи — из данных, остальных назвала
-    # модель. Id Deezer ложатся в пост: при выходе и правке их заново не ищут.
+    # артист и гости релиза, артисты новости, артисты связи (ends) — из данных, остальных
+    # назвала модель. Id Deezer ложатся в пост: при выходе и правке их заново не ищут.
     src = source or {}
+    ends = src.get("ends") or []
     if rubric_key != "poll":
         named = [*(otbor._credits(src["artist"]) if src.get("artist") else []),
-                 *_features(src.get("tracks") or []), *(src.get("artists") or [])]
+                 *_features(src.get("tracks") or []), *(src.get("artists") or []),
+                 *(end.get("artist", "") for end in ends)]
         people = (answer or {}).get("people")  # GigaChat схему не держит: не список — никого
         if links := publish.artist_ids(text, [*named, *(people if isinstance(people, list) else [])]):
             post["links"] = links
+    # Что послушать под разбором и новостью (владелец, 01.10.2026: «послушать нечего»):
+    # треки идут тем же путём, что трек релиза, — запрос, YouTube, Mac, первый комментарий
+    # (tracks.pieces). В самом посте их нет: пост остаётся одной плиткой.
+    if heard := [track for track in map(_heard, ends) if track]:
+        post["listen"] = heard
 
     if rubric_key == "meme":
         # Надписи лежат отдельно от подписи: они рисуются поверх шаблона,
@@ -213,6 +220,28 @@ def _lead_track(source: dict) -> dict:
     """
     tracks = source.get("tracks") or []
     return next((track for track in tracks if track.get("preview")), tracks[0] if tracks else {})
+
+
+def _heard(end: dict) -> dict:
+    """Трек для комментария под постом, который сам не о релизе: {artist, track, seconds, url} или {}.
+
+    Модель трек не выбирает и не называет: артиста, название и ссылку на трек в Deezer человек
+    вписал в данные связи руками (поле ends в lineage.json и subtext.json). Магазин здесь только
+    подтверждает, что по ссылке лежит трек с этим названием, и отдаёт длину — по ней tracks.find
+    узнаёт видео на YouTube. Поиска по названию нет намеренно: 01.10.2026 otbor.lookup на
+    «Bringing the Phonk» отдал инструментал, а на «Killing in the Name» — концертную запись.
+    Длина уже есть (трек релиза, названного новостью, — urgent.run) — в магазин не ходим.
+    """
+    if not (end.get("artist") and end.get("track")):
+        return {}
+    seconds, url = end.get("seconds") or 0, end.get("url", "")
+    if not seconds:
+        found = otbor.from_link(url)
+        if otbor._bare(found.get("title", "")) != otbor._bare(end["track"]):
+            log.warning("Трек «%s — %s» по ссылке не подтвердился", end["artist"], end["track"])
+            return {}
+        seconds = found.get("seconds") or 0
+    return {"artist": end["artist"], "track": end["track"], "seconds": seconds, "url": url}
 
 
 # ─────────────────────────── планирование ───────────────────────────
@@ -431,7 +460,8 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     # пост уйдёт в ленту текстом. Где имени нет и в самой связи, его ставит
     # поле artist в lineage.json.
     for link in lineage[: quota.get("lineage", 0)]:
-        add("lineage", link, {"artist": link.get("artist") or footage.find_artist(str(link))})
+        add("lineage", link, {"artist": link.get("artist") or footage.find_artist(str(link)),
+                              "ends": link.get("ends") or []})
 
     # МЕЖДУ СТРОК — только из курируемой базы: цитаты не должны быть выдуманы.
     subtext = state.read_json(config.SUBTEXT_FILE, {"items": []})["items"]
@@ -444,7 +474,7 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
             "notes": item.get("notes", []),
             "angle": item.get("angle", ""),
         }
-        add("subtext", payload, {"subtext_index": index})
+        add("subtext", payload, {"subtext_index": index, "ends": item.get("ends") or []})
 
     # МЕМ — контекст из базы артистов, чтобы шутки были про нашу сцену,
     # и каталог картинок. Картинку выбирает модель: она — реакция на поворот,
@@ -1011,54 +1041,64 @@ def do_ask_tracks() -> int:
     Отдельный шаг после генерации, а не вызов из save_post: один проход покрывает
     и свежие посты, и лежавшие в очереди до появления запросов, а сорвавшийся
     на Telegram запуск просто повторится завтра — пост к тому моменту уже в очереди.
-    Трек просят только к постам о релизах, а те ждут ответа
-    config.RELEASE_TRACK_WAIT_HOURS и уходят с отрывком (publish.next_post),
-    поэтому шаг идёт сразу за compose --fresh, в том же запуске.
+    Посты о релизах ждут ответа config.RELEASE_TRACK_WAIT_HOURS и уходят с отрывком
+    (publish.next_post), поэтому шаг идёт сразу за compose --fresh, в том же запуске.
+    Под разбором и новостью треки свои (tracks.pieces): запрос на каждый, выхода поста
+    они не держат — без файла в комментарии встают ссылки на площадки (comments.seed).
     """
     admin = config.secret("TELEGRAM_ADMIN_ID")
     asked = 0
-    for path in sorted(config.QUEUE.glob("*.json")):
+    # Срочная новость выходит мимо очереди, и трек названного в ней релиза просить больше
+    # негде: берём и вышедшее за двое суток — столько же ждёт Mac (tracks.pending). Только
+    # посты с полем listen: у релиза без запроса в архиве ветки комментариев уже нет.
+    since = (state.now() - timedelta(days=2)).strftime("%Y%m%d")
+    recent = [path for path in sorted(config.ARCHIVE.glob("*.json"))
+              if path.name >= since and state.read_json(path, {}).get("listen")]
+    for path in [*sorted(config.QUEUE.glob("*.json")), *recent]:
         post = state.read_json(path, {})
-        if not needs_track(post):
-            continue
+        for number, piece in enumerate(tracks.pieces(post)):
+            if not needs_track(piece):
+                continue
 
-        rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
-        text = (
-            f"<b>Нужен полный трек</b> · {rubric.title if rubric else post.get('rubric', '')}\n"
-            f"{post['artist']} — {post['track']}\n"
-            f"<code>{path.name}</code>\n\n"
-            "Ответь на это сообщение аудиофайлом — полный трек встанет первым "
-            "комментарием под постом. Файл до 20 МБ: боту Telegram больший не отдаёт, "
-            "а mp3 в 320 kbps длиннее 8 минут уже не пройдёт — такой пришли в 192 kbps. "
-            "Где трек лежит — кнопками ниже."
-        )
-        video = tracks.find(post["artist"], post["track"], post.get("seconds") or 0)
-        buttons = where_to_find(post, video)
-        sent = None
-        preview = fresh_preview(post) or post.get("preview", "")
-        if preview:
-            # Отрывок прямо в запросе: владелец слышит, что ищет, и не скачает
-            # одноимённый трек другого артиста или чужой ремикс. Ответ на аудио
-            # дежурство находит так же, как на текст, — по message_id.
-            try:
-                sent = telegram.send_audio(
-                    admin, preview, text,
-                    title=post["track"], performer=post["artist"],
-                    cover_url=post.get("cover", ""), buttons=buttons,
-                )
-            except telegram.TelegramError as exc:
-                print(f"  отрывок не ушёл ({exc}) — запрос текстом")
-        if sent is None:
-            sent = telegram.send_message(admin, text, buttons=buttons)
-        # Отметка пишется сразу после каждой отправки: оборвись запуск на середине,
-        # уже спрошенное второй раз не спросится. По message_id дежурство
-        # найдёт пост, когда придёт ответ.
-        post["track_request"] = {"message_id": sent["message_id"], "sent_at": state.iso()}
-        if video:
-            post["track_request"]["youtube"] = video["url"]
-        state.write_json(path, post)
-        asked += 1
-        print(f"  ? {post['artist']} — {post['track']}  ({path.name}){'  YouTube найден' if video else ''}")
+            rubric = config.RUBRIC_BY_KEY.get(post.get("rubric", ""))
+            name = tracks.label(path.name, number)
+            text = (
+                f"<b>Нужен полный трек</b> · {rubric.title if rubric else post.get('rubric', '')}\n"
+                f"{piece['artist']} — {piece['track']}\n"
+                f"<code>{name}</code>\n\n"
+                "Ответь на это сообщение аудиофайлом — полный трек встанет первым "
+                "комментарием под постом. Файл до 20 МБ: боту Telegram больший не отдаёт, "
+                "а mp3 в 320 kbps длиннее 8 минут уже не пройдёт — такой пришли в 192 kbps. "
+                "Где трек лежит — кнопками ниже."
+            )
+            video = tracks.find(piece["artist"], piece["track"], piece.get("seconds") or 0)
+            # У трека под разбором магазин — ссылка из данных связи, а не source_url поста.
+            buttons = where_to_find({**piece, "source_url": piece.get("url") or piece.get("source_url", "")}, video)
+            sent = None
+            preview = (fresh_preview(post) or post.get("preview", "")) if piece is post else ""
+            if preview:
+                # Отрывок прямо в запросе: владелец слышит, что ищет, и не скачает
+                # одноимённый трек другого артиста или чужой ремикс. Ответ на аудио
+                # дежурство находит так же, как на текст, — по message_id.
+                try:
+                    sent = telegram.send_audio(
+                        admin, preview, text,
+                        title=post["track"], performer=post["artist"],
+                        cover_url=post.get("cover", ""), buttons=buttons,
+                    )
+                except telegram.TelegramError as exc:
+                    print(f"  отрывок не ушёл ({exc}) — запрос текстом")
+            if sent is None:
+                sent = telegram.send_message(admin, text, buttons=buttons)
+            # Отметка пишется сразу после каждой отправки: оборвись запуск на середине,
+            # уже спрошенное второй раз не спросится. По message_id дежурство
+            # найдёт пост, когда придёт ответ.
+            piece["track_request"] = {"message_id": sent["message_id"], "sent_at": state.iso()}
+            if video:
+                piece["track_request"]["youtube"] = video["url"]
+            state.write_json(path, post)
+            asked += 1
+            print(f"  ? {piece['artist']} — {piece['track']}  ({name}){'  YouTube найден' if video else ''}")
 
     print(f"Запрошено полных треков: {asked}.")
     return 0
@@ -1395,13 +1435,33 @@ def _selftest() -> int:
                 "news", "Quavo позвал Фаррелла Уильямса.", {"kind": "news", "artists": ["Quavo"]}, folder=Path(tmp),
                 answer={"people": [{"shown": "Фаррелла Уильямса", "name": "Pharrell Williams"},
                                    {"shown": "Канье", "name": "Kanye West"}]}), {})
+            # Разбор: артисты связи — в ссылки, треки концов — в listen. Название — из данных,
+            # магазин по ссылке подтверждает его и даёт длину; не подтвердил — трека нет.
+            # У новости длина уже есть (трек названного релиза) — в магазин не ходим.
+            deezer.find_artist_id = {"Three 6 Mafia": 291, "Bones": 5}.get
+            real_link, otbor.from_link = otbor.from_link, {
+                "d/1": {"title": "Late Nite Tip (Explicit)", "seconds": 286},
+                "d/2": {"title": "HDMI (Live)", "seconds": 150}}.get
+            ends = [{"artist": "Three 6 Mafia", "track": "Late Nite Tip", "url": "d/1"},
+                    {"artist": "Bones", "track": "Dirt", "url": "d/2"}, {"artist": "Bones"}]
+            lineage = state.read_json(save_post("lineage", "Three 6 Mafia раньше, Bones позже.",
+                                                {"artist": "Bones", "ends": ends}, folder=Path(tmp)), {})
+            heard = _heard({"artist": "Quavo", "track": "Lead", "seconds": 181, "url": "d/3"})
         finally:
             deezer.find_artist_id = real_find
+            otbor.from_link = real_link
     assert named["links"] == {"Quavo": 8, "Фаррелла Уильямса": 7} and "<a" not in named["text"], named
+    assert "listen" not in named and lineage["links"] == {"Three 6 Mafia": 291, "Bones": 5}, lineage
+    assert lineage["listen"] == [{"artist": "Three 6 Mafia", "track": "Late Nite Tip", "seconds": 286, "url": "d/1"}], lineage
+    assert heard == {"artist": "Quavo", "track": "Lead", "seconds": 181, "url": "d/3"} and lineage["track"] == "", heard
+    # Запрос трека — на каждый трек разбора; сам пост разбора трека не просит.
+    assert [needs_track(piece) for piece in tracks.pieces({**lineage, "listen": [*lineage["listen"], {
+        "artist": "Bones", "track": "HDMI", "track_request": {"message_id": 1}}]})] == [False, True, False]
     assert (saved["released_at"], saved["score"]) == (inbox[2]["released_at"], 95), saved
     assert saved["release"] and news["release"] == "", (saved["release"], news["release"])
 
-    print("релиз: предзаказ, старше суток и дубль магазина не пишутся, на релиз один пост")
+    print("релиз: предзаказ, старше суток и дубль магазина не пишутся, на релиз один пост; "
+          "разбор несёт треки концов связи")
     return 0
 
 

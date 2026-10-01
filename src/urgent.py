@@ -31,7 +31,7 @@ import logging
 import os
 from datetime import timedelta
 
-from . import compose, config, publish, state, telegram
+from . import collect, compose, config, publish, state, telegram
 from .sources import deezer, feeds, telegram_web
 
 log = logging.getLogger("urgent")
@@ -237,7 +237,14 @@ def run(limit: int, dry_run: bool, target: str) -> int:
             print(f"  — пропущено ({result.get('reason', '')}): {item.get('title', '')[:50]}")
             continue
 
-        path = compose.save_post("news", result["text"], with_portrait(item), folder=config.URGENT, answer=result)
+        source = with_portrait(item)
+        # Новость назвала релиз — под ней первым комментарием встанет его трек: тот же путь,
+        # что у трека релиза (compose.save_post, поле listen). У сниппета слушать нечего, кроме него.
+        release = {} if item.get("snippet") else collect.named_release(item)
+        if lead := compose._lead_track(release):
+            source = {**source, "ends": [{"artist": release["artist"], "track": lead["title"],
+                                          "seconds": lead.get("seconds") or 0, "url": release["url"]}]}
+        path = compose.save_post("news", result["text"], source, folder=config.URGENT, answer=result)
         post = state.read_json(path, {})
 
         if target == "admin":
@@ -299,7 +306,7 @@ def _selftest() -> int:
     with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 9, 0, tzinfo=timezone.utc)):  # 12:00 МСК
         assert not due([])
 
-    asked, used = [], []
+    asked, used, saved = [], [], []
     def generate(rubric: str, payload: dict) -> dict:
         asked.append(payload["fingerprint"])
         return {"skip": payload["fingerprint"] == "snippet", "text": "Текст.", "reason": "мимо"}
@@ -307,7 +314,11 @@ def _selftest() -> int:
     with (mock.patch.object(config, "secret", lambda name: "0"),
           mock.patch.object(compose, "generate_checked", generate),
           mock.patch.object(compose, "_news_payload", lambda item: item),
-          mock.patch.object(compose, "save_post", lambda *a, **k: Path("post.json")),
+          mock.patch.object(compose, "save_post", lambda *a, **k: saved.append(a[2].get("ends")) or Path("post.json")),
+          # Новость назвала релиз, и Deezer знает его точно: трек едет в пост — в комментарии.
+          mock.patch.object(collect, "named_release", lambda item: {
+              "artist": "Quavo", "url": "https://www.deezer.com/album/1",
+              "tracks": [{"title": "Intro", "seconds": 0}, {"title": "Lead", "seconds": 181, "preview": "p"}]}),
           mock.patch.object(compose, "mark_used", used.extend),
           mock.patch.object(telegram_web, "snippet_reachable", lambda url: "big" not in url),
           mock.patch.object(state, "read_json", lambda path, default: {}),
@@ -316,8 +327,11 @@ def _selftest() -> int:
           mock.patch.dict(globals(), {"fresh_news": lambda hours: items, "with_portrait": lambda item: item})):
         run(1, False, "admin")
     assert asked == ["snippet", "scene"] and used == ["snippet", "snippet-big", "scene"], (asked, used)
+    assert saved == [[{"artist": "Quavo", "track": "Lead", "seconds": 181, "url": "https://www.deezer.com/album/1"}]], saved
+    # Заголовок без названия в кавычках — в магазин не ходим, новость выходит как раньше.
+    assert collect.named_release({"title": "Quavo анонсировал альбом"}) == {}
     print("срочное: сниппет, свой артист и сцена первыми, отброшенная уступает место, "
-          "сниппет без ролика не пишется, заход по часам")
+          "сниппет без ролика не пишется, заход по часам, трек названного релиза едет в пост")
     return 0
 
 

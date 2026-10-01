@@ -35,11 +35,20 @@
 Ветку пост запоминает полем thread — трек, скачанный позже (Mac владельца спал),
 встаёт туда первым комментарием (moderate.attach_track).
 
+Под разбором и новостью первым комментарием — что послушать (владелец, 01.10.2026:
+«послушать нечего»): треки концов связи, корень и наследник, или трек релиза, который
+назвала новость. Они лежат в посте списком listen и идут тем же путём, что трек релиза
+(tracks.pieces). Файл к выходу не пришёл — трек встаёт ссылками на площадки, тем же видом,
+что «Слушать» в посте о релизе, а файл, скачанный позже, — в ту же ветку. В самом посте
+от этого только строка «что послушать — в комментариях» (publish.track_note): пост
+остаётся одной плиткой.
+
 Отключается одной строкой в src/config.py — COMMENT_SEED.
 """
 
 from __future__ import annotations
 
+import html
 import logging
 import random
 import tempfile
@@ -48,7 +57,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 
-from . import config, llm, state, telegram
+from . import config, llm, publish, state, telegram, tracks
 from .sources import telegram_web
 
 log = logging.getLogger("comments")
@@ -153,6 +162,13 @@ def ask(post: dict, rubric: str, attached: str = "") -> str:
     return text
 
 
+def heard(piece: dict) -> str:
+    """Трек под разбором, пока файла нет: имя и площадки строкой, как «Слушать» в посте о релизе."""
+    name = html.escape(f"{piece['artist']} — {piece['track']}")
+    link = html.escape(piece.get("url") or "https://www.deezer.com/")
+    return publish.listen(f'<b>{name}</b>\n▸ <a href="{link}">Слушать</a>', piece["artist"], piece["track"])
+
+
 def origin_id(message: dict) -> int | None:
     """Номер поста в канале, пересылку которого мы получили."""
     origin = message.get("forward_origin") or {}
@@ -236,7 +252,11 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
     # В ленте он занимал вторую плитку и делал вид поста плавающим (есть трек —
     # два сообщения, нет — одно), а здесь открывает ветку и даёт послушать,
     # не уводя из канала. Не ушёл — остаётся обычный вопрос.
-    track = post.get("full_track_file_id", "")
+    files = [piece["full_track_file_id"] for piece in tracks.pieces(post) if piece.get("full_track_file_id")]
+    track = files[0] if files else ""
+    # Треки под разбором и новостью, к которым файл не пришёл: встают ссылками на площадки.
+    missing = [piece for piece in post.get("listen") or [] if not piece.get("full_track_file_id")]
+    links = "\n\n".join(heard(piece) for piece in missing)
     # Сниппет живёт в чужом посте, и ссылку на файл Telegram выдаёт с временным
     # ключом — качаем его сейчас, а не при сборе: между сбором и выходом поста
     # проходят часы. Большого файла превью не отдаёт — его качает аккаунт
@@ -250,7 +270,9 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
         about = ("snippet", "сниппет") if post.get("snippet") else (rubric, "ролик")
         try:
             if track:
-                telegram.send_audio(chat_id, track, ask(post, rubric, "трек"), reply_to=message_id)
+                # Вопрос — подписью под первым плеером; у разбора их два, корень и наследник.
+                for number, file in enumerate(files):
+                    telegram.send_audio(chat_id, file, "" if number else ask(post, rubric, "трек"), reply_to=message_id)
                 if rubric == "otbor":
                     try:
                         telegram.send_poll(chat_id, *OTBOR_POLL, reply_to=message_id)
@@ -272,7 +294,16 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                 return True
             else:
                 # У ролика вопрос для спора уже написан в сценарии (src/reels.py) — модель не нужна.
-                telegram.send_message(chat_id, post.get("comment") or ask(post, rubric), reply_to=message_id)
+                telegram.send_message(chat_id, "\n\n".join(filter(None, (links, post.get("comment") or ask(post, rubric)))),
+                                      reply_to=message_id)
+                links = ""
+            if links:
+                telegram.send_message(chat_id, links, reply_to=message_id)
+            if missing and post.get("file"):
+                # Файл ещё придёт (Mac владельца спал): запоминаем ветку, как у релиза.
+                path = config.ARCHIVE / post["file"]
+                state.write_json(path, {**state.read_json(path, {}),
+                                        "thread": {"chat": chat_id, "message_id": message_id}})
         except telegram.TelegramError as exc:
             # Бота могли не пустить в чат или разжаловать — пост от этого не страдает.
             log.warning("Первый комментарий не ушёл: %s", exc)
@@ -377,6 +408,30 @@ def _selftest() -> None:
         telegram.send_poll = lambda chat, question, options, reply_to=None, **_: sent.append(
             ("опрос", question, reply_to))
         assert seed(forwarded) and sent == [("трек", "T"), ("опрос", OTBOR_POLL[0], 5)], sent
+        # Разбор: файлов нет — первым комментарием треки обоих концов связи ссылками
+        # на площадки и вопрос, одним сообщением; ветка запоминается под поздний файл.
+        sent.clear()
+        posted[0]["rubric"] = "lineage"
+        root = {"artist": "Three 6 Mafia", "track": "Late Nite Tip", "url": "https://www.deezer.com/track/1"}
+        heir = {"artist": "Bones", "track": "HDMI", "url": "https://www.deezer.com/track/2"}
+        snippet = {"message": {"chat": -200, "message_id": 200}, "listen": [root, heir]}
+        real_write, written = state.write_json, []
+        state.write_json = lambda path, payload: written.append((path.name, payload.get("thread")))
+        assert seed(forwarded) and len(sent) == 1 and sent[0][0] == "вопрос", sent
+        text = sent[0][1]
+        assert text.index("Three 6 Mafia — Late Nite Tip") < text.index("Bones — HDMI") < text.rindex("\n\n"), text
+        assert 'href="https://www.deezer.com/track/1">Deezer' in text and text.count(publish.LISTEN_HEAD) == 2, text
+        assert written == [("s.json", {"chat": "-100", "message_id": 5})], written
+        # Один файл пришёл: он плеером с вопросом, второй трек — ссылками следом.
+        sent.clear()
+        root["full_track_file_id"] = "R"
+        assert seed(forwarded) and sent[0] == ("трек", "R") and "Bones — HDMI" in sent[1][1], sent
+        assert "Late Nite Tip" not in sent[1][1] and len(sent) == 2, sent
+        # Оба файла на месте: два плеера, ссылок и запомненной ветки нет.
+        sent.clear(), written.clear()
+        heir["full_track_file_id"] = "H"
+        assert seed(forwarded) and sent == [("трек", "R"), ("трек", "H")] and not written, (sent, written)
+        state.write_json = real_write
     finally:
         telegram.send_audio, telegram.send_poll = real_audio, real_poll
         state.read_json = real_read
@@ -405,6 +460,7 @@ def _selftest() -> None:
     llm.generate_comment = real_comment
 
     print("первый комментарий: пост находится по номеру пересылки, сниппет уходит роликом, "
+          "под разбором — треки концов связи файлами или ссылками, "
           "вопрос пишется по посту, а брак ответа уводит в запасной набор")
 
 

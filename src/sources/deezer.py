@@ -23,13 +23,15 @@ def stored_id(name: str) -> int | None:
 
     Нужен там, где канал и Deezer пишут артиста по-разному: у нас «Guf»
     латиницей (по нему ищется всё остальное), а на Deezer он заведён
-    кириллицей, и поиском по имени его не достать.
+    кириллицей, и поиском по имени его не достать. Алиас — то же имя: на «Молчат Дома»
+    поиск отдавал страницу-двойник с двумя альбомами, хотя в базе группа есть как
+    «Molchat Doma», и ссылка из поста вела на двойника (01.10.2026).
     """
     from .. import config, state
 
     target = name.casefold().strip()
     for artist in state.read_json(config.ARTISTS_FILE, {}).get("artists", []):
-        if artist.get("name", "").casefold().strip() == target:
+        if target in (known.casefold().strip() for known in (artist.get("name", ""), *artist.get("aliases", []))):
             return artist.get("deezer_id")
     return None
 

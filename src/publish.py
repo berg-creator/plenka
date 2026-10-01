@@ -282,6 +282,8 @@ def listen(text: str, artist: str, title: str) -> str:
 TRACK_NOTE = "▸ Или в комментариях ↓"
 # Площадок в посте нет — «или» не к чему, трек называется сам.
 TRACK_ALONE = "▸ Полный трек — в комментариях ↓"
+# Под разбором и новостью: треки концов связи или названного релиза (поле listen).
+LISTEN_NOTE = "▸ Что послушать — в комментариях ↓"
 
 
 def track_note(text: str, post: dict) -> str:
@@ -298,7 +300,13 @@ def track_note(text: str, post: dict) -> str:
     «▸ Или в комментариях ↓» — второй способ наравне со «Слушать»; стрелка — на кнопку
     комментариев под постом.
     """
-    if not post.get("full_track_file_id") or TRACK_NOTE in text or TRACK_ALONE in text:
+    if TRACK_NOTE in text or TRACK_ALONE in text or LISTEN_NOTE in text:
+        return text
+    # У разбора и новости комментарий есть всегда: не пришёл файл — там ссылки на площадки
+    # (comments.seed), поэтому строка обещает «что послушать», а не «полный трек».
+    if post.get("listen"):
+        return f"{text}\n\n{LISTEN_NOTE}"
+    if not post.get("full_track_file_id"):
         return text
     at = text.find(f"{LISTEN_HEAD}\n")
     if at < 0:
@@ -853,6 +861,9 @@ def _selftest() -> None:
     # У отбора под площадками ещё зов в бота: строка встаёт между ними.
     otbor = track_note(f"{text}\n\nПришли свой — @bot", {"full_track_file_id": "x"})
     assert otbor == f"{text}\n{TRACK_NOTE}\n\nПришли свой — @bot", otbor
+    # Разбор и новость: что послушать лежит в комментариях всегда, файлом или ссылками.
+    heard = track_note("Разбор.", {"listen": [{"artist": "Bones", "track": "HDMI"}]})
+    assert heard == f"Разбор.\n\n{LISTEN_NOTE}" and track_note(heard, {"listen": [{}]}) == heard, heard
     print("площадки стримингов: все проверки прошли")
 
     # Имена артистов — ссылками на карточку в боте, только при выдаче (artist_links).
@@ -968,6 +979,11 @@ def main() -> int:
         else:
             full = "нет"
         print(f"Полный трек: {full}")
+        for piece in post.get("listen") or []:
+            got = ("файл есть" if piece.get("full_track_file_id") else
+                   "запрошен, файла нет — встанет ссылками на площадки" if piece.get("track_request") else
+                   "не запрошен — встанет ссылками на площадки")
+            print(f"В комментарии: {piece.get('artist', '')} — {piece.get('track', '')} ({got})")
         shown = view(post.get("text", ""), post)
         if telegram.visible_len(shown) > telegram.MAX_CAPTION:
             print(f"Вид: текстом — подпись к фото не больше {telegram.MAX_CAPTION} знаков, "
