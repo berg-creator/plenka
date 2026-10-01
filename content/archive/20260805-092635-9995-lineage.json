@@ -6,6 +6,14 @@
   "links": {
     "DJ Screw": 97514
   },
+  "listen": [
+    {
+      "artist": "DJ Screw",
+      "seconds": 193,
+      "track": "Pimp Tha Pen (Screwed)",
+      "url": "https://www.deezer.com/track/64347221"
+    }
+  ],
   "message": {
     "buttons": [],
     "chat": -1003786155466,
@@ -14,5 +22,9 @@
   },
   "rubric": "lineage",
   "source_url": "",
-  "text": "<b>SLOWED + REVERB ПРИДУМАЛИ В ХЬЮСТОНЕ НА 2 ВЕРТУШКАХ</b>\n\nЗаходишь в тикток — там опять весь день играет одна песня, но медленно и с ревербом.\n\nНачалось это в Хьюстоне: DJ Screw замедлял пластинки на своих микстейпах и резал трек на повторы. Руками, на 2 вертушках, а не плагином.\n\nПодход назвали chopped and screwed, и вся индустрия slowed + reverb растёт оттуда.\n\n<code>chopped and screwed · Хьюстон · slowed + reverb</code>"
+  "text": "<b>SLOWED + REVERB ПРИДУМАЛИ В ХЬЮСТОНЕ НА 2 ВЕРТУШКАХ</b>\n\nЗаходишь в тикток — там опять весь день играет одна песня, но медленно и с ревербом.\n\nНачалось это в Хьюстоне: DJ Screw замедлял пластинки на своих микстейпах и резал трек на повторы. Руками, на 2 вертушках, а не плагином.\n\nПодход назвали chopped and screwed, и вся индустрия slowed + reverb растёт оттуда.\n\n<code>chopped and screwed · Хьюстон · slowed + reverb</code>",
+  "thread": {
+    "chat": "-1003946355526",
+    "message_id": 28
+  }
 }

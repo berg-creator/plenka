@@ -6,6 +6,14 @@
   "links": {
     "Playboi Carti": 10002824
   },
+  "listen": [
+    {
+      "artist": "Playboi Carti",
+      "seconds": 218,
+      "track": "Stop Breathing",
+      "url": "https://www.deezer.com/track/1189531082"
+    }
+  ],
   "message": {
     "buttons": [],
     "chat": -1003786155466,
@@ -19,5 +27,9 @@
   "score": 0,
   "source_url": "",
   "text": "<b>RAGE-ЗВУК: PLAYBOI CARTI И ТО, ЧТО ПОСЛЕ НЕГО</b>\n\nRage-звук — это Playboi Carti и поколение после него.\n\nА вырос он из электронной музыки и экспериментального трэпа.\n\nСвязь проста: синтезаторы заменили мелодию, голос стал ритмическим элементом, тексты ушли на второй план. Формула построена на искажении и предельно плотном миксе.\n\n<code>электронная музыка и экспериментальный трэп · Playboi Carti</code>",
+  "thread": {
+    "chat": "-1003946355526",
+    "message_id": 229
+  },
   "track": ""
 }

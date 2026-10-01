@@ -8,6 +8,14 @@
     "Ghostemane": 7150049,
     "Scarlxrd": 10541089
   },
+  "listen": [
+    {
+      "artist": "Ghostemane",
+      "seconds": 125,
+      "track": "Mercury: Retrograde",
+      "url": "https://www.deezer.com/track/1810839377"
+    }
+  ],
   "message": {
     "buttons": [],
     "chat": -1003786155466,
@@ -22,5 +30,9 @@
   "score": 0,
   "source_url": "",
   "text": "<b>TRAP-METAL: ОТ НЮ-МЕТАЛА ДО CITY MORGUE</b>\n\nCity Morgue, Scarlxrd, Ghostemane — лица trap-metal.\n\nЧто общего? Тяжёлая гитара плюс трэп-барабаны, а читку заменяет крик. Тот же приём был у ню-метала: соединить гитарный вес с ритмикой хип-хопа.\n\nGhostemane пришёл в рэп из метал- и хардкор-групп.\n\n<code>ню-метал и хардкор → trap-metal</code>\n\n🔥 — МОЖНО ЗАБЫТЬ ОБ ОСНОВАХ\n👎 — ЕЩЁ ОДНА ПЕРЕВАРЕННАЯ ЖВАЧКА",
+  "thread": {
+    "chat": "-1003946355526",
+    "message_id": 311
+  },
   "track": ""
 }

@@ -8,6 +8,20 @@
     "Lil Uzi Vert": 7101343,
     "Lil Yachty": 9776678
   },
+  "listen": [
+    {
+      "artist": "Lil B",
+      "seconds": 276,
+      "track": "I'm God",
+      "url": "https://www.deezer.com/track/4286436062"
+    },
+    {
+      "artist": "Lil Uzi Vert",
+      "seconds": 182,
+      "track": "XO Tour Llif3",
+      "url": "https://www.deezer.com/track/144949268"
+    }
+  ],
   "message": {
     "buttons": [],
     "chat": -1003786155466,
@@ -21,5 +35,9 @@
   "score": 0,
   "source_url": "",
   "text": "<b>ЧИТАЮТ ОБАЯНИЕМ: ОТ LIL B ДО LIL YACHTY</b>\n\nLil Yachty и Lil Uzi Vert держатся на вайбе и обаянии, а не на техничной читке.\n\nНачалось это с Lil B и клауд-рэпа. Lil B выпускал релизы огромным потоком и первым сделал ставку на интернет-распространение. Артисты следующего поколения называли его влияние напрямую.\n\n<code>Lil B → Lil Yachty, Lil Uzi Vert</code>\n\nГлавное теперь не скилл, а личность исполнителя.",
+  "thread": {
+    "chat": "-1003946355526",
+    "message_id": 210
+  },
   "track": ""
 }

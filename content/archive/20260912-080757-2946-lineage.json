@@ -6,6 +6,14 @@
   "links": {
     "Sematary": 73944942
   },
+  "listen": [
+    {
+      "artist": "Sematary",
+      "seconds": 200,
+      "track": "Slaughter House",
+      "url": "https://www.deezer.com/track/1117928612"
+    }
+  ],
   "message": {
     "buttons": [],
     "chat": -1003786155466,
@@ -19,5 +27,9 @@
   "score": 0,
   "source_url": "",
   "text": "<b>SEMATARY И HAUNTED MOUND ЗАПИСАЛИ ХОРРОР-КОР НАРОЧНО ГРЯЗНЫМ</b>\n\nSematary и Haunted Mound: образы ужаса и лоу-фай запись как принцип, а не как ограничение.\n\nЗвук сделан грязным намеренно — это сознательный выбор, а не нехватка техники.\n\nВизуальный код взят у блэк-метала: лес, шрифты, зернистая плёнка.\n\n<code>хоррор-кор и блэк-метал · Sematary, Haunted Mound</code>\n\nЗаписываться чисто стало немодно.",
+  "thread": {
+    "chat": "-1003946355526",
+    "message_id": 200
+  },
   "track": ""
 }
