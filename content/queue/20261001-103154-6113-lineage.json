@@ -1,0 +1,43 @@
+{
+  "artist": "Bladee",
+  "cover": "",
+  "created_at": "2026-10-01T10:31:54+00:00",
+  "link": "cloud-rap-drain-gang",
+  "links": {
+    "Bladee": 5804578,
+    "Yung Lean": 5097674
+  },
+  "listen": [
+    {
+      "artist": "Yung Lean",
+      "seconds": 153,
+      "track": "Ginseng Strip 2002",
+      "track_request": {
+        "message_id": 3374,
+        "sent_at": "2026-10-01T10:34:56+00:00",
+        "youtube": "https://www.youtube.com/watch?v=YSWuIRpzpi0"
+      },
+      "url": "https://www.deezer.com/track/1692471257"
+    },
+    {
+      "artist": "Bladee",
+      "seconds": 127,
+      "track": "Be Nice 2 Me",
+      "track_request": {
+        "message_id": 3375,
+        "sent_at": "2026-10-01T10:34:57+00:00",
+        "youtube": "https://www.youtube.com/watch?v=hJQjWKq7vrc"
+      },
+      "url": "https://www.deezer.com/track/610773232"
+    }
+  ],
+  "preview": "",
+  "release": "",
+  "released_at": "",
+  "rubric": "lineage",
+  "score": 0,
+  "seconds": 0,
+  "source_url": "",
+  "text": "<b>ДРЕЙН ВЫРОС ИЗ ШВЕДСКОЙ ТОСКИ И АВТОТЮНА</b>\n\nBladee и его звук не упали с неба. Всё началось в шведском интернет-андеграунде вокруг Yung Lean.\n\nСекрет связи — размытые синтезаторы и выкрученный автотюн. Голос ломают специально, превращая в еще один инструмент.\n\n<blockquote>Инструмент, который забыли настроить.</blockquote>\n\n<code>Bladee · Yung Lean · 2010-е</code>\n\nЗато петь уметь не надо.",
+  "track": ""
+}

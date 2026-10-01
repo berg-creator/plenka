@@ -10,6 +10,11 @@
       "artist": "Bones",
       "seconds": 139,
       "track": "HDMI",
+      "track_request": {
+        "message_id": 3369,
+        "sent_at": "2026-10-01T10:34:50+00:00",
+        "youtube": "https://www.youtube.com/watch?v=5souw4K5UQc"
+      },
       "url": "https://www.deezer.com/track/608439842"
     }
   ],

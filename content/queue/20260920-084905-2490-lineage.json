@@ -12,12 +12,22 @@
       "artist": "Кино",
       "seconds": 284,
       "track": "Группа крови",
+      "track_request": {
+        "message_id": 3370,
+        "sent_at": "2026-10-01T10:34:51+00:00",
+        "youtube": "https://www.youtube.com/watch?v=xtxjm7ciwmc"
+      },
       "url": "https://www.deezer.com/track/448260732"
     },
     {
       "artist": "Молчат Дома",
       "seconds": 141,
       "track": "Судно (Борис Рыжий)",
+      "track_request": {
+        "message_id": 3371,
+        "sent_at": "2026-10-01T10:34:53+00:00",
+        "youtube": "https://www.youtube.com/watch?v=zQ9w2xOH1U8"
+      },
       "url": "https://www.deezer.com/track/836932812"
     }
   ],

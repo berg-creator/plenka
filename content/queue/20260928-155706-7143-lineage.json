@@ -16,12 +16,22 @@
       "artist": "Three 6 Mafia",
       "seconds": 286,
       "track": "Late Nite Tip",
+      "track_request": {
+        "message_id": 3372,
+        "sent_at": "2026-10-01T10:34:54+00:00",
+        "youtube": "https://www.youtube.com/watch?v=mddyvJ8iNp0"
+      },
       "url": "https://www.deezer.com/track/472047342"
     },
     {
       "artist": "SpaceGhostPurrp",
       "seconds": 190,
       "track": "Bringing the Phonk",
+      "track_request": {
+        "message_id": 3373,
+        "sent_at": "2026-10-01T10:34:55+00:00",
+        "youtube": "https://www.youtube.com/watch?v=pmlh7dMKxKE"
+      },
       "url": "https://www.deezer.com/track/32936161"
     }
   ],

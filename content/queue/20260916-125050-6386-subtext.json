@@ -14,6 +14,11 @@
       "artist": "Bladee",
       "seconds": 127,
       "track": "Be Nice 2 Me",
+      "track_request": {
+        "message_id": 3368,
+        "sent_at": "2026-10-01T10:34:49+00:00",
+        "youtube": "https://www.youtube.com/watch?v=hJQjWKq7vrc"
+      },
       "url": "https://www.deezer.com/track/610773232"
     }
   ],
