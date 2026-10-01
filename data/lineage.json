@@ -373,6 +373,95 @@
           "url": "https://www.deezer.com/track/7337324"
         }
       ]
+    },
+    {
+      "id": "kid-cudi--travis-scott",
+      "by": "auto",
+      "added_at": "2026-10-01T10:52:31+00:00",
+      "kind": "said",
+      "modern": "Travis Scott",
+      "ancestor": "Kid Cudi",
+      "connection": "признанное влияние: имя в псевдониме и наставник в дуэте the Scotts",
+      "facts": [
+        "Псевдоним Travis Scott собран из имени любимого дяди Трэвиса и первого имени Kid Cudi, одного из тех, кто вдохновил его сильнее всего",
+        "Среди тех, кто повлиял на Travis Scott, называют Kid Cudi",
+        "В дуэте the Scotts Kid Cudi — наставник и постоянный соавтор Travis Scott"
+      ],
+      "artist": "Travis Scott",
+      "ends": [
+        {
+          "artist": "Kid Cudi",
+          "track": "Day 'N' Nite",
+          "url": "https://www.deezer.com/track/929199652"
+        },
+        {
+          "artist": "Travis Scott",
+          "track": "SICKO MODE",
+          "url": "https://www.deezer.com/track/536421002"
+        }
+      ],
+      "sources": [
+        {
+          "fact": "Псевдоним Travis Scott собран из имени любимого дяди Трэвиса и первого имени Kid Cudi, одного из тех, кто вдохновил его сильнее всего",
+          "url": "https://en.wikipedia.org/wiki/Travis_Scott",
+          "quote": "During an interview, Webster revealed he chose his moniker as a combination of his favorite uncle, Travis, and the first name of one of his biggest inspirations, Kid Cudi (whose real name is Scott Mescudi)."
+        },
+        {
+          "fact": "Среди тех, кто повлиял на Travis Scott, называют Kid Cudi",
+          "url": "https://en.wikipedia.org/wiki/Travis_Scott",
+          "quote": "He is also influenced by Bon Iver, Kid Cudi, M.I.A., Kanye West, Toro y Moi, Tame Impala, T.I., and Thom Yorke."
+        },
+        {
+          "fact": "В дуэте the Scotts Kid Cudi — наставник и постоянный соавтор Travis Scott",
+          "url": "https://en.wikipedia.org/wiki/Travis_Scott",
+          "quote": "Scott is also one-half of the alternative hip-hop super-duo the Scotts, alongside his mentor and frequent collaborator, American musician Kid Cudi."
+        }
+      ]
+    },
+    {
+      "id": "wu-tang-clan--kasta",
+      "by": "auto",
+      "added_at": "2026-10-01T10:52:33+00:00",
+      "kind": "said",
+      "modern": "Kasta и южный стиль русского хип-хопа",
+      "ancestor": "Wu-Tang Clan и нью-йоркский хип-хоп",
+      "connection": "музыку группы писал Влади, ориентируясь по звучанию на RZA из Wu-Tang Clan",
+      "facts": [
+        "Wu-Tang Clan сильно повлияли на раннее творчество Kasta, а со временем у группы сложился свой южный стиль русского хип-хопа",
+        "Имя объединению придумали по аналогии с Wu-Tang Clan: Баста предложил Fu-Blood-Casta, а Влади оставил от него только Kasta",
+        "Всю музыку группе писал битмейкер Влади, и по звучанию он ориентировался на RZA из нью-йоркской рэп-группы Wu-Tang Clan"
+      ],
+      "artist": "Kasta",
+      "ends": [
+        {
+          "artist": "Wu-Tang Clan",
+          "track": "C.R.E.A.M.",
+          "url": "https://www.deezer.com/track/541322"
+        },
+        {
+          "artist": "Kasta",
+          "track": "Вокруг шум",
+          "url": "https://www.deezer.com/track/3407955491"
+        }
+      ],
+      "sources": [
+        {
+          "fact": "Wu-Tang Clan сильно повлияли на раннее творчество Kasta, а со временем у группы сложился свой южный стиль русского хип-хопа",
+          "url": "https://en.wikipedia.org/wiki/Kasta",
+          "quote": "Wu-Tang Clan had a huge influence on Kasta's early work, but over time, Kasta developed a unique southern style of Russian hip-hop."
+        },
+        {
+          "fact": "Имя объединению придумали по аналогии с Wu-Tang Clan: Баста предложил Fu-Blood-Casta, а Влади оставил от него только Kasta",
+          "url": "https://en.wikipedia.org/wiki/Kasta",
+          "quote": "Basta (Баста Хрю) suggested calling the association Fu-Blood-Casta (by analogy with Wu-Tang Clan and Fu-Schnickens), but Vlady considered this name to be unpleasant and suggested leaving only Kasta from it, and in the end everyone agreed on this."
+        },
+        {
+          "fact": "Всю музыку группе писал битмейкер Влади, и по звучанию он ориентировался на RZA из нью-йоркской рэп-группы Wu-Tang Clan",
+          "url": "https://ru.wikipedia.org/wiki/%D0%9A%D0%B0%D1%81%D1%82%D0%B0_(%D0%B3%D1%80%D1%83%D0%BF%D0%BF%D0%B0)",
+          "quote": "Всю музыку для коллектива писал битмейкер Влади и по звучанию он ориентировался на своего коллегу RZA из нью-йоркской рэп-группы Wu-Tang Clan"
+        }
+      ]
     }
-  ]
+  ],
+  "searched_at": "2026-10-01T10:52:33+00:00"
 }
