@@ -43,14 +43,25 @@
 от этого только строка «что послушать — в комментариях» (publish.track_note): пост
 остаётся одной плиткой.
 
+Разборы, вышедшие до этого решения, получают тот же комментарий задним числом (old,
+запуск руками — comments.yml): ветку вышедшего поста бот из апдейтов уже не узнает,
+пересылка давно пришла, а открытая страница виджета обсуждения называет её без входа
+в аккаунт (thread_of). Вопрос под такими постами уже стоит, поэтому вторым комментарием
+идут одни треки. В дежурстве этого прохода нет намеренно: он разовый, а состояние всё
+равно пишет Actions.
+
 Отключается одной строкой в src/config.py — COMMENT_SEED.
 """
 
 from __future__ import annotations
 
+import argparse
+import contextlib
 import html
+import io
 import logging
 import random
+import re
 import tempfile
 import time
 from collections.abc import Callable
@@ -59,6 +70,7 @@ from pathlib import Path
 
 from . import config, llm, publish, state, telegram, tracks
 from .sources import telegram_web
+from .sources.http import get
 
 log = logging.getLogger("comments")
 
@@ -334,6 +346,88 @@ def into_post(post: dict, snippet: dict, message: dict) -> bool:
     return True
 
 
+# Страница виджета обсуждения открыта без входа: в форме ответа лежат чат обсуждений
+# (peer, «c<id>_<ключ>») и номер пересылки поста в нём — та самая ветка.
+WIDGET = "https://t.me/{channel}/{post}?embed=1&discussion=1"
+_PEER = re.compile(r'name="peer" value="c(\d+)_')
+_TOP = re.compile(r'name="top_msg_id" value="(\d+)"')
+
+# Пауза между постами прохода: в один чат Telegram пускает 20 сообщений в минуту.
+OLD_PAUSE = 3.5
+
+
+def widget(post_id: int) -> str:
+    """Страница виджета обсуждения под постом канала; пусто — не открылась."""
+    response = get(WIDGET.format(channel=config.CHANNEL_HANDLE.lstrip("@"), post=post_id), min_interval=0.5)
+    return response.text if response is not None else ""
+
+
+def thread_of(page: str) -> dict:
+    """Ветка комментариев по странице виджета: {chat, message_id}, как её запоминает seed, или {}.
+
+    У удалённого поста и поста без обсуждения формы ответа на странице нет — ветки нет.
+    """
+    peer, top = _PEER.search(page), _TOP.search(page)
+    return {"chat": f"-100{peer.group(1)}", "message_id": int(top.group(1))} if peer and top else {}
+
+
+def old(post_id: int = 0, dry_run: bool = False) -> int:
+    """Треки комментарием под вышедшими разборами, у которых его нет. Возвращает, под сколькими встал.
+
+    Берутся посты архива со связью (link — id в lineage.json), которых путь listen ещё
+    не касался: ни listen, ни thread. Треки — концы связи, подтверждённые магазином
+    (compose._heard); связь без трека и пост без ветки пропускаются, пустого комментария нет.
+    Сначала строка в пост, потом комментарий, запись в архив — последней: что бы ни
+    сорвалось, повтор доделывает, а не дублирует. Правка, уже стоящая в канале, — не отказ,
+    а комментарий, уже видный на странице виджета (запуск оборвался до коммита), второй
+    раз не шлётся. Беззвучно: это 30 сообщений в чат задним числом.
+    """
+    # Здесь, а не сверху: compose тянет сбор и карточки, а дежурству, которое грузит
+    # этот модуль на каждой смене, они ради разового прохода не нужны.
+    from . import compose
+
+    links = {link.get("id"): link for link in state.read_json(config.LINEAGE_FILE, {}).get("links", [])}
+    done = 0
+    for path in sorted(config.ARCHIVE.glob("*.json")):
+        post = state.read_json(path, {})
+        number = (post.get("message") or {}).get("message_id")
+        ends = (links.get(post.get("link")) or {}).get("ends") or []
+        if not number or not ends or post.get("listen") or post.get("thread") or post_id not in (0, number):
+            continue
+        listen = [track for track in map(compose._heard, ends) if track]
+        page = widget(number) if listen else ""
+        thread = thread_of(page)
+        if not thread:
+            print(f"{number} · {path.name} · пропуск: {'ветки обсуждения нет' if listen else 'трека у связи нет'}")
+            continue
+        # ponytail: виджет отдаёт последние комментарии, не все; под постом их единицы —
+        # станут десятки, искать свой придётся по страницам (data-before).
+        there = publish.LISTEN_HEAD in page
+        print(f"{number} · {path.name} · ветка {thread['message_id']} · связь {post['link']}"
+              + (" · комментарий уже стоит" if there else ""))
+        for piece in listen:
+            print(f"    {piece['artist']} — {piece['track']} · {piece['url']}")
+        if dry_run:
+            continue
+        post = {**post, "listen": listen, "thread": thread}
+        try:
+            try:
+                publish.edit(post)
+            except telegram.TelegramError as exc:
+                if "message is not modified" not in str(exc):
+                    raise
+            if not there:
+                telegram.send_message(thread["chat"], "\n\n".join(map(heard, listen)),
+                                      reply_to=thread["message_id"], quiet=True)
+        except telegram.TelegramError as exc:
+            print(f"{number} · не вышло, архив не тронут: {exc}")
+            continue
+        state.write_json(path, post)
+        done += 1
+        time.sleep(OLD_PAUSE)
+    return done
+
+
 def _selftest() -> None:
     """Пересылка находит свой пост по номеру, а не по времени."""
     forward = {"forward_origin": {"type": "channel", "message_id": 106}}
@@ -459,10 +553,93 @@ def _selftest() -> None:
         assert got == expected if expected else got in QUESTIONS["release"], (answer, got)
     llm.generate_comment = real_comment
 
+    # Ветка вышедшего поста — из формы ответа на странице виджета (кусок страницы поста 26,
+    # 01.10.2026); у удалённого поста формы нет.
+    form = ('<form class="tgme_post_discussion_new_message_form js-new_message_form"> '
+            '<input type="hidden" name="peer" value="c3946355526_-2511569901370190638" /> '
+            '<input type="hidden" name="top_msg_id" value="8" /> '
+            '<input type="hidden" name="discussion_hash" value="8912b1e24ef425e5f1" /> </form>')
+    assert thread_of(form) == {"chat": "-1003946355526", "message_id": 8}, thread_of(form)
+    assert thread_of('<div class="tme_no_messages_found">Discussion is not available at the moment.</div>') == {}
+
+    # Старые разборы: трек — конец связи своего поста; без связи, без трека, без ветки
+    # и уже с веткой пост не трогается; стоящий комментарий второй раз не шлётся.
+    from . import compose
+    lineage = {"links": [
+        {"id": "a", "ends": [{"artist": "Bones", "track": "HDMI", "url": "d/1"}, {"artist": "Xavier Wulf"}]},
+        {"id": "b", "ends": [{"artist": "Salem"}]},
+        {"id": "c", "ends": [{"artist": "Korn", "track": "Blind", "url": "d/2"}]}]}
+    archive = {
+        "1.json": {"link": "a", "message": {"message_id": 11}},
+        "2.json": {"link": "b", "message": {"message_id": 12}},
+        "3.json": {"link": "https://rap.ru/новость", "message": {"message_id": 13}},
+        "4.json": {"link": "c", "message": {"message_id": 14}, "thread": {"chat": "-1", "message_id": 4}},
+        "5.json": {"link": "c", "message": {"message_id": 15}},
+        "6.json": {"link": "c", "message": {"message_id": 16}},
+        "7.json": {"link": "c", "message": {"message_id": 17}},
+    }
+    pages = {11: form, 15: "", 16: form + publish.LISTEN_HEAD, 17: form}
+    real = (state.read_json, state.write_json, compose._heard, publish.edit, telegram.send_message, time.sleep)
+    real_widget, real_archive = globals()["widget"], config.ARCHIVE
+    sent, edited, written = [], [], []
+
+    class Folder:
+        def glob(self, _):
+            return [Path(name) for name in archive]
+
+    def edit(post):
+        edited.append(post["message"]["message_id"])
+        if edited[-1] == 16:
+            raise telegram.TelegramError("Bad Request: message is not modified")
+        if edited[-1] == 17:
+            raise telegram.TelegramError("Bad Request: not enough rights")
+
+    config.ARCHIVE = Folder()
+    state.read_json = lambda path, default=None: lineage if path == config.LINEAGE_FILE else archive[path.name]
+    state.write_json = lambda path, payload: written.append((path.name, payload["listen"], payload["thread"]))
+    compose._heard = lambda end: {**end, "seconds": 200} if end.get("track") else {}
+    publish.edit = edit
+    telegram.send_message = lambda chat, text, reply_to=None, quiet=False, **_: sent.append((chat, text, reply_to, quiet))
+    time.sleep = lambda _: None
+    globals()["widget"] = lambda number: pages[number]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):  # список постов прохода самопроверке не нужен
+            assert old(dry_run=True) == 0 and not (sent or edited or written), (sent, edited, written)
+            assert old() == 2, (sent, edited, written)
+        assert edited == [11, 16, 17] and [name for name, *_ in written] == ["1.json", "6.json"], (edited, written)
+        assert len(sent) == 1 and sent[0][0] == "-1003946355526" and sent[0][2:] == (8, True), sent
+        assert "Bones — HDMI" in sent[0][1] and "Korn" not in sent[0][1] and "Xavier" not in sent[0][1], sent
+        assert written[0][1:] == ([{"artist": "Bones", "track": "HDMI", "url": "d/1", "seconds": 200}],
+                                  {"chat": "-1003946355526", "message_id": 8}), written
+        sent.clear()
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert old(post_id=12) == 0 and old(post_id=14) == 0 and not sent, sent
+    finally:
+        (state.read_json, state.write_json, compose._heard, publish.edit, telegram.send_message, time.sleep) = real
+        globals()["widget"], config.ARCHIVE = real_widget, real_archive
+
     print("первый комментарий: пост находится по номеру пересылки, сниппет уходит роликом, "
           "под разбором — треки концов связи файлами или ссылками, "
-          "вопрос пишется по посту, а брак ответа уводит в запасной набор")
+          "вопрос пишется по посту, а брак ответа уводит в запасной набор; "
+          "ветка старого поста читается со страницы виджета, треки под старым разбором — "
+          "свои, один раз и не под постом без связи, трека или ветки")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Первый комментарий под постом канала")
+    parser.add_argument("--selftest", action="store_true", help="проверка без сети")
+    parser.add_argument("--old", action="store_true",
+                        help="треки комментарием под вышедшими разборами, у которых его нет (из Actions: comments.yml)")
+    parser.add_argument("--post", type=int, default=0, help="с --old: только пост канала с этим номером")
+    parser.add_argument("--dry-run", action="store_true", help="с --old: что ушло бы, без отправки и записи")
+    args = parser.parse_args()
+    if args.old:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        print(f"Постов с новым комментарием: {old(args.post, args.dry_run)}")
+        return 0
+    _selftest()
+    return 0
 
 
 if __name__ == "__main__":
-    _selftest()
+    raise SystemExit(main())

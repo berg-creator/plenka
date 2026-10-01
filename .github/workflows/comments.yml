@@ -1,0 +1,59 @@
+name: Треки под старыми разборами
+
+# Ручной запуск: под вышедшими разборами, у которых нет комментария с треками,
+# ставит его задним числом и дописывает в пост строку «что послушать»
+# (src/comments.py, old). Не в дежурстве намеренно: проход разовый, а сообщения
+# в чате обсуждений назад не забрать — поэтому без галочки «Отправить» это только
+# список, что ушло бы. Повтор безопасен: пост с веткой и треками второй раз не берётся.
+on:
+  workflow_dispatch:
+    inputs:
+      post:
+        description: "Номер поста в канале (пусто — все разборы без комментария с треками)"
+        type: string
+        default: ""
+      send:
+        description: "Отправить (без галочки — только список)"
+        type: boolean
+        default: false
+
+# Пишет content/archive, поэтому делит очередь на запись с остальными.
+concurrency:
+  group: state-write
+  cancel-in-progress: false
+
+jobs:
+  old:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Поставить треки комментарием
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          POST: ${{ inputs.post }}
+          DRY: ${{ !inputs.send && '--dry-run' || '' }}
+        run: python -m src.comments --old ${POST:+--post "$POST"} $DRY
+
+      # И после сбоя: комментарии, которые успели уйти, должны остаться в архиве,
+      # иначе повтор поставит их второй раз.
+      - name: Сохранить состояние
+        if: always()
+        run: |
+          git config user.name "plenka-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add content/
+          git diff --cached --quiet || git commit -m "комментарии: треки под старыми разборами"
+          git pull --rebase --autostash origin ${{ github.ref_name }}
+          git push
