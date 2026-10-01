@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import logging
 import re
 import tempfile
@@ -216,6 +217,21 @@ def lookup(artist: str, title: str) -> dict:
     return {}
 
 
+def spotify(kind: str, number: str) -> dict:
+    """Трек (track) или альбом (album) Spotify, обложка — полем cover; пусто — страница не отдала.
+
+    oEmbed Spotify отдаёт одно название, без артиста; встраиваемый плеер —
+    всё сразу, включая отрывок. Ключ API для этого не нужен.
+    """
+    page = http.get(f"https://open.spotify.com/embed/{kind}/{number}")
+    found = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', page.text if page else "", re.S)
+    if not found:
+        return {}
+    entity = json.loads(found.group(1))["props"]["pageProps"]["state"]["data"]["entity"]
+    images = sorted(entity.get("visualIdentity", {}).get("image", []), key=lambda i: i.get("maxWidth", 0))
+    return {**entity, "cover": images[-1]["url"] if images else ""}
+
+
 def _split_title(text: str, artist: str = "") -> dict:
     """«Артист - Трек (Official Video)» → артист и трек; без тире — артист из канала."""
     text = re.sub(r"\s*[(\[][^)\]]*[)\]]", "", text).strip()
@@ -255,22 +271,15 @@ def _from_link(url: str) -> dict:
         return _deezer(data) if data and not data.get("error") else {}
 
     if host.endswith("spotify.com"):
-        # oEmbed Spotify отдаёт одно название, без артиста; встраиваемый плеер —
-        # всё сразу, включая отрывок. Ключ API для этого не нужен.
         track = next(iter(re.findall(r"/track/(\w+)", url)), "")
-        page = http.get(f"https://open.spotify.com/embed/track/{track}") if track else None
-        found = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', page.text if page else "", re.S)
-        if not found:
+        entity = spotify("track", track) if track else {}
+        if not entity:
             return {}
-        import json
-
-        entity = json.loads(found.group(1))["props"]["pageProps"]["state"]["data"]["entity"]
-        images = sorted(entity.get("visualIdentity", {}).get("image", []), key=lambda i: i.get("maxWidth", 0))
         return {
             "artist": ", ".join(a["name"] for a in entity.get("artists", [])),
             "title": entity.get("name", ""),
             "url": f"https://open.spotify.com/track/{track}",
-            "cover": images[-1]["url"] if images else "",
+            "cover": entity["cover"],
             "seconds": round((entity.get("duration") or 0) / 1000),
             "preview": (entity.get("audioPreview") or {}).get("url", ""),
             "published": True,
@@ -327,8 +336,10 @@ def by_link(url: str) -> dict:
     """Трек по ссылке, дополненный магазином: отрывок и обложка часто есть только там.
     Ссылка человека главнее найденной — это площадка, которую он сам выбрал."""
     found = from_link(url)
-    if not found:
-        return {}
+    # Площадка сама отдала и отрывок, и обложку — магазин добавить нечего, а запрос к нему
+    # после ссылки Apple — это три секунды паузы iTunes.
+    if not found or found.get("preview") and found.get("cover"):
+        return found
     return {**lookup(_credits(found["artist"])[0], found["title"]), **{k: v for k, v in found.items() if v}}
 
 

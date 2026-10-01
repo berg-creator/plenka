@@ -136,7 +136,7 @@ MENU = (
     f'Бот канала — <b><a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">ПЛЁНКА</a></b>\n\n'
     "🎛 <b>СВЕДЕНИЕ</b>\nПришли вокал и бит — сведу их в готовый трек.\n\n"
     "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
-    "📼 <b>ВКЛАДЫШ</b>\nКинь ссылку на трек — пришлю карточку со всеми площадками для друга.\n\n"
+    "📼 <b>ВКЛАДЫШ</b>\nКинь ссылку на трек или альбом — пришлю карточку со всеми площадками для друга.\n\n"
     "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
     # Площадку называет только INTRO ДВОЙНИКА: лайки можно и не кидать, а написать артистов.
     "🪞 <b>ДВОЙНИК</b>\nУзнай, на сколько процентов твоя музыка совпадает с артистами.\n\n"
@@ -161,11 +161,12 @@ PROYAVKA_KEYS = ("proyavka", "taste", "lyrics", "roots")
 VKLADYSH = (
     "📼 <b>ВКЛАДЫШ</b>\n\n"
     "Кинь ссылку на трек — Яндекс, Spotify, Apple Music, YouTube — или напиши <i>Артист — Трек</i>. "
-    "Альбом тоже можно: ссылкой из Яндекса, Apple Music, Deezer или <i>Артист — Альбом</i>. "
+    "Альбом тоже можно: ссылкой из Яндекса, Apple Music, Spotify, Deezer или <i>Артист — Альбом</i>. "
     "Пришлю карточку со всеми площадками: перешлёшь другу, и он откроет у себя."
 )
 # Карточка артиста не собралась: Deezer не ответил или id из ссылки чужой.
 ARTIST_MISSING = "Карточку артиста собрать не вышло — Deezer не ответил. Попробуй ещё раз через минуту."
+ALBUM_MISSING = "Альбом собрать не вышло — площадка не ответила. Попробуй ещё раз через минуту."
 # Строка под вкладышем: кнопки живут отдельно, карточку пересылают без них.
 VKLADYSH_NEXT = "Перешли карточку другу — площадки в ней. А дальше?"
 # Ссылка на «Мне нравится» или плейлист Яндекс Музыки — то, что ролик ДВОЙНИКА велит кинуть
@@ -181,7 +182,7 @@ def menu_buttons() -> list[list[dict]]:
     return [
         [{"text": "🎛 СВЕДЕНИЕ — вокал и бит в трек", "callback_data": f"{CALLBACK_PREFIX}skleyka"}],
         [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
-        [{"text": "📼 ВКЛАДЫШ — трек для друга", "callback_data": f"{CALLBACK_PREFIX}vkladysh"}],
+        [{"text": "📼 ВКЛАДЫШ — трек или альбом другу", "callback_data": f"{CALLBACK_PREFIX}vkladysh"}],
         [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
         [{"text": "🪞 ДВОЙНИК — на сколько ты артист", "callback_data": f"{CALLBACK_PREFIX}sved"}],
         [{"text": "🎞 ПРОЯВКА — разобрать музыку", "callback_data": f"{CALLBACK_PREFIX}proyavka"}],
@@ -1555,6 +1556,8 @@ def _vkladysh(chat_id: str, track: dict) -> None:
     # Двадцать знаков — как у кнопок под разбором (_subject): кириллица в 64 байта.
     who = otbor._credits(track["artist"])[0][:20]
     telegram.send_message(chat_id, VKLADYSH_NEXT, buttons=[
+        # Трек назван так же, как альбом артиста: текстом «Артист — Название» альбом иначе не достать.
+        *([[{"text": "💿 Альбом", "callback_data": _cb("album", track["album"])}]] if track.get("album") else []),
         [{"text": "🔔 Следить за артистом", "callback_data": _cb("watch", who)}],
         [{"text": "🎞 Разбор вкуса", "callback_data": _cb("razbor", who)}],
     ])
@@ -1678,6 +1681,14 @@ def handle_callback(query: dict, data: dict) -> None:
 
     if action == "vkladysh":
         telegram.send_message(chat_id, VKLADYSH)
+        return
+
+    if action == "album" and subject:
+        # «💿 Альбом» под вкладышем трека — та же карточка, без подписки, как сам вкладыш.
+        if found := vkladysh.album(subject):
+            _vkladysh(chat_id, found)
+        else:
+            telegram.send_message(chat_id, ALBUM_MISSING)
         return
 
     if action == "watch" and subject:
@@ -2025,15 +2036,27 @@ def _selftest() -> None:
         assert "ab12cd34" not in saved and "555" not in saved and "777" not in saved, saved
 
         # ВКЛАДЫШ: трек текстом — карточка и кнопки под ней, без модели; метка и команда — что прислать.
-        cards, real_vk = [], (vkladysh.find, vkladysh.send)
-        vkladysh.find = lambda text: {"artist": "Bones, Xavier Wulf", "title": "Dirt"} if " — " in text else {}
+        cards, real_vk = [], (vkladysh.find, vkladysh.send, vkladysh.album)
+        vkladysh.find = lambda text: {"artist": "Bones, Xavier Wulf", "title": "Dirt",
+                                      **({"album": "d7"} if "DIRT" in text else {})} if " — " in text else {}
+        vkladysh.album = lambda code: {"artist": "Bones", "title": "DIRT"} if code == "d7" else {}
         vkladysh.send = lambda chat, track: cards.append(track["title"])
         try:
+            # Трек назван как альбом артиста — первой под карточкой «💿 Альбом», по нажатию — карточка альбома.
+            handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
+                            "message_id": 199, "date": 19000, "text": "Bones — DIRT"}, {})
+            assert replies[-1][1][0][0] == {"text": "💿 Альбом", "callback_data": _cb("album", "d7")}, replies[-1]
+            for code in ("d7", "d404"):
+                handle_callback({"id": "q", "data": _cb("album", code), "from": {"id": 77701},
+                                 "message": {"chat": {"id": 55501}, "message_id": 1}}, {})
+            assert cards == ["Dirt", "DIRT"] and replies[-1][0] == ALBUM_MISSING, (cards, replies[-1])
+            assert len(replies[-2][1]) == 2, "под карточкой альбома кнопки «Альбом» нет"
+            cards.clear()
             for n, text in enumerate(("Bones — Dirt", "/start vkladysh", "/vkladysh")):
                 handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
                                 "message_id": 200 + n, "date": 20000 + n * 60, "text": text}, {})
         finally:
-            vkladysh.find, vkladysh.send = real_vk
+            vkladysh.find, vkladysh.send, vkladysh.album = real_vk
         assert cards == ["Dirt"], cards
         assert replies[-3][0] == VKLADYSH_NEXT and replies[-3][1][1][0]["callback_data"] == _cb("razbor", "Bones")
         assert [text for text, _ in replies[-2:]] == [VKLADYSH] * 2, replies[-2:]
@@ -2105,7 +2128,7 @@ def _selftest() -> None:
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
         tmp.cleanup()
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню шесть разделов; "
-          "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
+          "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ, одноимённый альбом — кнопкой «💿 Альбом»; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал; "
           "skleyka_r<код> — метка skleyka_ref, код в приглашение; переспрос СВЕДЕНИЯ: «разбор вкуса» — прежним путём; "
           "/vopros и /paysupport — вопрос владельцу, его ответ — человеку; a_<id> — карточка артиста с «Следить»")

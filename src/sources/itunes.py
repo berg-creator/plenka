@@ -127,28 +127,39 @@ def album_id_from_url(url: str) -> str:
     return match.group(1) if match else ""
 
 
-def find_album(artist: str, title: str) -> int | None:
-    """Ищет альбом по имени артиста и названию. Нужен, когда id релиза
-    не сохранился, — например, при дозагрузке треклистов к старым находкам.
+def _albums(artist: str, title: str) -> list[dict]:
+    """Записи магазина об альбоме по имени артиста и названию, в порядке выдачи.
 
     Совпадение требуется точное — и по названию, и по артисту. Похожий результат
     здесь хуже, чем никакого: поиск охотно отдаёт чужой альбом с тем же названием,
     и в пост уходит треклист, которого у релиза нет.
+
+    Ищем альбомы вместе с песнями (entity=album,song): одному альбомному поиску часть
+    каталога не видна вовсе — «Berg Chopper INTRO» и «Pharaoh Phuneral» он отдаёт пустыми
+    и по названию, и по артисту, хотя альбомы в магазине есть (01.10.2026). Вместе с песнями
+    магазин возвращает и сам альбом, тем же запросом.
     """
     data = get_json(
         SEARCH_URL,
-        params={"term": f"{artist} {title}", "entity": "album", "limit": 10},
+        params={"term": f"{artist} {title}", "entity": "album,song", "limit": 10},
         min_interval=MIN_INTERVAL,
     )
-    if not data or not data.get("results"):
-        return None
+    return [item for item in (data or {}).get("results") or []
+            if item.get("wrapperType") == "collection"
+            and _norm(item.get("collectionName", "")) == _norm(title)
+            and _norm(item.get("artistName", "")) == _norm(artist)]
 
-    for item in data["results"]:
-        same_album = _norm(item.get("collectionName", "")) == _norm(title)
-        same_artist = _norm(item.get("artistName", "")) == _norm(artist)
-        if same_album and same_artist:
-            return item.get("collectionId")
-    return None
+
+def find_album(artist: str, title: str) -> int | None:
+    """Id альбома по имени артиста и названию. Нужен, когда id релиза
+    не сохранился, — например, при дозагрузке треклистов к старым находкам."""
+    return next((item.get("collectionId") for item in _albums(artist, title)), None)
+
+
+def find_release(artist: str, title: str) -> dict:
+    """Альбом по имени сразу релизом, как album_release: ВКЛАДЫШУ нужны ссылка и дата,
+    а второй запрос к магазину — это три секунды паузы. Одноимённый сингл уступает альбому."""
+    return _release(max(_albums(artist, title), key=lambda item: (item.get("trackCount") or 0) > 1, default={}))
 
 
 # Магазины дописывают к названию тип релиза и издание: «- Single», «(Deluxe)».

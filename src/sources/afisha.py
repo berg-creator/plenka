@@ -86,8 +86,8 @@ def same_name(a: str, b: str) -> bool:
     return fold(a) == fold(b)
 
 
-def find_artist(name: str) -> str | None:
-    """Адрес страницы артиста в Афише или None, если там его нет (или там тёзка)."""
+def _page(name: str) -> tuple[str, str] | None:
+    """Адрес страницы артиста в Афише и сама страница; None — его там нет (или там тёзка)."""
     candidate = slug(name)
     if not candidate:
         return None
@@ -99,7 +99,20 @@ def find_artist(name: str) -> str | None:
     # и имя на странице бывает другим — тогда это не наш артист.
     if not title or not same_name(html.unescape(title.group(1)), name):
         return None
-    return response.url.split("/artist/", 1)[1].split("?", 1)[0]
+    return response.url.split("/artist/", 1)[1].split("?", 1)[0], response.text
+
+
+def find_artist(name: str) -> str | None:
+    """Адрес страницы артиста в Афише или None, если там его нет (или там тёзка)."""
+    found = _page(name)
+    return found[0] if found else None
+
+
+def upcoming(name: str, today: date | None = None) -> list[dict]:
+    """Концерты по имени артиста одним запросом: find_artist и concerts подряд качают
+    одну страницу дважды, с паузой между — три лишних секунды для ВКЛАДЫША (src/vkladysh.py)."""
+    found = _page(name)
+    return parse(found[1], today or date.today(), found[0]) if found else []
 
 
 def parse_day(text: str, today: date) -> date | None:
