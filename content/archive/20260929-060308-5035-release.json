@@ -2,6 +2,9 @@
   "artist": "Buckshot & Ghost Mountain",
   "cover": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/d8/30/b9/d830b950-75d8-3a39-b019-499a545be1e7/075679554772.jpg/600x600bb.jpg",
   "created_at": "2026-09-29T06:03:08+00:00",
+  "links": {
+    "Ghost Mountain": 463415
+  },
   "message": {
     "buttons": [],
     "chat": -1003786155466,

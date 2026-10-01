@@ -2,6 +2,10 @@
   "artist": "",
   "cover": "",
   "created_at": "2026-09-12T08:08:55+00:00",
+  "links": {
+    "Lil Peep": 11420468,
+    "Lil Tracy": 11674815
+  },
   "message": {
     "buttons": [],
     "chat": -1003786155466,

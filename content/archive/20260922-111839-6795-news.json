@@ -2,6 +2,9 @@
   "artist": "Korn",
   "cover": "https://cdn-images.dzcdn.net/images/artist/0ce0ba67519757fa080893d779b4f071/1000x1000-000000-80-0-0.jpg",
   "created_at": "2026-09-22T11:18:39+00:00",
+  "links": {
+    "Korn": 1327
+  },
   "message": {
     "buttons": [],
     "chat": -1003786155466,

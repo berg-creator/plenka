@@ -150,8 +150,12 @@ CONSENT_BUTTONS = [[{"text": "Можно", "callback_data": _cb("yes")},
 
 
 def _credits(artist: str) -> list[str]:
-    """«A & B feat. C» → [A, B, C]: известность и повтор сверяются по каждому имени."""
-    parts = re.split(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bx\b)\s*", artist, flags=re.IGNORECASE)
+    """«A & B feat. C» → [A, B, C]: известность и повтор сверяются по каждому имени.
+
+    Запятая делит только с пробелом после неё: «nothing,nowhere.» — одно имя, а половина
+    «nothing» находила в Deezer чужую группу, и имя в посте вело бы на её карточку (01.10.2026).
+    """
+    parts = re.split(r"\s*(?:,(?=\s)|&|\bfeat\.?|\bft\.?|\bx\b)\s*", artist, flags=re.IGNORECASE)
     return [p for p in parts if p] or [artist]
 
 
@@ -768,6 +772,8 @@ def _selftest() -> None:
     from unittest import mock
 
     from . import moderate
+
+    assert _credits("A, B & C feat. D") == ["A", "B", "C", "D"] and _credits("nothing,nowhere.") == ["nothing,nowhere."]
 
     said: list[tuple[str, str]] = []
     played: list[dict] = []

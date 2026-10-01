@@ -148,7 +148,7 @@
       "tier": "core"
     },
     {
-      "deezer_id": 363378572,
+      "deezer_id": 2934901,
       "itunes_id": 516663045,
       "name": "Chief Keef",
       "tags": [
@@ -655,7 +655,7 @@
       "tier": "legend"
     },
     {
-      "deezer_id": 258830271,
+      "deezer_id": 73,
       "itunes_id": 35307,
       "name": "Nas",
       "tags": [
@@ -718,7 +718,7 @@
       "tier": "legend"
     },
     {
-      "deezer_id": 72662772,
+      "deezer_id": 117,
       "itunes_id": 6907568,
       "name": "Slipknot",
       "tags": [
@@ -1184,7 +1184,7 @@
       "aliases": [
         "Sektor Gaza"
       ],
-      "deezer_id": 6459787,
+      "deezer_id": 3083691,
       "itunes_id": 531116017,
       "name": "Сектор Газа",
       "tags": [
@@ -1279,7 +1279,7 @@
       "aliases": [
         "Kasta"
       ],
-      "deezer_id": 78801792,
+      "deezer_id": 2795521,
       "itunes_id": 340420197,
       "name": "Каста",
       "tags": [
@@ -1312,8 +1312,8 @@
       "tier": "ru"
     },
     {
-      "deezer_id": 2662361,
-      "itunes_id": 1094514442,
+      "deezer_id": 5252888,
+      "itunes_id": 642924098,
       "name": "Guf",
       "tags": [
         "ru-rap"
@@ -1336,7 +1336,7 @@
       "aliases": [
         "MORGENSHTERN"
       ],
-      "deezer_id": 98335212,
+      "deezer_id": 14468689,
       "itunes_id": 1371400021,
       "name": "Моргенштерн",
       "tags": [
@@ -1349,6 +1349,7 @@
       "aliases": [
         "INSTASAMKA"
       ],
+      "deezer_id": 66261042,
       "itunes_id": 1465235237,
       "name": "Инстасамка",
       "tags": [

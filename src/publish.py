@@ -343,7 +343,9 @@ def release_title(post: dict) -> str:
 # последние релизы, площадки и «🔔 Следить» (src/vkladysh.py). Метка a_<id Deezer>.
 ARTIST_LINK = f"https://t.me/{config.BOT_HANDLE.lstrip('@')}?start=a_{{}}"
 # Теги и готовые ссылки: имя внутри них не ищем — ни в адресе, ни в строке площадок.
-_MARKUP = re.compile(r"<a\b[^>]*>.*?</a>|<[^>]*>", re.DOTALL | re.IGNORECASE)
+# Опись <code> тоже мимо: ссылку внутри неё Telegram молча снимает, и имя, впервые
+# названное в описи, оставалось без карточки, хотя ниже стояло в тексте (01.10.2026).
+_MARKUP = re.compile(r"<a\b[^>]*>.*?</a>|<(code|pre)\b[^>]*>.*?</\1>|<[^>]*>", re.DOTALL | re.IGNORECASE)
 
 
 def _mention(text: str, name: str, taken: list[tuple[int, int]] = ()) -> tuple[int, int] | None:
@@ -888,6 +890,7 @@ def _selftest() -> None:
             assert f'«<a href="{link(7)}">Фаррелла Уильямса</a>»' in linked, linked
             assert telegram.sanitize(linked) == linked and telegram.visible_len(linked) == telegram.visible_len(text)
             assert artist_links(f'<a href="https://nas.com/Nas">Nas</a>', {}) == '<a href="https://nas.com/Nas">Nas</a>'
+            assert artist_links("<code>Nas · Uzi</code>\n\nNas дальше.", {}) == f'<code>Nas · Uzi</code>\n\n<a href="{link(1)}">Nas</a> дальше.'
             # Текст ради ссылок не режется: не влезло — ссылки снимаются с последней.
             extra = len(f'<a href="{link(1)}"></a>')
             long = "Nas и Uzi " + "а" * (telegram.MAX_TEXT - extra - 11)

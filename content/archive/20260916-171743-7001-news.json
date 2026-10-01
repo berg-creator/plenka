@@ -2,6 +2,9 @@
   "artist": "Bring Me The Horizon",
   "cover": "https://cdn-images.dzcdn.net/images/artist/d159e783c1f419ae27fd2deca5b89b54/1000x1000-000000-80-0-0.jpg",
   "created_at": "2026-09-16T17:17:43+00:00",
+  "links": {
+    "Bring Me The Horizon": 12874
+  },
   "message": {
     "buttons": [],
     "chat": -1003786155466,

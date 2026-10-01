@@ -2,6 +2,9 @@
   "artist": "Mac Miller",
   "cover": "https://cdn-images.dzcdn.net/images/artist/d868d87e47d0597e6ba36d49eadec848/1000x1000-000000-80-0-0.jpg",
   "created_at": "2026-09-20T17:16:40+00:00",
+  "links": {
+    "Mac Miller": 632926
+  },
   "message": {
     "buttons": [],
     "chat": -1003786155466,

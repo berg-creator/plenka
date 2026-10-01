@@ -2,6 +2,12 @@
   "artist": "",
   "cover": "https://lede-admin.stereogum.com/wp-content/uploads/sites/64/2026/09/GettyImages-2273176722.jpg?w=564",
   "created_at": "2026-09-10T19:56:03+00:00",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 91
+  },
   "preview": "",
   "rubric": "news",
   "source_url": "https://stereogum.com/2511027/n-o-r-e-sued-for-alleged-1999-sexual-assault-of-music-exec/news/",

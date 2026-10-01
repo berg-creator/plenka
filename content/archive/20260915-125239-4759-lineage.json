@@ -2,6 +2,9 @@
   "artist": "Bones",
   "cover": "",
   "created_at": "2026-09-15T12:52:39+00:00",
+  "links": {
+    "Bones": 277893
+  },
   "message": {
     "buttons": [],
     "chat": -1003786155466,

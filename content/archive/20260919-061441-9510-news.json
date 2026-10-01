@@ -2,6 +2,9 @@
   "artist": "Big Baby Tape",
   "cover": "https://cdn-images.dzcdn.net/images/artist/4d6e77d48beb90bbbfdd46e1a5f52199/1000x1000-000000-80-0-0.jpg",
   "created_at": "2026-09-19T06:14:41+00:00",
+  "links": {
+    "Big Baby Tape": 14277587
+  },
   "message": {
     "buttons": [],
     "chat": -1003786155466,
