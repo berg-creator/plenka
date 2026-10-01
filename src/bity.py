@@ -2,9 +2,14 @@
 
 С 02.10.2026 владелец сам делает type beat'ы и сам выкладывает их на YouTube.
 Зрители type beat'ов — артисты, ровно те, кому нужно СВЕДЕНИЕ, а «скачать
-в Телеграме» — стандарт ниши. Поэтому в описании ролика — ссылка на бота
-?start=beat_<id>: бот отдаёт бит бесплатно, с условием подписать BEAT_CREDIT,
-и кнопкой «🎚 Свести с этим битом» открывает заявку СВЕДЕНИЯ, где бит уже лежит.
+в Телеграме» — стандарт ниши. Бот отдаёт бит бесплатно, с условием подписать
+BEAT_CREDIT, и кнопкой «🎚 Свести с этим битом» открывает заявку СВЕДЕНИЯ, где бит
+уже лежит.
+
+Путь к биту — через меню бота: «🎚 БИТЫ» первой кнопкой и команда /bity (listing).
+Ссылку ?start=beat_<id> YouTube в описании ролика оставить не дал (02.10.2026),
+там только адрес бота, и человек приходит обычным /start. Поэтому описание ролика
+называет путь словами, а не ссылкой; сама ссылка жива — для мест, где её пускают.
 
 Бит владелец шлёт боту в личку файлом с подписью со слова «бит»:
 
@@ -65,6 +70,15 @@ TAIL = re.compile(r",\s*(?:(?P<bpm>\d{2,3})\s*(?:bpm)?)?\s*"
                   r"(?P<key>[A-G][#b♯♭]?\s*(?:minor|major|min|maj|минор|мажор|m)?)?\s*$", re.IGNORECASE)
 PREFIX = "s:bit:"
 MAKE = "🎚 Свести с этим битом"
+# Бит из списка (listing): своя кнопка, а не PREFIX — та открывает заявку СВЕДЕНИЯ, эта отдаёт файл.
+PICK = "s:beat:"
+# Метка счётчика (service.SOURCES): бит взят из меню бота, а не по ссылке beat_ — та считается «beat».
+MENU_LABEL = "beat_menu"
+# ponytail: список без страниц — LIST_MAX свежих битов, старые из меню не видны (по ссылке beat_
+# и в «🔎 Нет бита» живы). Страницы — когда битов станет больше.
+LIST_MAX = 20
+# Знаков на кнопке списка: длиннее Telegram на телефоне обрезает многоточием.
+LABEL_MAX = 40
 RISING_DAYS = 14
 RISING_TOP = 5
 NOT_RAP = re.compile(r"metal|grunge|punk|rock")
@@ -87,13 +101,14 @@ VIDEO_BUDGET = 48 * 2**20
 FORMAT = ("🎚 Бит не принял — не понял подпись. Нужно так: артисты, тире, название, "
           "потом, если знаешь, темп и тональность через запятую:\n<code>бит Kizaru x Toxi$ — Полёт, 140 Fm</code>")
 ADDED = ("🎚 Бит №{id} в каталоге: «{title}» — {artists}{tempo}.\n"
-         "Ссылка для описания: {link}\n\n"
+         "Прямая ссылка на бит (если YouTube даст вставить): {link}\n\n"
          "<b>Название для YouTube</b>\n<code>{name}</code>\n\n"
          "<b>Описание</b>\n<pre>{about}</pre>\n\n"
          "<b>Теги</b>\n<code>{tags}</code>\n\n"
          "{rising}🎬 Ролик 1920×1080 и превью для YouTube соберу и пришлю следом.")
 RISING = f"📈 На подъёме — больше всего новостей и релизов в сборе канала за {RISING_DAYS} дней: {{names}}.\n\n"
-ABOUT = ("Скачать бесплатно ({format}) — в Telegram-боте: {link}\n"
+# Путь словами, без t.me: ссылку YouTube в описании оставить не дал (02.10.2026), адрес бота — оставил.
+ABOUT = ("Скачать бесплатно ({format}): Telegram → {bot} → кнопка «🎚 БИТЫ»\n"
          "Там же бот бесплатно сведёт твой голос с этим битом.\n\n"
          "Бесплатно и для коммерческого релиза (free for profit). "
          "Одно условие — подпиши в названии трека: {credit}\n"
@@ -101,7 +116,11 @@ ABOUT = ("Скачать бесплатно ({format}) — в Telegram-боте:
 GIVEN = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
          "Бесплатно, и для релиза тоже. Одно условие — подпиши в названии трека: <b>{credit}</b>.\n\n"
          f"Записал голос? Жми «{MAKE}» — бит уже будет в заявке, пришлёшь только голос.")
-MISSING = ("🎚 Такого бита не нашёл — похоже, ссылка обрезалась. Открой её из описания ролика ещё раз "
+LIST = ("🎚 <b>Биты ПЛЁНКИ</b>\n\n"
+        "Бесплатно, и для релиза тоже. Одно условие — подпиши в названии трека: <b>{credit}</b>.\n\n"
+        "Выбери бит — пришлю файлом.")
+EMPTY = "🎚 Битов ПЛЁНКИ пока нет. Найду бесплатный бит как у нужного артиста."
+MISSING = ("🎚 Такого бита не нашёл — похоже, ссылка обрезалась. Все биты ПЛЁНКИ — по команде /bity, "
            "или найду бесплатный бит как у нужного артиста.")
 VIDEO = "🎬 Ролик к биту №{id} «{title}» — {minutes}, {mb:.0f} МБ. Название и описание — в сообщении выше."
 VIDEO_BIG = "🎬 Ролик к биту №{id} вышел {mb:.0f} МБ — Telegram бота принимает до 50. Собери его сам: python -m src.bity --video."
@@ -116,6 +135,11 @@ def load() -> dict:
 
 def save(catalog: dict) -> None:
     state.write_json(config.BEATS_FILE, catalog)
+
+
+def newest() -> list[tuple[str, dict]]:
+    """Каталог, новые первыми — по номеру: файл пишется с ключами по алфавиту, и «10» в нём стоит раньше «2»."""
+    return sorted(load().items(), key=lambda pair: int(pair[0]), reverse=True)
 
 
 def parse(caption: str) -> dict | None:
@@ -165,11 +189,11 @@ def tags(beat: dict) -> str:
 
 
 def about(beat_id: str, beat: dict) -> str:
-    """Описание ролика: скачать и свести — в боте, условия, темп, хэштеги."""
+    """Описание ролика: скачать и свести — в боте (путь через меню, не ссылка), условия, темп, хэштеги."""
     tempo = " · ".join(filter(None, (beat["bpm"] and f"BPM: {beat['bpm']}", beat["key"] and f"Тональность: {beat['key']}")))
     hashtags = " ".join([*(f"#{re.sub(r'\W', '', name.casefold().replace('ё', 'е'))}typebeat" for name in beat["artists"][:3]),
                          "#typebeat", "#freeforprofit"])
-    return ABOUT.format(format=(Path(beat.get("name", "")).suffix.lstrip(".").upper() or "WAV"), link=link(beat_id),
+    return ABOUT.format(format=(Path(beat.get("name", "")).suffix.lstrip(".").upper() or "WAV"), bot=config.BOT_HANDLE,
                         credit=config.BEAT_CREDIT, tempo=tempo + "\n" if tempo else "", hashtags=hashtags)
 
 
@@ -243,6 +267,39 @@ def give(chat_id: str | int, beat_id: str) -> None:
     skleyka._count(_label(": выдан"))
 
 
+def _button(beat: dict) -> str:
+    """Подпись кнопки списка: название, артисты, темп. Не влезает в LABEL_MAX — артисты с конца
+    уходят под многоточие: полное имя первого важнее обрубка третьего."""
+    names = list(beat["artists"])
+    tempo = f" · {beat['bpm']} BPM" if beat["bpm"] else ""
+    while True:
+        more = "…" if len(names) < len(beat["artists"]) else ""
+        text = f"{beat['title']} · {' x '.join(names)}{more}{tempo}"
+        if len(text) <= LABEL_MAX or len(names) == 1:
+            return text
+        names.pop()
+
+
+def listing(chat_id: str | int) -> None:
+    """«🎚 БИТЫ» в меню и /bity: биты кнопками, новые первыми. Бит в каталоге один — сразу он:
+    список из одной кнопки — лишнее нажатие. Без подписки, как по ссылке beat_."""
+    catalog = newest()
+    if len(catalog) == 1:
+        pick(chat_id, catalog[0][0])
+    elif catalog:
+        rows = [[{"text": _button(beat), "callback_data": f"{PICK}{beat_id}"}] for beat_id, beat in catalog[:LIST_MAX]]
+        telegram.send_message(chat_id, LIST.format(credit=html.escape(config.BEAT_CREDIT)), buttons=rows)
+    else:
+        telegram.send_message(chat_id, EMPTY, buttons=[[skleyka.BEAT_BUTTON]])
+
+
+def pick(chat_id: str | int, beat_id: str) -> None:
+    """Бит из меню или списка: та же выдача, что по ссылке, но со своей меткой — владелец видит,
+    откуда берут бит."""
+    skleyka._count(MENU_LABEL)
+    give(chat_id, beat_id)
+
+
 def callback(chat_id: str | int, user_id: str | int, beat_id: str, *, admin: bool = False) -> None:
     """«🎚 Свести с этим битом»: заявка СВЕДЕНИЯ «вокал + бит», бит в ней уже лежит. Номер
     сообщения — владельца: больше 20 МБ сведение качает бит служебным входом по нему."""
@@ -261,7 +318,7 @@ def matching(names: list[str], bpm: float | None = None) -> list[dict]:
     plain = lambda name: name.casefold().replace("ё", "е")  # набирают «темный принц», в каталоге — «Тёмный»
     wanted = {plain(name) for name in names}
     found = []
-    for beat_id, beat in reversed(load().items()):
+    for beat_id, beat in newest():
         if not wanted & {plain(name) for name in beat["artists"]}:
             continue
         if bpm and beat["bpm"] and abs(skleyka._rate(beat["bpm"], bpm) - 1) > skleyka.SWAP_TEMPO:
@@ -559,6 +616,39 @@ def _selftest() -> None:
         # Готовый трек с битом ПЛЁНКИ — в счётчик.
         assert skleyka.BEAT_COUNT["own"] + " → трек" == "БИТ ПЛЁНКИ → трек"
 
+        # Описание ролика: путь словами и ни одной ссылки — YouTube её не оставил; прямая — только владельцу.
+        text = about("1", beat)
+        assert text.splitlines()[0] == f"Скачать бесплатно (WAV): Telegram → {config.BOT_HANDLE} → кнопка «🎚 БИТЫ»"
+        assert "t.me" not in text and "http" not in text and "Прямая ссылка на бит" in reply
+        assert ABOUT.count("{bot}") == 1 and "{link}" not in ABOUT
+
+        # «🎚 БИТЫ» в меню и /bity: один бит — сразу он, со своей меткой; несколько — список кнопками,
+        # новые первыми и по номеру, длинная подпись теряет артистов с конца; пустой каталог — «🔎 Нет бита».
+        sent.clear()
+        counted.clear()
+        listing(46)
+        assert sent[-1][:3] == ("audio", "46", "F5") and counted == [MENU_LABEL, "БИТ ПЛЁНКИ: выдан"], counted
+        assert sent[-1][4]["buttons"] == [[{"text": MAKE, "callback_data": f"{PREFIX}1"}]], "под битом — прежняя кнопка"
+        catalog = load()
+        save({**catalog, "2": dict(beat, title="Фары", artists=["MADK1D", "Тёмный принц", "TEWIQ"], bpm=156)})
+        listing(46)
+        assert sent[-1][2] == LIST.format(credit=config.BEAT_CREDIT) and len(sent) == 2, "список — без файла"
+        assert sent[-1][3]["buttons"] == [
+            [{"text": "Фары · MADK1D x Тёмный принц… · 156 BPM", "callback_data": f"{PICK}2"}],
+            [{"text": "Полёт · Kizaru x Toxi$ · 140 BPM", "callback_data": f"{PICK}1"}]]
+        assert _button(dict(beat, bpm=None)) == "Полёт · Kizaru x Toxi$"
+        assert not PICK.startswith(PREFIX) and not PREFIX.startswith(PICK), "кнопки списка и сведения не путаются"
+        pick(46, "2")
+        assert sent[-1][:3] == ("audio", "46", "F5") and counted[-2:] == [MENU_LABEL, "БИТ ПЛЁНКИ: выдан"]
+        save({str(n): beat for n in range(1, LIST_MAX + 5)})
+        listing(46)
+        assert [row[0]["callback_data"] for row in sent[-1][3]["buttons"]] == \
+            [f"{PICK}{n}" for n in range(LIST_MAX + 4, 4, -1)], "новые первыми: 24, 23, … — не «9» раньше «10»"
+        save({})
+        listing(46)
+        assert sent[-1][2] == EMPTY and sent[-1][3]["buttons"] == [[skleyka.BEAT_BUTTON]]
+        save(catalog)
+
         # «🔎 Нет бита»: биты владельца с этим артистом — первыми, со ссылкой на бота; чужой темп — прочь.
         assert [v["link"] for v in matching(["kizaru"])] == [link("1")] and not matching(["Mayot"])
         assert not matching(["Kizaru"], 100) and matching(["Kizaru"], 71)
@@ -604,7 +694,8 @@ def _selftest() -> None:
             assert load()["1"]["video"] is True and not busy() and _RENDER is None
             tick()
             assert len(spawned) == 1, "ролик один раз"
-    print("bity: подпись и маршрут бита, каталог и тексты для YouTube, на подъёме, ссылка beat_ по file_id, "
+    print("bity: подпись и маршрут бита, каталог и тексты для YouTube, описание без ссылки, на подъёме, "
+          "ссылка beat_ по file_id, «🎚 БИТЫ»: один бит — сразу файл, несколько — список, метка меню, "
           "кнопка — заявка с битом, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, "
           "обложка на спинах, живой ролик в 50 МБ и превью — ок")
 

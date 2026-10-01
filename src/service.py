@@ -88,8 +88,10 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "vkladysh": "ВКЛАДЫШ, пересланная карточка",
            # Имя артиста в посте канала (?start=a_<id Deezer>, publish.artist_links): id сюда не пишется.
            "a": "КАРТОЧКА АРТИСТА, имя в посте",
-           # Бит ПЛЁНКИ из описания ролика на YouTube (?start=beat_<id>, src/bity.py): id сюда не пишется.
-           "beat": "БИТ ПЛЁНКИ, ролик на YouTube",
+           # Бит ПЛЁНКИ по прямой ссылке (?start=beat_<id>, src/bity.py): id сюда не пишется.
+           "beat": "БИТ ПЛЁНКИ, прямая ссылка",
+           # Тот же бит из «🎚 БИТЫ» в меню и /bity: в описании ролика YouTube оставил только адрес бота.
+           bity.MENU_LABEL: "БИТ ПЛЁНКИ, меню бота",
            "ad": "реклама, канал не распознан"}
 # Платный пост ведёт в ДВОЙНИКА ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
@@ -118,13 +120,14 @@ COMMANDS = {
     "otbor": "otbor", "отбор": "otbor",
     "skleyka": "skleyka", "склейка": "skleyka",
     "svedenie": "skleyka", "сведение": "skleyka",
+    "bity": "bity", "биты": "bity", "beats": "bity",
     "dvoynik": "sved", "sved": "sved", "двойник": "sved",
     "proyavka": "proyavka", "проявка": "proyavka",
     "vkladysh": "vkladysh", "вкладыш": "vkladysh",
     "vopros": "vopros", "вопрос": "vopros", "paysupport": "vopros",
 }
 
-# У бота шесть разделов, и называются они везде одинаково — в меню «/», на экране
+# У бота семь разделов, и называются они везде одинаково — в меню «/», на экране
 # до «Начать», здесь и на кнопках: 🎙 ОТБОР, 🎞 ПРОЯВКА и 🔔 СЛЕЖУ. Слежение
 # за релизами и концертами жило только кнопкой под разбором артиста и командами,
 # которых никто не знает, — о нём не узнавали вовсе (владелец, 16.09.2026). Раньше разбор был
@@ -132,8 +135,11 @@ COMMANDS = {
 # вовсе, и человек не понимал, что тут есть (владелец, 16.09.2026). Вид разбора
 # бот по-прежнему угадывает по форме сообщения, выбирать его не нужно.
 # Порядок — по силе боли, как в меню «/» (setup.BOT_COMMANDS, владелец 25.09.2026).
+MENU_HEAD = f'Бот канала — <b><a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">ПЛЁНКА</a></b>\n\n'
+# Биты — первыми, раньше СВЕДЕНИЯ: ссылку на бит YouTube в описании ролика оставить не дал (02.10.2026),
+# там только адрес бота, и пришедший за битом видит это меню. Абзац и кнопка — пока каталог не пуст.
+MENU_BEATS = "🎚 <b>БИТЫ</b>\nБесплатные биты ПЛЁНКИ — можно и в релиз.\n\n"
 MENU = (
-    f'Бот канала — <b><a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">ПЛЁНКА</a></b>\n\n'
     "🎛 <b>СВЕДЕНИЕ</b>\nПришли вокал и бит — сведу их в готовый трек.\n\n"
     "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
     "📼 <b>ВКЛАДЫШ</b>\nКинь ссылку на трек или альбом — пришлю карточку со всеми площадками для друга.\n\n"
@@ -178,8 +184,13 @@ SVED_LINK = re.compile(r"music\.yandex\.\w+/(?:users/[^/\s]+/(?:playlists|tracks
 CALLBACK_PREFIX = "s:"
 
 
+def menu_text() -> str:
+    return MENU_HEAD + (MENU_BEATS if bity.load() else "") + MENU
+
+
 def menu_buttons() -> list[list[dict]]:
-    return [
+    beats = [[{"text": "🎚 БИТЫ — бесплатно, можно в релиз", "callback_data": f"{CALLBACK_PREFIX}bity"}]]
+    return (beats if bity.load() else []) + [
         [{"text": "🎛 СВЕДЕНИЕ — вокал и бит в трек", "callback_data": f"{CALLBACK_PREFIX}skleyka"}],
         [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
         [{"text": "📼 ВКЛАДЫШ — трек или альбом другу", "callback_data": f"{CALLBACK_PREFIX}vkladysh"}],
@@ -1423,6 +1434,10 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         count_source("beat")
         bity.give(chat_id, slug[:8])
         return False
+    if kind == "bity":
+        # /bity — то же, что «🎚 БИТЫ» в меню: список битов, один — сразу он. Без подписки.
+        bity.listing(chat_id)
+        return False
     if kind == "menu" and link == "a":
         # Имя артиста в посте канала — карточка сразу и без подписки, как вкладыш:
         # подписку спросят кнопки под ней — те же «Следить» и «Разбор вкуса», что под вкладышем
@@ -1489,7 +1504,7 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
             ask_artist(chat_id)
         return False
     if kind == "menu":
-        telegram.send_message(chat_id, MENU, buttons=menu_buttons())
+        telegram.send_message(chat_id, menu_text(), buttons=menu_buttons())
         return False
 
     # Списками слежения человек распоряжается сам, и это не стоит ни токенов,
@@ -1522,7 +1537,7 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
             return False
         kind = guess_kind(body)
     if not kind:
-        telegram.send_message(chat_id, MENU, buttons=menu_buttons())
+        telegram.send_message(chat_id, menu_text(), buttons=menu_buttons())
         return False
 
     if not _subscribed(chat_id, user_id, admin):
@@ -1649,6 +1664,15 @@ def handle_callback(query: dict, data: dict) -> None:
                            data, ask=False)
         return
 
+    if action in ("bity", "beat"):
+        # «🎚 БИТЫ» в меню — список битов ПЛЁНКИ, кнопка списка (bity.PICK) — сам бит. Без подписки,
+        # как по ссылке beat_: её спросит «🎚 Свести с этим битом» — действие bit ниже, не путать.
+        if action == "bity":
+            bity.listing(chat_id)
+        else:
+            bity.pick(chat_id, subject[:8])
+        return
+
     if action == "bit":
         # «🎚 Свести с этим битом» под битом ПЛЁНКИ (src/bity.py); «Подписался» несёт номер бита.
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
@@ -1741,7 +1765,7 @@ def handle_callback(query: dict, data: dict) -> None:
         _spend_if_costly(data, key, kind)
         return
 
-    telegram.send_message(chat_id, MENU, buttons=menu_buttons())
+    telegram.send_message(chat_id, menu_text(), buttons=menu_buttons())
 
 
 def _selftest() -> None:
@@ -1753,6 +1777,11 @@ def _selftest() -> None:
     import datetime
     import io
     import tempfile
+
+    # Каталог битов на всю проверку — свой и пустой: настоящий data/beats.json добавил бы в меню «🎚 БИТЫ».
+    # Назад не возвращается: проверка идёт своим процессом и на этом кончается.
+    beats_dir = tempfile.TemporaryDirectory()
+    config.BEATS_FILE = pathlib.Path(beats_dir.name) / "beats.json"
 
     sent_to: list[str] = []
     real = (telegram.send_message, telegram.send_audio, _preview, state.read_jsonl,
@@ -2006,10 +2035,10 @@ def _selftest() -> None:
         assert "555" not in saved and "777" not in saved, "id человека в открытом файле"
         assert not SVED_LINK.search("https://music.yandex.ru/album/1/track/2"), "трек — не плейлист"
         intro = svedenie.INTRO
-        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU] + [intro] * 5, \
+        assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU_HEAD + MENU] + [intro] * 5, \
             "старая ссылка и /proyavka — в ПРОЯВКУ, метки sved и ad — что прислать"
         assert links == ["https://music.yandex.ru/users/x/playlists/3?utm_source=share"], links
-        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎛", "🎙", "📼", "🔔", "🪞", "🎞"], "в меню шесть разделов"
+        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎛", "🎙", "📼", "🔔", "🪞", "🎞"], "битов нет — в меню шесть разделов"
         # Кнопка «следить» под ответом ДВОЙНИКА — кнопка сервиса: подписывает watch_add,
         # второго пути к тому же списку нет.
         assert svedenie.buttons("Toxi$")[1][0]["callback_data"] == _cb("watch", "Toxi$")
@@ -2137,11 +2166,67 @@ def _selftest() -> None:
             skleyka.question, skleyka.answer, config.secret = real_q
         assert questions == [("77701", ""), ("77701", "звёзды не дошли"), ("77701", "трек не пришёл"), ("ответ", "+1")] \
             and replies[-1][0] == "Отправил.", questions
+        # Биты ПЛЁНКИ в меню (src/bity.py): есть бит — «🎚 БИТЫ» первой кнопкой и первым абзацем.
+        # Один бит — сразу файл, несколько — список, новые первыми, кнопка списка — файл; метка
+        # beat_menu — отдельно от ссылки beat. «🎚 Свести с этим битом» (s:bit:) — прежним путём.
+        beat = {"artists": ["MADK1D", "Тёмный принц", "TEWIQ"], "title": "Фары", "bpm": 156, "key": "G#m",
+                "file_id": "F1", "kind": "document", "message": 5, "name": "fary.wav", "size": 1}
+        files, mixed = [], []
+        real_bit = telegram.send_by_id, bity.callback, skleyka._count
+        telegram.send_by_id = lambda chat, kind, file_id, caption="", **kw: files.append((file_id, kw.get("buttons")))
+        # skleyka._count зовёт src.service, а проверка идёт модулем __main__ — счёт ушёл бы в настоящий файл.
+        skleyka._count = count_source
+        bity.callback = lambda chat, user, beat_id, **_: mixed.append(beat_id)
+
+        def say(text: str, n: int) -> None:
+            handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701}, "message_id": 500 + n,
+                            "date": 50000 + n * 60, "text": text}, {})
+
+        def press(data: str) -> None:
+            handle_callback({"id": "q", "data": data, "message": {"chat": {"id": 55501}, "message_id": 5},
+                             "from": {"id": 77701}}, {})
+
+        try:
+            bity.save({"1": beat})
+            say("/start", 0)
+            assert replies[-1][0] == MENU_HEAD + MENU_BEATS + MENU and replies[-1][0].index("БИТЫ") < replies[-1][0].index("СВЕДЕНИЕ")
+            assert [row[0]["text"][:1] for row in replies[-1][1]] == ["🎚", "🎛", "🎙", "📼", "🔔", "🪞", "🎞"]
+            assert replies[-1][1][0][0]["callback_data"] == f"{CALLBACK_PREFIX}bity"
+            for n, text in enumerate(("/bity", "/beats", "/биты"), 1):
+                say(text, n)
+            press(f"{CALLBACK_PREFIX}bity")
+            own = [[{"text": bity.MAKE, "callback_data": f"{bity.PREFIX}1"}]]
+            assert files == [("F1", own)] * 4, "один бит — сразу файл, без списка"
+            bity.save({"1": beat, "2": dict(beat, title="Полёт", artists=["Kizaru"], bpm=None, file_id="F2")})
+            say("/bity", 5)
+            assert replies[-1][0] == bity.LIST.format(credit=config.BEAT_CREDIT) and len(files) == 4
+            assert replies[-1][1] == [[{"text": "Полёт · Kizaru", "callback_data": f"{bity.PICK}2"}],
+                                      [{"text": "Фары · MADK1D x Тёмный принц… · 156 BPM", "callback_data": f"{bity.PICK}1"}]]
+            press(f"{bity.PICK}2")
+            assert files[-1][0] == "F2" and mixed == []
+            press(f"{bity.PREFIX}1")
+            assert mixed == ["1"] and len(files) == 5, "«Свести с этим битом» — заявка, а не ещё один файл"
+            say("/start beat_1", 6)
+            day = state.read_json(SOURCES_FILE, {})[_today()]
+            assert (day[bity.MENU_LABEL], day["beat"], day["БИТ ПЛЁНКИ: выдан"]) == (5, 1, 6), day
+            assert SOURCES[bity.MENU_LABEL] != SOURCES["beat"]
+            bity.save({})
+            say("/bity", 7)
+            assert replies[-1] == (bity.EMPTY, [[skleyka.BEAT_BUTTON]])
+            # Витрина бота знает о битах и влезает в лимиты Telegram: у setup своей самопроверки нет.
+            from . import setup
+            assert setup.BOT_COMMANDS[0][0] == "bity" and COMMANDS["bity"] == COMMANDS["beats"] == "bity"
+            assert setup.BOT_DESCRIPTION.index("БИТЫ") < setup.BOT_DESCRIPTION.index("СВЕДЕНИЕ")
+            assert setup.units(setup.BOT_DESCRIPTION) <= setup.DESCRIPTION_LIMIT, setup.units(setup.BOT_DESCRIPTION)
+            assert setup.units(setup.BOT_SHORT) <= setup.SHORT_LIMIT, setup.units(setup.BOT_SHORT)
+        finally:
+            telegram.send_by_id, bity.callback, skleyka._count = real_bit
     finally:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
         tmp.cleanup()
-    print("метка /start: считается по дню без id и сразу открывает отбор; в меню шесть разделов; "
+    print("метка /start: считается по дню без id и сразу открывает отбор; в меню шесть разделов, с битами — семь, «🎚 БИТЫ» первым; "
+          "/bity и кнопка: один бит — сразу файл, несколько — список, метка beat_menu отдельно от ссылки beat; "
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ, одноимённый альбом — кнопкой «💿 Альбом»; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал; "
           "skleyka_r<код> — метка skleyka_ref, код в приглашение; переспрос СВЕДЕНИЯ: «разбор вкуса» — прежним путём; "
