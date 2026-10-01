@@ -102,7 +102,7 @@ def _parse(stamp: str) -> datetime | None:
 
 
 def told_links() -> set[str]:
-    """Связи ОТКУДА НОГИ, о которых пост уже вышел или ждёт выхода, — их id из поля link.
+    """Связи ОТКУДА НОГИ, о которых пост уже вышел, ждёт выхода или не выйдет вовсе, — их id.
 
     Связь рассказывается один раз (владелец, 01.10.2026), поэтому вышедший и потом
     удалённый из канала пост тоже считается: его прочли. Здесь, а не в compose:
@@ -111,7 +111,10 @@ def told_links() -> set[str]:
     """
     posts = (read_json(path, {}) for folder in (config.ARCHIVE, config.QUEUE)
              for path in folder.glob("*-lineage.json"))
-    return {post["link"] for post in posts if post.get("link")}
+    # Связь, снятую владельцем (поле off в data/lineage.json — причина словами), считаем
+    # рассказанной: из базы её не убираем — она нужна клипам и разборам бота, а пост по ней не пишется.
+    shelved = (link for link in read_json(config.LINEAGE_FILE, {}).get("links", []) if link.get("off"))
+    return {post["link"] for post in posts if post.get("link")} | {link["id"] for link in shelved if link.get("id")}
 
 
 def git_commit(message: str, paths: list[Path]) -> bool:

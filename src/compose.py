@@ -1470,20 +1470,21 @@ def _selftest() -> int:
     assert [needs_track(piece) for piece in tracks.pieces({**lineage, "listen": [*lineage["listen"], {
         "artist": "Bones", "track": "HDMI", "track_request": {"message_id": 1}}]})] == [False, True, False]
     assert (saved["released_at"], saved["score"]) == (inbox[2]["released_at"], 95), saved
-    # Одна связь — один пост: вышедшая и ждущая в очереди в план не идут, пост несёт id связи,
+    # Одна связь — один пост: вышедшая, ждущая в очереди и снятая владельцем (off) в план не идут, пост несёт id связи,
     # а когда нерассказанных нет, разборов в плане нет вовсе — рубрика молчит, а не ходит по кругу.
     with tempfile.TemporaryDirectory() as tmp:
         real_paths = config.ARCHIVE, config.QUEUE, config.LINEAGE_FILE
         config.ARCHIVE, config.QUEUE, config.LINEAGE_FILE = Path(tmp) / "a", Path(tmp) / "q", Path(tmp) / "l.json"
         try:
             state.write_json(config.LINEAGE_FILE, {"links": [
-                {"id": "x", "modern": "X"}, {"id": "y", "modern": "Y"}, {"id": "z", "modern": "Z", "by": "auto"}]})
+                {"id": "x", "modern": "X"}, {"id": "y", "modern": "Y"}, {"id": "z", "modern": "Z", "by": "auto"},
+                {"id": "w", "modern": "W", "off": "снята владельцем"}]})
             state.write_json(config.ARCHIVE / "1-lineage.json", {"link": "x"})
             state.write_json(config.QUEUE / "2-lineage.json", {"link": "y"})
             untold = [(job[2], job[3]["link"]) for job in plan(40) if job[1] == "lineage"]
             assert untold == [({"modern": "Z"}, "z")], untold
             again = save_post("lineage", "Текст.", {"link": "z"})
-            assert state.read_json(again, {})["link"] == "z" and state.told_links() == {"x", "y", "z"}
+            assert state.read_json(again, {})["link"] == "z" and state.told_links() == {"w", "x", "y", "z"}
             assert not [job for job in plan(40) if job[1] == "lineage"]
         finally:
             config.ARCHIVE, config.QUEUE, config.LINEAGE_FILE = real_paths
