@@ -329,6 +329,12 @@
       "published_at": "2026-10-01T14:41:11+00:00",
       "rubric": "subtext",
       "story_id": "456239070"
+    },
+    {
+      "key": "a646beaf2b268fed",
+      "published_at": "2026-10-02T14:02:04+00:00",
+      "rubric": "poll",
+      "story_id": "456239071"
     }
   ]
 }
