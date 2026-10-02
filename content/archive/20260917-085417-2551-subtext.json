@@ -19,6 +19,13 @@
       "url": "https://www.deezer.com/track/608439842"
     }
   ],
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 226
+  },
+  "photo": "3b9774d724f384fb969b6e8bdb29f553651b042316e7226972614c3047160230",
   "preview": "",
   "release": "",
   "released_at": "",
