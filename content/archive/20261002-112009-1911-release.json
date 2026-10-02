@@ -2,6 +2,13 @@
   "artist": "JAŸ-Z",
   "cover": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/96/0c/15/960c1533-9f20-71e6-c0c4-28fc54793e91/26UM1IM21041.rgb.jpg/600x600bb.jpg",
   "created_at": "2026-10-02T11:20:09+00:00",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 230
+  },
+  "photo": "df80d7c4924c8528ad6824a4b698037002f003d00392019a05b205d201d000c2",
   "preview": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/04/22/ce/0422ceaa-bc2b-b81f-2e1c-d388be00dde7/mzaf_1970865731958290548.plus.aac.p.m4a",
   "release": "Girls, Girls, Girls",
   "released_at": "2026-10-02T07:00:00+00:00",
