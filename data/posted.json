@@ -1025,6 +1025,12 @@
       "file": "20261002-054900-9438-verdict.json",
       "published_at": "2026-10-02T07:52:39+00:00",
       "rubric": "verdict"
+    },
+    {
+      "chat": "channel",
+      "file": "20261002-055012-1260-release.json",
+      "published_at": "2026-10-02T08:54:07+00:00",
+      "rubric": "release"
     }
   ],
   "photos": [
@@ -1168,6 +1174,7 @@
     "849b1930b326627e871878298d5b0d1ec70d3b6f014e743f46f6c67686e666b6",
     "db003d046f04df46bf647e25de335c315e19bf196f294e59d6718f814b855b15",
     "3b9774d724f384fb969b6e8bdb29f553651b042316e7226972614c3047160230",
-    "b0fab0fa79ee696eb96a19766b744b214d274dc949cb49c98b4949891f953f7f"
+    "b0fab0fa79ee696eb96a19766b744b214d274dc949cb49c98b4949891f953f7f",
+    "3731b7303731b771b372936083628360a781b6909698e26ab61ab71ae61a961a"
   ]
 }
