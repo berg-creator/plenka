@@ -27,6 +27,7 @@ make.py исполняется как код, а пишет его модель,
 
     python -m src.noty --selftest          приёмы пианоролла, замер нот и запись партитуры FL и MIDI, без сети
     python -m src.noty --build ПАПКА       собрать и проверить бит из ПАПКА/make.py, без Telegram
+    python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py прошлых битов: та же форма или мелодия — отказ
     python -m src.noty --send АРХИВ        отправить собранный архив владельцу
 
 Сетка — шестнадцатые: такт = 16, доля = 4.
@@ -35,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import re
 import runpy
 import struct
 import tempfile
@@ -335,11 +337,49 @@ def shape(info: dict, tracks: dict[str, list[N]]) -> dict:
     }
 
 
+def _lead(tracks: dict[str, list[N]]) -> list[N]:
+    return sorted(n for name, notes in tracks.items() if "мелод" in name and "контр" not in name for n in flat(notes))
+
+
+def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[str, list[N]]) -> list[str]:
+    """Чем бит повторяет прошлый. Пусто — не повторяет. 02.10.2026 второй бит подряд вышел с тем же порядком
+    частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код."""
+    was = f"«{old.get('title', 'прошлый бит')}»"
+    out = [f"в паспорте нет поля {k}" for k in ("form", "melody", "mood") if not info.get(k)]
+    out += [f"{word} «{info[k]}» — как в {was}: возьми другое" for k, word in (("form", "форма"), ("melody", "приём мелодии"))
+            if info.get(k) and info[k] == old.get(k)]
+
+    def order(i):                       # «вступление 1–4, припев 5–12» → вступление, припев
+        return re.findall(r"[а-яё]+(?=\s*\d)", str(i.get("parts", "")).lower())
+
+    if order(info) and order(info) == order(old):
+        out.append(f"части идут в том же порядке, что в {was}: {', '.join(order(info))}")
+    a, b = _lead(tracks), _lead(old_tracks)
+    if len(a) > 3 and len(b) > 3:
+        def bars(notes):                # рисунок такта: места нот в нём
+            return [tuple(round(n.pos % 16, 2) for n in notes if int(n.pos // 16) == x) for x in sorted({int(n.pos // 16) for n in notes})]
+
+        def moves(notes):               # пары соседних ходов в полутонах — тональность не важна
+            step = [y.key - x.key for x, y in zip(notes, notes[1:])]
+            return set(zip(step, step[1:]))
+
+        rhythm = sum(x in set(bars(b)) for x in bars(a)) / len(bars(a))
+        same = len(moves(a) & moves(b)) / len(moves(a))
+        # ponytail: пороги сняты с одной пары («Фары» и «134»: 62% и 31–38%, у несхожих партий — до 12% и 15%);
+        # начнут браковать несхожее на слух — мерить по фразам, а не по тактам
+        if rhythm >= .5 and same >= .25:
+            out.append(f"мелодия повторяет {was}: ритм тот же в {rhythm:.0%} тактов, ходы те же на {same:.0%} — "
+                       "другой приём, другая длина фразы, другое начало")
+    return out
+
+
 def about(info: dict) -> str:
     """Записка владельцу: она же подпись к архиву."""
     return "\n".join([
         f"🎹 {info['title']}", f"{info['bpm']} BPM, {info['key']}, {info['bars']} тактов", "",
-        f"Скелет: {info['skeleton']}", f"С чего снято: {info['like']}", f"Части: {info['parts']}", "",
+        f"Скелет: {info['skeleton']}",
+        *([f"Форма: {info.get('form', '—')}; мелодия: {info.get('melody', '—')}; характер: {info.get('mood', '—')}"]
+          if info.get("form") or info.get("melody") or info.get("mood") else []), f"С чего снято: {info['like']}", f"Части: {info['parts']}", "",
         "Что сделано нотами:", *(f"• {t}" for t in info["tricks"]), "",
         "Папка fl — партитуры FL Studio: перетащи файл в пианоролл своего канала "
         "(или меню пианоролла → File → Open score). В них панорама, подстройка и слайды каждой ноты — "
@@ -350,11 +390,18 @@ def about(info: dict) -> str:
     ])
 
 
-def build(folder: Path, out: Path) -> Path:
-    """Архив бита из ПАПКА/make.py; рядом — записка .txt, она же подпись при отправке."""
+def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
+    """Архив бита из ПАПКА/make.py; рядом — записка .txt, она же подпись при отправке.
+    prev — make.py прошлых битов: повтор их формы или мелодии — тоже брак."""
     made = runpy.run_path(str(folder / "make.py"))
     info, tracks = made["INFO"], made["compose"]()
     bad = problems(info, tracks)
+    for path in prev:
+        try:
+            old = runpy.run_path(str(path))
+            bad += echoes(info, tracks, old["INFO"], old["compose"]())
+        except Exception as e:          # прошлый бит писан под старый noty — не повод остаться без сегодняшнего
+            print(f"{path}: не прочитан ({e}) — сверка без него")
     if bad:
         raise SystemExit("Бит не годен:\n" + "\n".join(bad))
     root = out / folder.name
@@ -451,6 +498,18 @@ def selftest() -> None:
         names = zipfile.ZipFile(archive).namelist()
         assert "beat/fl/02 хэт.fsc" in names and "beat/midi/01 808.mid" in names and "beat/о бите.txt" in names
         assert "бит A x B — Тест, 140 Fm" in archive.with_suffix(".txt").read_text("utf-8")
+        try:                            # собранный бит против самого себя: та же форма — отказ
+            build(tmp / "beat", tmp / "out", prev=(tmp / "beat" / "make.py",))
+            raise AssertionError("повтор прошлого бита должен браковаться")
+        except SystemExit as e:
+            assert "в паспорте нет поля form" in str(e) and "в том же порядке" not in str(e), e   # parts='x' — частей не названо
+    tune = [N(b * 16 + p, 2, k) for b in range(4) for p, k in ((0, 67), (6, 63), (8, 65), (12, 67))]
+    song = dict(title="A — Б", form="песня", melody="линия", mood="обычный", parts="вступление 1–4, припев 5–12, конец 13–16")
+    rep = "\n".join(echoes(song, {"мелодия": tune}, song, {"мелодия": [n._replace(key=n.key + 6) for n in tune]}))
+    assert all(w in rep for w in ("форма «песня»", "приём мелодии «линия»", "в том же порядке", "мелодия повторяет")), rep
+    other = song | dict(form="блоки по 16", melody="зов — ответ", parts="вступление 1–8, блок 9–24")
+    assert not echoes(other, {"мелодия": [N(b * 16 + p, 1, k) for b in range(4) for p, k in ((2, 60), (3, 72), (10, 61))]},
+                      song, {"мелодия": tune}), "другая форма и другая мелодия — не повтор"
     info = dict(title="t", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=1, like="x", parts="x", tricks=["x"], skeleton="x",
                 tonal=["мелодия"])
     plain = {"мелодия": [N(0, 4, 66)], "хэт": [N(i, 1) for i in range(16)], "бочка": [N(0, 1), N(20, 1)]}
@@ -460,20 +519,22 @@ def selftest() -> None:
     assert "синтезатор" not in "\n".join(problems(info | {"tonal": ["808"]}, {"808": glide(0, 4, 29, 41)}))
     doubled = {"808": [N(i * 4, 3, 29) for i in range(4)], "бочка": [N(i * 4, 1) for i in range(4)]}
     assert "под каждой нотой 808" in "\n".join(problems(info | {"tonal": ["808"]}, doubled))
-    print("ноты: приёмы, партитура FL, MIDI и отбраковка — в порядке")
+    print("ноты: приёмы, партитура FL, MIDI, отбраковка и сверка с прошлым битом — в порядке")
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Ноты для бита: партитуры FL Studio и MIDI")
     p.add_argument("--selftest", action="store_true", help="проверить приёмы и запись файлов, без сети")
     p.add_argument("--build", metavar="ПАПКА", type=Path, help="собрать архив из ПАПКА/make.py")
+    p.add_argument("--prev", metavar="ФАЙЛ", type=Path, nargs="+", default=(),
+                   help="make.py прошлых битов: та же форма, приём или сама мелодия — бит не годен")
     p.add_argument("--out", metavar="КУДА", type=Path, help="куда положить архив (по умолчанию — временная папка)")
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
     a = p.parse_args()
     if a.selftest:
         selftest()
     elif a.build:
-        build(a.build, a.out or Path(tempfile.mkdtemp(prefix="noty-")))
+        build(a.build, a.out or Path(tempfile.mkdtemp(prefix="noty-")), tuple(a.prev))
     elif a.send:
         send(a.send)
     else:

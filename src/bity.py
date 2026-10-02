@@ -27,13 +27,16 @@ BEAT_CREDIT, и кнопкой «🎚 Свести с этим битом» от
 в канал — туда идут читать, а бит и сведение живут в боте.
 
 Ролик собирает отдельный процесс (--render), как сведение (--job): качать бит
-и кодировать видео в цикле опроса значит держать кнопки всех. Кадр — двое
-спинами к зрителю против света фар, имена артистов принтом на спинах (cover):
-в выдаче type beat'ов ищут артиста, а чужое лицо в превью — жалоба
-правообладателя. Кадр живой: наезд дышит, туман плывёт, свет бьётся в такт —
-застывшую картинку YouTube показывает хуже. Отвергнута панель кассетника
-с названием бита (владелец, 01.10.2026): в выдаче она терялась рядом с лицами
-артистов у лидеров. Тот же кадр 1280×720 уходит владельцу файлом — превью
+и кодировать видео в цикле опроса значит держать кнопки всех. Кадр — плёночный
+портрет (cover, владелец 02.10.2026): живое фото 4:3 по центру чёрного кадра
+и одно слово названия, без имён артистов и плашек — так выглядят соседи
+по выдаче, а имена и «free type beat» стоят в названии ролика. Фото — запас
+с Pexels (config.BEAT_PHOTOS), каждому биту своё; лицо артиста в превью —
+жалоба правообладателя, сгенерированных лиц в проекте нет вовсе. Отвергнуты:
+панель кассетника с названием (01.10.2026: терялась рядом с лицами у лидеров)
+и двое спинами против света фар с именами на спинах (первый ролик; остались
+запасным кадром, когда фото кончились). Кадр живой: наезд дышит, туман плывёт,
+свет бьётся в такт — застывшую картинку YouTube показывает хуже. Тот же кадр 1280×720 уходит владельцу файлом — превью
 для YouTube. Служебный вход бота для битов больше 20 МБ
 открывает и сведение, а ключ, открытый дважды, Telegram гасит, поэтому ролик
 и сведение не идут одновременно (tick, skleyka.tick).
@@ -47,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import io
 import math
 import random
 import re
@@ -59,7 +63,8 @@ from collections import Counter
 from datetime import timedelta
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+import requests
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from . import clips, collect, config, make_cover, skleyka, state, stories, telegram
 
@@ -93,7 +98,11 @@ THIS_MONTH, DEMAND_RESULTS, DEMAND_MIN = "EgIIBA%3D%3D", 20, 3
 # Поле «Теги» на YouTube — до 500 знаков на все.
 TAGS_LIMIT = 500
 WIDTH, HEIGHT = 1920, 1080
-# Кадр config.BEAT_BACK: где у спин середина и на какой линии стоит имя в одну строку, сколько спина
+# Значок: фото 4:3 во всю высоту по центру чёрного кадра, слово — Playfair Display, вес 500, буквы
+# вплотную, не шире WORD_WIDTH от фото; кегль от WORD_SIZE вниз. Снято с образца, который выбрал
+# владелец 02.10.2026. Невышедших фото меньше PHOTOS_LOW — строка владельцу под превью.
+PHOTO_BOX, WORD_FONT, WORD_WIDTH, WORD_SIZE, PHOTOS_LOW = (1440, HEIGHT), stories.FONTS / "Playfair.ttf", 0.74, (420, 120), 5
+# Запасной кадр config.BEAT_BACK: где у спин середина и на какой линии стоит имя в одну строку, сколько спина
 # вмещает в ширину. Снято с образца, который выбрал владелец 01.10.2026.
 BACKS = ((620, 640), (1365, 672))
 BACK_WIDTH = 520
@@ -134,6 +143,7 @@ VIDEO = "🎬 Ролик к биту №{id} «{title}» — {minutes}, {mb:.0f}
 VIDEO_BIG = "🎬 Ролик к биту №{id} вышел {mb:.0f} МБ — Telegram бота принимает до 50. Собери его сам: python -m src.bity --video."
 # Документом, а не фото: фото Telegram пережимает, а превью идёт на YouTube как есть.
 PREVIEW = "🖼 Превью к биту №{id} для YouTube, 1280×720 — файлом, чтобы Telegram его не пережал."
+PHOTOS_FEW = "\n📷 Фото для значков в запасе: {left}. Кончатся — значок вернётся к спинам; скажи Claude добрать запас."
 VIDEO_FAILED = "🎬 Ролик к биту №{id} «{title}» не собрался — причина в журнале дежурства."
 
 
@@ -287,6 +297,9 @@ def add(message: dict) -> None:
     beat_id = str(max(map(int, catalog), default=0) + 1)
     catalog[beat_id] = dict(beat, file_id=item["f"], kind="audio" if message.get("audio") else "document",
                             message=item["m"], name=item["n"], size=item["s"], at=state.iso())
+    # Фото значка — сразу за битом: ролик собирает другой процесс, а каталог пишет только дежурство.
+    if shot := photo(beat):
+        catalog[beat_id]["photo"] = shot["id"]
     save(catalog)
     hot = rising(state.read_jsonl(config.INBOX_FILE), collect.load_artists(), state.now())
     telegram.send_message(chat, texts(beat_id, catalog[beat_id], hot))
@@ -450,12 +463,64 @@ def _print(draw: ImageDraw.ImageDraw, name: str, x: float, y: float) -> None:
         draw.text((x, base), line, font=face, fill=WHITE, anchor="ms")
 
 
+def _stock() -> tuple[list[dict], set]:
+    """Запас фото и те, что уже отданы битам."""
+    return state.read_json(config.BEAT_PHOTOS, []), {beat.get("photo") for beat in load().values()}
+
+
+def photo(beat: dict) -> dict | None:
+    """Фото значка: записанное за битом, иначе первое в запасе, не отданное другому. Запас вышел — None."""
+    stock, taken = _stock()
+    return next((shot for shot in stock if shot["id"] == beat.get("photo")), None) \
+        or next((shot for shot in stock if shot["id"] not in taken), None)
+
+
+def _picture(url: str) -> Image.Image:
+    response = requests.get(url, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
+    response.raise_for_status()
+    return Image.open(io.BytesIO(response.content)).convert("RGB")
+
+
 def cover(beat: dict) -> Image.Image:
-    """Кадр ролика и превью: двое спинами к зрителю против света фар (config.BEAT_BACK), имена артистов —
-    принтом на спинах, внизу плашка «FREE TYPE BEAT». Спины, а не лица: чужое лицо в превью — жалоба
-    правообладателя, а сгенерированных лиц в проекте нет вовсе. Названия бита, темпа и условия на кадре
-    нет: в выдаче превью читают за секунду, и ищут там артиста, а не название. Имена — без «ё»,
-    как в youtube_title."""
+    return portrait(beat) or _backs(beat)
+
+
+def portrait(beat: dict) -> Image.Image | None:
+    """Кадр ролика и превью — плёночный портрет: фото запаса 4:3 по центру чёрного кадра, обрезка вокруг
+    focus, и одно слово названия на линии y (доля высоты: 0.93 — внизу, 0.34 — наверху, где низ занят лицом).
+    Фото идёт как есть, без обработки. Имён артистов, темпа и плашек нет: их несёт название ролика.
+    Запас вышел или фото не скачалось — None, и кадром идут прежние спины (cover): ролик важнее вида."""
+    shot = photo(beat)
+    if not shot:
+        return None
+    try:
+        picture = _picture(shot["url"])
+    except (OSError, requests.RequestException) as error:
+        print(f"  значок: фото {shot['id']} не скачалось ({error}) — спины")
+        return None
+    img = Image.new("RGB", (WIDTH, HEIGHT), "black")
+    img.paste(ImageOps.fit(picture, PHOTO_BOX, centering=(0.5, shot["focus"])), ((WIDTH - PHOTO_BOX[0]) // 2, 0))
+    # ponytail: слово одно — из названия в несколько слов идёт самое длинное; захочется другое — поле в подписи бита.
+    word = max(beat["title"].split(), key=len).upper()
+    size = WORD_SIZE[0]
+    while True:
+        face = ImageFont.truetype(str(WORD_FONT), size)
+        face.set_variation_by_axes([500])
+        gap = -size * 0.06
+        width = sum(face.getlength(char) + gap for char in word) - gap
+        if width <= PHOTO_BOX[0] * WORD_WIDTH or size <= WORD_SIZE[1]:
+            break
+        size -= 10
+    draw, x = ImageDraw.Draw(img), (WIDTH - width) / 2
+    for char in word:
+        draw.text((x, HEIGHT * shot["y"]), char, font=face, fill="white", anchor="ls")
+        x += face.getlength(char) + gap
+    return img
+
+
+def _backs(beat: dict) -> Image.Image:
+    """Запасной кадр: двое спинами к зрителю против света фар (config.BEAT_BACK), имена артистов —
+    принтом на спинах, внизу плашка «FREE TYPE BEAT». Имена — без «ё», как в youtube_title."""
     img = Image.open(config.BEAT_BACK).convert("RGB")
     draw = ImageDraw.Draw(img)
     names = [name.upper().replace("Ё", "Е") for name in beat["artists"]]
@@ -495,12 +560,13 @@ def maxrate(seconds: float) -> int:
     return int(min(1800, max(200, VIDEO_BUDGET * 8 / 1000 / seconds - AUDIO_KBPS)))
 
 
-def ffmpeg_args(frame: Path, mist: Path, audio: Path, dest: Path, seconds: float, bpm: int | None) -> list[str]:
+def ffmpeg_args(frame: Path, mist: Path | None, audio: Path, dest: Path, seconds: float, bpm: int | None) -> list[str]:
     """Команда ролика. Текст уже в кадре и движется вместе с ним: наезд дышит на ±4 % вокруг точки
     чуть ниже середины — плашка у нижнего края из кадра не уходит. Наезд — perspective, а не zoompan:
     тот режет окно по целым пикселям, и на таком медленном ходу край букв дёргается даже по кадру,
     увеличенному вдвое (замер 01.10.2026: скачки до 0,4 пикселя между кадрами при ходе 0,1), а perspective
-    считает доли пикселя (0,07). Туман — поверх, сложением «экран» по яркости; свет пульсирует раз
+    считает доли пикселя (0,07). Туман — поверх, сложением «экран» по яркости, и только спинам (mist):
+    на плёночном портрете он делает чёрное серым и съедает темноту снимка. Свет пульсирует раз
     в такт (bpm / 4 долей в минуту), темпа нет — без пульса.
 
     Бесконечных источников здесь нет вовсе: кадр и туман — по одной картинке, длину им задаёт счёт
@@ -513,12 +579,13 @@ def ffmpeg_args(frame: Path, mist: Path, audio: Path, dest: Path, seconds: float
     pulse = f",eq=brightness='0.035*sin(2*PI*{bpm / 240:.4f}*t)':eval=frame" if bpm else ""
     graph = (f"[0:v]format=yuv420p,loop=loop={frames}:size=1,"
              f"perspective=x0='{left}':y0='{top}':x1='{left}+W/{z}':y1='{top}':x2='{left}':y2='{top}+H/{z}'"
-             f":x3='{left}+W/{z}':y3='{top}+H/{z}':sense=source:eval=frame:interpolation=cubic{pulse}[bg];"
-             f"[1:v]format=yuv420p,loop=loop={frames}:size=1,scroll=horizontal={FOG_SPEED / FPS / WIDTH:.6f}[fog];"
-             f"[bg][fog]blend=c0_mode=screen[v]")
+             f":x3='{left}+W/{z}':y3='{top}+H/{z}':sense=source:eval=frame:interpolation=cubic{pulse}")
+    if mist:
+        graph += (f"[bg];[1:v]format=yuv420p,loop=loop={frames}:size=1,scroll=horizontal={FOG_SPEED / FPS / WIDTH:.6f}[fog];"
+                  f"[bg][fog]blend=c0_mode=screen")
     return [clips.ffmpeg(), "-y", "-hide_banner", "-framerate", str(FPS), "-i", str(frame),
-            "-framerate", str(FPS), "-i", str(mist), "-i", str(audio), "-filter_complex", graph,
-            "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-preset", PRESET, "-crf", "23",
+            *(["-framerate", str(FPS), "-i", str(mist)] if mist else []), "-i", str(audio), "-filter_complex", graph + "[v]",
+            "-map", "[v]", "-map", f"{2 if mist else 1}:a", "-c:v", "libx264", "-preset", PRESET, "-crf", "23",
             "-maxrate", f"{rate}k", "-bufsize", f"{rate * 2}k", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k", "-movflags", "+faststart", "-t", f"{seconds:.3f}", str(dest)]
 
@@ -531,12 +598,17 @@ def video(audio: Path, beat: dict, folder: Path) -> Path:
         raise clips.ClipError("длина бита не читается")
     folder.mkdir(parents=True, exist_ok=True)
     frame, mist, dest = folder / "cover.png", folder / "fog.png", folder / "video.mp4"
-    img = cover(beat)
+    img = portrait(beat)
+    if img:
+        mist = None
+    else:
+        img = _backs(beat)
+        Image.eval(fog(), lambda value: value * FOG_LIGHT // 255).save(mist)
     img.save(frame)
     img.resize(PREVIEW_SIZE, Image.LANCZOS).save(folder / PREVIEW_NAME, quality=92)
-    Image.eval(fog(), lambda value: value * FOG_LIGHT // 255).save(mist)
     clips.run(ffmpeg_args(frame, mist, audio, dest, seconds, beat.get("bpm")))
-    mist.unlink()
+    if mist:
+        mist.unlink()
     return dest
 
 
@@ -560,7 +632,10 @@ def render(beat_id: str) -> int:
             telegram.send_video_file(admin, clip, VIDEO.format(id=beat_id, title=html.escape(beat["title"]), mb=mb,
                                                                minutes=f"{seconds // 60}:{seconds % 60:02d}"),
                                      seconds=seconds, width=WIDTH, height=HEIGHT)
-        telegram.send_document(admin, clip.with_name(PREVIEW_NAME), PREVIEW.format(id=beat_id))
+        stock, taken = _stock()
+        left = sum(shot["id"] not in taken for shot in stock)
+        telegram.send_document(admin, clip.with_name(PREVIEW_NAME), PREVIEW.format(id=beat_id)
+                               + (PHOTOS_FEW.format(left=left) if left < PHOTOS_LOW else ""))
     return 0
 
 
@@ -580,7 +655,12 @@ def _selftest() -> None:
         return {"message_id": message_id, "chat": {"id": int(sender), "type": "private"}, "from": {"id": int(sender)},
                 "caption": caption, **({"audio": found} if audio else {"document": dict(found, mime_type="audio/wav")})}
 
+    asked: list[str] = []
+    state.write_json(tmp / "photos.json", [{"id": 11, "url": "https://photo/11", "focus": 0.42, "y": 0.93},
+                                           {"id": 22, "url": "https://photo/22", "focus": 0.5, "y": 0.34}])
     with mock.patch.object(config, "BEATS_FILE", tmp / "beats.json"), \
+            mock.patch.object(config, "BEAT_PHOTOS", tmp / "photos.json"), \
+            mock.patch.dict(globals(), {"_picture": lambda url: asked.append(url) or Image.new("RGB", (1600, 1200), (90, 60, 40))}), \
             mock.patch.object(config, "SKLEYKA_FILE", tmp / "skleyka.json"), \
             mock.patch.object(config, "INBOX_FILE", tmp / "inbox.jsonl"), \
             mock.patch.object(config, "secret", lambda name, required=True: owner if name == "TELEGRAM_ADMIN_ID" else ""), \
@@ -726,8 +806,22 @@ def _selftest() -> None:
         assert [v["link"] for v in found] == [link("1")], "YouTube молчит — свои биты всё равно есть"
         assert f'href="{link("1")}"' in skleyka.beats_text("Kizaru", found)
 
-        # Обложка: 1920×1080 при любом числе артистов; спин две — третий на кадр не идёт.
-        frames = {n: cover(dict(beat, artists=["Big Baby Tape", "Тёмный Принц", "Kizaru"][:n])) for n in (1, 2, 3)}
+        # Значок: фото запаса 4:3 по центру чёрного кадра и белое слово названия; фото записано за битом
+        # при приёме, следующему биту — следующее; сеть не трогается.
+        assert load()["1"]["photo"] == 11 and photo({"title": "Новый"})["id"] == 22
+        frame = cover(load()["1"])
+        assert frame.size == (WIDTH, HEIGHT) and frame.getpixel((100, 540)) == (0, 0, 0)
+        assert frame.getpixel((960, 300)) == (90, 60, 40) and asked == ["https://photo/11"], asked
+        assert any(frame.getpixel((x, 960)) == (255, 255, 255) for x in range(240, 1680)), "слово названия внизу"
+        upper = cover({"title": "Тёмная ночь", "artists": ["Kizaru"]})
+        assert asked[-1] == "https://photo/22" and upper.getpixel((960, 700)) == (90, 60, 40)
+        assert any(upper.getpixel((x, 300)) == (255, 255, 255) for x in range(240, 1680)), "y 0.34 — слово наверху"
+        # Фото не скачалось или запас вышел — спины: 1920×1080 при любом числе артистов, третий на кадр не идёт.
+        with mock.patch.dict(globals(), {"_picture": lambda url: (_ for _ in ()).throw(OSError("нет сети"))}):
+            assert cover(beat).tobytes() == _backs(beat).tobytes() != frame.tobytes()
+        with mock.patch.object(config, "BEAT_PHOTOS", tmp / "none.json"):
+            assert photo({"title": "Новый"}) is None and cover({"title": "Ночь", "artists": ["Kizaru", "Toxi$"]}).size == (WIDTH, HEIGHT)
+        frames = {n: _backs(dict(beat, artists=["Big Baby Tape", "Тёмный Принц", "Kizaru"][:n])) for n in (1, 2, 3)}
         assert all(img.size == (WIDTH, HEIGHT) for img in frames.values())
         assert frames[3].tobytes() == frames[2].tobytes() != frames[1].tobytes()
         # Команда ролика: бесконечных входов нет, а появится -loop — своя -t до его -i; -t и перед выходом.
@@ -737,6 +831,9 @@ def _selftest() -> None:
         # Свет бьётся раз в такт: 156 BPM — 0,65 Гц; темпа нет — пульса нет.
         assert "eq=brightness='0.035*sin(2*PI*0.6500*t)'" in " ".join(args)
         assert "eq=" not in " ".join(ffmpeg_args(Path("c.png"), Path("f.png"), Path("b.wav"), Path("v.mp4"), 300.0, None))
+        # Портрету туман не идёт: входов два, звук — второй; спинам — три и сложение «экран».
+        clean = ffmpeg_args(Path("c.png"), None, Path("b.wav"), Path("v.mp4"), 300.0, 156)
+        assert "blend" not in " ".join(clean) and clean.count("-i") == 2 and "1:a" in clean and "blend" in " ".join(args)
         # Битрейт: короткому биту 1800, длинному — сколько влезает; с буфером кодека ролик меньше 50 МБ.
         assert maxrate(159) == 1800 > maxrate(300) > maxrate(900) >= 200
         assert all((maxrate(t) + AUDIO_KBPS) * 125 * t + maxrate(t) * 250 < telegram.MAX_UPLOAD for t in (159, 300, 600, 900))
@@ -772,7 +869,7 @@ def _selftest() -> None:
     print("bity: подпись и маршрут бита, каталог и тексты для YouTube, описание без ссылки, на подъёме, "
           "ссылка beat_ по file_id, «🎚 БИТЫ»: один бит — сразу файл, несколько — список, метка меню, "
           "кнопка — заявка с битом, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, счёт по номеру бита, "
-          "обложка на спинах, живой ролик в 50 МБ и превью, спрос по медиане без «ё» — ок")
+          "значок — плёночный портрет со словом названия, без фото — спины, живой ролик в 50 МБ и превью, спрос по медиане без «ё» — ок")
 
 
 def main() -> int:
