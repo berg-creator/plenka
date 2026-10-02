@@ -1,0 +1,37 @@
+{
+  "artist": "",
+  "cover": "https://cdn4.telesco.pe/file/PqkqQsFX2sR8cv0dpJRyPnx3sjWbjcbrgz1A9QO13bnaJLaAo_cL2M4u3Fzbbb5d4pKP-wUrHw8sOAy-tA8Dpccvy7yREc2rIamL6ZuJcWKCZ-y0mqYs2xsCPhcesVByNYi177y7XP1OMq8EJxRBe2ZPZguag4vdVifPwEfyCJ6SDfgyrPDwb9jceDz2QFtwkJC28Jb118sGvczEpcw8X4k0352Q-DixmraZwan7PZEhlbXG2hkLQKz16qZKIGwBvIc03yqwzY3RKAmNO4OG1ZRwazf7wkpyl0xj3oaiWei3t4cbjKviXsJoSRZt4ZkNcMR0E5KUAE08kWOr1T2B9g.jpg",
+  "created_at": "2026-10-02T11:18:27+00:00",
+  "links": {
+    "Брутто": 13980161
+  },
+  "listen": [
+    {
+      "artist": "Брутто",
+      "seconds": 168,
+      "track": "Action",
+      "track_request": {
+        "message_id": 3442,
+        "sent_at": "2026-10-02T11:20:14+00:00",
+        "youtube": "https://www.youtube.com/watch?v=iKWwxaV-4AE"
+      },
+      "url": "https://www.deezer.com/album/193442422"
+    }
+  ],
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 229
+  },
+  "photo": "e6d9a6d92cdba69ba633187111d835b872dd3f0d131f731b271b9718a70cc7a6",
+  "preview": "",
+  "release": "",
+  "released_at": "2026-10-01T12:15:09+00:00",
+  "rubric": "news",
+  "score": 90,
+  "seconds": 0,
+  "source_url": "https://t.me/superslowflow/30410",
+  "text": "<b>БРУТТО РАССКАЗАЛ, КАК СОБИРАЛСЯ «ГАДДЕМ»</b>\n\nБрутто пришёл на стрим к дизайнеру Gex и объяснил, как устроена его сольная трилогия. Первая часть далась тяжелее всего — её артист собирал без оглядки на прошлый опыт.\n\n<blockquote>Я делал что-то свое, находясь в чудовищном творческом кризисе, где искренне считаешь себя куском дерьма.</blockquote>\n\nКогда кризис затягивается на три альбома, это уже стабильность.",
+  "track": ""
+}
