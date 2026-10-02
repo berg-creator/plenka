@@ -314,6 +314,14 @@ def main() -> int:
         return _selftest()
     if args.install:
         return install()
+    if not args.dry_run:
+        # Тот же круг собирает папку «00 - Сегодня» со звуками утреннего бита (noty.gather): второго демона
+        # ради неё не заводим. До .env — ключи ей не нужны; её сбой трекам не мешает.
+        try:
+            from . import noty
+            print(f"  ♪ {noty.gather()}")
+        except Exception as exc:  # noqa: BLE001
+            log.error("Папка «Сегодня» не собрана: %s", exc)
     config.load_dotenv()
     return run(args.dry_run)
 

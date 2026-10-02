@@ -25,21 +25,39 @@ make.py исполняется как код, а пишет его модель,
 и отправка разведены: beats.yml собирает архив шагом без секретов, токен бота
 видит только готовый архив.
 
+Звуки и пресеты к нотам (владелец, 02.10.2026: «давать помимо миди сами пресеты и звуки
+из моих библиотек»). Паспорт называет звук каждой партии полем sounds — путём внутри
+библиотеки владельца. Сами файлы в репозиторий и в архив Telegram не идут: наборы чужие
+и платные, а нужны только за Маком, где уже лежат. В репозитории — список имён
+data/beat_sounds.json (сборка отказывает звуку, которого в нём нет), а помощник на Маке
+(src/tracks.py, тот же круг раз в десять минут) копирует названное в папку «00 - Сегодня»
+браузера FL и в такую же папку пресетов Serum. make.py на Маке исполняется только
+в песочнице macOS — без сети, без записи мимо временной папки, без подпроцессов и без
+чтения .env: рядом лежит ключ входа в Telegram владельца. Отвергнуто: исполнять как есть
+(код пишет модель, читавшая сеть) и тянуть готовые партитуры из Actions (нужен второй вход).
+
     python -m src.noty --selftest          приёмы пианоролла, замер нот и запись партитуры FL и MIDI, без сети
     python -m src.noty --build ПАПКА       собрать и проверить бит из ПАПКА/make.py, без Telegram
     python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py прошлых битов: та же форма или мелодия — отказ
     python -m src.noty --send АРХИВ        отправить собранный архив владельцу
+    python -m src.noty --sounds            переписать data/beat_sounds.json: имена звуков и пресетов библиотеки (только Мак)
+    python -m src.noty --gather            папка «00 - Сегодня»: ноты свежей ветки битов, её звуки и пресеты (только Мак)
 
 Сетка — шестнадцатые: такт = 16, доля = 4.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import re
 import runpy
+import shutil
 import struct
+import subprocess
+import sys
 import tempfile
+import unicodedata
 import zipfile
 from pathlib import Path
 from typing import NamedTuple
@@ -47,11 +65,20 @@ from typing import NamedTuple
 TICK = 24                 # тиков FL в шестнадцатой: PPQ 96, как в проектах владельца
 PPQ, MIDI_TICK = 480, 120
 # Черновик «всё вместе» играет любой плеер: тембр General MIDI — по слову в имени партии
-GM_TONAL = {"аккорд": 89, "гитар": 25, "мелод": 10, "808": 38, "бас": 38, "колокол": 14, "струн": 48, "флейт": 73}
+GM_TONAL = {"аккорд": 89, "гитар": 25, "мелод": 10, "808": 38, "бас": 38, "колокол": 14, "струн": 48, "флейт": 73, "медь": 61}
 GM_DRUM = {"бочка": 36, "клэп": 39, "снейр": 38, "открыт": 46, "хэт": 42, "римшот": 37, "перк": 75, "крэш": 49}
 
 
 SAMPLED = ("808", "бас")    # партии с высотой, которые владелец играет сэмплером, а не синтезатором
+# Неожиданный ход (владелец, 02.10.2026: «удивлять слушателей»): один на бит, на стыке частей — prompts/beats.md
+TWISTS = ("смена бита", "ложный вход", "половинный темп", "сдвиг вверх", "чужой тембр", "задом наперёд")
+# Библиотека владельца на Маке. Путь звука в паспорте — «KITS/…» или «Serum/…»
+LIBRARY = {"KITS": Path.home() / "Documents" / "Image-Line" / "FL Studio" / "KITS",
+           "Serum": Path("/Library/Audio/Presets/Xfer Records/Serum Presets/Presets")}
+# В список идёт то, что можно ставить в бит на раздачу. Оркестровых сэмплов Lex Luger (KITS/01) в нём нет:
+# набор взят с archive.org без указанной лицензии — сборка откажет им, как любому неназванному звуку.
+LISTED = (("KITS/09 - Scene 2026 Kit", "**/*.wav"), ("KITS/10 - Кино Kit", "**/*.wav"), ("Serum", "**/*.fxp"))
+TODAY = "00 - Сегодня"      # папка копий на сегодня — в KITS и в User пресетов Serum; чистится только она
 
 
 class N(NamedTuple):
@@ -167,6 +194,11 @@ def mute(notes: list[N], start: float, end: float) -> list[N]:
             continue
         out.append(n._replace(ln=start - n.pos) if n.pos < start < n.pos + n.ln else n)
     return out
+
+
+def reverse(notes: list[N], start: float, end: float) -> list[N]:
+    """Фраза задом наперёд: ноты отрезка зеркалом по времени — последняя звучит первой, длины те же."""
+    return sorted(n._replace(pos=start + end - n.pos - n.ln) for n in notes if start <= n.pos < end)
 
 
 def flat(notes: list[N]) -> list[N]:
@@ -295,6 +327,11 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                  if any(n.pan or n.fine or n.slide or n.ln < .5 for n in notes) or len({n.vel for n in notes}) > 3)
     if tricky < 3:
         out.append(f"саунд-дизайн нотами только в {tricky} партиях: нужен хотя бы в трёх")
+    if info.get("sounds"):              # звук назван — он должен быть в списке библиотеки: иначе Маку нечего копировать
+        listed = known()
+        out += [f"{part}: звука «{n}» нет в списке data/beat_sounds.json"
+                for part, names in info["sounds"].items() for n in _names(names) if _nfc(n) not in listed]
+        out += [f"{name}: партии не назван звук в sounds" for name in tracks if name not in info["sounds"]]
     return out[:20]
 
 
@@ -345,8 +382,11 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
     """Чем бит повторяет прошлый. Пусто — не повторяет. 02.10.2026 второй бит подряд вышел с тем же порядком
     частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код."""
     was = f"«{old.get('title', 'прошлый бит')}»"
-    out = [f"в паспорте нет поля {k}" for k in ("form", "melody", "mood") if not info.get(k)]
-    out += [f"{word} «{info[k]}» — как в {was}: возьми другое" for k, word in (("form", "форма"), ("melody", "приём мелодии"))
+    out = [f"в паспорте нет поля {k}" for k in ("form", "melody", "mood", "twist", "sounds") if not info.get(k)]
+    if info.get("twist") and info["twist"] not in TWISTS:
+        out.append(f"неожиданный ход «{info['twist']}» — не из списка: {', '.join(TWISTS)}")
+    out += [f"{word} «{info[k]}» — как в {was}: возьми другое"
+            for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"))
             if info.get(k) and info[k] == old.get(k)]
 
     def order(i):                       # «вступление 1–4, припев 5–12» → вступление, припев
@@ -378,9 +418,13 @@ def about(info: dict) -> str:
     return "\n".join([
         f"🎹 {info['title']}", f"{info['bpm']} BPM, {info['key']}, {info['bars']} тактов", "",
         f"Скелет: {info['skeleton']}",
-        *([f"Форма: {info.get('form', '—')}; мелодия: {info.get('melody', '—')}; характер: {info.get('mood', '—')}"]
+        *([f"Форма: {info.get('form', '—')}; мелодия: {info.get('melody', '—')}; характер: {info.get('mood', '—')}"
+           + (f"; неожиданный ход: {info['twist']}" if info.get("twist") else "")]
           if info.get("form") or info.get("melody") or info.get("mood") else []), f"С чего снято: {info['like']}", f"Части: {info['parts']}", "",
         "Что сделано нотами:", *(f"• {t}" for t in info["tricks"]), "",
+        *(["Звуки и пресеты — в папке «00 - Сегодня» в браузере FL и в меню Serum → User (нужно Rescan); "
+           "их кладёт Мак, когда не спит:",
+           *(f"• {part} — {n}" for part, names in info["sounds"].items() for n in _names(names)), ""] if info.get("sounds") else []),
         "Папка fl — партитуры FL Studio: перетащи файл в пианоролл своего канала "
         "(или меню пианоролла → File → Open score). В них панорама, подстройка и слайды каждой ноты — "
         "они работают в сэмплере (барабаны, 808), синтезатору идут только ноты и сила.",
@@ -433,8 +477,124 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
         for f in sorted(root.rglob("*")):
             z.write(f, f.relative_to(out))
     archive.with_suffix(".txt").write_text(about(info), encoding="utf-8")
+    archive.with_suffix(".sounds.json").write_text(json.dumps(info.get("sounds") or {}, ensure_ascii=False), encoding="utf-8")
     print(f"{info['bpm']} BPM, {info['bars']} тактов, {info['bars'] * 240 / info['bpm']:.0f} с → {archive}")
     return archive
+
+
+def _nfc(name: str) -> str:
+    """Имена с диска Мака бывают разложенными («й» двумя знаками), автор пишет слитно — сравниваем слитно."""
+    return unicodedata.normalize("NFC", name)
+
+
+def _names(names) -> list[str]:
+    return [names] if isinstance(names, str) else [str(n) for n in names]
+
+
+def known() -> set[str]:
+    """Звуки и пресеты, которые можно назвать в паспорте: список имён из репозитория."""
+    from . import config
+    return set(json.loads(config.BEAT_SOUNDS.read_text("utf-8"))["sounds"]) if config.BEAT_SOUNDS.exists() else set()
+
+
+def library() -> list[str]:
+    """Имена звуков и пресетов библиотеки владельца. Только обход имён: чтение файла в KITS скачало бы
+    его из iCloud — две трети библиотеки там заглушки."""
+    out = set()
+    for base, pattern in LISTED:
+        key, _, sub = base.partition("/")
+        root = LIBRARY[key] / sub
+        out |= {_nfc(f"{base}/{f.relative_to(root).as_posix()}") for f in root.glob(pattern) if TODAY not in f.parts}
+    return sorted(out)
+
+
+def lay(built: Path | None, sounds: dict, kits: Path, serum: Path,
+        roots: dict[str, Path] | None = None, listed: set[str] | None = None) -> list[str]:
+    """Папки «Сегодня»: партитуры и записка собранного бита и копии названных звуков — сэмплы в kits,
+    пресеты в serum, имя партии впереди. Прошлые файлы обеих папок убираются: там только копии.
+    Оригиналы открываются лишь на чтение. sounds пришёл из make.py — это данные, а не доверенный путь:
+    копируется только то, что есть в списке. Возвращает, что не легло, — оно же дописано в записку."""
+    roots, listed, missed = roots or LIBRARY, known() if listed is None else listed, []
+    for folder in (kits, serum):
+        assert folder.name == TODAY, f"{folder}: чистится только папка «{TODAY}»"
+        folder.mkdir(parents=True, exist_ok=True)
+        for old in folder.iterdir():
+            if old.is_file() or old.is_symlink():
+                old.unlink()
+    for f in sorted((built / "fl").glob("*.fsc")) if built else []:
+        shutil.copyfile(f, kits / f.name)
+    for part, names in (sounds.items() if isinstance(sounds, dict) else []):
+        label = re.sub(r"[/\\:\0]", " ", str(part))[:40]
+        for name in map(_nfc, _names(names)):
+            key, _, rel = name.partition("/")
+            if name not in listed or key not in roots:
+                missed.append(f"{label}: «{name}» — нет в списке библиотеки")
+                continue
+            src = roots[key] / rel
+            dst = (serum if key == "Serum" else kits) / f"{label[:1].upper()}{label[1:]} — {src.name}"
+            try:
+                shutil.copyfile(src, dst)           # заглушку iCloud чтение скачает — так и надо
+            except OSError as e:
+                dst.unlink(missing_ok=True)
+                missed.append(f"{label}: «{name}» — " + ("нет на диске" if isinstance(e, FileNotFoundError)
+                                                        else "не прочитался: выгружен в iCloud и не скачался"))
+    note = (built / "о бите.txt").read_text("utf-8") if built and (built / "о бите.txt").exists() else ""
+    (kits / "о бите.txt").write_text(note + ("\n\nНе легло в папку:\n" + "\n".join(f"• {m}" for m in missed) if missed else ""),
+                                     encoding="utf-8")
+    return missed
+
+
+def _sandboxed(folder: Path, tmp: Path) -> None:
+    """Сборка бита в песочнице macOS: make.py писала модель, читавшая сеть, а на Маке рядом ключ входа
+    в Telegram владельца. Сети нет, подпроцессов нет, запись — только в tmp, .env и приватное состояние
+    не читаются, окружение пустое. В Actions ту же роль играет шаг без секретов (beats.yml)."""
+    from . import config
+    profile = ("(version 1)(allow default)(deny network*)(deny process-fork)(deny file-write*)"
+               f'(allow file-write* (subpath "{tmp}"))(allow file-write* (literal "/dev/null"))'
+               f'(deny file-read* (literal "{config.ROOT / ".env"}"))(deny file-read* (subpath "{config.PRIVATE}"))')
+    subprocess.run(["/usr/bin/sandbox-exec", "-p", profile, sys.executable, "-B", "-m", "src.noty",
+                    "--build", str(folder), "--out", str(tmp / "out")], cwd=config.ROOT, check=True, timeout=300,
+                   env={"PATH": "/usr/bin:/bin", "HOME": str(tmp), "TMPDIR": str(tmp)}, capture_output=True, text=True)
+
+
+def gather(kits: Path | None = None, serum: Path | None = None) -> str:
+    """Свежая ветка claude/beats-* → папки «Сегодня» в браузере FL и в пресетах Serum. Собранное второй
+    раз не трогается: помощник на Маке заходит сюда раз в десять минут. Спал Мак — соберёт, проснувшись."""
+    from . import config
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(config.ROOT), *args], capture_output=True, text=True,
+                              check=True, timeout=120).stdout
+
+    kits, serum = kits or LIBRARY["KITS"] / TODAY, serum or LIBRARY["Serum"] / "User" / TODAY
+    if not kits.parent.is_dir() or not serum.parent.is_dir():
+        return "библиотеки FL или пресетов Serum на этой машине нет"
+    git("fetch", "-q", "origin", "+refs/heads/claude/beats-*:refs/remotes/origin/claude/beats-*")
+    heads = dict(line.split() for line in git("for-each-ref", "--format=%(refname:short) %(objectname)",
+                                              "refs/remotes/origin/claude/beats-*").splitlines())
+    ids = {ref.removeprefix("origin/claude/beats-"): sha for ref, sha in heads.items()
+           if re.fullmatch(r"origin/claude/beats-[0-9a-z-]+", ref)}
+    if not ids:
+        return "веток с битами нет"
+    beat = max(ids)                                 # id начинается с даты
+    mark = f"{beat} {ids[beat]}"
+    if (kits / ".бит").exists() and (kits / ".бит").read_text("utf-8") == mark:
+        return f"{beat}: уже собрано"
+    with tempfile.TemporaryDirectory(prefix="noty-") as tmp:
+        tmp = Path(tmp).resolve()
+        (tmp / beat).mkdir()
+        (tmp / beat / "make.py").write_text(git("show", f"origin/claude/beats-{beat}:content/beats/{beat}/make.py"), "utf-8")
+        try:
+            _sandboxed(tmp / beat, tmp)
+            missed = lay(tmp / "out" / beat, json.loads((tmp / "out" / f"{beat}.sounds.json").read_text("utf-8")), kits, serum)
+            done = "ноты на месте" + (f", не легло звуков: {len(missed)}" if missed else "")
+        except (subprocess.SubprocessError, OSError, ValueError) as e:      # не собрался — записка, а не падение
+            lay(None, {}, kits, serum)
+            why = (getattr(e, "stderr", "") or getattr(e, "stdout", "") or str(e)).strip()[-1500:]
+            (kits / "о бите.txt").write_text(f"{beat}: ноты на Маке не собрались — возьми архив из Telegram.\n\n{why}", "utf-8")
+            done = "ноты не собрались, в папке записка"
+    (kits / ".бит").write_text(mark, "utf-8")
+    return f"{beat}: {done}"
 
 
 def send(archive: Path) -> None:
@@ -470,6 +630,7 @@ def selftest() -> None:
     h = hits(16, "x.o.|X...", vel=100)
     assert [(n.pos, n.vel) for n in h] == [(16, 100), (18, 45), (20, 115)], "рисунок строкой: удар, призрак, акцент"
     assert mute([N(0, 12, 32), N(8, 1), N(12, 4, 32)], 8, 12) == [N(0, 8, 32), N(12, 4, 32)], "вдох обрывает хвост 808"
+    assert reverse([N(0, 2, 60), N(4, 1, 62), N(20, 1)], 0, 8) == [N(3, 1, 62), N(6, 2, 60)], "фраза задом наперёд"
     beat = {"хэт": hits(0, "x.x.x.x.x.x.x.x.") + hits(16, "x.x.x.x.x.x.") + roll(28, 4, 8),
             "клэп": [N(8, 1), N(24, 1)], "бочка": [N(0, 1)], "808": [N(0, 6, 32), N(6, 2, 35), N(16, 12, 32), N(24, 4, 44, slide=True)]}
     sh = shape(dict(bars=3, bpm=120), beat)
@@ -503,11 +664,34 @@ def selftest() -> None:
             raise AssertionError("повтор прошлого бита должен браковаться")
         except SystemExit as e:
             assert "в паспорте нет поля form" in str(e) and "в том же порядке" not in str(e), e   # parts='x' — частей не названо
+        # Папка «Сегодня» на временных папках: звук найден, не найден, не читается, чужой путь, старое убрано, оригинал цел
+        lib, pres, kits, serum = tmp / "lib", tmp / "pres", tmp / "lib" / TODAY, tmp / "pres" / "User" / TODAY
+        (lib / "k" / "Stub.wav").mkdir(parents=True)        # не читается, как заглушка iCloud без сети
+        (pres / "User" / "p").mkdir(parents=True)
+        kits.mkdir()
+        (lib / "k" / "Kick.wav").write_bytes(b"k")
+        (pres / "User" / "p" / "Lead.fxp").write_bytes(b"p")
+        (kits / "старое.wav").write_bytes(b"x")
+        listed = {"KITS/k/Kick.wav", "KITS/k/Gone.wav", "KITS/k/Stub.wav", "Serum/User/p/Lead.fxp"}
+        missed = lay(tmp / "out" / "beat", {"бочка": "KITS/k/Kick.wav", "мелодия": ["Serum/User/p/Lead.fxp"], "хэт": "KITS/k/Gone.wav",
+                                            "клэп": "KITS/k/Stub.wav", "перк": "KITS/../../etc/passwd"},
+                     kits, serum, {"KITS": lib, "Serum": pres}, listed)
+        assert (kits / "Бочка — Kick.wav").read_bytes() == b"k" and (serum / "Мелодия — Lead.fxp").read_bytes() == b"p"
+        assert (kits / "02 хэт.fsc").exists() and not (kits / "старое.wav").exists() and (lib / "k" / "Kick.wav").read_bytes() == b"k"
+        assert [m.split(":")[0] for m in missed] == ["хэт", "клэп", "перк"] and "нет на диске" in missed[0] \
+            and "не прочитался" in missed[1] and "нет в списке" in missed[2], missed
+        assert "Не легло в папку" in (kits / "о бите.txt").read_text("utf-8") and len(list(kits.iterdir())) == 5, list(kits.iterdir())
+        assert lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed) == [], "бит без поля звуков"
+        assert sorted(f.suffix for f in kits.iterdir()) == [".fsc", ".fsc", ".fsc", ".txt"] and not list(serum.iterdir())
+        assert json.loads((tmp / "out" / "beat.sounds.json").read_text("utf-8")) == {}
     tune = [N(b * 16 + p, 2, k) for b in range(4) for p, k in ((0, 67), (6, 63), (8, 65), (12, 67))]
-    song = dict(title="A — Б", form="песня", melody="линия", mood="обычный", parts="вступление 1–4, припев 5–12, конец 13–16")
+    song = dict(title="A — Б", form="песня", melody="линия", mood="обычный", twist="ложный вход", sounds={"мелодия": "x"},
+                parts="вступление 1–4, припев 5–12, конец 13–16")
     rep = "\n".join(echoes(song, {"мелодия": tune}, song, {"мелодия": [n._replace(key=n.key + 6) for n in tune]}))
-    assert all(w in rep for w in ("форма «песня»", "приём мелодии «линия»", "в том же порядке", "мелодия повторяет")), rep
-    other = song | dict(form="блоки по 16", melody="зов — ответ", parts="вступление 1–8, блок 9–24")
+    assert all(w in rep for w in ("форма «песня»", "приём мелодии «линия»", "неожиданный ход «ложный вход»",
+                                  "в том же порядке", "мелодия повторяет")), rep
+    assert "не из списка" in "\n".join(echoes(song | {"twist": "сальто"}, {}, {}, {})), "ход — только из списка"
+    other = song | dict(form="блоки по 16", melody="зов — ответ", twist="сдвиг вверх", parts="вступление 1–8, блок 9–24")
     assert not echoes(other, {"мелодия": [N(b * 16 + p, 1, k) for b in range(4) for p, k in ((2, 60), (3, 72), (10, 61))]},
                       song, {"мелодия": tune}), "другая форма и другая мелодия — не повтор"
     info = dict(title="t", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=1, like="x", parts="x", tricks=["x"], skeleton="x",
@@ -519,7 +703,11 @@ def selftest() -> None:
     assert "синтезатор" not in "\n".join(problems(info | {"tonal": ["808"]}, {"808": glide(0, 4, 29, 41)}))
     doubled = {"808": [N(i * 4, 3, 29) for i in range(4)], "бочка": [N(i * 4, 1) for i in range(4)]}
     assert "под каждой нотой 808" in "\n".join(problems(info | {"tonal": ["808"]}, doubled))
-    print("ноты: приёмы, партитура FL, MIDI, отбраковка и сверка с прошлым битом — в порядке")
+    named = "\n".join(problems(info | {"sounds": {"мелодия": "KITS/такого нет.wav"}}, plain))
+    assert "нет в списке" in named and "хэт: партии не назван звук" in named, named
+    assert "Звуки и пресеты" in about(info | {"twist": "ложный вход", "form": "x", "sounds": {"хэт": ["KITS/a.wav"]}}) \
+        and "неожиданный ход: ложный вход" in about(info | {"twist": "ложный вход", "form": "x"})
+    print("ноты: приёмы, партитура FL, MIDI, отбраковка, сверка с прошлым битом, неожиданный ход, звуки по списку и папка «Сегодня» — в порядке")
 
 
 def main() -> None:
@@ -530,6 +718,8 @@ def main() -> None:
                    help="make.py прошлых битов: та же форма, приём или сама мелодия — бит не годен")
     p.add_argument("--out", metavar="КУДА", type=Path, help="куда положить архив (по умолчанию — временная папка)")
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
+    p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
+    p.add_argument("--gather", action="store_true", help="собрать папку «00 - Сегодня»: ноты свежего бита и его звуки (только Мак)")
     a = p.parse_args()
     if a.selftest:
         selftest()
@@ -537,6 +727,16 @@ def main() -> None:
         build(a.build, a.out or Path(tempfile.mkdtemp(prefix="noty-")), tuple(a.prev))
     elif a.send:
         send(a.send)
+    elif a.sounds:
+        from . import config, state
+        names = library()
+        if not names:
+            raise SystemExit("Библиотеки на этой машине нет — список не тронут.")
+        config.BEAT_SOUNDS.write_text(json.dumps({"date": state.now().strftime("%Y-%m-%d"), "sounds": names},
+                                                 ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        print(f"{len(names)} имён → {config.BEAT_SOUNDS}")
+    elif a.gather:
+        print(gather())
     else:
         p.print_help()
 
