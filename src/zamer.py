@@ -284,6 +284,9 @@ def measure(drums: np.ndarray, bass: np.ndarray, other: np.ndarray, hint: float 
     octs = np.array([o_spec[(f >= lo) & (f < 2 * lo)].sum() for lo in (65, 130, 261, 523, 1046, 2093, 4186)])
     mute = np.mean([o_env[bar_of_frame == b].mean() < .25 * np.median(o_env) for b in live if (bar_of_frame == b).any()])
 
+    rise = [float(np.mean(x)) if len(x) else 0 for x in np.array_split(
+        [o_env[bar_of_frame == b].mean() for b in live if (bar_of_frame == b).any()], 3)]   # мелодия по третям окна
+
     return dict(
         bpm=round(bpm, 1), bars=len(live), bar0=round(ph + shift * q, 4), on_grid=round(on_grid, 2),
         hat_per_bar=statistics.median(per_bar(hb)), hat_grid=GRIDS.get(grid, "нет"),
@@ -310,6 +313,9 @@ def measure(drums: np.ndarray, bass: np.ndarray, other: np.ndarray, hint: float 
         mel_loop=next((n for n in (1, 2, 4, 8) if sims[n] >= max(sims.values()) - .02), None),
         mel_voices=float(np.median(voices)), mel_octaves=int((octs >= octs.max() * 10 ** -1.5).sum()),
         mel_mute_bars=round(float(mute), 2),
+        # Кино (02.10.2026): остинато — соседние такты похожи по хроме; нарастание — мелодия к концу окна громче.
+        # ponytail: окно 90 секунд, а не весь трек, и громкость, а не число слоёв — слои demucs не делит
+        mel_same=round(float(sims[1]), 2), mel_rise=round(float(20 * np.log10((rise[-1] + 1e-9) / (rise[0] + 1e-9))), 1),
     )
 
 
@@ -380,6 +386,7 @@ COLS = (("bpm", "темп"), ("hat_per_bar", "хэт/такт"), ("hat_roll_bars
         ("b808_len", "нота 808, 1/16"), ("b808_fill", "808 звучит"), ("b808_pitches", "разных нот 808"),
         ("b808_slides_per_8", "слайдов на 8 т."), ("b808_with_kick", "808 с бочкой"), ("mel_loop", "петля мелодии, т."),
         ("mel_voices", "нот разом"), ("mel_octaves", "октав занято"), ("mel_mute_bars", "такты без мелодии"),
+        ("mel_same", "соседние такты похожи"), ("mel_rise", "мелодия к концу громче, дБ"),
         ("seconds", "длина, с"), ("total_bars", "тактов"), ("intro_bars", "вступление, т."),
         ("breaths_per_8", "вдохов в полтакта на 8 т."), ("drops", "выключений на такт"),
         ("drop_every", "выключение раз в, т."), ("quiet_parts", "частей без низа"),
@@ -453,6 +460,7 @@ def selftest() -> None:
     assert r["low_2bars"] == "x.....x...x.....|x.....x...x....." and r["clap_2bars"] == "........x.......|........x.......", r
     assert r["b808_per_bar"] == 3 and 3.5 <= r["b808_len"] <= 6 and r["b808_with_kick"] == 1, r
     assert 1.5 <= r["b808_slides_per_8"] <= 2.5 and r["hat_pan"] > 30 and r["swing"] is None, r
+    assert r["mel_same"] > .95 and abs(r["mel_rise"]) < 1, r      # ровный тон: такты одинаковы, громкость не растёт
     from scipy.signal import resample_poly
     sec = sections(resample_poly(drums.sum(0) + bass + other, 1, 4), 11025, 150, r["bar0"])
     assert sec["intro_bars"] == 2 and sec["drops"] == 0 and sec["map"] == "...." + "#" * 32 + "....", sec
