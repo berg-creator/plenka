@@ -491,13 +491,20 @@ def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         out.append(f"мелодия: голоса идут в терцию или сексту {close / both:.0%} общего времени — "
                    "второй голос в октаву, квинту или не разом с первым")
     # Тишина — паузы от доли и длиннее, где молчит вся музыка (808 не в счёт): щель между короткими нотами
-    # закроет хвост пресета. У «кино» остинато не молчит — там порога нет
+    # закроет хвост пресета. У «кино» остинато не молчит — там порога нет.
+    # Нота длится ещё и «звучит» своего пресета Serum — сколько он после ноты держится выше −12 дБ. Это мерка,
+    # которой снята пустота референсов (`zamer.color`), а не хвост до −60 дБ: тем половина пресетов (от 1,5 с)
+    # закрыла бы любую паузу короче такта, и порог QUIET мерил бы уже не то, с чего он снят
+    heard, named = measured(), info.get("sounds") or {}
+    ring = {name: max((heard[s][3] for s in map(_nfc, _names(named.get(name, ()))) if s in heard), default=0)
+            * info.get("bpm", 0) / 15 for name in music}                                # секунды → шестнадцатые
     quiet = till = 0
-    for a, b in sorted((n.pos, n.pos + n.ln) for notes in music.values() for n in notes) + [(end, end)]:
+    for a, b in sorted((n.pos, n.pos + n.ln + ring[name]) for name, notes in music.items() for n in notes) + [(end, end)]:
         quiet, till = quiet + (a - till if a - till >= 4 else 0), max(till, b)
     need = QUIET.get(info.get("color"), .1)
     if music and not kino and quiet / end < need:
-        out.append(f"музыка молчит {quiet / end:.0%} времени — нужно не меньше {need:.0%}: такты и полтакта, где её нет вовсе")
+        out.append(f"музыка молчит {quiet / end:.0%} времени — нужно не меньше {need:.0%}: такты и полтакта, где её нет вовсе"
+                   + ("; нота считается с хвостом пресета — «звучит» в data/beat_sounds.json" if any(ring.values()) else ""))
     return out
 
 
@@ -680,6 +687,15 @@ def known() -> set[str]:
     """Звуки и пресеты, которые можно назвать в паспорте: список имён из репозитория."""
     from . import config
     return set(json.loads(config.BEAT_SOUNDS.read_text("utf-8"))["sounds"]) if config.BEAT_SOUNDS.exists() else set()
+
+
+def measured() -> dict[str, list[float]]:
+    """Промер пресетов Serum: имя → яркость Гц, верха %, хвост с, звучит с (нота C5 в секунду, 02.10.2026).
+    Снят на Маке самим плагином (`.cache/serum-spike/promer.py`, вне git: ему нужны Serum и pedalboard).
+    Яркость сборка не бракует: пресеты «Фосфора» вышли темнее медианы референсов — приторное она не ловит."""
+    from . import config
+    data = json.loads(config.BEAT_SOUNDS.read_text("utf-8")).get("serum", {}) if config.BEAT_SOUNDS.exists() else {}
+    return {name: [float(x) for x in row.split()] for name, row in data.items()}
 
 
 def library() -> list[str]:
@@ -936,6 +952,12 @@ def selftest() -> None:
            "мелодия": [N(b * 16 + p, 2, k) for b in (0, 1, 2) for p, k in ((0, 62), (6, 63), (10, 50))],     # три ноты, одна — ♭2
            "контрмелодия": [N(b * 16 + 6, 2, 51) for b in (0, 2)], "808": [N(0, 64, 26)]}       # второй голос — октавой ниже
     assert sugar(paper | {"sounds": {"мелодия": "Serum/Leads/LD Dirty Lead [SW].fxp"}}, dry) == [], sugar(paper, dry)
+    # Хвост пресета закрывает паузу: пэд звучит после ноты 2,8 с — на 140 BPM это полтора такта, и такт тишины
+    # в нотах тишиной не выходит. Тёмный орган с хвостом в сотую секунды те же ноты оставляет сухими
+    choir, organ = "Serum/Pads/PD Monkchoir [GS].fxp", "Serum/Misc/KY punchOrgan [GS].fxp"
+    assert measured()[choir][3] > 2 > .1 > measured()[organ][3] and measured()[organ][0] < 1000, "промер Serum в data/beat_sounds.json"
+    assert "музыка молчит 0%" in "\n".join(sugar(paper | {"bpm": 140, "sounds": {"аккорды": choir}}, dry)), "хвост закрыл паузу"
+    assert sugar(paper | {"bpm": 140, "sounds": {"аккорды": organ}}, dry) == [], "тёмный пресет с коротким хвостом проходит"
     half = {**dry, "аккорды": dry["аккорды"] + [N(48, 8, 50)]}                           # тишины полтакта из четырёх
     assert not sugar(paper | {"color": "андер"}, dry) and not sugar(paper, half), "тишины хватает"
     assert "молчит 12% времени — нужно не меньше 20%" in "\n".join(sugar(paper | {"color": "андер"}, half)), "андеру тишины нужно больше"
