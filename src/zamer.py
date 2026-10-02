@@ -36,6 +36,7 @@
     ~/.cache/whisper-venv/bin/python -m src.zamer --selftest             замер на синтетическом бите с известным рисунком
     ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ… --out zamer.json  замерить файлы, дописать в zamer.json
     ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ --bpm 142          темп известен (дрилл, двухтактный рисунок)
+    ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ --color            ещё и цвет музыки: яркость, регистр, ноты, аккорды, шум
     ~/.cache/whisper-venv/bin/python -m src.zamer --table data/beats_zamer.json   сводка: медианы по группам
 
 Чужой звук — только для замера: стемы пишутся во временную папку и удаляются сразу.
@@ -319,6 +320,57 @@ def measure(drums: np.ndarray, bass: np.ndarray, other: np.ndarray, hint: float 
     )
 
 
+def color(other: np.ndarray, bpm: float | None, bar0: float = 0.0) -> dict:
+    """Цвет музыки (стем other): яркость, регистр, плотность нот, смены аккорда, шум, верха, заполнение.
+    02.10.2026 владелец назвал свои биты приторными и дал референсы звука. Рисунок барабанов тут ни при чём:
+    сравнивать надо тембр и гармонию, а их `measure` не снимает. bar0 — начало любого такта, секунды.
+
+    Каждая мера грубая, и читать числа надо с этим:
+    регистр — медиана самой громкой полутоновой полосы CQT по кадрам: в аккорде это самый громкий голос
+    (обычно низ пэда), а не мелодия, и бывает обертон вместо основного тона;
+    атаки — рост CQT в 65 Гц – 4 кГц, только громкие ноты (до −30 дБ от пика): хэт, протёкший в стем,
+    мимо, а протёкший голос и вибрато пэда считаются;
+    аккорд такта — ближайшее из 24 трезвучий по хроме такта: смена внутри такта не видна, одноголосая
+    мелодия без аккорда прыгает между трезвучиями, а ошибка темпа вдвое меняет и число вдвое;
+    шум — плоскостность спектра в 100–8000 Гц, верха — доля энергии 6–16 кГц. Выше 16 кГц не смотрим:
+    превью магазина сжато, и срез кодека читался бы тембром. Такта нет (bpm пуст) — меры «на такт» пустые."""
+    import librosa
+    spec = np.abs(librosa.stft(other, n_fft=2048, hop_length=512)) ** 2
+    f = np.fft.rfftfreq(2048, 1 / SR)
+    spec, f = spec[f < 16000], f[f < 16000]
+    e = spec.sum(0)
+    if not e.max():
+        return {}
+    on = e >= .0625 * np.percentile(e, 90)                 # музыка звучит: порог тот же, что у `sounding` в measure
+    mag, band = np.sqrt(spec[:, on]), spec[(f >= 100) & (f < 8000)][:, on]
+    flat = np.exp(np.log(band + 1e-10).mean(0)) / (band.mean(0) + 1e-10)
+    cq = np.abs(librosa.cqt(librosa.resample(other, orig_sr=SR, target_sr=22050), sr=22050, hop_length=512,
+                            fmin=librosa.midi_to_hz(36), n_bins=72, tuning=None))    # строй трека — по звуку: сэмплы бывают расстроены
+    loud = cq.sum(0) >= .25 * np.percentile(cq.sum(0), 90)
+    note = int(np.median(36 + cq[:, loud].argmax(0)))
+    # Всё тише −30 дБ от пика — в пол: при −40 дрожание шумового дна читалось атаками (182 вместо 128
+    # на синтетике). Цена: тихий слой под громким в счёт не идёт
+    hits = librosa.onset.onset_detect(onset_envelope=librosa.onset.onset_strength(
+        S=librosa.amplitude_to_db(cq, ref=np.max, top_db=30), sr=22050), sr=22050, hop_length=512)
+    out = dict(col_bright=round(float(np.median((f[:, None] * mag).sum(0) / mag.sum(0)))),
+               col_note=note, col_note_name=str(librosa.midi_to_note(note, unicode=False)),
+               col_notes_sec=round(len(hits) / (len(other) / SR), 2), col_notes_bar=None, col_chords_8=None,
+               col_flat=round(float(np.median(flat)), 4),
+               col_air=round(float(spec[f >= 6000][:, on].sum() / spec[:, on].sum()), 4),
+               col_fill=round(float(on.mean()), 2))
+    if bpm:
+        bar = 240 / bpm
+        chroma = librosa.feature.chroma_cqt(C=cq, sr=22050, hop_length=512, fmin=librosa.midi_to_hz(36), bins_per_octave=12)
+        cb = np.floor((np.arange(chroma.shape[1]) * 512 / 22050 - bar0) / bar).astype(int)
+        # ponytail: 24 мажорных и минорных трезвучия, такт целиком; септаккорды и смены в полтакта — когда понадобятся
+        tri = np.array([np.roll([1, 0, 0, m, 1 - m, 0, 0, 1, 0, 0, 0, 0], r) for m in (0, 1) for r in range(12)])
+        chords = [int((tri @ chroma[:, (cb == b) & loud].mean(1)).argmax())
+                  for b in range(cb.min() + 1, cb.max()) if ((cb == b) & loud).any()]     # крайние такты окна неполные
+        out.update(col_notes_bar=round(len(hits) / (len(other) / SR / bar), 1),
+                   col_chords_8=round(sum(a != b for a, b in zip(chords, chords[1:])) / max(len(chords) - 1, 1) * 8, 1))
+    return out
+
+
 def sections(full: np.ndarray, sr: int, bpm: float, bar0: float) -> dict:
     """Части по всему треку: где низ (бочка и 808) играет, а где выключен. Сетка — по полтакта."""
     half = 120 / bpm
@@ -356,8 +408,8 @@ def sections(full: np.ndarray, sr: int, bpm: float, bar0: float) -> dict:
                 map="".join("#" if o else "." for o in on))     # по знаку на полтакта: # — низ играет
 
 
-def run(path: Path, hint: float | None = None, start: float | None = None) -> dict:
-    """Замер файла: окно → demucs → рисунок; части — по всему файлу."""
+def run(path: Path, hint: float | None = None, start: float | None = None, with_color: bool = False) -> dict:
+    """Замер файла: окно → demucs → рисунок; части — по всему файлу. with_color — ещё и цвет музыки."""
     import librosa
     import soundfile as sf
     with tempfile.TemporaryDirectory(prefix="zamer-") as tmp:
@@ -373,8 +425,16 @@ def run(path: Path, hint: float | None = None, start: float | None = None) -> di
                 for n in ("drums", "bass", "other")}
         if stem["drums"].ndim == 1:
             stem["drums"] = np.stack([stem["drums"]] * 2)
-        out = measure(stem["drums"], stem["bass"], stem["other"], hint)
-        out.update(sections(full, sr, out["bpm"], at + out.pop("bar0")))
+        try:
+            out = measure(stem["drums"], stem["bass"], stem["other"], hint)
+            out.update(sections(full, sr, out["bpm"], at + out["bar0"]))
+        except SystemExit as e:                            # клэпа нет — рисунка нет, а цвет меряется и без такта
+            if not with_color:
+                raise
+            out = dict(bpm=hint, no_pattern=str(e))
+        if with_color:
+            out.update(color(stem["other"], out["bpm"], out.get("bar0", 0)))
+        out.pop("bar0", None)
     return dict(file=path.name, **out)
 
 
@@ -387,6 +447,9 @@ COLS = (("bpm", "темп"), ("hat_per_bar", "хэт/такт"), ("hat_roll_bars
         ("b808_slides_per_8", "слайдов на 8 т."), ("b808_with_kick", "808 с бочкой"), ("mel_loop", "петля мелодии, т."),
         ("mel_voices", "нот разом"), ("mel_octaves", "октав занято"), ("mel_mute_bars", "такты без мелодии"),
         ("mel_same", "соседние такты похожи"), ("mel_rise", "мелодия к концу громче, дБ"),
+        ("col_bright", "яркость музыки, Гц"), ("col_note", "регистр, MIDI"), ("col_notes_sec", "атак музыки в секунду"),
+        ("col_notes_bar", "атак музыки на такт"), ("col_chords_8", "смен аккорда на 8 т."),
+        ("col_flat", "шум (плоскостность)"), ("col_air", "доля верхов 6–16 кГц"), ("col_fill", "музыка звучит"),
         ("seconds", "длина, с"), ("total_bars", "тактов"), ("intro_bars", "вступление, т."),
         ("breaths_per_8", "вдохов в полтакта на 8 т."), ("drops", "выключений на такт"),
         ("drop_every", "выключение раз в, т."), ("quiet_parts", "частей без низа"),
@@ -406,9 +469,9 @@ def table(rows: list[dict] | dict) -> str:
             if v:
                 out.append(f"{name:26} {statistics.median(v):g}  ({v[0]:g} … {v[-1]:g})"
                            + (f", не измерено у {len(rs) - len(v)}" if len(v) < len(rs) else ""))
-        grids = [r["hat_grid"] for r in rs]
+        grids = [r.get("hat_grid", "нет") for r in rs]
         out.append(f"{'сетка хэта':26} " + ", ".join(f"{g} — {grids.count(g)}" for g in sorted(set(grids), key=grids.count, reverse=True)))
-        spots = [" и ".join(str(k) for k in r["snare_steps"]) or "нет" for r in rs]
+        spots = [" и ".join(str(k) for k in r.get("snare_steps", ())) or "нет" for r in rs]
         out.append(f"{'клэп на шагах':26} " + ", ".join(f"{s} — {spots.count(s)}" for s in sorted(set(spots), key=spots.count, reverse=True)))
     return "\n".join(out)
 
@@ -464,7 +527,19 @@ def selftest() -> None:
     from scipy.signal import resample_poly
     sec = sections(resample_poly(drums.sum(0) + bass + other, 1, 4), 11025, 150, r["bar0"])
     assert sec["intro_bars"] == 2 and sec["drops"] == 0 and sec["map"] == "...." + "#" * 32 + "....", sec
-    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом и части на синтетическом бите — в порядке")
+    # Цвет: редкий низкий синус, один на такт, против частых высоких нот со сменой высоты по тактам и шумом
+    bar, m = 2.0, int(32 * SR)
+    tt = np.arange(m) / SR
+    low_tone = np.sin(2 * np.pi * 110 * tt) * np.exp(-(tt % bar) / .4) * np.minimum(1, (tt % bar) / .01)
+    hi_f = np.where((tt // bar) % 2 == 0, 1046.5, 1480.0)
+    hi_tone = (np.sin(2 * np.pi * np.cumsum(hi_f) / SR) * np.exp(-(tt % .25) / .05) * np.minimum(1, (tt % .25) / .005) * .3
+               + rng.standard_normal(m) * .03)
+    a, b = color(low_tone, 120), color(hi_tone, 120)
+    assert a["col_note"] == 45 and b["col_note"] in (84, 90) and b["col_bright"] > 5 * a["col_bright"], (a, b)
+    assert .5 <= a["col_notes_bar"] <= 2 and 6 <= b["col_notes_bar"] <= 10, (a, b)
+    assert a["col_chords_8"] == 0 and b["col_chords_8"] >= 7, (a, b)
+    assert b["col_flat"] > 10 * a["col_flat"] and b["col_air"] > 10 * a["col_air"], (a, b)
+    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, части и цвет музыки на синтетике — в порядке")
 
 
 def main() -> None:
@@ -475,6 +550,7 @@ def main() -> None:
     p.add_argument("--group", default="все", help="метка группы для сводки: чарт, type beat, сцена, наш")
     p.add_argument("--out", type=Path, help="куда дописать замеры (JSON-список)")
     p.add_argument("--table", type=Path, metavar="JSON", help="сводка по файлу замеров")
+    p.add_argument("--color", action="store_true", help="ещё и цвет музыки: яркость, регистр, плотность нот, смены аккорда, шум, верха")
     p.add_argument("--selftest", action="store_true", help="проверить замер на синтетическом бите, без demucs")
     a = p.parse_args()
     if a.selftest:
@@ -482,7 +558,7 @@ def main() -> None:
     if a.table:
         return print(table(json.loads(a.table.read_text("utf-8"))))
     for path in a.files:
-        row = dict(group=a.group, **run(path, a.bpm, a.start))
+        row = dict(group=a.group, **run(path, a.bpm, a.start, a.color))
         print(json.dumps(row, ensure_ascii=False))
         if a.out:
             rows = json.loads(a.out.read_text("utf-8")) if a.out.exists() else []

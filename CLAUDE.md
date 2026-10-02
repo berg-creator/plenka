@@ -80,7 +80,8 @@ python -m src.noty --selftest           ноты для бита: дробь с 
 python -m src.noty --build content/beats/ID   архив нот бита из make.py: партитуры FL Studio и MIDI, без Telegram
 python -m src.noty --sounds            переписать data/beat_sounds.json: имена звуков и пресетов библиотеки, файлы не читаются (только Мак)
 python -m src.noty --gather            папка «00 - Сегодня»: ноты свежей ветки битов, её звуки и пресеты; make.py — в песочнице (только Мак)
-~/.cache/whisper-venv/bin/python -m src.zamer --selftest   замер бита: темп, клэп, хэт с дробью, бочка, 808 со слайдом и части — на синтетическом бите
+~/.cache/whisper-venv/bin/python -m src.zamer --selftest   замер бита: темп, клэп, хэт с дробью, бочка, 808 со слайдом, части и цвет музыки — на синтетике
+~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ --color   ещё и цвет музыки: яркость, регистр, атаки, смены аккорда, шум, верха (сравнение с референсами звука)
 ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ… --group ГРУППА --out zamer.json   замер чужих битов для скелетов prompts/beats.md (только Мак, demucs; раз в месяц — NEXT.md)
 python -m src.bity --demand [АРТИСТ ...]  под кого делать бит: сколько за месяц смотрят рядовой type beat под названных и под русскоязычных артистов на подъёме
 python -m src.bity --video БИТ --title "Kizaru x Toxi$ — Полёт, 140 Fm" --out ПАПКА  живой ролик 1920×1080, превью 1280×720 и тексты для YouTube, без Telegram
