@@ -36,9 +36,17 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 чтения .env: рядом лежит ключ входа в Telegram владельца. Отвергнуто: исполнять как есть
 (код пишет модель, читавшая сеть) и тянуть готовые партитуры из Actions (нужен второй вход).
 
+Цвет (владелец, 02.10.2026: биты «слишком попсовые», один похож на музыку из Майнкрафта). Замер показал, что
+сладкое сидело в нотах и именах звуков, а не в барабанах: круг из четырёх аккордов, мелодия колокольчиком
+выше F6. Запрет словами в брифе автор не держит (так было с формой и мелодией), поэтому `sugar` бракует
+числом то, что видно в нотах: регистр, число аккордов, размер мотива, терции второго голоса, долю тишины,
+имена звуков на мелодии. Звука сборка не слышит: это отсев приторных нот, а не проверка, что бит хорош.
+Отвергнуто: мерить «садится ли мелодия на звук аккорда» — при одном-двух аккордах и мотиве из трёх нот
+доля высокая у любого бита, сладкое от сухого она не отличает.
+
     python -m src.noty --selftest          приёмы пианоролла, замер нот и запись партитуры FL и MIDI, без сети
     python -m src.noty --build ПАПКА       собрать и проверить бит из ПАПКА/make.py, без Telegram
-    python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py прошлых битов: та же форма или мелодия — отказ
+    python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py прошлых битов: та же форма, мелодия, цвет или смесь — отказ
     python -m src.noty --send АРХИВ        отправить собранный архив владельцу
     python -m src.noty --sounds            переписать data/beat_sounds.json: имена звуков и пресетов библиотеки (только Мак)
     python -m src.noty --gather            папка «00 - Сегодня»: ноты свежей ветки битов, её звуки и пресеты (только Мак)
@@ -59,19 +67,36 @@ import sys
 import tempfile
 import unicodedata
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
 TICK = 24                 # тиков FL в шестнадцатой: PPQ 96, как в проектах владельца
 PPQ, MIDI_TICK = 480, 120
 # Черновик «всё вместе» играет любой плеер: тембр General MIDI — по слову в имени партии
-GM_TONAL = {"аккорд": 89, "гитар": 25, "мелод": 10, "808": 38, "бас": 38, "колокол": 14, "струн": 48, "флейт": 73, "медь": 61}
+# Мелодии в списке нет намеренно: до 02.10.2026 её играла музыкальная шкатулка (программа 10), и черновик
+# звучал «Майнкрафтом» при любых нотах. Теперь она — рояль (0), как всякая неназванная партия
+GM_TONAL = {"аккорд": 89, "гитар": 25, "808": 38, "бас": 38, "колокол": 14, "струн": 48, "флейт": 73, "медь": 61}
 GM_DRUM = {"бочка": 36, "клэп": 39, "снейр": 38, "открыт": 46, "хэт": 42, "римшот": 37, "перк": 75, "крэш": 49}
 
 
 SAMPLED = ("808", "бас")    # партии с высотой, которые владелец играет сэмплером, а не синтезатором
 # Неожиданный ход (владелец, 02.10.2026: «удивлять слушателей»): один на бит, на стыке частей — prompts/beats.md
-TWISTS = ("смена бита", "ложный вход", "половинный темп", "сдвиг вверх", "чужой тембр", "задом наперёд")
+TWISTS = ("смена бита", "ложный вход", "половинный темп", "сдвиг вниз", "чужой тембр", "задом наперёд")
+MOODS = ("обычный", "злой", "кино")
+# Цвет музыки — гармония, мелодия, тембр — и референсы звука, с которых он снят (владелец, 02.10.2026;
+# признаки каждого — prompts/beats.md, «Цвет»). Имена — про звук, а не про название бита: пара в названии — по спросу
+COLORS = {"андер": ("андер",), "дым": ("A$AP Rocky",), "лёд": ("Yung Lean", "Black Kray"), "рифф": ("Lil Peep",),
+          "пустота": ("Kanye West", "Lil Wayne", "50 Cent"), "ржавчина": ("Chief Keef", "Playboi Carti")}
+SOUNDS = {name for names in COLORS.values() for name in names} | {"кино"}       # что можно смешивать
+ALIEN = ("тембр", "приём мелодии", "рисунок перка", "оркестровый слой", "обработка")   # что берётся от чужого звука
+FREE_DAY = 2                # среда: раз в неделю смесь свободная, день — по дате в id бита
+# Сколько времени музыка молчит. У референсов она звучит 94% времени, у «Дифирамба» — 80%, у Lil Wayne
+# и 50 Cent — 54 и 71%, у «Фосфора» — 100% (замер 02.10.2026)
+QUIET = {"андер": .2, "пустота": .2}
+HIGH = 77                   # F6: выше неё «Фосфор» держал мелодию 56% времени, «Фары» — 19%
+# Колокольчик, шкатулка и плак на мелодии — по имени звука: «Bell - Crystal Eye» и «Pluck - Chosen» стояли в «Фосфоре»
+SWEET = ("bell", "music box", "pluck", "glock", "chime", "celest", "kalimba", "toy", "колокол", "шкатул", "арф")
 # Библиотека владельца на Маке. Путь звука в паспорте — «KITS/…» или «Serum/…»
 LIBRARY = {"KITS": Path.home() / "Documents" / "Image-Line" / "FL Studio" / "KITS",
            "Serum": Path("/Library/Audio/Presets/Xfer Records/Serum Presets/Presets")}
@@ -300,11 +325,19 @@ def read_mid(path: Path) -> tuple[int, int]:
 
 # --- бит целиком -------------------------------------------------------------
 
-def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
-    """Что не так с битом. Пусто — годен."""
+def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list[str]:
+    """Что не так с битом. Пусто — годен. free — день свободной смеси (`_free`)."""
     out, end = [], info["bars"] * 16
-    out += [f"в паспорте нет поля {k}" for k in ("title", "bpm", "key", "scale", "bars", "skeleton", "like", "parts", "tricks")
+    # form … fx обязательны здесь, а не в сверке с прошлым битом: beats.yml собирает без --prev,
+    # и «Фосфор» 02.10.2026 ушёл владельцу без единого из этих полей
+    out += [f"в паспорте нет поля {k}" for k in ("title", "bpm", "key", "scale", "bars", "skeleton", "like", "parts", "tricks",
+                                                 "form", "melody", "mood", "twist", "color", "mix", "sounds", "fx")
             if not info.get(k)]
+    out += [f"{word} «{info[k]}» — не из списка: {', '.join(names)}"
+            for k, word, names in (("twist", "неожиданный ход", TWISTS), ("mood", "характер", MOODS), ("color", "цвет", COLORS))
+            if info.get(k) and info[k] not in names]
+    # Малая секунда и тритон к тонике — острые ноты, которых бит без сахара и ждёт: им длина разрешена
+    scale = set(info["scale"]) | {(info["scale"][0] + 1) % 12, (info["scale"][0] + 6) % 12}
     for name, notes in tracks.items():
         if not notes:
             out.append(f"{name}: партия пустая")
@@ -316,7 +349,7 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                 out.append(f"{where}: сила, панорама, подстройка или высота вне пределов")
         # Короткая нота мимо тональности — проходящая или подъезд; длинная — ошибка
         out += [f"{name}, такт {int(n.pos // 16) + 1}: длинная нота мимо тональности ({n.key})"
-                for n in flat(notes) if name in info.get("tonal", ()) and n.key % 12 not in info["scale"] and n.ln > 1]
+                for n in flat(notes) if name in info.get("tonal", ()) and n.key % 12 not in scale and n.ln > 1]
         if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED) \
                 and any(n.pan or n.fine or n.slide for n in notes):
             out.append(f"{name}: панорама, подстройка и слайд ноты в синтезаторе не работают — только в сэмплере")
@@ -332,7 +365,95 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         out += [f"{part}: звука «{n}» нет в списке data/beat_sounds.json"
                 for part, names in info["sounds"].items() for n in _names(names) if _nfc(n) not in listed]
         out += [f"{name}: партии не назван звук в sounds" for name in tracks if name not in info["sounds"]]
-    return out[:20]
+    if info.get("fx"):
+        out += [f"{name}: партии не названа обработка в fx" for name in tracks
+                if name in info.get("tonal", ()) and name not in info["fx"]]
+    if info.get("mix"):
+        out += _mix(info, free)
+    return (out + sugar(info, tracks))[:20]
+
+
+def _free(name: str) -> bool:
+    """День свободной смеси — по дате, с которой начинается id бита: календарь автора и сборки один."""
+    try:
+        return datetime.strptime(name[:8], "%Y%m%d").weekday() == FREE_DAY
+    except ValueError:
+        return False
+
+
+def _mix(info: dict, free: bool) -> list[str]:
+    """Смешение «основа + одно чужое» (владелец, 02.10.2026: «мешать лучшие жанры друг с другом и немного
+    экспериментировать»). Основа — референс своего цвета, от другого звука — ровно один элемент: два чужих
+    разом — уже не type beat пары, а третий жанр. Раз в неделю, в свободный день, счёт не ведётся."""
+    mix = info["mix"] if isinstance(info["mix"], dict) else {}
+    base, alien, what = (_names(mix.get(k) or ()) for k in ("основа", "чужое", "элемент"))
+    if not (base and alien and what):
+        return ["mix: нужны «основа», «чужое» и «элемент»"]
+    out = [f"mix: «{n}» — не из списка звуков: {', '.join(sorted(SOUNDS))}" for n in base + alien if n not in SOUNDS]
+    out += [f"mix: элемент «{w}» — не из списка: {', '.join(ALIEN)}" for w in what if w not in ALIEN]
+    if free or out:
+        return out
+    mine = COLORS.get(info.get("color"), ())
+    if len(alien) > 1 or len(what) > 1:
+        out.append("mix: два чужих элемента разом — брак; свободная смесь — только в бите среды")
+    if len(base) > 1 or base[0] not in mine:
+        out.append(f"mix: основа — один референс своего цвета ({', '.join(mine)})")
+    if set(alien) & set(mine):
+        out.append("mix: чужое — звук другого цвета, а не своего")
+    return out
+
+
+def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Приторное в нотах и именах звуков. Пусто — сухо. Пороги сняты с двух битов, которые владелец 02.10.2026
+    назвал попсовыми: «Фосфор» ими бракуется. Последние 16 тактов «смены бита» не в счёт: там другой бит."""
+    from statistics import median
+
+    out, kino = [], info.get("mood") == "кино"
+    end = (info["bars"] - (16 if info.get("twist") == "смена бита" else 0)) * 16
+    music = {name: [n for n in flat(notes) if n.pos < end] for name, notes in tracks.items()
+             if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED)}
+    music = {name: notes for name, notes in music.items() if notes}
+    for name, notes in music.items():
+        high = sum(n.ln for n in notes if n.key >= HIGH) / sum(n.ln for n in notes)
+        if high > .25:
+            out.append(f"{name}: {high:.0%} времени на F6 и выше — наверху не дольше четверти, главный регистр ниже C6")
+        sweet = [s for s in _names((info.get("sounds") or {}).get(name, ())) if any(w in _nfc(s).lower().replace("cowbell", "") for w in SWEET)]      # ковбелл — не колокольчик
+        if sweet and ("мелод" in name or median(n.key for n in notes) >= 72):
+            out.append(f"{name}: звук «{sweet[0]}» — колокольчик, шкатулка или плак наверху; бери тёмное семейство")
+    # Аккорд такта — классы высот партий гармонии. Один-два аккорда или петля в 1–2 такта дают не больше двух
+    # разных по составу тактов; круг из четырёх со сменой каждый такт — четыре
+    harmony = [n for name, notes in music.items() if "аккорд" in name or "пэд" in name for n in notes] \
+        or [n for name, notes in music.items() if "гитар" in name for n in notes]
+    kinds = {frozenset(n.key % 12 for n in harmony if min(n.pos + n.ln, b + 16) - max(n.pos, b) >= .5)
+             for b in range(0, end, 16)} - {frozenset()}
+    if len(kinds) > 2:
+        out.append(f"гармония: {len(kinds)} разных по составу тактов — один-два аккорда на бит или петля в 1–2 такта")
+    # Мотив — классы высот, а не высоты: тот же мотив октавой ниже остаётся тем же мотивом, а подъезды
+    # короче шестнадцатой — украшение. У темы «кино» нот на одну больше
+    tones = {n.key % 12 for n in _lead(tracks) if n.pos < end and n.ln >= 1}
+    if len(tones) > 4 + kino:
+        out.append(f"мелодия: в мотиве {len(tones)} разных нот — нужно 2–{4 + kino}")
+    # Второй голос параллельно в терцию или сексту — удвоение, от которого мелодия слащавая
+    voices = sorted(n for name, notes in music.items() if "мелод" in name for n in notes)
+    both = close = 0
+    for i, a in enumerate(voices):
+        for b in voices[i + 1:]:
+            if b.pos >= a.pos + a.ln:
+                break
+            t = min(a.pos + a.ln, b.pos + b.ln) - b.pos
+            both, close = both + t, close + t * (abs(a.key - b.key) % 12 in (3, 4, 8, 9))
+    if both >= 16 and close > .5 * both:
+        out.append(f"мелодия: голоса идут в терцию или сексту {close / both:.0%} общего времени — "
+                   "второй голос в октаву, квинту или не разом с первым")
+    # Тишина — паузы от доли и длиннее, где молчит вся музыка (808 не в счёт): щель между короткими нотами
+    # закроет хвост пресета. У «кино» остинато не молчит — там порога нет
+    quiet = till = 0
+    for a, b in sorted((n.pos, n.pos + n.ln) for notes in music.values() for n in notes) + [(end, end)]:
+        quiet, till = quiet + (a - till if a - till >= 4 else 0), max(till, b)
+    need = QUIET.get(info.get("color"), .1)
+    if music and not kino and quiet / end < need:
+        out.append(f"музыка молчит {quiet / end:.0%} времени — нужно не меньше {need:.0%}: такты и полтакта, где её нет вовсе")
+    return out
 
 
 def shape(info: dict, tracks: dict[str, list[N]]) -> dict:
@@ -382,12 +503,12 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
     """Чем бит повторяет прошлый. Пусто — не повторяет. 02.10.2026 второй бит подряд вышел с тем же порядком
     частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код."""
     was = f"«{old.get('title', 'прошлый бит')}»"
-    out = [f"в паспорте нет поля {k}" for k in ("form", "melody", "mood", "twist", "sounds") if not info.get(k)]
-    if info.get("twist") and info["twist"] not in TWISTS:
-        out.append(f"неожиданный ход «{info['twist']}» — не из списка: {', '.join(TWISTS)}")
-    out += [f"{word} «{info[k]}» — как в {was}: возьми другое"
-            for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"))
-            if info.get(k) and info[k] == old.get(k)]
+    out = [f"{word} «{info[k]}» — как в {was}: возьми другое"
+           for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"), ("color", "цвет"))
+           if info.get(k) and info[k] == old.get(k)]
+    pair = [[_names(m.get(k) or ()) for k in ("основа", "чужое")] for m in (info.get("mix"), old.get("mix")) if isinstance(m, dict)]
+    if len(pair) == 2 and pair[0] == pair[1]:
+        out.append(f"смесь «{' + '.join(n for names in pair[0] for n in names)}» — как в {was}: возьми другую")
 
     def order(i):                       # «вступление 1–4, припев 5–12» → вступление, припев
         return re.findall(r"[а-яё]+(?=\s*\d)", str(i.get("parts", "")).lower())
@@ -420,11 +541,19 @@ def about(info: dict) -> str:
         f"Скелет: {info['skeleton']}",
         *([f"Форма: {info.get('form', '—')}; мелодия: {info.get('melody', '—')}; характер: {info.get('mood', '—')}"
            + (f"; неожиданный ход: {info['twist']}" if info.get("twist") else "")]
-          if info.get("form") or info.get("melody") or info.get("mood") else []), f"С чего снято: {info['like']}", f"Части: {info['parts']}", "",
+          if info.get("form") or info.get("melody") or info.get("mood") else []),
+        *([f"Цвет: {info['color']}"] if info.get("color") else []),
+        *([f"Смесь: основа — {', '.join(_names(m.get('основа') or ()))}; от чужого звука "
+           f"({', '.join(_names(m.get('чужое') or ()))}) — {', '.join(_names(m.get('элемент') or ()))}"]
+          if isinstance(m := info.get("mix"), dict) else []),
+        f"С чего снято: {info['like']}", f"Части: {info['parts']}", "",
         "Что сделано нотами:", *(f"• {t}" for t in info["tricks"]), "",
         *(["Звуки и пресеты — в папке «00 - Сегодня» в браузере FL и в меню Serum → User (нужно Rescan); "
            "их кладёт Мак, когда не спит:",
            *(f"• {part} — {n}" for part, names in info["sounds"].items() for n in _names(names)), ""] if info.get("sounds") else []),
+        *(["Обработка — цепочки из интервью продюсеров и замера. Ни пресетов, ни эффектов автор нот не слышал: "
+           "это с чего начать, а не как должно звучать:",
+           *(f"• {part} — {chain}" for part, chain in info["fx"].items()), ""] if info.get("fx") else []),
         "Папка fl — партитуры FL Studio: перетащи файл в пианоролл своего канала "
         "(или меню пианоролла → File → Open score). В них панорама, подстройка и слайды каждой ноты — "
         "они работают в сэмплере (барабаны, 808), синтезатору идут только ноты и сила.",
@@ -439,7 +568,7 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     prev — make.py прошлых битов: повтор их формы или мелодии — тоже брак."""
     made = runpy.run_path(str(folder / "make.py"))
     info, tracks = made["INFO"], made["compose"]()
-    bad = problems(info, tracks)
+    bad = problems(info, tracks, _free(folder.name))
     for path in prev:
         try:
             old = runpy.run_path(str(path))
@@ -597,12 +726,23 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     return f"{beat}: {done}"
 
 
+def _pages(text: str, limit: int = 4000) -> list[str]:
+    """Записка по сообщениям Telegram (4096 знаков), по строкам: со звуками и обработкой она в одно не влезает."""
+    out = [""]
+    for line in text.splitlines(keepends=True):
+        if len(out[-1]) + len(line) > limit:
+            out.append("")
+        out[-1] += line
+    return [page for page in out if page.strip()]
+
+
 def send(archive: Path) -> None:
     """Архив и следом записка: в подпись к файлу (1024 знака) она не влезает."""
     from . import config, telegram
     text = archive.with_suffix(".txt").read_text("utf-8")
     telegram.send_document(config.secret("TELEGRAM_ADMIN_ID"), archive, "\n".join(text.splitlines()[:2]))
-    telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), text)
+    for page in _pages(text):
+        telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), page)
 
 
 def selftest() -> None:
@@ -648,22 +788,29 @@ def selftest() -> None:
         mid(tmp / "a.mid", 156, _track("a", notes))
         assert read_mid(tmp / "a.mid") == (len(flat(notes)),) * 2
         (tmp / "beat").mkdir()
+        one = min(known())                          # любой звук из списка: имена в нём меняет только Мак владельца
         (tmp / "beat" / "make.py").write_text(
             "from src.noty import N, roll, spread, glide\n"
             "INFO = dict(title='A x B — Тест', bpm=140, key='Fm', scale=[5, 7, 8, 10, 0, 1, 3], bars=2, skeleton='сцена',\n"
-            "            like='x', parts='x', tricks=['x'], tonal=['808'])\n"
+            "            like='x', parts='x', tricks=['x'], tonal=['808'], form='песня', melody='один аккорд', mood='злой',\n"
+            "            twist='ложный вход', color='ржавчина', fx={'808': 'Fruity Fast Dist'},\n"
+            "            mix={'основа': 'Chief Keef', 'чужое': 'кино', 'элемент': 'оркестровый слой'},\n"
+            f"            sounds=dict.fromkeys(('808', 'хэт', 'клэп'), {one!r}))\n"
             "def compose():\n"
             "    return {'808': glide(0, 16, 29, 41, at=12, over=4), 'хэт': spread([N(i, 1) for i in range(32)]),\n"
             "            'клэп': [N(8, 1)] + roll(28, 4, 16)}\n", encoding="utf-8")
         archive = build(tmp / "beat", tmp / "out")
         names = zipfile.ZipFile(archive).namelist()
         assert "beat/fl/02 хэт.fsc" in names and "beat/midi/01 808.mid" in names and "beat/о бите.txt" in names
-        assert "бит A x B — Тест, 140 Fm" in archive.with_suffix(".txt").read_text("utf-8")
-        try:                            # собранный бит против самого себя: та же форма — отказ
+        note = archive.with_suffix(".txt").read_text("utf-8")
+        assert "бит A x B — Тест, 140 Fm" in note and "Цвет: ржавчина" in note and "автор нот не слышал" in note, note
+        assert "основа — Chief Keef; от чужого звука (кино) — оркестровый слой" in note, note
+        try:                            # собранный бит против самого себя: та же форма, цвет и смесь — отказ
             build(tmp / "beat", tmp / "out", prev=(tmp / "beat" / "make.py",))
             raise AssertionError("повтор прошлого бита должен браковаться")
         except SystemExit as e:
-            assert "в паспорте нет поля form" in str(e) and "в том же порядке" not in str(e), e   # parts='x' — частей не названо
+            assert all(w in str(e) for w in ("форма «песня»", "цвет «ржавчина»", "смесь «Chief Keef + кино»")) \
+                and "в том же порядке" not in str(e), e                                           # parts='x' — частей не названо
         # Папка «Сегодня» на временных папках: звук найден, не найден, не читается, чужой путь, старое убрано, оригинал цел
         lib, pres, kits, serum = tmp / "lib", tmp / "pres", tmp / "lib" / TODAY, tmp / "pres" / "User" / TODAY
         (lib / "k" / "Stub.wav").mkdir(parents=True)        # не читается, как заглушка iCloud без сети
@@ -683,22 +830,25 @@ def selftest() -> None:
         assert "Не легло в папку" in (kits / "о бите.txt").read_text("utf-8") and len(list(kits.iterdir())) == 5, list(kits.iterdir())
         assert lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed) == [], "бит без поля звуков"
         assert sorted(f.suffix for f in kits.iterdir()) == [".fsc", ".fsc", ".fsc", ".txt"] and not list(serum.iterdir())
-        assert json.loads((tmp / "out" / "beat.sounds.json").read_text("utf-8")) == {}
+        assert json.loads((tmp / "out" / "beat.sounds.json").read_text("utf-8")) == dict.fromkeys(("808", "хэт", "клэп"), one)
     tune = [N(b * 16 + p, 2, k) for b in range(4) for p, k in ((0, 67), (6, 63), (8, 65), (12, 67))]
     song = dict(title="A — Б", form="песня", melody="линия", mood="обычный", twist="ложный вход", sounds={"мелодия": "x"},
-                parts="вступление 1–4, припев 5–12, конец 13–16")
+                parts="вступление 1–4, припев 5–12, конец 13–16", color="лёд")
     rep = "\n".join(echoes(song, {"мелодия": tune}, song, {"мелодия": [n._replace(key=n.key + 6) for n in tune]}))
-    assert all(w in rep for w in ("форма «песня»", "приём мелодии «линия»", "неожиданный ход «ложный вход»",
+    assert all(w in rep for w in ("форма «песня»", "приём мелодии «линия»", "неожиданный ход «ложный вход»", "цвет «лёд»",
                                   "в том же порядке", "мелодия повторяет")), rep
-    assert "не из списка" in "\n".join(echoes(song | {"twist": "сальто"}, {}, {}, {})), "ход — только из списка"
-    other = song | dict(form="блоки по 16", melody="зов — ответ", twist="сдвиг вверх", parts="вступление 1–8, блок 9–24")
+    other = song | dict(form="блоки по 16", melody="зов — ответ", twist="сдвиг вниз", parts="вступление 1–8, блок 9–24", color="дым")
     assert not echoes(other, {"мелодия": [N(b * 16 + p, 1, k) for b in range(4) for p, k in ((2, 60), (3, 72), (10, 61))]},
                       song, {"мелодия": tune}), "другая форма и другая мелодия — не повтор"
     info = dict(title="t", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=1, like="x", parts="x", tricks=["x"], skeleton="x",
                 tonal=["мелодия"])
-    plain = {"мелодия": [N(0, 4, 66)], "хэт": [N(i, 1) for i in range(16)], "бочка": [N(0, 1), N(20, 1)]}
+    plain = {"мелодия": [N(0, 4, 69)], "хэт": [N(i, 1) for i in range(16)], "бочка": [N(0, 1), N(20, 1)]}
     bad = "\n".join(problems(info, plain))
     assert "мимо тональности" in bad and "вне бита" in bad and "только в 0 партиях" in bad
+    assert all(f"нет поля {k}" in bad for k in ("form", "mood", "color", "mix", "fx")), "паспорт проверяется и без --prev"
+    assert "мимо тональности" not in "\n".join(problems(info, {"мелодия": [N(0, 4, 66), N(4, 4, 71)]})), "♭2 и ♭5 — можно долго"
+    assert "не из списка" in "\n".join(problems(info | {"twist": "сальто"}, plain)), "ход — только из списка"
+    assert "характер «добрый» — не из списка" in "\n".join(problems(info | {"mood": "добрый"}, plain))
     assert "в синтезаторе не работают" in "\n".join(problems(info, {"мелодия": glide(0, 4, 65, 77)}))
     assert "синтезатор" not in "\n".join(problems(info | {"tonal": ["808"]}, {"808": glide(0, 4, 29, 41)}))
     doubled = {"808": [N(i * 4, 3, 29) for i in range(4)], "бочка": [N(i * 4, 1) for i in range(4)]}
@@ -707,7 +857,37 @@ def selftest() -> None:
     assert "нет в списке" in named and "хэт: партии не назван звук" in named, named
     assert "Звуки и пресеты" in about(info | {"twist": "ложный вход", "form": "x", "sounds": {"хэт": ["KITS/a.wav"]}}) \
         and "неожиданный ход: ложный вход" in about(info | {"twist": "ложный вход", "form": "x"})
-    print("ноты: приёмы, партитура FL, MIDI, отбраковка, сверка с прошлым битом, неожиданный ход, звуки по списку и папка «Сегодня» — в порядке")
+    # Цвет: сладкое бракуется, сухое проходит. Сладкий — «Фосфор» в четырёх тактах: круг из четырёх аккордов,
+    # мелодия наверху в семь нот, второй голос в терцию, колокольчик, ни одной паузы
+    paper = dict(bars=4, tonal=["аккорды", "мелодия", "контрмелодия", "808"], mood="обычный", color="лёд")
+    sweet = {"аккорды": [N(b * 16, 16, k + r) for b, r in enumerate((0, 8, 3, 10)) for k in (50, 53, 57)],
+             "мелодия": [N(i * 4, 4, k) for i, k in enumerate((81, 79, 77, 84, 86, 82, 76) * 2)],
+             "контрмелодия": [N(i * 4, 4, k - 3) for i, k in enumerate((81, 79, 77, 84, 86, 82, 76) * 2)],
+             "808": [N(0, 64, 26)]}
+    said = "\n".join(sugar(paper | {"sounds": {"мелодия": "Serum/User/Bells/Bell - Crystal Eye.fxp"}}, sweet))
+    assert all(w in said for w in ("мелодия: 86% времени на F6", "4 разных по составу тактов", "в мотиве 7 разных нот",
+                                   "в терцию или сексту 100%", "музыка молчит 0%", "колокольчик, шкатулка или плак")), said
+    dry = {"аккорды": [N(b * 16, 16, k) for b in (0, 1, 2) for k in (50, 57)],              # один аккорд, такт тишины
+           "мелодия": [N(b * 16 + p, 2, k) for b in (0, 1, 2) for p, k in ((0, 62), (6, 63), (10, 50))],     # три ноты, одна — ♭2
+           "контрмелодия": [N(b * 16 + 6, 2, 51) for b in (0, 2)], "808": [N(0, 64, 26)]}       # второй голос — октавой ниже
+    assert sugar(paper | {"sounds": {"мелодия": "Serum/Leads/LD Dirty Lead [SW].fxp"}}, dry) == [], sugar(paper, dry)
+    half = {**dry, "аккорды": dry["аккорды"] + [N(48, 8, 50)]}                           # тишины полтакта из четырёх
+    assert not sugar(paper | {"color": "андер"}, dry) and not sugar(paper, half), "тишины хватает"
+    assert "молчит 12% времени — нужно не меньше 20%" in "\n".join(sugar(paper | {"color": "андер"}, half)), "андеру тишины нужно больше"
+    assert not sugar(paper | {"mood": "кино"}, {"мелодия": [N(i * 12, 12, k) for i, k in enumerate((50, 53, 55, 57, 58))]}), \
+        "кино: остинато не молчит, в теме пять нот"
+    assert "в мотиве 5" in "\n".join(sugar(paper | {"twist": "смена бита", "bars": 20},
+                                             {"мелодия": [N(i * 12, 12, k) for i, k in enumerate((50, 53, 55, 57, 58))]}))
+    one = dict(color="лёд", mix={"основа": "Yung Lean", "чужое": "кино", "элемент": "оркестровый слой"})
+    two = one | {"mix": one["mix"] | {"чужое": ["кино", "Chief Keef"], "элемент": ["оркестровый слой", "тембр"]}}
+    assert _mix(one, False) == [] and _mix(two, True) == [] and "два чужих элемента" in _mix(two, False)[0]
+    assert "основа — один референс своего цвета" in _mix(one | {"color": "дым"}, False)[0]
+    assert "не из списка звуков" in _mix(one | {"mix": one["mix"] | {"чужое": "Boulevard Depo"}}, False)[0]
+    assert "чужое — звук другого цвета" in _mix(one | {"mix": one["mix"] | {"чужое": "Black Kray"}}, False)[0]
+    assert _pages("а\n" * 3000) == ["а\n" * 2000, "а\n" * 1000] and _pages("коротко") == ["коротко"], "длинная записка — частями"
+    assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
+    print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
+          "сверка с прошлым битом, неожиданный ход, звуки по списку и папка «Сегодня» — в порядке")
 
 
 def main() -> None:
@@ -715,7 +895,7 @@ def main() -> None:
     p.add_argument("--selftest", action="store_true", help="проверить приёмы и запись файлов, без сети")
     p.add_argument("--build", metavar="ПАПКА", type=Path, help="собрать архив из ПАПКА/make.py")
     p.add_argument("--prev", metavar="ФАЙЛ", type=Path, nargs="+", default=(),
-                   help="make.py прошлых битов: та же форма, приём или сама мелодия — бит не годен")
+                   help="make.py прошлых битов: та же форма, приём, цвет, смесь или сама мелодия — бит не годен")
     p.add_argument("--out", metavar="КУДА", type=Path, help="куда положить архив (по умолчанию — временная папка)")
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
     p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
