@@ -44,6 +44,13 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 Отвергнуто: мерить «садится ли мелодия на звук аккорда» — при одном-двух аккордах и мотиве из трёх нот
 доля высокая у любого бита, сладкое от сухого она не отличает.
 
+Музыка петлёй (владелец, 02.10.2026: «да», через день). Разбор его проектов показал, что музыку он делает
+гитарными петлями набора 01 через Gross Beat и Love Philter, а Serum почти не трогает. Обычный бит с 05.10.2026
+называет петлю полем loop и партий музыки не несёт: ноты — барабаны, 808 и не больше одной партии сэмплером.
+Злой и кино остаются партиями — характер и так чередуется через день, своего расписания у петли нет. Темп петли
+берётся из имени файла: звук в KITS читать нельзя (заглушки iCloud), а петля без темпа в имени в список не идёт.
+Отвергнуто: брать любые петли набора — Lex Luger и прочее с archive.org лежат в той же папке без лицензии.
+
     python -m src.noty --selftest          приёмы пианоролла, замер нот и запись партитуры FL и MIDI, без сети
     python -m src.noty --build ПАПКА       собрать и проверить бит из ПАПКА/make.py, без Telegram
     python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py прошлых битов: та же форма, мелодия, цвет или смесь — отказ
@@ -103,6 +110,12 @@ LIBRARY = {"KITS": Path.home() / "Documents" / "Image-Line" / "FL Studio" / "KIT
 # В список идёт то, что можно ставить в бит на раздачу. Оркестровых сэмплов Lex Luger (KITS/01) в нём нет:
 # набор взят с archive.org без указанной лицензии — сборка откажет им, как любому неназванному звуку.
 LISTED = (("KITS/09 - Scene 2026 Kit", "**/*.wav"), ("KITS/10 - Кино Kit", "**/*.wav"), ("Serum", "**/*.fxp"))
+# Музыка петлёй. Папка Loops плоская: вид петли — приставка имени. Только MusicRadar — royalty-free по README набора
+LOOPS = "KITS/01 - ASAP Rocky Kit/Loops"
+LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient")
+LOOP_TEMPO = .08            # отход темпа бита от темпа петли (или двойного): дальше растяжка слышна; мерка skleyka.SWAP_TEMPO
+LOOP_FROM = "20261005"      # с этого дня обычный бит — петлёй: 03.10 и 04.10 — пробы злого и кино, они партиями
+LISTED += ((LOOPS, "*.wav"),)
 TODAY = "00 - Сегодня"      # папка копий на сегодня — в KITS и в User пресетов Serum; чистится только она
 
 
@@ -332,7 +345,7 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
     # и «Фосфор» 02.10.2026 ушёл владельцу без единого из этих полей
     out += [f"в паспорте нет поля {k}" for k in ("title", "bpm", "key", "scale", "bars", "skeleton", "like", "parts", "tricks",
                                                  "form", "melody", "mood", "twist", "color", "mix", "sounds", "fx")
-            if not info.get(k)]
+            if not info.get(k) and not (k == "melody" and info.get("loop"))]      # у бита петлёй мелодии нет
     out += [f"{word} «{info[k]}» — не из списка: {', '.join(names)}"
             for k, word, names in (("twist", "неожиданный ход", TWISTS), ("mood", "характер", MOODS), ("color", "цвет", COLORS))
             if info.get(k) and info[k] not in names]
@@ -370,7 +383,39 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
                 if name in info.get("tonal", ()) and name not in info["fx"]]
     if info.get("mix"):
         out += _mix(info, free)
+    if info.get("loop"):
+        out += _loop(info, tracks)
     return (out + sugar(info, tracks))[:20]
+
+
+def loop_bpm(name: str) -> int | None:
+    """Темп петли из имени файла: «AC_NylStr85A-01» — 85, «K02Organ110E-03» — 110. None — петля не из разрешённых
+    видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои."""
+    stem = name.rsplit("/", 1)[-1]
+    if not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS)) or re.search("Beat|Bass|Drum", stem):
+        return None
+    return next((int(d) for d in re.findall(r"(?<!\d)\d{2,3}(?!\d)", stem) if 60 <= int(d) <= 200), None)
+
+
+def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Музыка петлёй: петля — из разрешённых, темп бита — её темп или вдвое быстрее, партий музыки рядом
+    не больше одной, и та сэмплером. Нот у петли нет: где она играет и чем обработана — словами в parts и fx."""
+    loop, tempo = _nfc(str(info["loop"])), loop_bpm(str(info["loop"]))
+    if not (loop.startswith(LOOPS + "/") and tempo and loop in known()):
+        return [f"loop: «{loop}» — не из разрешённых петель: {LOOPS}, виды {', '.join(LOOP_KINDS)}, "
+                "с темпом в имени — точное имя бери из data/beat_sounds.json"]
+    out = []
+    if info.get("bpm") and min(abs(info["bpm"] / (tempo * k) - 1) for k in (1, 2)) > LOOP_TEMPO:
+        out.append(f"loop: темп бита {info['bpm']} не сходится с темпом петли {tempo} — бит в её темпе "
+                   f"или вдвое быстрее, отход не больше {LOOP_TEMPO:.0%}")
+    if info.get("mood") != "обычный":
+        out.append("loop: петлёй — только обычный бит; злой и кино — партиями")
+    music = [name for name in tracks if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED)]
+    if len(music) > 1 or any(s.startswith("Serum/") for name in music for s in _names((info.get("sounds") or {}).get(name, ()))):
+        out.append(f"loop: рядом с петлёй партии музыки ({', '.join(music)}) — не больше одной, и та сэмплером, а не Serum")
+    if "петля" not in (info.get("fx") or {}):
+        out.append("loop: в fx нет строки «петля» — цепочки обработки петли")
+    return out
 
 
 def _free(name: str) -> bool:
@@ -504,7 +549,8 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
     частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код."""
     was = f"«{old.get('title', 'прошлый бит')}»"
     out = [f"{word} «{info[k]}» — как в {was}: возьми другое"
-           for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"), ("color", "цвет"))
+           for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"), ("color", "цвет"),
+                           ("loop", "петля"))
            if info.get(k) and info[k] == old.get(k)]
     pair = [[_names(m.get(k) or ()) for k in ("основа", "чужое")] for m in (info.get("mix"), old.get("mix")) if isinstance(m, dict)]
     if len(pair) == 2 and pair[0] == pair[1]:
@@ -534,12 +580,17 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
     return out
 
 
+def _sounds(info: dict) -> dict:
+    """Звуки паспорта вместе с петлёй: Мак кладёт её в папку «Сегодня» наравне с остальными."""
+    return (info.get("sounds") or {}) | ({"петля": info["loop"]} if info.get("loop") else {})
+
+
 def about(info: dict) -> str:
     """Записка владельцу: она же подпись к архиву."""
     return "\n".join([
         f"🎹 {info['title']}", f"{info['bpm']} BPM, {info['key']}, {info['bars']} тактов", "",
         f"Скелет: {info['skeleton']}",
-        *([f"Форма: {info.get('form', '—')}; мелодия: {info.get('melody', '—')}; характер: {info.get('mood', '—')}"
+        *([f"Форма: {info.get('form', '—')}; мелодия: {info.get('melody') or ('петля' if info.get('loop') else '—')}; характер: {info.get('mood', '—')}"
            + (f"; неожиданный ход: {info['twist']}" if info.get("twist") else "")]
           if info.get("form") or info.get("melody") or info.get("mood") else []),
         *([f"Цвет: {info['color']}"] if info.get("color") else []),
@@ -550,7 +601,10 @@ def about(info: dict) -> str:
         "Что сделано нотами:", *(f"• {t}" for t in info["tricks"]), "",
         *(["Звуки и пресеты — в папке «00 - Сегодня» в браузере FL и в меню Serum → User (нужно Rescan); "
            "их кладёт Мак, когда не спит:",
-           *(f"• {part} — {n}" for part, names in info["sounds"].items() for n in _names(names)), ""] if info.get("sounds") else []),
+           *(f"• {part} — {n}" for part, names in _sounds(info).items() for n in _names(names)), ""] if _sounds(info) else []),
+        *([f"Музыка — петлёй: темп в её имени — {loop_bpm(info['loop'])}, растяни её к темпу бита без смены высоты. "
+           "Тональность снята с имени петли, на слух не сверена: не строит — сдвинь партитуру 808 целиком.", ""]
+          if info.get("loop") else []),
         *(["Обработка — цепочки из интервью продюсеров и замера. Ни пресетов, ни эффектов автор нот не слышал: "
            "это с чего начать, а не как должно звучать:",
            *(f"• {part} — {chain}" for part, chain in info["fx"].items()), ""] if info.get("fx") else []),
@@ -569,6 +623,8 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     made = runpy.run_path(str(folder / "make.py"))
     info, tracks = made["INFO"], made["compose"]()
     bad = problems(info, tracks, _free(folder.name))
+    if folder.name[:8].isdigit() and folder.name[:8] >= LOOP_FROM and info.get("mood") == "обычный" and not info.get("loop"):
+        bad.append("обычный бит — петлёй (поле loop): музыка через день петлёй, через день партиями")
     for path in prev:
         try:
             old = runpy.run_path(str(path))
@@ -606,7 +662,7 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
         for f in sorted(root.rglob("*")):
             z.write(f, f.relative_to(out))
     archive.with_suffix(".txt").write_text(about(info), encoding="utf-8")
-    archive.with_suffix(".sounds.json").write_text(json.dumps(info.get("sounds") or {}, ensure_ascii=False), encoding="utf-8")
+    archive.with_suffix(".sounds.json").write_text(json.dumps(_sounds(info), ensure_ascii=False), encoding="utf-8")
     print(f"{info['bpm']} BPM, {info['bars']} тактов, {info['bars'] * 240 / info['bpm']:.0f} с → {archive}")
     return archive
 
@@ -633,7 +689,8 @@ def library() -> list[str]:
     for base, pattern in LISTED:
         key, _, sub = base.partition("/")
         root = LIBRARY[key] / sub
-        out |= {_nfc(f"{base}/{f.relative_to(root).as_posix()}") for f in root.glob(pattern) if TODAY not in f.parts}
+        out |= {_nfc(f"{base}/{f.relative_to(root).as_posix()}") for f in root.glob(pattern)
+                if TODAY not in f.parts and (base != LOOPS or loop_bpm(f.name))}
     return sorted(out)
 
 
@@ -811,6 +868,14 @@ def selftest() -> None:
         except SystemExit as e:
             assert all(w in str(e) for w in ("форма «песня»", "цвет «ржавчина»", "смесь «Chief Keef + кино»")) \
                 and "в том же порядке" not in str(e), e                                           # parts='x' — частей не названо
+        (tmp / "20261005-a-b-140-fm").mkdir()               # обычный бит с 05.10.2026 без петли — отказ
+        (tmp / "20261005-a-b-140-fm" / "make.py").write_text(
+            (tmp / "beat" / "make.py").read_text("utf-8").replace("mood='злой'", "mood='обычный'"), encoding="utf-8")
+        try:
+            build(tmp / "20261005-a-b-140-fm", tmp / "out")
+            raise AssertionError("обычный бит без петли должен браковаться")
+        except SystemExit as e:
+            assert "обычный бит — петлёй" in str(e), e
         # Папка «Сегодня» на временных папках: звук найден, не найден, не читается, чужой путь, старое убрано, оригинал цел
         lib, pres, kits, serum = tmp / "lib", tmp / "pres", tmp / "lib" / TODAY, tmp / "pres" / "User" / TODAY
         (lib / "k" / "Stub.wav").mkdir(parents=True)        # не читается, как заглушка iCloud без сети
@@ -884,10 +949,31 @@ def selftest() -> None:
     assert "основа — один референс своего цвета" in _mix(one | {"color": "дым"}, False)[0]
     assert "не из списка звуков" in _mix(one | {"mix": one["mix"] | {"чужое": "Boulevard Depo"}}, False)[0]
     assert "чужое — звук другого цвета" in _mix(one | {"mix": one["mix"] | {"чужое": "Black Kray"}}, False)[0]
+    # Музыка петлёй: без партий музыки проходит; чужая папка, чужой темп, злой бит и набор партий Serum — брак
+    assert loop_bpm("Acoustic Gtr - AC_12Str120A-01.wav") == 120 and loop_bpm("Country Crunk - K01AcouMix84C-02.wav") == 84
+    assert not loop_bpm("Western Gtr - WW_AcouG_Chord-Amin.wav") and not loop_bpm("Country Crunk - K02Beat110-01.wav") \
+        and not loop_bpm("Lex Luger - Strings140.wav"), "без темпа, барабаны и чужой набор — не петли"
+    loop = min((n for n in known() if n.startswith(LOOPS) and loop_bpm(n) == 85), default="")
+    assert loop, "в data/beat_sounds.json нет петель: перепиши список на Маке — noty --sounds"
+    drums = {"808": glide(0, 16, 29, 41, at=12, over=4), "хэт": spread([N(i, 1) for i in range(32)]), "клэп": [N(8, 1)] + roll(28, 4, 16)}
+    looped = dict(title="t", bpm=170, key="Am", scale=[9, 11, 0, 2, 4, 5, 7], bars=2, skeleton="сцена", like="x", parts="x",
+                  tricks=["x"], tonal=["808"], form="песня", mood="обычный", twist="ложный вход", color="рифф", loop=loop,
+                  mix={"основа": "Lil Peep", "чужое": "кино", "элемент": "обработка"}, sounds=dict.fromkeys(drums, loop),
+                  fx={"808": "Fruity Fast Dist", "петля": "Gross Beat → Fruity Love Philter"})
+    assert problems(looped, drums) == [] and problems(looped | {"bpm": 88}, drums) == [], problems(looped, drums)
+    assert "Музыка — петлёй: темп в её имени — 85" in about(looped) and f"• петля — {loop}" in about(looped)
+    assert "не сходится с темпом петли 85" in "\n".join(problems(looped | {"bpm": 140}, drums))
+    for alien in ("KITS/01 - ASAP Rocky Kit/Loops/Lex Luger - Strings140.wav", loop.replace(LOOPS, "KITS/09 - Scene 2026 Kit")):
+        assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": alien}, drums)), alien
+    full = {**drums, "аккорды": [N(0, 8, 57)], "мелодия": [N(8, 2, 60)]}
+    said = "\n".join(problems(looped | {"tonal": ["808", "аккорды", "мелодия"], "mood": "злой", "fx": {"808": "x"},
+                                        "sounds": dict.fromkeys(full, loop)}, full))
+    assert all(w in said for w in ("не больше одной", "только обычный бит", "нет строки «петля»")), said
+    assert "петля «" in "\n".join(echoes(looped, drums, looped, drums)), "та же петля, что в прошлом бите, — повтор"
     assert _pages("а\n" * 3000) == ["а\n" * 2000, "а\n" * 1000] and _pages("коротко") == ["коротко"], "длинная записка — частями"
     assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
-          "сверка с прошлым битом, неожиданный ход, звуки по списку и папка «Сегодня» — в порядке")
+          "сверка с прошлым битом, неожиданный ход, музыка петлёй, звуки по списку и папка «Сегодня» — в порядке")
 
 
 def main() -> None:
@@ -912,7 +998,9 @@ def main() -> None:
         names = library()
         if not names:
             raise SystemExit("Библиотеки на этой машине нет — список не тронут.")
-        config.BEAT_SOUNDS.write_text(json.dumps({"date": state.now().strftime("%Y-%m-%d"), "sounds": names},
+        old = json.loads(config.BEAT_SOUNDS.read_text("utf-8")) if config.BEAT_SOUNDS.exists() else {}
+        # незнакомые поля файла остаются: рядом с именами лежит то, что о звуках намерено
+        config.BEAT_SOUNDS.write_text(json.dumps(old | {"date": state.now().strftime("%Y-%m-%d"), "sounds": names},
                                                  ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         print(f"{len(names)} имён → {config.BEAT_SOUNDS}")
     elif a.gather:
