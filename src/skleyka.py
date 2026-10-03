@@ -2258,37 +2258,50 @@ def _drafts(data: dict) -> bool:
     ещё — или дальше» или сведение в очередь; тишина DRAFT_MINUTES — заявка закрыта."""
     changed = False
     for chat_id, draft in list(data["drafts"].items()):
-        quiet, plan = _age(draft["at"]), draft.get("plan")
-        if quiet >= DRAFT_MINUTES * 60:
-            del data["drafts"][chat_id]
-            if draft["files"]:
-                telegram.send_message(chat_id, EXPIRED)
-            changed = True
-            continue
-        if not plan or quiet < QUIET:
-            continue
-        step = draft["step"]
-        have = [f for f in draft["files"] if step < len(plan) and f["r"] == plan[step]]
-        if draft.get("asked") == "style":
-            if quiet < STYLE_WAIT:
-                continue
-            _queue(data, chat_id, draft)
-        elif draft.get("asked") != step:
-            _ask(chat_id, draft)
-        elif len(draft["files"]) > draft.get("acked", 0):
-            # Ответ на каждый новый файл, со всем принятым: бит, узнанный по имени на шаге даблов,
-            # раньше принимался молча, и шаг «пришли бит» потом не наступал — 28.09 это читалось
-            # как «бит даже не попросил».
-            more = plan[step] in MULTI
-            telegram.send_message(chat_id, (MORE if more and have else "Есть: {names}.").format(names=_got(draft)),
-                                  buttons=[[{"text": "▶ Дальше", "callback_data": f"{PREFIX}n"}]] if more and have
-                                  else [[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]] if more
-                                  else None)
-            draft["acked"] = len(draft["files"])
-        else:
-            continue
-        changed = True
+        try:
+            changed = _round(data, chat_id, draft) or changed
+        except telegram.TelegramError as exc:
+            # 03.10.2026 человек заблокировал бота, отказ на EXPIRED ронял круг до save, и
+            # шесть часов стояли заявки всех. Отказ (403) — писать ему некуда, заявка прочь;
+            # сбой сети — заявка ждёт следующего круга. Прочие идут дальше в обоих случаях.
+            print(f"  заявка сведения {chat_id}: {exc}")
+            if "Forbidden" in str(exc):
+                data["drafts"].pop(chat_id, None)
+                changed = True
     return changed
+
+
+def _round(data: dict, chat_id: str, draft: dict) -> bool:
+    """Одна заявка на круге дежурства; True — состояние изменилось."""
+    quiet, plan = _age(draft["at"]), draft.get("plan")
+    if quiet >= DRAFT_MINUTES * 60:
+        del data["drafts"][chat_id]
+        if draft["files"]:
+            telegram.send_message(chat_id, EXPIRED)
+        return True
+    if not plan or quiet < QUIET:
+        return False
+    step = draft["step"]
+    have = [f for f in draft["files"] if step < len(plan) and f["r"] == plan[step]]
+    if draft.get("asked") == "style":
+        if quiet < STYLE_WAIT:
+            return False
+        _queue(data, chat_id, draft)
+    elif draft.get("asked") != step:
+        _ask(chat_id, draft)
+    elif len(draft["files"]) > draft.get("acked", 0):
+        # Ответ на каждый новый файл, со всем принятым: бит, узнанный по имени на шаге даблов,
+        # раньше принимался молча, и шаг «пришли бит» потом не наступал — 28.09 это читалось
+        # как «бит даже не попросил».
+        more = plan[step] in MULTI
+        telegram.send_message(chat_id, (MORE if more and have else "Есть: {names}.").format(names=_got(draft)),
+                              buttons=[[{"text": "▶ Дальше", "callback_data": f"{PREFIX}n"}]] if more and have
+                              else [[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]] if more
+                              else None)
+        draft["acked"] = len(draft["files"])
+    else:
+        return False
+    return True
 
 
 def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film: bool = False) -> list[list[dict]]:
@@ -3221,7 +3234,10 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
         if "bonus" in track:
             data["bonus"].setdefault(track["chat"], []).append(track.pop("bonus"))
     if not result:
-        telegram.send_message(track["chat"], FAILED)
+        try:
+            telegram.send_message(track["chat"], FAILED)
+        except telegram.TelegramError as exc:  # бота заблокировали: иначе _finish повторялся бы каждый круг
+            print(f"  сведение {job['id']}: {exc}")
 
 
 def resume() -> None:
@@ -4105,6 +4121,17 @@ def _selftest() -> None:
             data["drafts"][chat]["at"] = state.iso(state.now() - timedelta(seconds=seconds))
             _drafts(data)
             save(data)
+
+        # Заблокировал бота — его заявка прочь, соседняя идёт дальше (03.10.2026 стояли все).
+        def blocked(chat, text, **_):
+            if chat == "b":
+                raise telegram.TelegramError("sendMessage: Forbidden: bot was blocked by the user")
+            sent.append(text)
+        ago = lambda seconds: state.iso(state.now() - timedelta(seconds=seconds))  # noqa: E731
+        pair = {"drafts": {"b": {"at": ago(DRAFT_MINUTES * 60 + 1), "files": [{"r": "вокал"}], "plan": None, "step": 0},
+                           "ok": {"at": ago(QUIET + 1), "files": [], "plan": ["вокал", "бит"], "step": 0}}}
+        with mock.patch.object(telegram, "send_message", blocked):
+            assert _drafts(pair) and list(pair["drafts"]) == ["ok"] and pair["drafts"]["ok"]["asked"] == 0, pair
 
         # Бесплатный бит: только явное «free for profit» без «non profit», длина бита, артист
         # в названии, один бит на канал; кириллицу переводит iTunes, его ответ кириллицей не берётся.
