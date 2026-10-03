@@ -102,6 +102,12 @@ WIDTH, HEIGHT = 1920, 1080
 # вплотную, не шире WORD_WIDTH от фото; кегль от WORD_SIZE вниз. Снято с образца, который выбрал
 # владелец 02.10.2026. Невышедших фото меньше PHOTOS_LOW — строка владельцу под превью.
 PHOTO_BOX, WORD_FONT, WORD_WIDTH, WORD_SIZE, PHOTOS_LOW = (1440, HEIGHT), stories.FONTS / "Playfair.ttf", 0.74, (420, 120), 5
+# Настроение бита — последнее слово подписи («…, 142 Em, злой»), его же подсказывает записка нот (noty.MOODS).
+# Фото запаса несут своё полем mood (без поля — «обычный»), злому слово — рубленым Oswald 700: тёплый
+# портрет и книжная антиква читались добрыми, а у чужих type beat'ов пары кадр холодный (владелец, 03.10.2026).
+MOOD = re.compile(r",\s*(?P<mood>злой|кино|обычный)\s*$", re.IGNORECASE)
+WORD_FONTS = {"злой": (stories.FONTS / "Oswald.ttf", 700, 240)}  # шрифт, вес, кегль не больше: узкий Oswald в ширину
+# WORD_WIDTH вырастал до половины кадра и закрывал лицо
 # Запасной кадр config.BEAT_BACK: где у спин середина и на какой линии стоит имя в одну строку, сколько спина
 # вмещает в ширину. Снято с образца, который выбрал владелец 01.10.2026.
 BACKS = ((620, 640), (1365, 672))
@@ -116,7 +122,8 @@ AUDIO_KBPS = 192
 VIDEO_BUDGET = 48 * 2**20
 
 FORMAT = ("🎚 Бит не принял — не понял подпись. Нужно так: артисты, тире, название, "
-          "потом, если знаешь, темп и тональность через запятую:\n<code>бит Kizaru x Toxi$ — Полёт, 140 Fm</code>")
+          "потом, если знаешь, темп, тональность и настроение (злой, кино) через запятую:\n"
+          "<code>бит Kizaru x Toxi$ — Полёт, 140 Fm, злой</code>")
 ADDED = ("🎚 Бит №{id} в каталоге: «{title}» — {artists}{tempo}.\n"
          "Прямая ссылка на бит (если YouTube даст вставить): {link}\n\n"
          "<b>Название для YouTube</b>\n<code>{name}</code>\n\n"
@@ -143,7 +150,7 @@ VIDEO = "🎬 Ролик к биту №{id} «{title}» — {minutes}, {mb:.0f}
 VIDEO_BIG = "🎬 Ролик к биту №{id} вышел {mb:.0f} МБ — Telegram бота принимает до 50. Собери его сам: python -m src.bity --video."
 # Документом, а не фото: фото Telegram пережимает, а превью идёт на YouTube как есть.
 PREVIEW = "🖼 Превью к биту №{id} для YouTube, 1280×720 — файлом, чтобы Telegram его не пережал."
-PHOTOS_FEW = "\n📷 Фото для значков в запасе: {left}. Кончатся — значок вернётся к спинам; скажи Claude добрать запас."
+PHOTOS_FEW = "\n📷 Фото «{mood}» для значков в запасе: {left}. Кончатся — значок вернётся к спинам; скажи Claude добрать запас."
 VIDEO_FAILED = "🎬 Ролик к биту №{id} «{title}» не собрался — причина в журнале дежурства."
 
 
@@ -164,6 +171,8 @@ def parse(caption: str) -> dict | None:
     """Подпись бита — {artists, title, bpm, key}; None — не понял. «бит» в начале необязателен:
     так же читается --title сухого прогона."""
     text = " ".join(MARK.sub("", caption, count=1).split())
+    if mood := MOOD.search(text):
+        text = text[:mood.start()]
     parts = DASH.split(text, maxsplit=1)
     if len(parts) != 2:
         return None
@@ -176,7 +185,10 @@ def parse(caption: str) -> dict | None:
         title = title[:tail.start()]
     artists = [name for name in SPLIT.split(who) if name.strip()]
     title = title.strip(" \"'«»“”")
-    return {"artists": artists, "title": title, "bpm": bpm, "key": key} if artists and title else None
+    if not (artists and title):
+        return None
+    beat = {"artists": artists, "title": title, "bpm": bpm, "key": key}
+    return dict(beat, mood=mood["mood"].lower()) if mood else beat
 
 
 def link(beat_id: str) -> str:
@@ -469,10 +481,15 @@ def _stock() -> tuple[list[dict], set]:
 
 
 def photo(beat: dict) -> dict | None:
-    """Фото значка: записанное за битом, иначе первое в запасе, не отданное другому. Запас вышел — None."""
+    """Фото значка: записанное за битом, иначе первое в запасе его настроения, не отданное другому.
+    Фото этого настроения вышли — None: значок вернётся к спинам, чужое настроение хуже."""
     stock, taken = _stock()
     return next((shot for shot in stock if shot["id"] == beat.get("photo")), None) \
-        or next((shot for shot in stock if shot["id"] not in taken), None)
+        or next((shot for shot in stock if shot["id"] not in taken and _mood(shot) == _mood(beat)), None)
+
+
+def _mood(item: dict) -> str:
+    return item.get("mood", "обычный")
 
 
 def _picture(url: str) -> Image.Image:
@@ -502,10 +519,10 @@ def portrait(beat: dict) -> Image.Image | None:
     img.paste(ImageOps.fit(picture, PHOTO_BOX, centering=(0.5, shot["focus"])), ((WIDTH - PHOTO_BOX[0]) // 2, 0))
     # ponytail: слово одно — из названия в несколько слов идёт самое длинное; захочется другое — поле в подписи бита.
     word = max(beat["title"].split(), key=len).upper()
-    size = WORD_SIZE[0]
+    font, weight, size = WORD_FONTS.get(_mood(beat), (WORD_FONT, 500, WORD_SIZE[0]))
     while True:
-        face = ImageFont.truetype(str(WORD_FONT), size)
-        face.set_variation_by_axes([500])
+        face = ImageFont.truetype(str(font), size)
+        face.set_variation_by_axes([weight])
         gap = -size * 0.06
         width = sum(face.getlength(char) + gap for char in word) - gap
         if width <= PHOTO_BOX[0] * WORD_WIDTH or size <= WORD_SIZE[1]:
@@ -633,9 +650,9 @@ def render(beat_id: str) -> int:
                                                                minutes=f"{seconds // 60}:{seconds % 60:02d}"),
                                      seconds=seconds, width=WIDTH, height=HEIGHT)
         stock, taken = _stock()
-        left = sum(shot["id"] not in taken for shot in stock)
+        left = sum(shot["id"] not in taken and _mood(shot) == _mood(beat) for shot in stock)
         telegram.send_document(admin, clip.with_name(PREVIEW_NAME), PREVIEW.format(id=beat_id)
-                               + (PHOTOS_FEW.format(left=left) if left < PHOTOS_LOW else ""))
+                               + (PHOTOS_FEW.format(mood=_mood(beat), left=left) if left < PHOTOS_LOW else ""))
     return 0
 
 
@@ -657,6 +674,7 @@ def _selftest() -> None:
 
     asked: list[str] = []
     state.write_json(tmp / "photos.json", [{"id": 11, "url": "https://photo/11", "focus": 0.42, "y": 0.93},
+                                           {"id": 33, "url": "https://photo/33", "focus": 0.5, "y": 0.93, "mood": "злой"},
                                            {"id": 22, "url": "https://photo/22", "focus": 0.5, "y": 0.34}])
     with mock.patch.object(config, "BEATS_FILE", tmp / "beats.json"), \
             mock.patch.object(config, "BEAT_PHOTOS", tmp / "photos.json"), \
@@ -676,6 +694,9 @@ def _selftest() -> None:
             {"artists": ["Kizaru", "Toxi$"], "title": "Полёт", "bpm": 140, "key": "Fm"}
         assert parse("Бит: OG Buda & Mayot — «Холодно, мама», 142 bpm, F# minor") == \
             {"artists": ["OG Buda", "Mayot"], "title": "Холодно, мама", "bpm": 142, "key": "F# minor"}
+        assert parse("бит Kizaru x Toxi$ — Полёт, 140 Fm, Злой") == \
+            {"artists": ["Kizaru", "Toxi$"], "title": "Полёт", "bpm": 140, "key": "Fm", "mood": "злой"}
+        assert parse("бит Kizaru x Toxi$ — Злой")["title"] == "Злой", "без запятой — это название"
         assert parse("бит Kizaru х Toxi$ - Лето, 2") == {"artists": ["Kizaru", "Toxi$"], "title": "Лето, 2", "bpm": None, "key": ""}
         assert parse("бит Kizaru") is None and parse("бит — Полёт") is None
 
@@ -809,6 +830,7 @@ def _selftest() -> None:
         # Значок: фото запаса 4:3 по центру чёрного кадра и белое слово названия; фото записано за битом
         # при приёме, следующему биту — следующее; сеть не трогается.
         assert load()["1"]["photo"] == 11 and photo({"title": "Новый"})["id"] == 22
+        assert photo({"title": "Новый", "mood": "злой"})["id"] == 33 and photo({"title": "Новый", "mood": "кино"}) is None
         frame = cover(load()["1"])
         assert frame.size == (WIDTH, HEIGHT) and frame.getpixel((100, 540)) == (0, 0, 0)
         assert frame.getpixel((960, 300)) == (90, 60, 40) and asked == ["https://photo/11"], asked

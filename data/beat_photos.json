@@ -112,5 +112,180 @@
     "url": "https://images.pexels.com/photos/38312711/pexels-photo-38312711.jpeg?auto=compress&cs=tinysrgb&w=1600",
     "focus": 0.38,
     "y": 0.93
+  },
+  {
+    "id": 12040575,
+    "url": "https://images.pexels.com/photos/12040575/pexels-photo-12040575.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 20536782,
+    "url": "https://images.pexels.com/photos/20536782/pexels-photo-20536782.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 11602236,
+    "url": "https://images.pexels.com/photos/11602236/pexels-photo-11602236.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 17323406,
+    "url": "https://images.pexels.com/photos/17323406/pexels-photo-17323406.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 10068849,
+    "url": "https://images.pexels.com/photos/10068849/pexels-photo-10068849.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 6670896,
+    "url": "https://images.pexels.com/photos/6670896/pexels-photo-6670896.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.34,
+    "mood": "злой"
+  },
+  {
+    "id": 9895328,
+    "url": "https://images.pexels.com/photos/9895328/pexels-photo-9895328.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.34,
+    "mood": "злой"
+  },
+  {
+    "id": 28398726,
+    "url": "https://images.pexels.com/photos/28398726/pexels-photo-28398726.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 5191411,
+    "url": "https://images.pexels.com/photos/5191411/pexels-photo-5191411.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 10999002,
+    "url": "https://images.pexels.com/photos/10999002/pexels-photo-10999002.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 18816229,
+    "url": "https://images.pexels.com/photos/18816229/pexels-photo-18816229.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.34,
+    "mood": "злой"
+  },
+  {
+    "id": 12821630,
+    "url": "https://images.pexels.com/photos/12821630/pexels-photo-12821630.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 29095597,
+    "url": "https://images.pexels.com/photos/29095597/pexels-photo-29095597.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "злой"
+  },
+  {
+    "id": 6276690,
+    "url": "https://images.pexels.com/photos/6276690/pexels-photo-6276690.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.34,
+    "mood": "кино"
+  },
+  {
+    "id": 30728709,
+    "url": "https://images.pexels.com/photos/30728709/pexels-photo-30728709.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 36686691,
+    "url": "https://images.pexels.com/photos/36686691/pexels-photo-36686691.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 15373168,
+    "url": "https://images.pexels.com/photos/15373168/pexels-photo-15373168.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 8642097,
+    "url": "https://images.pexels.com/photos/8642097/pexels-photo-8642097.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 14924813,
+    "url": "https://images.pexels.com/photos/14924813/pexels-photo-14924813.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 29757530,
+    "url": "https://images.pexels.com/photos/29757530/pexels-photo-29757530.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 10077895,
+    "url": "https://images.pexels.com/photos/10077895/pexels-photo-10077895.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 30562736,
+    "url": "https://images.pexels.com/photos/30562736/pexels-photo-30562736.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 36723806,
+    "url": "https://images.pexels.com/photos/36723806/pexels-photo-36723806.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 36937402,
+    "url": "https://images.pexels.com/photos/36937402/pexels-photo-36937402.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.5,
+    "y": 0.93,
+    "mood": "кино"
+  },
+  {
+    "id": 19057542,
+    "url": "https://images.pexels.com/photos/19057542/pexels-photo-19057542.jpeg?auto=compress&cs=tinysrgb&w=1600",
+    "focus": 0.35,
+    "y": 0.93,
+    "mood": "кино"
   }
 ]
