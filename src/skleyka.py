@@ -1900,10 +1900,20 @@ def _age(stamp: str) -> float:
     return (state.now() - moment).total_seconds() if moment else math.inf
 
 
+def _stale(draft: dict) -> bool:
+    """Срок вышел, и шаг был за человеком. Пока шаг за ботом — вопрос шага не задан, файл
+    не подтверждён, после вопроса о звуке трек не встал в очередь, — заявка не протухает:
+    03.10.2026 круг дежурства простоял 28 часов, и первый же рабочий закрыл шесть заявок,
+    среди них заявку со ссылкой, где всё пришло, и заявку с вокалом, где бот не спросил бит."""
+    owed = bool(draft.get("plan")) and (draft.get("asked") != draft["step"]
+                                        or len(draft["files"]) > draft.get("acked", 0))
+    return _age(draft["at"]) >= DRAFT_MINUTES * 60 and not owed
+
+
 def _draft(data: dict, chat_id: str) -> dict | None:
     """Открытая заявка человека; протухшая — как нет."""
     draft = data["drafts"].get(chat_id)
-    return draft if draft and _age(draft["at"]) < DRAFT_MINUTES * 60 else None
+    return draft if draft and not _stale(draft) else None
 
 
 def active(chat_id: str | int) -> bool:
@@ -2282,7 +2292,7 @@ def _drafts(data: dict) -> bool:
 def _round(data: dict, chat_id: str, draft: dict) -> bool:
     """Одна заявка на круге дежурства; True — состояние изменилось."""
     quiet, plan = _age(draft["at"]), draft.get("plan")
-    if quiet >= DRAFT_MINUTES * 60:
+    if _stale(draft):
         del data["drafts"][chat_id]
         # Ссылка на облако — тоже дорожки: 03.10.2026 заявка со ссылкой пережила простой очереди
         # и закрылась молча, человек ждал трек весь вечер.
@@ -2299,6 +2309,8 @@ def _round(data: dict, chat_id: str, draft: dict) -> bool:
         _queue(data, chat_id, draft)
     elif draft.get("asked") != step:
         _ask(chat_id, draft)
+        # Срок — от вопроса бота: запоздалый вопрос иначе закрыл бы заявку следующим же кругом.
+        draft["at"] = state.iso()
     elif len(draft["files"]) > draft.get("acked", 0):
         # Ответ на каждый новый файл, со всем принятым: бит, узнанный по имени на шаге даблов,
         # раньше принимался молча, и шаг «пришли бит» потом не наступал — 28.09 это читалось
@@ -2308,7 +2320,7 @@ def _round(data: dict, chat_id: str, draft: dict) -> bool:
                               buttons=[[{"text": "▶ Дальше", "callback_data": f"{PREFIX}n"}]] if more and have
                               else [[{"text": "⏭ Пропустить шаг", "callback_data": f"{PREFIX}p:{step}"}]] if more
                               else None)
-        draft["acked"] = len(draft["files"])
+        draft["acked"], draft["at"] = len(draft["files"]), state.iso()
     else:
         return False
     return True
@@ -4804,6 +4816,27 @@ def _selftest() -> None:
         data["jobs"].pop()
         data["used"]["60"].pop()
         save(data)
+        # Шаг за ботом — срок заявку не закрывает (03.10.2026, круг дежурства стоял 28 часов): ссылка
+        # и шесть часов тишины — вопрос о звуке, потом сведение; вокал, после которого бот не спросил
+        # бит, — вопрос, и срок идёт от него. Шаг за человеком — заявка закрыта.
+        start(61, 61)
+        callback(61, 61, "m:3")
+        assert wish(61, "https://disk.yandex.ru/d/abc")
+        later("61", 6 * 3600)
+        assert sent[-1].startswith("Дорожки есть: по ссылкам") and _age(load()["drafts"]["61"]["at"]) < QUIET, sent[-1]
+        later("61", 6 * 3600)
+        data = load()
+        assert "61" not in data["drafts"] and sent[-1].startswith("Принял: по ссылкам"), sent[-1]
+        del data["tracks"][data["jobs"].pop()["track"]]
+        data["used"]["61"].pop()
+        save(data)
+        start(62, 62)
+        callback(62, 62, "m:1")
+        take(file(8, "take.wav", chat=62))
+        later("62", 6 * 3600)
+        assert sent[-1].startswith("<b>Шаг 2 из 2</b> · пришли бит") and "62" in load()["drafts"], sent[-1]
+        later("62", DRAFT_MINUTES * 60 + 1)
+        assert sent[-1] == EXPIRED and "62" not in load()["drafts"], sent[-1]
         oblako.look = real_look
 
         # Стемы папкой с master и голоса zip-архивом: роли по именам и соседям, master и «бит»
