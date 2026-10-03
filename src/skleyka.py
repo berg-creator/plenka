@@ -909,14 +909,15 @@ def _band(low: float, high: float, order: int = 3) -> str:
     return ",".join([f"highpass=f={low:.0f}"] * order * bool(low) + [f"lowpass=f={high:.0f}"] * order * bool(high)) or "anull"
 
 
-def _bands(path: Path, chain: str = "", split=SPLIT, step: float = 0.1) -> list[list[float]]:
+def _bands(path: Path, chain: str = "", split=SPLIT, step: float = 0.1, cuts: list[str] | None = None) -> list[list[float]]:
     """Уровень полос по окнам step секунд, дБ RMS, за один проход: полосы между
     частотами split, 36 дБ на октаву, как в tone, нулевая — ниже первой частоты.
-    Тишина — −150."""
+    cuts — свои фильтры полос вместо split. Тишина — −150."""
     edges = (0, *split, 0)
-    n = len(edges) - 1
+    cuts = cuts or [_band(edges[k], edges[k + 1]) for k in range(len(edges) - 1)]
+    n = len(cuts)
     graph = (f"[0:a]{chain}asplit={n}" + "".join(f"[i{k}]" for k in range(n)) + ";"
-             + "".join(f"[i{k}]{_band(edges[k], edges[k + 1])},asetnsamples={round(RATE * step)},astats=metadata=1:reset=1:"
+             + "".join(f"[i{k}]{cuts[k]},asetnsamples={round(RATE * step)},astats=metadata=1:reset=1:"
                        f"measure_perchannel=none:measure_overall=RMS_level,"
                        f"ametadata@{k}=print:key=lavfi.astats.Overall.RMS_level[o{k}];" for k in range(n))
              + "".join(f"[o{k}]" for k in range(n)) + f"amix=inputs={n}")
@@ -1747,6 +1748,18 @@ HAND = ("🎧 <b>Свести руками</b>\n\n"
         "Напиши ему, что хочешь получить")
 HAND_TRACKS = ", — дорожки у него уже есть."
 HAND_LOST = "⚠️ Не переслал: {what}. Сообщения удалены или трек сведён раньше этой кнопки — попроси у человека."
+# Отказ в ручном сведении — по замеру записи (gauge, flaws): запись с явным браком руками не вытянуть,
+# и взять за неё деньги значит продать ту же версию бота. Человеку — что не так и как перезаписать;
+# мерил бот, поэтому спорить можно — /vopros. Владельцу — одна строка вместо карточки и дорожек.
+HAND_NO = ("🎧 <b>Свести руками</b>\n\n"
+           "За этот трек звукорежиссёр ПЛЁНКИ не возьмётся: дело в записи голоса, а запись сведением "
+           "не исправить. Заплатишь — а разницы с версией бота почти не услышишь.\n\n"
+           "{flaws}\n\n"
+           "Пока пользуйся версией бота — она у тебя уже есть. Перезапишешь голос — присылай заново, "
+           "/svedenie: под новым треком будет та же кнопка.\n\n"
+           "Запись мерил бот, а не человек. Не согласен — напиши /vopros, посмотрит владелец.")
+HAND_SIFTED = ("🎧 Свести руками — бот не взял ({why}): {who}, трек {track}. Запись: {take}. "
+               "Человеку — отказ и как перезаписать; ответ на это сообщение уйдёт ему. ")
 # Товары за звёзды: payload счёта → название (до 32 знаков).
 STARS = {"pack": f"+{config.SKLEYKA_PACK} трека на сутки",
          "month": f"30 дней по {config.SKLEYKA_MONTH_PER_DAY} треков в сутки"}
@@ -2528,18 +2541,37 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
     и следом копии дорожек и версии бота (copyMessage: без пределов 20 и 50 МБ). Под лимитом
     трек не назван — берётся последний готовый; нет его — только текст, без карточки: пересылать
     нечего. Заявка одна на трек (hand): повтор владельцу ничего не шлёт, человеку — тот же текст.
-    Отметка ставится после карточки: карточка не ушла — следующее нажатие пошлёт её снова."""
+    Отметка ставится после карточки: карточка не ушла — следующее нажатие пошлёт её снова.
+    Запись с явным браком (замер сведения, track["take"]) не берётся: человеку — отказ HAND_NO,
+    владельцу — строка вместо карточки, тоже один раз (sifted). Замера нет или он не читается —
+    заказ идёт как без него."""
     tracks = data["tracks"]
     track_id = track_id or max((key for key, track in tracks.items() if track["chat"] == chat_id and track.get("done")),
                                key=lambda key: tracks[key]["done"], default="")
     track = tracks.get(track_id)
     track = track if track and track["chat"] == chat_id else None
+    try:
+        found = (track or {}).get("take") or {}
+        bad, measured = flaws(found), gauge_line(found) if found else "не мерилась"
+    except Exception as exc:  # noqa: BLE001 — замер не должен стоить заказа
+        print(f"  заказ руками: замер не прочитан: {type(exc).__name__}")
+        bad, measured = [], "не мерилась"
+    admin = config.secret("TELEGRAM_ADMIN_ID")
+    name = " ".join(filter(None, (who.get("first_name"), who.get("last_name")))) or "без имени"
+    contact = f"@{who['username']}" if who.get("username") else f"без username · chat_id <code>{chat_id}</code>"
+    if bad:
+        telegram.send_message(chat_id, HAND_NO.format(flaws="\n\n".join(f"• {TAKE_FLAWS[key][1]}" for key in bad)))
+        if not track.get("sifted"):
+            telegram.send_message(admin, HAND_SIFTED.format(
+                why=", ".join(TAKE_FLAWS[key][0] for key in bad), who=f"{html.escape(name)} · {contact}",
+                track=track_id, take=measured) + f"{QUESTION_TAG}{chat_id}")
+            track["sifted"] = state.iso()
+            save(data)
+        return
     telegram.send_message(chat_id, HAND + (HAND_TRACKS if track else "."))
     if not track or track.get("hand"):
         return
-    admin, files = config.secret("TELEGRAM_ADMIN_ID"), track["files"]
-    name = " ".join(filter(None, (who.get("first_name"), who.get("last_name")))) or "без имени"
-    contact = f"@{who['username']}" if who.get("username") else f"без username · chat_id <code>{chat_id}</code>"
+    files = track["files"]
     split = not {f["r"] for f in files} <= {"вокал", "бит"}
     # Что в ссылке на облако, узнаёт только сведение — режим и цену по ней не угадываем.
     mode = "дорожки по ссылке" if track.get("links") else \
@@ -2552,6 +2584,8 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
         *(f"Ссылка: {html.escape(link['u'])} — {html.escape(link.get('say', ''))}" for link in track.get("links", [])),
         f"Ручки: {html.escape(look(track['knobs']))}; пересборок — {track['tweaks']}",
         *([f"Словами: «{html.escape(words)}»"] if words else []),
+        f"Запись: {measured}; дорожек — {len(files)}{' и ссылка' if track.get('links') else ''}; "
+        f"просьба словами — {'есть' if words else 'нет'}",
         "", f"{QUESTION_TAG}{chat_id}",
         "<i>Ответь на это сообщение — перешлю человеку. Файлы — следом.</i>"]))
     track["hand"] = state.iso()
@@ -3232,7 +3266,7 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     if not track:
         return
     if result.get("ok"):
-        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix") if result.get(key)}, done=state.iso())
+        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix", "take") if result.get(key)}, done=state.iso())
         if result.get("keyed"):
             data["keys"][track["chat"]] = state.iso()
         if not job.get("tweak"):
@@ -3506,6 +3540,153 @@ def _hush(parts: list[tuple[str, Path, str]], master: Path | None, work: Path) -
     return hushed
 
 
+# Замер записи — отбор заказов «🎧 Свести руками» (владелец, 03.10.2026): первый же заказ пришёл
+# с голосом, который сведение не вытягивает, — работа сделана, а разницы с версией бота почти нет.
+# Отбирает бот, без владельца: сырой голос меряется, пока лежит на диске (run_job), числа едут
+# в запись трека, и _hand читает готовое. Ложный отказ — потерянный платящий клиент, поэтому
+# отсеивается только явный брак: порог каждой мерки стоит далеко за нормой, а мерка, которой
+# не на чем мериться, молчит (None) — и заказ идёт как раньше. Сырых записей, хороших и плохих,
+# для сверки порогов нет: пороги — расчёт, а не опыт; спорный отказ человек оспорит через /vopros.
+TAKE_STEP = 0.05        # окно замера, с
+TAKE_SILENCE = -90.0    # тише, дБ, — цифровая тишина: пауза вырезана в проекте, шума в ней не найти
+# Шум — самые тихие ровные куски записи (от полсекунды подряд в пределах TAKE_STEADY дБ, вместе
+# от TAKE_PAUSES секунд) к громкости голоса. Ровные и самые тихие — потому что хвост слова и вдох
+# тоже тихие, но на месте не стоят, а шум комнаты и микрофона стоит, и тише своего шума запись
+# не бывает. Аудиокнижная норма ACX — шум не выше −60 дБ при голосе −23…−18, то есть от 37 дБ;
+# подавитель шума без «воды» в голосе снимает 12–15 дБ, компрессия сведения столько же возвращает.
+# Ниже 20 дБ шум стоит прямо под словами, и чистить нечем. На живой речи с подмешанным шумом
+# мерка сошлась с подмешанным в пределах 2 дБ; шум громче «голос минус 10 дБ» она не видит —
+# не отличает от тянутой ноты, и такая запись пройдёт.
+TAKE_STEADY = 6.0
+TAKE_PAUSES = 2.0
+TAKE_NOISE = 20.0
+# Перегруз — доля сэмплов голоса, стоящих ровно на потолке файла: у живой волны потолка касаются
+# два сэмпла, у срезанной — полки. По модели речи (амплитуды по Лапласу, пик-фактор 16 дБ) 1% —
+# это запись, перегруженная вдвое, на 6 дБ; до 3 дБ (0,2%) вершины ещё дорисовываются.
+# ponytail: срез видно только побитовый — после MP3, дизера или смены частоты полки смазаны,
+# и такой перегруз пройдёт; ловить его — мерить искажения, а не полки.
+TAKE_CLIP = 0.01
+# Верх — мощность выше 10 кГц к голосу; тело согласных — выше 4 кГц. Средний спектр речи
+# (Byrne, 1994) держит там около −25 и −15 дБ. Запись через мессенджер или диктофон режется
+# на 3,4 или 7–8 кГц (телефонная и «широкая» полоса), и выше — ничего: такое не вернуть
+# эквалайзером, поднимать нечего. Пороги — на 25–35 дБ темнее среднего спектра.
+TAKE_AIR = -60.0
+TAKE_BODY = -40.0
+# Гул — на сколько дБ звук падает за TAKE_TAIL секунды после громкого места, по лучшим концам слов
+# (1% самых крутых): быстрее, чем затихает комната, запись затихнуть не может. Живая речь, свёрнутая
+# с затухающим шумом (комната со временем затухания RT60, микрофон далеко): 0,3 с (вокальная
+# кабина) — 37 дБ, 0,5 с (жилая комната) — 29, 0,8 с — 25, 1,2 с — 21, 2 с — 17; микрофон вплотную —
+# на 2–8 дБ больше. Расчёт 60 · TAKE_TAIL / RT60 даёт меньше: слог короче разгона комнаты. Отсев —
+# от 1,2 с с микрофоном вдалеке: ванная, подъезд, пустой зал. Сухой, но пережатый голос (вдохи
+# подняты компрессией) даёт около 30 — порогу выше он бы не уступил.
+TAKE_TAIL = 0.2
+TAKE_ROOM = 20.0
+# Звенья фильтра Баттерворта 8-го порядка (48 дБ на октаву, −3 дБ ровно на частоте среза):
+# одинаковые звенья подряд, как в _band, срез размывают на пол-октавы — полоса 7–8 кГц
+# протекала бы в «выше 10 кГц» и прятала срез.
+BUTTER = (0.5098, 0.6013, 0.9, 2.5629)
+
+
+def _above(low: int, twice: bool = False) -> str:
+    """Всё выше low Гц, 48 дБ на октаву; twice — 96."""
+    return ",".join(f"highpass=f={low}:t=q:w={q}" for q in BUTTER * (1 + twice))
+
+
+def gauge(vocal: Path) -> dict:
+    """Замер сырого голоса для отбора в ручное сведение: noise — голос к шуму в паузах, дБ;
+    clip — доля срезанных сэмплов голоса; air и body — верх выше 10 и 4 кГц к голосу, дБ;
+    room — спад за TAKE_TAIL после громкого, дБ. None — мерить не на чем. Звука меньше
+    пяти секунд — пусто: судить не о чем."""
+    full, body, air = _bands(vocal, f"{FORMAT},", step=TAKE_STEP,
+                             cuts=["anull", _above(4000), _above(10000, twice=True)])
+    live = [i for i, db in enumerate(full) if db > TAKE_SILENCE]
+    if len(live) < 5 / TAKE_STEP:
+        return {}
+    top = sorted(full[i] for i in live)[int(0.95 * (len(live) - 1))]
+    sung = [i for i in live if full[i] > top - 20]
+    whole, body, air = (sum(10 ** (band[i] / 10) for i in sung) for band in (full, body, air))
+    voice = 10 * math.log10(whole / len(sung))
+    found = {"body": round(10 * math.log10(body / whole), 1), "air": round(10 * math.log10(air / whole), 1)}
+
+    # Шум. Окна на стыке с вырезанной тишиной — неполные, в счёт не идут.
+    inner = [i for i in live if 0 < i < len(full) - 1 and full[i - 1] > TAKE_SILENCE and full[i + 1] > TAKE_SILENCE]
+    floors, i, need = [], 0, round(0.5 / TAKE_STEP)
+    while i < len(inner):
+        j = i
+        low = high = full[inner[i]]
+        while j + 1 < len(inner) and inner[j + 1] == inner[j] + 1 \
+                and max(high, full[inner[j + 1]]) - min(low, full[inner[j + 1]]) <= TAKE_STEADY:
+            j += 1
+            low, high = min(low, full[inner[j]]), max(high, full[inner[j]])
+        if j - i + 1 >= need:
+            floors.append((statistics.median(full[k] for k in inner[i:j + 1]), j - i + 1))
+        i = j + 1 if j - i + 1 >= need else i + 1
+    floor = min(floors, default=(0.0, 0))[0]
+    # Шум стоит в каждой паузе: одна тихая ровная нота — не он. Ровный кусок громче «голос минус
+    # 10 дБ» — тянутая нота; нашлось в записи место заметно тише — значит, и это был не её шум
+    # (тихий голос между вырезанных пауз).
+    pauses = sum(n for db, n in floors if db <= floor + TAKE_STEADY) * TAKE_STEP
+    deep = sorted(full[i] for i in inner)[int(0.02 * (len(inner) - 1))] if inner else 0.0
+    found["noise"] = round(voice - floor, 1) \
+        if pauses >= TAKE_PAUSES and floor <= voice - 10 and deep >= floor - TAKE_STEADY else None
+
+    # Перегруз: по каналам, немой канал (голос в одном канале стерео) стоит на «потолке» весь.
+    err = _stderr("-i", vocal, "-af", "astats=measure_perchannel=Peak_level+Peak_count:measure_overall=Number_of_samples")
+    flat = max((int(count) - 2 for peak, count in re.findall(r"Peak level dB: (-?[\d.]+)\n[^\n]*Peak count: (\d+)", err)
+                if float(peak) > -60), default=0)
+    samples = int(re.search(r"Number of samples: (\d+)", err).group(1))
+    found["clip"] = round(max(0, flat) / (samples * len(sung) / len(full)), 4)
+
+    # Гул: куски, задевшие вырезанную тишину, не в счёт — там звук оборвали ножницами.
+    level, back = _envelope(vocal, f"{FORMAT},"), round(TAKE_TAIL * ENV_RATE)
+    alive = sorted(db for db in level if db > TAKE_SILENCE)
+    loud = alive[int(0.95 * (len(alive) - 1))] - 6
+    falls = sorted(level[i] - level[i + back] for i in range(len(level) - back)
+                   if level[i] >= loud and min(level[i:i + back + 1]) > TAKE_SILENCE)
+    found["room"] = round(falls[int(0.99 * (len(falls) - 1))], 1) if len(falls) >= ENV_RATE else None
+    return found
+
+
+# Что сказать человеку про каждый изъян — и как перезаписать, и что увидит владелец.
+TAKE_FLAWS = {
+    "noise": ("шум", "В паузах между словами слышен шум, и он слишком близко к голосу по громкости: вычистить его, "
+                     "не испортив голос, уже нельзя. Запиши там, где тихо: окна закрыты, вентилятор, холодильник "
+                     "и кондиционер выключены, микрофон — в ладони от рта, чтобы голос был намного громче комнаты."),
+    "clip": ("перегруз", "Голос записан с перегрузом: громкие места срезаны, и этот хрип из записи не убрать. "
+                         "Убавь громкость записи (gain) так, чтобы на самом громком слове индикатор "
+                         "не заходил в красное, или отодвинься от микрофона."),
+    "dull": ("нет верха", "В записи нет верхних частот — так звучит голос из голосового сообщения, диктофона "
+                          "или звонка: поднимать эквалайзером там нечего. Запиши в программе для записи музыки "
+                          "(BandLab, GarageBand, FL Studio), выгрузи WAV и пришли файлом — не голосовым "
+                          "и не записью, пересланной через мессенджер."),
+    "room": ("гул", "После слов звук не затихает: гулкая комната, бит из колонок в микрофоне или отзвук, уже "
+                    "наложенный на голос, — от голоса это не отделить. Запиши в комнате с мягкими вещами (шкаф "
+                    "с одеждой, одеяло за спиной), микрофон — в ладони от рта, бит — только в наушниках, "
+                    "а отзвук и эхо при выгрузке выключи."),
+}
+
+
+def flaws(found: dict) -> list[str]:
+    """Явный брак записи по замеру gauge — ключи TAKE_FLAWS. Пусто — запись берём."""
+    noise, room = found.get("noise"), found.get("room")
+    return [key for key, bad in (
+        ("noise", noise is not None and noise < TAKE_NOISE),
+        ("clip", found.get("clip", 0) >= TAKE_CLIP),
+        ("dull", found.get("air", 0) < TAKE_AIR or found.get("body", 0) < TAKE_BODY),
+        # Спад упёрся в шум — это шум, а не комната.
+        ("room", room is not None and room < TAKE_ROOM and (noise is None or noise > room + 6)),
+    ) if bad]
+
+
+def gauge_line(found: dict) -> str:
+    """Замер записи одной строкой — владельцу."""
+    noise, room = found.get("noise"), found.get("room")
+    return (("шум не измерить" if noise is None else f"шум на {noise:g} дБ тише голоса (брак — меньше {TAKE_NOISE:g})")
+            + f", срезано {found.get('clip', 0):.2%} (от {TAKE_CLIP:.0%})"
+            + f", выше 10 кГц {found.get('air', 0):g} дБ (ниже {TAKE_AIR:g}), выше 4 кГц {found.get('body', 0):g} (ниже {TAKE_BODY:g})"
+            + (", спад не измерить" if room is None else f", спад за {TAKE_TAIL:g} с {room:g} дБ (меньше {TAKE_ROOM:g})"))
+
+
 # Контроль готового трека — то, что слышно сразу, а замеры сведения не видят: они меряют громкость
 # и тембр, а не где трек начинается и кончается. Чинится — чиним и говорим человеку одной строкой
 # в подписи; не чинится — трек всё равно уходит, а владельцу строка в личку: человек ждал
@@ -3636,6 +3817,14 @@ def run_job(spec_path: Path) -> int:
                 telegram.send_message(chat, refusal)
                 result["why"] = "отказ"
                 return 0
+            # Замер записи — по сырому файлу ведущего голоса, до сдвигов и растяжки: срез вершин
+            # виден только в нетронутом файле. Числа — в запись трека, читает их _hand.
+            try:
+                raw = [path for _, path, part in parts if part == "вокал"] \
+                    or [path for _, path, part in parts if part in VOCAL_SIDE]
+                result["take"] = gauge(max(raw, key=clips.probe_seconds))
+            except Exception as exc:  # noqa: BLE001 — без замера трек сводится, а заказ руками идёт как раньше
+                print(f"  сведение {spec['job']}: запись не замерена: {type(exc).__name__}")
             parts = _hush(parts, ended, work)
             vocal, beat = _bus(parts, True, work / "vocal.wav"), _bus(parts, False, work / "beat.wav")
             if shift := reference and offset(reference, beat):
@@ -4578,10 +4767,12 @@ def _selftest() -> None:
         # Кнопка приложения: отметку ставит сборка, что её прислала; человек пишет не словами
         # о треке — её снимает первый ответ бота без своих кнопок, и один раз.
         (tmp / "keyed").mkdir()
-        (tmp / "keyed" / "result.json").write_text(json.dumps({"ok": True, "keyed": True, "film": "FILM1"}))
+        (tmp / "keyed" / "result.json").write_text(json.dumps({"ok": True, "keyed": True, "film": "FILM1",
+                                                                "take": {"noise": 31.0}}))
         done = subprocess.Popen(["true"])
         done.wait()
         _finish(data, done, {"id": "jk", "track": "t1", "tweak": True}, tmp / "keyed")
+        assert data["tracks"]["t1"]["take"] == {"noise": 31.0}, "замер записи — в запись трека, для заказа руками"
         save(data)
 
         # Ролик ДО/ПОСЛЕ: при любом темпе сетки первым идёт ПОСЛЕ, ДО — не дольше 3,5 с, весь ролик 12–15 с.
@@ -4665,7 +4856,8 @@ def _selftest() -> None:
         person, card, lost = sent[-3:]
         assert person == HAND + HAND_TRACKS and person.endswith("что хочешь получить, — дорожки у него уже есть.")
         assert "по дорожкам, 2500 ₽" in card and "Лил Пи · без username · chat_id <code>5</code>" in card \
-            and "Словами: «голос на дропе\nэха меньше»" in card and f"{QUESTION_TAG}5" in card, card
+            and "Словами: «голос на дропе\nэха меньше»" in card and f"{QUESTION_TAG}5" in card \
+            and "Запись: не мерилась; дорожек — 3; просьба словами — есть" in card, card
         assert [(m, p["chat_id"], p["from_chat_id"], p["message_id"], json.loads(p["reply_parameters"])["message_id"])
                 for m, p in calls] == [("copyMessage", "1", "5", n, len(sent) - 1) for n in (11, 13, 99)], calls
         assert lost == HAND_LOST.format(what="«dbl.wav»") and load()["tracks"]["t5"]["hand"], "пропавший файл — строкой"
@@ -4682,6 +4874,32 @@ def _selftest() -> None:
         assert "· дорожки по ссылке" in sent[-1] and "₽" not in sent[-1] \
             and "Ссылка: https://disk.yandex.ru/d/x — папка, 5 WAV" in sent[-1] and "@lilpi" in sent[-1] \
             and "Дорожки:" not in sent[-1] and [p["message_id"] for _, p in calls] == [98], "дорожки по ссылке — ссылкой"
+        assert "Запись: не мерилась; дорожек — 0 и ссылка; просьба словами — нет" in sent[-1], sent[-1]
+        # Отбор по замеру записи: явный брак — человеку отказ с советом и /vopros, владельцу одна
+        # строка с числами, без карточки и дорожек, и один раз; годная запись — карточка со строкой
+        # замера; замер, который не читается, заказа не стоит.
+        data, fine = load(), {"noise": 41.5, "clip": 0.0002, "air": -33.0, "body": -18.0, "room": 34.0}
+        for key, found in (("t7", dict(fine, noise=12.0, clip=0.03)), ("t8", fine), ("t9", {"noise": "шумно"})):
+            data["tracks"][key] = {"chat": "6", "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(), "done": state.iso(),
+                                   "mix": 97, "take": found, "files": [{"m": 21, "f": "F21", "n": "vox.wav", "s": 1, "g": "", "r": "вокал"}]}
+        save(data)
+        count, calls[:] = len(sent), []
+        callback(6, 6, "t7:u", who={"username": "lilpi"})
+        person, owner = sent[count:]
+        assert person == HAND_NO.format(flaws=f"• {TAKE_FLAWS['noise'][1]}\n\n• {TAKE_FLAWS['clip'][1]}") \
+            and "/vopros" in person and "пользуйся версией бота" in person and "₽" not in person, person
+        assert owner.startswith("🎧 Свести руками — бот не взял (шум, перегруз): без имени · @lilpi, трек t7. Запись: шум на 12 дБ") \
+            and "срезано 3.00% (от 1%)" in owner and owner.endswith(f"{QUESTION_TAG}6") and not calls, owner
+        callback(6, 6, "t7:u", who={"username": "lilpi"})
+        assert sent[count + 2:] == [person] and not calls and "hand" not in load()["tracks"]["t7"], \
+            "повторный отказ — владельцу ничего, заказом отсеянный трек не считается"
+        callback(6, 6, "t8:u", who={"username": "lilpi"})
+        assert sent[-2] == HAND + HAND_TRACKS and "Запись: шум на 41.5 дБ тише голоса (брак — меньше 20), срезано 0.02%" in sent[-1] \
+            and "дорожек — 1; просьба словами — нет" in sent[-1] and [p["message_id"] for _, p in calls] == [21, 97], sent[-1]
+        calls[:] = []
+        callback(6, 6, "t9:u", who={"username": "lilpi"})
+        assert sent[-2] == HAND + HAND_TRACKS and "Запись: не мерилась" in sent[-1] \
+            and [p["message_id"] for _, p in calls] == [21, 97], "битый замер — заказ идёт как раньше"
         telegram._call = mock
         start(1, 1, admin=True)
         assert sent[-1] == INTRO and keys[-1] == [*MODES, [HELP_BUTTON]]
@@ -4927,6 +5145,43 @@ def _selftest() -> None:
         assert not fixed and wrong == ["тишина внутри трека с 0:05 по 0:14",
                                        "голос разошёлся с битом: 9 с звучит до начала бита или после его конца"], (fixed, wrong)
 
+        # Замер записи для отбора в ручное сведение. «Голос» — слоги по 0,2 с, две секунды из трёх:
+        # тон с обертонами, согласные на 5 и 12 кГц, тихий шум в паузах. Шумная, перегруженная,
+        # глухая и гулкая запись — брак; чистая, чистая с вырезанными паузами, голос в одном канале
+        # и шум на грани — нет. lavfi — только с длиной d=.
+        syllables = ("0.3*(sin(2*PI*150*t)+0.5*sin(2*PI*300*t)+0.3*sin(2*PI*1200*t)+0.1*sin(2*PI*5000*t)"
+                     "+0.03*sin(2*PI*12000*t))*lt(mod(t,0.3),0.2)*lt(mod(t,3),2)")
+
+        def taken(name: str, sound: str, *after: str) -> dict:
+            _ffmpeg("-f", "lavfi", "-i", f"aevalsrc='{sound}':d=20", *after, tmp / f"take-{name}.wav")
+            return gauge(tmp / f"take-{name}.wav")
+
+        hum = "*(random(0)-0.5)"
+        clean = taken("clean", f"{syllables}+0.001{hum}")
+        assert not flaws(clean) and clean["noise"] > 50 and clean["clip"] < 0.001 and clean["room"] > 40, clean
+        noisy = taken("noisy", f"{syllables}+0.2{hum}")
+        assert flaws(noisy) == ["noise"] and 8 < noisy["noise"] < 14, noisy
+        edge = taken("edge", f"{syllables}+0.04{hum}")
+        assert not flaws(edge) and 24 < edge["noise"] < 30, f"шум на грани — берём: {edge}"
+        cut = taken("cut", syllables)
+        assert not flaws(cut) and cut["noise"] is None, f"паузы вырезаны — шум не мерится, запись берём: {cut}"
+        hot = taken("hot", f"clip(4*({syllables}+0.001{hum}),-0.9,0.9)")
+        assert flaws(hot) == ["clip"] and hot["clip"] > 0.1, hot
+        phone = taken("phone", f"{syllables}+0.001{hum}", "-ar", "8000")
+        wide = taken("wide", f"{syllables}+0.001{hum}", "-ar", "16000")
+        assert flaws(phone) == ["dull"] and phone["body"] < TAKE_BODY and flaws(wide) == ["dull"] \
+            and wide["body"] > -30 and wide["air"] < TAKE_AIR, (phone, wide)
+        hall = taken("hall", f"{syllables}+0.001{hum}", "-af", "aecho=0.3:1:60|130|210|300|400|520:0.8|0.7|0.6|0.5|0.4|0.3")
+        assert flaws(hall) == ["room"] and hall["room"] < 15, hall
+        left = taken("left", f"{syllables}+0.001{hum}", "-af", "pan=stereo|c0=c0|c1=0*c0")
+        assert not flaws(left) and left["clip"] < 0.001, f"немой канал стерео — не перегруз: {left}"
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=440:d=3", tmp / "take-brief.wav")
+        assert gauge(tmp / "take-brief.wav") == {} and not flaws({}), "звука меньше пяти секунд — судить не о чем"
+        # Спад, упёршийся в шум, — это шум, а не комната.
+        assert flaws(dict(clean, noise=22.0, room=18.0)) == [] and flaws(dict(clean, noise=None, room=18.0)) == ["room"]
+        assert all(mark in gauge_line(noisy) for mark in ("шум на", "срезано", "выше 10 кГц", "спад за 0.2 с")) \
+            and gauge_line(cut).startswith("шум не измерить"), gauge_line(noisy)
+
         # Готовый трек зовётся по ведущему голосу, а не по первой дорожке; WAV больше MAX_UPLOAD
         # у заявки ссылками уходит по сообщению с MP3: файлов человека, чтобы узнать чат, у неё нет.
         shipped: list[tuple] = []
@@ -4962,7 +5217,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
-          "реферал за трек и звёзды, «свести руками» один раз, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется — ок")
+          "реферал за трек и звёзды, «свести руками» один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется — ок")
 
 
 def talk_check() -> list[str]:
