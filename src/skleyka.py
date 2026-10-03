@@ -2276,7 +2276,9 @@ def _round(data: dict, chat_id: str, draft: dict) -> bool:
     quiet, plan = _age(draft["at"]), draft.get("plan")
     if quiet >= DRAFT_MINUTES * 60:
         del data["drafts"][chat_id]
-        if draft["files"]:
+        # Ссылка на облако — тоже дорожки: 03.10.2026 заявка со ссылкой пережила простой очереди
+        # и закрылась молча, человек ждал трек весь вечер.
+        if draft["files"] or draft.get("links"):
             telegram.send_message(chat_id, EXPIRED)
         return True
     if not plan or quiet < QUIET:
