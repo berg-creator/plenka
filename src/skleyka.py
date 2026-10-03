@@ -1653,6 +1653,7 @@ ACCEPTED = ("Принял: {parts}. Свожу — пришлю минут че�
             "Голос встанет сам по первому слову. Встанет не туда — после сведения подвинешь пальцем.")
 EXPIRED = "Дорожки не пришли до конца — заявку закрыл. Начать заново — /svedenie."
 OLD = "Эта заявка уже закрыта. Начать заново — /svedenie."
+EXTRA = "Этот файл не взял: дорожки для трека уже есть. Заменить их — «↩️ Сменить режим»."
 CANCELLED = "Отменил. Захочешь свести — /svedenie."
 LIMIT = "Треков в сутки — {count}. Следующий можно с {time} по Москве."
 INVITE = ("Твоя ссылка для артиста:\n{link}\n\nПридёт по ней и сведёт свой трек — получишь ещё один трек "
@@ -2197,8 +2198,15 @@ def take(message: dict) -> None:
         save(data)
         telegram.send_message(chat_id, SWAP_TOOK.format(name=html.escape(item["n"])), ask="Toxi$")
         return
-    if draft["step"] >= len(draft["plan"]) and not draft.get("links") or len(draft["files"]) >= MAX_PARTS \
-            or any(known["m"] == item["m"] for known in draft["files"]):
+    if any(known["m"] == item["m"] for known in draft["files"]):
+        return
+    if draft["step"] >= len(draft["plan"]) and not draft.get("links") or len(draft["files"]) >= MAX_PARTS:
+        # Шаги кончились или дорожек уже MAX_PARTS: раньше файл пропадал молча, и человек ждал
+        # его в треке. Одна строка на заявку — лишних файлов бывает пачка.
+        if not draft.get("extra"):
+            draft["extra"] = True
+            save(data)
+            telegram.send_message(chat_id, EXTRA, buttons=[[BACK]])
         return
     plan, named = draft["plan"], role(item["n"])
     if draft["step"] >= len(plan):
@@ -2261,8 +2269,8 @@ def _drafts(data: dict) -> bool:
         try:
             changed = _round(data, chat_id, draft) or changed
         except telegram.TelegramError as exc:
-            # 03.10.2026 человек заблокировал бота, отказ на EXPIRED ронял круг до save, и
-            # шесть часов стояли заявки всех. Отказ (403) — писать ему некуда, заявка прочь;
+            # 02.10.2026 человек заблокировал бота, отказ на EXPIRED ронял круг до save, и
+            # 25,8 часа (до 03.10, 13:52 UTC) стояли заявки всех. Отказ (403) — писать ему некуда, заявка прочь;
             # сбой сети — заявка ждёт следующего круга. Прочие идут дальше в обоих случаях.
             print(f"  заявка сведения {chat_id}: {exc}")
             if "Forbidden" in str(exc):
@@ -2565,8 +2573,10 @@ def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> N
     if knobs == track["knobs"]:
         telegram.send_message(chat_id, SAME)
         return
+    was = track["knobs"]
     track.update(knobs=knobs, tweaks=track["tweaks"] + 1)
     minutes = _enqueue(data, track_id, knobs, tweak=True)
+    data["jobs"][-1]["was"] = was  # сборка упадёт — трек получит прежние ручки назад (_refund)
     save(data)
     telegram.send_message(chat_id, REBUILD.format(what=look(knobs), minutes=minutes), markup=REMOVE)
 
@@ -3227,19 +3237,36 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
                                          "step": plan.index("бит"), "files": kept, "asked": plan.index("бит"),
                                          "acked": len(kept), **{key: track[key] for key in ("old", "artist", "beat", "wish")
                                                                 if key in track}}
-    used = data["used"].get(track["chat"], [])
+    _refund(data, track, job)
+    if not result:
+        _sorry(track, job)
+
+
+def _refund(data: dict, track: dict, job: dict) -> None:
+    """Готового нет — потраченное возвращается: трек суток с бонусом или пересборка
+    с прежними ручками. Зовут и _finish, и resume: FAILED обещает «лимит не потрачен»,
+    а resume до 03.10.2026 снимал старое задание без возврата."""
     if job.get("tweak"):
         if not job.get("answer"):  # ответ без сборки пересборку не тратил
             track["tweaks"] = max(0, track["tweaks"] - 1)
-    elif used:
+        if "was" in job:
+            # Ручки трек получил до сборки (_tweak): без возврата повтор той же кнопки отвечал
+            # «Так уже и есть.» о треке, которого человек не получил (30.09–01.10 падали 4 сборки из 10).
+            track["knobs"] = job["was"]
+            for queued in data["jobs"]:  # следующая пересборка считала прежними ручки этой, несобранной
+                if queued["track"] == job["track"] and queued.get("was") == job.get("knobs"):
+                    queued["was"] = job["was"]
+    elif used := data["used"].get(track["chat"]):
         used.pop()
         if "bonus" in track:
             data["bonus"].setdefault(track["chat"], []).append(track.pop("bonus"))
-    if not result:
-        try:
-            telegram.send_message(track["chat"], FAILED)
-        except telegram.TelegramError as exc:  # бота заблокировали: иначе _finish повторялся бы каждый круг
-            print(f"  сведение {job['id']}: {exc}")
+
+
+def _sorry(track: dict, job: dict) -> None:
+    try:
+        telegram.send_message(track["chat"], FAILED)
+    except telegram.TelegramError as exc:  # бота заблокировали: иначе отказ повторялся бы каждый круг
+        print(f"  сведение {job['id']}: {exc}")
 
 
 def resume() -> None:
@@ -3254,7 +3281,8 @@ def resume() -> None:
             continue
         data["jobs"].remove(job)
         if track := data["tracks"].get(job["track"]):
-            telegram.send_message(track["chat"], FAILED)
+            _refund(data, track, job)
+            _sorry(track, job)
     save(data)
 
 
@@ -4242,6 +4270,11 @@ def _selftest() -> None:
         take(file(5, "take 2.wav"))
         later("7")
         assert sent[-1].startswith("Дорожки есть: вокал «") and load()["drafts"]["7"]["asked"] == "style"
+        # Файл после вопроса о звуке в трек не идёт — об этом одна строка, а не молчание; пачке — тоже одна.
+        count = len(sent)
+        take(file(91, "лишний.wav"))
+        take(file(92, "ещё лишний.wav"))
+        assert sent[-1] == EXTRA and len(sent) == count + 1 and len(load()["drafts"]["7"]["files"]) == 2
         wish(7, "голос входит на дропе")  # текст при открытой заявке — просьба, а не разбор
         assert sent[-1] == WISHED and load()["drafts"]["7"]["wish"] == "голос входит на дропе"
         callback(7, 7, "e")
@@ -4398,6 +4431,33 @@ def _selftest() -> None:
             == (["вокал", "бит"], 1, 1, ["f3"], "f4") and data["used"]["70"] == [], draft
         assert state.read_json(service.SOURCES_FILE, {})[service._today()][BEAT_COUNT["swap"] + " → трек"] == 1
         del data["tracks"]["tw"]
+        # Пересборка упала — ручки трека прежние: повтор той же кнопки снова встаёт в очередь,
+        # а не отвечает «так уже и есть» о треке, которого человек не получил. Упали две подряд —
+        # прежние у обеих те, с которыми трек собран.
+        data["tracks"]["kn"] = dict(data["tracks"][track], chat="72", tweaks=0, knobs=dict(KNOBS))
+        _tweak(data, "72", "kn", "c1", False)
+        _tweak(data, "72", "kn", "c1", False)
+        assert sent[-1] == SAME and data["jobs"][-1]["was"] == KNOBS, "пока пересборка в очереди — уже так"
+        _tweak(data, "72", "kn", "v+", False)
+        for job in [job for job in data["jobs"] if job["track"] == "kn"]:
+            (tmp / job["id"]).mkdir()
+            _finish(data, gone, job, tmp / job["id"])
+            assert data["tracks"]["kn"]["knobs"] == KNOBS, job
+        assert data["tracks"]["kn"]["tweaks"] == 0
+        _tweak(data, "72", "kn", "c1", False)
+        assert sent[-1] != SAME and data["jobs"][-1]["knobs"]["style"] == "мелодично"
+        # Сведение оборвала прошлая смена, и ему больше часа: снять, извиниться и вернуть
+        # трек суток, как обещает FAILED.
+        data["jobs"] = [job for job in data["jobs"] if job["track"] != "kn"]
+        data["tracks"]["kn"].update(chat="73", knobs=dict(KNOBS), tweaks=0)
+        data["used"]["73"] = [state.iso()]
+        long_ago = state.iso(state.now() - timedelta(minutes=RESUME_MINUTES + 1))
+        data["jobs"].append({"id": "rs", "track": "kn", "knobs": dict(KNOBS), "at": long_ago, "tweak": False, "started": long_ago})
+        save(data)
+        resume()
+        data = load()
+        assert sent[-1] == FAILED and data["used"]["73"] == [] and all(job["id"] != "rs" for job in data["jobs"])
+        del data["tracks"]["kn"], data["used"]["73"]
         save(data)
 
         # Ответ словами: дежурство только ставит просьбу в очередь, модель спрашивает сведение

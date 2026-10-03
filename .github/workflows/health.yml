@@ -20,6 +20,21 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # Очередь сведения лежит в приватном хранилище (config.SKLEYKA_FILE): без него сторож
+      # не видит, что она стоит. Только чтение — сторож туда ничего не пишет.
+      - name: Забрать приватное хранилище
+        env:
+          STATE_REPO: ${{ secrets.STATE_REPO }}
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: |
+          if [ -z "$STATE_REPO" ] || [ -z "$STATE_TOKEN" ]; then
+            echo "Приватное хранилище не настроено — очередь сведения сторож не видит."
+            exit 0
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${STATE_TOKEN}@github.com/${STATE_REPO}.git" private-state
+          echo "STATE_DIR=${GITHUB_WORKSPACE}/private-state" >> "$GITHUB_ENV"
+
       - name: Проверить состояние
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

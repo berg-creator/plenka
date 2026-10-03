@@ -1,9 +1,9 @@
 """Сторож: следит, чтобы канал не встал молча.
 
-Проверяет шесть вещей — не опустела ли очередь, не зависла ли публикация,
+Проверяет семь вещей — не опустела ли очередь, не зависла ли публикация,
 не перестал ли поступать материал, не иссякли ли входящие новости,
-не пишет ли за основной генератор запасной и не падали ли запуски воркфлоу
-за сутки.
+не пишет ли за основной генератор запасной, не падали ли запуски воркфлоу
+за сутки и не стоит ли очередь сведения.
 Если что-то не так, пишет тебе в личку. Без этого поломка обнаруживается
 только когда канал уже неделю молчит.
 """
@@ -72,7 +72,33 @@ def problems() -> list[str]:
     if failed := failed_runs():
         issues.append("⚠️ Упали запуски за сутки: " + ", ".join(failed))
 
+    if alarm := skleyka_alarm(state.read_json(config.SKLEYKA_FILE, {})):
+        issues.append(alarm)
+
     return issues
+
+
+def skleyka_alarm(data: dict) -> str:
+    """Строка владельцу, когда очередь сведения стоит.
+
+    02–03.10.2026 она стояла 25,8 часа: отказ Telegram ронял круг дежурства, заявки
+    не закрывались, задания не запускались, а сторож о сведении не знал. Заявку без
+    файлов круг закрывает через DRAFT_MINUTES, задание запускает сразу — открытая
+    на полчаса дольше заявка и задание, которое час не начато, значат, что круг до них
+    не доходит. Chat_id в строку не идут: журнал Actions открыт. Без приватного
+    хранилища файл пуст, и проверка молчит.
+    """
+    from .skleyka import DRAFT_MINUTES  # сведение тянет за собой полпроекта — только когда нужно
+
+    def older(stamp: str, minutes: int) -> bool:
+        moment = state._parse(stamp)
+        return moment is not None and state.now() - moment > timedelta(minutes=minutes)
+
+    drafts = sum(older(draft.get("at", ""), DRAFT_MINUTES + 30) for draft in data.get("drafts", {}).values())
+    jobs = sum("started" not in job and older(job.get("at", ""), 60) for job in data.get("jobs", []))
+    if not drafts and not jobs:
+        return ""
+    return f"❗ Очередь сведения стоит: заявок не закрыто в срок — {drafts}, заданий ждёт больше часа — {jobs}."
 
 
 # Меньше этого числа обращений за сутки — молчим: один отказ основного генератора
@@ -154,7 +180,15 @@ def selftest() -> int:
     assert not spare_alarm(rows(0, 6)), "основной пишет сам — молчим"
     assert not spare_alarm(rows(0, 5, stale=20)), "вчерашние отказы не считаются"
     assert spare_alarm(rows(4, 2)), "запасной написал больше половины — говорим"
-    print("✅ Сторож: подмену генератора видит, одиночный отказ терпит.")
+
+    late = state.iso(state.now() - timedelta(hours=2))
+    assert not skleyka_alarm({}), "хранилища нет — молчим"
+    assert not skleyka_alarm({"drafts": {"1": {"at": stamp}}, "jobs": [{"at": stamp}, {"at": late, "started": late}]}), \
+        "свежая заявка и идущее сведение — не простой"
+    assert "заявок не закрыто в срок — 1, заданий ждёт больше часа — 0" in skleyka_alarm({"drafts": {"1": {"at": late}}})
+    stuck = skleyka_alarm({"drafts": {"1": {"at": stamp}}, "jobs": [{"at": late}, {"at": late}]})
+    assert "ждёт больше часа — 2" in stuck and "1" not in stuck.replace("— 2", ""), "chat_id в журнал не идёт"
+    print("✅ Сторож: подмену генератора видит, одиночный отказ терпит, стоящую очередь сведения замечает.")
     return 0
 
 
