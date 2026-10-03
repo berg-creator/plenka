@@ -1,0 +1,193 @@
+{
+  "vars": {
+    "STYLE": "Stylized digital illustration exactly in the art style of the reference image: GTA loading screen artwork, retro video game illustration with a subtle pixel-art texture, bright warm saturated colours, clear strong light with crisp pure white highlights, clean simple shapes, natural restrained facial expressions with calm believable emotions, no exaggerated grins, no tears, eyes drawn as small dark almond shapes without big eye whites, people look at objects or at each other in three-quarter view, nobody looks at the viewer, background densely packed with small details. Not a photo, not a painting, not 3d.",
+    "HERO": "a slim black teenage boy (young Chief Keef) with dark brown skin and a short messy dreadlock haircut: many stubby thick dreads only finger-length, standing up on top of the head, close to the head on the sides (no ponytails, no buns, not long), a few tiny red rubber bands on the dreads, an oversized plain grey t-shirt, a thin gold chain, black jeans and white sneakers, no earrings, no piercings, no other jewelry",
+    "GRAN": "the grandmother: an elderly black woman with grey hair, round glasses, a purple headscarf and a colourful floral house robe",
+    "ROOM": "A cramped grandmother apartment living room in Chicago: pale yellow floral wallpaper, family photos in frames, an old brown couch with a crocheted blanket, lace curtains, a small old tv, a radiator, a potted plant.",
+    "SHOT": "{STYLE} The boy from image 1 with exactly the same face, dreadlocks with red bands, grey t-shirt, gold chain, black jeans and white sneakers, no earrings, drawn in the art style of image 2.",
+    "KEEP": "Keep image 1 exactly the same, change only one thing:",
+    "RULES": "correct anatomy, every person has exactly two arms and two hands, people never merge with each other or pass through furniture, calm natural body movement and restrained facial expressions, eyes stay open the whole time, no blinking, no closing eyes, no winking, slow steady motion, no tears, static locked camera on a tripod, no camera movement, no zoom, no cuts"
+  },
+  "frames": {
+    "hero": {
+      "refs": [
+        "style.png"
+      ],
+      "prompt": "{STYLE} Draw a new character in this art style: {HERO}. He stands full body facing the camera in the centre, arms relaxed, soft cel shading with warm rim light like the reference, on a simple plain warm orange-to-purple gradient background. Do not copy the man from the reference image.",
+      "seed": 7
+    },
+    "1-1": {
+      "refs": [
+        "hero.png",
+        "style.png"
+      ],
+      "prompt": "{SHOT} Bright warm afternoon, golden sunlight streams through the window. He sits on an old brown couch in three-quarter view turned to the right, a plain black laptop without any logo on his lap, he raps into a cheap microphone held close to his mouth, mouth open mid-word, eyes on the laptop screen, head tilted to the beat. Next to him in an armchair sits {GRAN}, busy knitting: she holds two long knitting needles raised in front of her chest with a half-knitted red scarf hanging from them, a ball of red yarn in her lap, she glances at him with a calm kind smile. {ROOM}",
+      "seed": 7
+    },
+    "1-2": {
+      "refs": [
+        "hero.png",
+        "style.png"
+      ],
+      "prompt": "{SHOT} Bright morning daylight in an old kitchen. He sits at a small kitchen table seen from the side in profile, typing on an open plain black laptop without any logo, eyes on the screen, focused calm face, mouth closed, nothing attached to the laptop, no microphone, no cables. A fridge covered in magnets, a kettle on the stove, a bowl of oranges, dishes, white sunlight from the window, light blue and yellow tiles.",
+      "seed": 7
+    },
+    "2-1": {
+      "refs": [
+        "hero.png",
+        "style.png"
+      ],
+      "prompt": "{SHOT} Sunny winter day in Chicago with a clear bright blue sky, fresh white snow shining in the sun, view from the front yard: the front of his two-storey red brick house, snow on the roof and the steps, bare trees. He wears an open black puffer jacket over the grey t-shirt and leans on the frame of the open front doorway with his arms crossed, both feet inside the house, bored annoyed face in three-quarter view, looking sideways at the police car. One trouser leg is rolled up showing a black electronic ankle monitor with a small green light on his ankle. In the foreground corner a police car is parked across the street, facing the house.",
+      "seed": 7
+    },
+    "3-1": {
+      "refs": [
+        "style.png"
+      ],
+      "prompt": "{STYLE} A grown black man with a short beard and short hair in a dark jacket sits on a chair behind a huge mixing console in a professional recording studio, three-quarter view, looking down at the faders, seen from the waist up, he has exactly two arms and two hands: his left hand rests on one fader, his right hand rests on the armrest of his chair, big studio headphones hang around his neck, nothing in his hands. There is clear space between his body and the console, the console stands in front of him and does not overlap his body. He nods to the beat with a calm satisfied smile. Rows of faders, big studio monitors, gold records on the walls, a lit glass vocal booth behind him, warm bright golden lamps and warm wood panels. Only one person in the picture.",
+      "seed": 7
+    },
+    "3-1on": {
+      "refs": [
+        "3-1.png"
+      ],
+      "prompt": "{KEEP} he lifts both of his hands off the mixing console up to his head, the big studio headphones are now on his head, the headband over the top of his head and the two ear cups covering both of his ears, his left hand holds the left ear cup and his right hand holds the right ear cup. The headphones moved from his neck to his head: his neck is bare, there is only one pair of headphones in the whole picture. Nothing touches the mixing console, no hands on the console, the faders are free. He has exactly two arms and two hands, both raised to his head.",
+      "seed": 7
+    },
+    "3-2": {
+      "refs": [
+        "hero.png",
+        "style.png"
+      ],
+      "prompt": "{SHOT} Bright afternoon daylight in the small entrance hall of the apartment. The front door is wide open on the left side of the picture, a sunny snowy street outside. Two grown men in puffer jackets walk in through the open door one behind the other with a clear gap between them, their bodies and arms do not touch or overlap, each man has exactly two arms: the first man, closer to the camera, is a grown bearded man about forty years old in a brown puffer jacket and a black beanie, clean-shaven head under the beanie, no dreadlocks, no chain, he looks nothing like the boy, he carries a big black flight case by its handle in his right hand down at his side; two steps behind him the second man, a grown man with a short haircut in a grey puffer jacket, no dreadlocks, hugs a big black studio loudspeaker cabinet in both of his own arms, two round woofer cones clearly visible on its front. Both look ahead where they are going with calm businesslike faces. Both men are in the left half of the picture. A wide empty gap of bare floor separates the second man from the boy, nobody overlaps anybody. He stands at the right edge of the hall in three-quarter view, full body, hands in the pockets of his jeans, watching the men come in with a small happy lopsided closed-mouth smile, one corner of the mouth raised, relaxed half-lidded eyes. Behind him {GRAN} stands in the kitchen doorway, full body, looking at the men, mildly surprised. Pale yellow floral wallpaper, a coat rack with coats, a mirror, a patterned runner rug on the wooden floor, warm sunlight on the floor.",
+      "seed": 8
+    },
+    "4-1": {
+      "refs": [
+        "hero.png",
+        "style.png"
+      ],
+      "prompt": "{SHOT} Evening in his small bedroom turned into a home studio, no bed in the picture: rap posters on the walls, a bookshelf, a desk with a plain black laptop in the right corner, a warm orange desk lamp and a string of warm fairy lights. He stands in the middle of the room in profile, turned to the right towards the microphone, not looking at the viewer, and records into a studio microphone on a stand with a round pop filter, big studio headphones on his head, one hand holds the headphones on his ear, eyes open looking at the microphone, focused calm face, lips moving mid-word. Behind him two grown rappers in puffer jackets stand on the bare wooden floor in front of the poster wall, one on the left and one on the right, both clearly standing on the floor and away from the desk, serious faces, arms crossed, looking at him and nodding their heads to the beat. A round wall clock above them.",
+      "seed": 7
+    },
+    "4-2": {
+      "refs": [
+        "4-1.png"
+      ],
+      "prompt": "{KEEP} the grown man on the left behind the boy now raises his own left forearm in front of his own chest and glances down at a big gold wristwatch on his own left wrist, with a hint of surprise and respect: eyebrows only slightly raised, a small approving nod, lips pressed together. The boy and the man on the right stay exactly as they are.",
+      "seed": 7
+    },
+    "5-1": {
+      "refs": [
+        "hero.png",
+        "style.png"
+      ],
+      "prompt": "{SHOT} Late night in his small bedroom, dark blue night outside the window, a warm desk lamp and the cool white glow of the laptop screen light his face. The camera is low and close, at the height of the desk top: the desk fills the whole bottom of the picture, he is seen only from the chest up, his legs and the space under the desk are out of the picture. He sits at the desk in three-quarter view behind an open plain black laptop without any logo, no waveforms, no colourful lights on the laptop, both hands rest on top of his head, eyes on the screen, tired disappointed face, lips pressed together, dry eyes. Tangled cables, headphones, an empty energy drink can and crumpled papers on the desk, rap posters on the wall.",
+      "seed": 7
+    },
+    "6-1": {
+      "refs": [
+        "hero.png",
+        "style.png"
+      ],
+      "prompt": "{SHOT} Cosy evening, warm bright lamp light. He sits on the couch in three-quarter view holding a smartphone in both hands and typing a message with his thumb, eyes on the phone, a slight smile, big headphones around his neck. Next to him in an armchair sits {GRAN}, awake and busy knitting: she holds two long knitting needles raised in front of her chest with a half-knitted red scarf hanging from them, a ball of red yarn in her lap, she glances at him with a kind smile. {ROOM}",
+      "seed": 7
+    }
+  },
+  "anim": {
+    "base": "stylized digital illustration, retro video game artwork, bright warm saturated colours, clean simple shapes",
+    "rules": "{RULES}",
+    "clips": {
+      "1-1": {
+        "move": "the boy raps into the microphone, his lips clearly move with every word like rapping, the microphone stays below his mouth, his eyes stay open and look down at the laptop screen the whole time, his head bobs slightly to the beat, the grandmother keeps knitting at a steady relaxed pace from the first to the last frame, her hands never stop: the right needle tip dips under the left needle and comes back again and again, she holds exactly two long thin straight wooden knitting needles, one in each hand, the needles stay rigid and straight and keep the same length the whole time, the red scarf sways a little under her hands, her hands stay low in front of her chest and never touch her face, the needle tips never come near her face or mouth, she glances at him",
+        "look": {
+          "мальчик": [
+            0,
+            0.1,
+            0.52,
+            1
+          ],
+          "бабушка": [
+            0.48,
+            0.1,
+            1,
+            1
+          ]
+        }
+      },
+      "1-2": {
+        "move": "the boy types fast on the laptop, his fingers move, his head stays tilted down, eyes on the laptop screen, he mouths the words"
+      },
+      "2-1": {
+        "move": "the boy sighs and slowly shakes his head, looking at the police car, his breath steams in the cold air, snow sparkles in the sun"
+      },
+      "3-1": {
+        "move": "the man spreads the big studio headphones wide apart with both hands, lifts the ear cups off his ears outwards away from his head, and lowers them behind his head down onto his neck, the ear cups never pass in front of his face and never go through his head, then puts his hands on the faders of the mixing console and keeps nodding his head to the beat until the very last frame, keeping his head up, his eyes stay open and look ahead across the console, dark pupils visible the whole time, calm satisfied smile, lamps glow softly",
+        "anchors": [
+          [
+            "3-1on",
+            0,
+            1.0
+          ],
+          [
+            "3-1",
+            28,
+            0.8
+          ],
+          [
+            "3-1",
+            48,
+            0.4
+          ]
+        ]
+      },
+      "3-2": {
+        "move": "the two men walk briskly into the hall through the open door at a normal quick pace one behind the other with a gap between them, taking big steps towards the camera, each carries his own equipment, the boy on the right does not walk: he stays standing on the same spot with both feet planted, hands in his pockets, only his head turns to watch the men and his small lopsided smile grows a little, the grandmother stands still in the doorway, only these four people, nobody else appears, no children",
+        "anchors": [
+          [
+            "3-2",
+            0,
+            1.0
+          ]
+        ],
+        "rules": "correct anatomy, every person has exactly two arms and two hands, people never merge with each other or pass through furniture, calm natural body movement and restrained facial expressions, eyes stay open the whole time, no blinking, no closing eyes, no winking, no tears, static locked camera on a tripod, no camera movement, no zoom, no cuts",
+        "stab": true
+      },
+      "4-1": {
+        "move": "the boy raps into the microphone, his mouth opens and closes with every word, one hand holds the headphone still on his ear, the two men behind him nod their heads to the beat with serious faces, then the man on the left glances at his gold wristwatch with a hint of surprise and respect, eyebrows slightly raised, a small approving nod, only these three people",
+        "anchors": [
+          [
+            "4-1",
+            0,
+            1.0
+          ],
+          [
+            "4-2",
+            32,
+            1.0
+          ]
+        ]
+      },
+      "5-1": {
+        "move": "the boy slowly exhales, his shoulders drop, his hands rest still on his head, his head does not move"
+      },
+      "6-1": {
+        "move": "the boy calmly types on the phone with his thumb and smiles slightly, the grandmother keeps knitting at a steady relaxed pace from the first to the last frame, her hands never stop: the right needle tip dips under the left needle and comes back again and again, she holds exactly two long thin straight wooden knitting needles, one in each hand, the needles stay rigid and straight and keep the same length the whole time, the red scarf sways a little under her hands, her hands stay low in front of her chest and never touch her face, the needle tips never come near her face or mouth, she glances at him",
+        "look": {
+          "мальчик": [
+            0,
+            0.1,
+            0.52,
+            1
+          ],
+          "бабушка": [
+            0.48,
+            0.1,
+            1,
+            1
+          ]
+        }
+      }
+    }
+  }
+}
