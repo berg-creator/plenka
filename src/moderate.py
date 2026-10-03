@@ -12,13 +12,13 @@
 и прослушка разбираются здесь же — сообщения уходят в src/service.py,
 пересылка отрывка и голоса в опросе под ним — в src/quiz.py.
 
-    python -m src.moderate             обработать накопившееся и выйти
     python -m src.moderate --serve 55  дежурить 55 минут, отвечая сразу
-    python -m src.moderate --dry-run   показать, что пришло, ничего не делая
+    python -m src.moderate --selftest  приём трека, первый комментарий, сохранение состояния — без сети
 
-Дежурство — основной режим. Оно держит соединение с Telegram открытым
-(long polling), поэтому ответ приходит за секунды. Разовый запуск остался
-для отладки и на случай, если дежурство почему-то не идёт.
+Дежурство — единственный режим. Оно держит соединение с Telegram открытым
+(long polling), поэтому ответ приходит за секунды. Разовый разбор накопившегося
+убран 04.10.2026: его не вызывал никто, а запуск без флагов на Маке был бы
+вторым опросчиком и воровал бы события у дежурства.
 """
 
 from __future__ import annotations
@@ -51,6 +51,11 @@ PUSH_EVERY = 600
 
 # Опрос, пока идёт или ждёт сведение (src/skleyka.py): очередь двигается на каждом круге.
 SKLEYKA_POLL = 3
+
+# Очередь сведения срывается столько секунд подряд — строка владельцу. Сторож (src/health.py)
+# ходит раз в сутки и заметил бы то же с опозданием до суток, а дежурство видит на каждом круге.
+STUCK_AFTER = 600
+STUCK_FILE = config.DATA / "duty_alarm.json"
 
 
 def handle(action: str, post_id: str) -> str:
@@ -688,14 +693,7 @@ def serve(minutes: int) -> int:
         # Сведение идёт отдельным процессом: здесь — только очередь. Пока она не пуста,
         # Telegram опрашивается чаще, иначе готовый трек ждал бы следующую до 25 секунд.
         try:
-            skleyka.tick()
-            bity.tick()  # ролик к биту ПЛЁНКИ — тоже отдельным процессом
-            wait = SKLEYKA_POLL if skleyka.busy() else POLL_TIMEOUT
-        except Exception as exc:  # noqa: BLE001 — сведение не держит дежурство
-            log.error("Очередь сведения сорвалась: %s", exc)
-            wait = POLL_TIMEOUT
-        try:
-            updates = telegram.get_updates(offset=offset, timeout=wait)
+            updates = telegram.get_updates(offset=offset, timeout=_ticks())
         except telegram.TelegramError as exc:
             # Обрыв связи не повод заканчивать дежурство: подождём и вернёмся.
             log.warning("Опрос сорвался: %s", exc)
@@ -731,6 +729,44 @@ def serve(minutes: int) -> int:
     push_state()
     print(f"Дежурство окончено. Нажатий: {total_handled}. Разборов: {total_served}.")
     return 0
+
+
+_stuck_since = 0.0  # с какого момента очередь сведения срывается без единого удачного круга
+
+
+def _ticks() -> int:
+    """Двигает очереди сведения и роликов к битам; ответ — сколько секунд ждать Telegram.
+
+    Очереди — каждая в своём try: сбой сведения иначе стопорил ролики к битам.
+    """
+    global _stuck_since
+    try:
+        skleyka.tick()
+        wait = SKLEYKA_POLL if skleyka.busy() else POLL_TIMEOUT
+        _stuck_since = 0.0
+    except Exception as exc:  # noqa: BLE001 — сведение не держит дежурство
+        log.error("Очередь сведения сорвалась: %s", exc)
+        wait = POLL_TIMEOUT
+        _stuck_since = _stuck_since or time.monotonic()
+        if time.monotonic() - _stuck_since >= STUCK_AFTER:
+            _alarm(f"Очередь сведения стоит {STUCK_AFTER // 60} мин.: {exc}")
+    try:
+        bity.tick()  # ролик к биту ПЛЁНКИ — тоже отдельным процессом
+    except Exception as exc:  # noqa: BLE001 — ролик к биту не держит дежурство
+        log.error("Очередь роликов к битам сорвалась: %s", exc)
+    return wait
+
+
+def _alarm(text: str) -> None:
+    """Строка владельцу о поломке — не чаще раза в сутки: смен за день несколько, и каждая написала бы своё."""
+    today = state.now().strftime("%Y-%m-%d")
+    if state.read_json(STUCK_FILE, {}).get("day") == today:
+        return
+    state.write_json(STUCK_FILE, {"day": today})
+    try:
+        telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), text[:500])
+    except Exception as exc:  # noqa: BLE001 — сигнал о поломке не роняет дежурство
+        log.error("Владельцу не написано: %s", exc)
 
 
 # Код дежурства: поменялся — идущая смена устарела. Список повторяет paths
@@ -816,32 +852,21 @@ def _push_repo(cwd, paths: list[str], message: str) -> None:
             if command[1] == "pull":
                 # Конфликт оставляет ребейз висеть: дерево застревает посреди
                 # чужих коммитов до конца смены, и всё, что дежурство запишет
-                # дальше, не уйдёт. Откат возвращает свой коммит и спрятанное;
-                # следующий push_state попробует снова.
+                # дальше, не уйдёт. Откат возвращает свой коммит и спрятанное.
+                # Но коммит смены остаётся, и та же попытка конфликтует снова:
+                # 29.09.2026 — 29 неудач подряд за четыре часа, состояние потеряно,
+                # свежий код до бота не дошёл. Поэтому повтор — с версией смены
+                # в спорных местах (в ребейзе theirs — это накладываемый, свой коммит).
                 subprocess.run(["git", "rebase", "--abort"], cwd=cwd, capture_output=True)
-                log.error("git pull: ребейз не сошёлся и откачен, состояние уйдёт следующей попыткой")
+                retry = subprocess.run([*command[:3], "-X", "theirs", *command[3:]],
+                                       cwd=cwd, capture_output=True, text=True)
+                if retry.returncode == 0:
+                    log.warning("git pull: конфликт решён версией смены")
+                    continue
+                # Удалённый с той стороны файл -X theirs не решает.
+                subprocess.run(["git", "rebase", "--abort"], cwd=cwd, capture_output=True)
+                log.error("git pull: ребейз не сошёлся и откачен: %s", retry.stderr.strip()[:200])
             return
-
-
-def once(dry_run: bool) -> int:
-    """Разовый разбор накопившегося — режим для крона."""
-    offset = state.read_json(OFFSET_FILE, {"offset": 0}).get("offset", 0)
-    updates = telegram.get_updates(offset=offset)
-
-    if not updates:
-        print("Новых событий нет.")
-        return 0
-
-    admin = config.secret("TELEGRAM_ADMIN_ID")
-    limits = service.load_state()
-    handled, served, last_id = process(updates, limits, admin, dry_run, offset)
-
-    if not dry_run:
-        state.write_json(OFFSET_FILE, {"offset": last_id})
-        service.save_state(limits)
-        print(f"Обработано нажатий: {handled}. Выдано разборов: {served}.")
-
-    return 0
 
 
 def _selftest() -> int:
@@ -986,7 +1011,40 @@ def _selftest() -> int:
         assert not (mine / ".git" / "rebase-merge").exists()
         assert not (mine / ".git" / "rebase-apply").exists()
         assert (mine / "offset.json").read_text() == "2"
-    print("подтягивание: конфликтный ребейз откачен, своё на месте")
+        sent = subprocess.run(["git", "show", "main:offset.json"], cwd=origin, capture_output=True, text=True)
+        assert sent.stdout == "2", sent  # версия смены дошла до сервера, а не ждёт следующей попытки
+        # Их коммит не потерян: версия смены легла поверх него.
+        assert subprocess.run(["git", "rev-list", "--count", "main"], cwd=origin,
+                              capture_output=True, text=True).stdout.strip() == "3"
+    print("подтягивание: конфликт решён версией смены, ребейз не висит, состояние ушло")
+
+    # Сбой сведения не стопорит ролики к битам, а стоящая очередь — одна строка владельцу в сутки.
+    with tempfile.TemporaryDirectory() as tmp:
+        called, told, clock = [], [], [1000.0]
+
+        def broken():
+            raise RuntimeError("сломано")
+        with (mock.patch.object(skleyka, "tick", broken),
+              mock.patch.object(bity, "tick", lambda: called.append(1)),
+              mock.patch.object(telegram, "send_message", lambda chat, text, **kw: told.append(text)),
+              mock.patch.object(config, "secret", lambda name, required=True: "1"),
+              mock.patch.object(time, "monotonic", lambda: clock[0]),
+              mock.patch(f"{__name__}.STUCK_FILE", Path(tmp) / "alarm.json"),
+              mock.patch(f"{__name__}._stuck_since", 0.0),
+              contextlib.redirect_stderr(io.StringIO())):
+            assert _ticks() == POLL_TIMEOUT and called == [1] and not told
+            clock[0] += STUCK_AFTER
+            _ticks()
+            clock[0] += STUCK_AFTER
+            _ticks()
+            assert len(called) == 3 and len(told) == 1 and "сломано" in told[0], (called, told)
+            # Удачный круг гасит счёт: следующий сбой — снова первый.
+            with mock.patch.object(skleyka, "tick", lambda: None), mock.patch.object(skleyka, "busy", lambda: True):
+                assert _ticks() == SKLEYKA_POLL
+            state.write_json(Path(tmp) / "alarm.json", {})
+            _ticks()
+            assert len(told) == 1, told
+    print("очереди: сбой сведения ролики к битам не стопорит, владельцу — одна строка")
 
     # Загадку прослушки создаёт другая машина: у дежурства файла ещё нет,
     # add на нём падает, а подтянуть его всё равно надо.
@@ -1077,7 +1135,6 @@ def _selftest() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Обработка событий бота")
-    parser.add_argument("--dry-run", action="store_true", help="только показать события")
     parser.add_argument(
         "--serve",
         type=int,
@@ -1093,9 +1150,10 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
 
-    if args.serve:
-        return serve(args.serve)
-    return once(args.dry_run)
+    if not args.serve:
+        # Запуск без флагов раньше разбирал накопившееся — вторым опросчиком рядом с дежурством.
+        parser.error("нужен --serve МИНУТ или --selftest")
+    return serve(args.serve)
 
 
 def _tell_busy(message: dict) -> None:

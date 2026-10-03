@@ -521,9 +521,16 @@ def user_key(user_id: str | int) -> str:
 
 
 def load_state() -> dict:
-    data = state.read_json(STATE_FILE, {"day": _today(), "total": 0, "users": {}})
+    return _new_day(state.read_json(STATE_FILE, {"day": _today(), "total": 0, "users": {}}))
+
+
+def _new_day(data: dict) -> dict:
+    """Новый день — общий счётчик обнуляется, история по людям остаётся.
+
+    Сверка — на каждом разборе, а не только при загрузке: смена держит состояние в памяти
+    до шести часов, и перешедшая полночь до своего конца отвечала бы «на сегодня плёнка закончилась».
+    """
     if data.get("day") != _today():
-        # Новый день — общий счётчик обнуляется, история по людям остаётся.
         data["day"] = _today()
         data["total"] = 0
     return data
@@ -539,7 +546,7 @@ def check_limit(data: dict, user_id: str, *, admin: bool) -> str:
     """Пусто — разбор разрешён. Иначе строка с объяснением для человека."""
     if admin:
         return ""
-    if data.get("total", 0) >= config.SERVICE_DAILY_TOTAL:
+    if _new_day(data).get("total", 0) >= config.SERVICE_DAILY_TOTAL:
         return (
             "На сегодня плёнка закончилась — проявочная перегружена.\n\n"
             "Приходи завтра, лимит обнулится."
@@ -554,7 +561,7 @@ def check_limit(data: dict, user_id: str, *, admin: bool) -> str:
 
 
 def spend(data: dict, user_id: str) -> None:
-    users = data.setdefault("users", {})
+    users = _new_day(data).setdefault("users", {})
     user = users.setdefault(user_id, {"day": "", "count": 0, "total": 0})
     if user.get("day") != _today():
         user["day"] = _today()
@@ -1812,6 +1819,16 @@ def _selftest() -> None:
          state.read_jsonl, globals()["WATCH_FILE"]) = real
         tmp.cleanup()
     print("рассылка релизов: один релиз — одна весть, старые отметки помнятся")
+
+    # Смена перешла полночь: общий лимит вчерашнего дня сегодня не действует.
+    stale = {"day": "2000-01-01", "total": config.SERVICE_DAILY_TOTAL, "users": {}}
+    assert check_limit(stale, "u", admin=False) == "" and stale == {"day": _today(), "total": 0, "users": {}}, stale
+    stale.update(day="2000-01-01", total=config.SERVICE_DAILY_TOTAL)
+    spend(stale, "u")
+    assert stale["total"] == 1 and stale["day"] == _today(), stale
+    stale["total"] = config.SERVICE_DAILY_TOTAL
+    assert "закончилась" in check_limit(stale, "v", admin=False)
+    print("лимит разборов: общий счётчик обнуляется в полночь, а не со сменой")
 
     # Слежение за артистом вне списка сбора: поиск при подписке, свой проход
     # по магазинам и ни строчки в inbox, откуда пишутся посты канала.

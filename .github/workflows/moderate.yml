@@ -78,11 +78,32 @@ jobs:
       # собран с lv2, плагин fat1 — отдельным пакетом, плюс 5 секунд. Не встал —
       # смена всё равно идёт: кнопки и разборы работают, а на трек бот честно
       # ответит, что принять его не может.
+      #
+      # Пакеты лежат в запасе (actions/cache): обычно установка — полминуты, но в 2 стыках смен
+      # из 49 зеркало отдавало 100 КБ/с, шаг шёл 12 минут, и бот всё это время молчал.
+      # Сперва — без сети вовсе, из запаса и списков образа; не сошлись версии — обычным путём,
+      # и качается только то, чего в запасе нет. Ключ — версия образа: с новым образом запас
+      # берётся прежний (restore-keys) и после установки откладывается свежий.
+      - name: Узнать версию образа
+        id: image
+        run: echo "version=${ImageVersion:-none}" >> "$GITHUB_OUTPUT"
+
+      - name: Достать запас пакетов
+        id: debs
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/debs/*.deb
+          key: debs-${{ steps.image.outputs.version }}
+          restore-keys: debs-
+
       - name: Поставить ffmpeg
         continue-on-error: true
         run: |
+          mkdir -p ~/debs/partial
+          install="sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives=$HOME/debs"
+          $install --no-download ffmpeg x42-plugins && exit 0
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg x42-plugins
+          $install ffmpeg x42-plugins
 
       # 7z распаковывает архивы дорожек по ссылке на облако (src/oblako.py): zip бот открывает
       # сам, а 7z и rar — только им. rar — отдельный пакет из multiverse; не встал — rar-архиву
@@ -90,9 +111,21 @@ jobs:
       - name: Поставить 7z
         continue-on-error: true
         run: |
-          sudo apt-get install -y --no-install-recommends 7zip 7zip-rar \
-            || sudo apt-get install -y --no-install-recommends 7zip
+          install="sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives=$HOME/debs"
+          $install --no-download 7zip 7zip-rar || {
+            sudo apt-get update -qq
+            $install 7zip 7zip-rar || $install 7zip
+          }
           (command -v 7zz || command -v 7z) && (7zz i 2>/dev/null || 7z i) | grep -c -i rar || true
+
+      # Сразу, а не в конце задачи: смену обрывают, и запас после шести часов мог бы не лечь вовсе.
+      - name: Отложить запас пакетов
+        if: steps.debs.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/debs/*.deb
+          key: debs-${{ steps.image.outputs.version }}
 
       - name: Представиться для коммитов
         run: |
@@ -161,6 +194,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # Ключ запуска сборки ролика — встроенный, отдельного секрета не нужно.
           GITHUB_TOKEN: ${{ github.token }}
+          # Журнал смены — строкой сразу, а не пачкой в конце: print в файл буферизуется,
+          # «Дежурство 350 мин.» смены 08:02 записано в 13:52, а при отмене вывод пропадал.
+          # Процессы сведения (--job) наследуют.
+          PYTHONUNBUFFERED: "1"
         # 350 минут, а не 360: смена должна закончиться сама и успеть сохранить
         # состояние, а не быть прибитой по таймауту на полуслове.
         run: python -m src.moderate --serve 350
@@ -170,7 +207,12 @@ jobs:
         run: |
           git add data/ content/
           git diff --cached --quiet || git commit -m "дежурство: состояние бота"
-          git pull --rebase --autostash origin ${{ github.ref_name }}
+          # Конфликт с чужим коммитом — версия смены, как в src/moderate.py (_push_repo):
+          # 29.09.2026 этот шаг упал на нём, и состояние за четыре часа пропало.
+          git pull --rebase --autostash origin ${{ github.ref_name }} || {
+            git rebase --abort || true
+            git pull --rebase -X theirs --autostash origin ${{ github.ref_name }}
+          }
           git push
 
       - name: Сохранить списки слежения
