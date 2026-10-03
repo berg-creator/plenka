@@ -299,6 +299,7 @@ def _selftest() -> int:
         old = {"name": "Old Name", "tier": "auto", "seen_at": "2025-09-01"}
         assert forgotten(old, now) and not forgotten(quiet, now) and not forgotten({"name": "Bones"}, now)
         assert "убран из базы" in "".join(refresh([old], [], now))
+    assert DEMOTE_DAYS <= collect.NEWS_KEEP_DAYS, "inbox забывает новости раньше, чем рэп-пресса «замолчала»"
     print("newcomers: самопроверка пройдена")
     return 0
 

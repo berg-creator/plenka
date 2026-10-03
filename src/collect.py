@@ -33,6 +33,11 @@ TIER_SCORE = {"core": 100, "ru": 95, "scene": 80, "legend": 70, "auto": 65, "ru_
 # Сколько дней тишины терпит сбор у найденного сами, прежде чем перестать искать его релизы.
 DORMANT_DAYS = 183
 
+# Сколько дней новость лежит в inbox. Дольше всех её читает база артистов: рэп-пресса,
+# молчащая newcomers.DEMOTE_DAYS дней, возвращает артиста из scene в auto. Без срока файл
+# рос на 1300 строк в месяц. Релизы и клипы не уходят: по ним считается previous_releases.
+NEWS_KEEP_DAYS = 90
+
 # Слова, по которым новость без упоминания знакомого артиста всё же интересна.
 NEWS_KEYWORDS_RU = (
     "умер", "скончал", "погиб", "арест", "суд", "иск", "биф", "конфликт",
@@ -706,7 +711,11 @@ def main() -> int:
             print("  (пусто — либо всё уже собрано ранее, либо не заполнены id артистов)")
         return 0
 
-    state.append_jsonl(config.INBOX_FILE, batch)
+    old = state.iso(state.now() - timedelta(days=NEWS_KEEP_DAYS))
+    rows = [row for row in state.read_jsonl(config.INBOX_FILE)
+            if row.get("kind") != "news" or row.get("collected_at", old) >= old]
+    config.INBOX_FILE.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows + batch), encoding="utf-8")
     removed = seen.prune()
     seen.save()
 

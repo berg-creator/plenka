@@ -35,7 +35,7 @@ jobs:
   # Упавшие — нет: там ошибка, и владелец о ней уже знает. Идущие — тоже.
   retry:
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -58,7 +58,7 @@ jobs:
 
   apply:
     if: startsWith(github.ref_name, 'claude/review-')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       # Коммит правок в main и удаление ветки.
@@ -113,7 +113,7 @@ jobs:
   notify:
     needs: [retry, apply]
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Написать владельцу

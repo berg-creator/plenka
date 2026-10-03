@@ -499,10 +499,6 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
     return issues
 
 
-def is_ok(text: str, rubric: str) -> bool:
-    return not problems(text, rubric)
-
-
 def _selftest() -> None:
     """Опись, её пересказ, длительность и выдумки в РЕЛИЗЕ и ВЕРДИКТЕ ловятся, законное проходит."""
     link = '\n\n▸ <a href="https://music.apple.com/us/album/sorry-mama-single/6807382817">Слушать в Apple Music</a>'
