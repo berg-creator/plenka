@@ -6,6 +6,13 @@
     "MAYOT": 1944341,
     "TASSO": 652512
   },
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 232
+  },
+  "photo": "756d7269f269f239f339db39d33972117a937bd36ff36f33cd33cd73cfe5ef65",
   "preview": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/bc/c0/5b/bcc05ba6-9b8b-9a9b-b38b-e7b1e942b928/mzaf_11085566728823773145.plus.aac.p.m4a",
   "release": "Любовь на пляже",
   "released_at": "2026-10-02T07:00:00+00:00",
