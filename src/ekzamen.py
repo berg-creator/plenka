@@ -23,6 +23,15 @@
 сторону нуля. demucs разделяет не идеально, поэтому до десятых дБ под эталон
 не подгоняем.
 
+Эталоны — превью Deezer, MP3 128 кбит/с: декодер поднимает пик и режет верх,
+поэтому мастер бота перед сравнением проходит тот же кодек (CODEC) — иначе след
+кодека читался бы ошибкой сведения. По таким эталонам сверяются баланс до ~15 кГц,
+громкость, динамика и место голоса; «воздух», пик и ширину по ним не настраиваем
+(владелец, 03.10.2026). Отдельной строкой — пик мастера после AAC 128 кбит/с
+к порогу AAC_PEAK: это не сравнение с эталоном, а ответ, переживёт ли мастер площадку.
+AAC — кодировщиком Apple (aac_at): встроенный в ffmpeg сам выбрасывает пик, на мастере
+с −2,0 dBTP дал +3,3, когда Apple −2,3 и MP3 −2,3, — мерился бы он, а не мастер.
+
 Почему не прослушка вслепую и не Matchering: первое требует ушей и мониторов,
 которых нет, второе — нового пакета и одного референса, а тут 40 релизов
 и только ffmpeg. Почему не сравнивать сразу с медианой релизов, как TONE: медиана
@@ -55,6 +64,10 @@ SEP = Path.home() / ".cache" / "plenka-quiz-ai" / "sep" / "htdemucs"
 # Громкость стема голоса ниже SILENT LUFS — голоса в треке нет (у ~27 из 447).
 SILENT = -35.0
 SPOIL_GAIN, SPOIL_BELL, SPOIL_SHELF, SPOIL_PAD = (-10.0, 6.0), 6.0, 5.0, 3.0
+CODEC = {".mp3": "libmp3lame", ".m4a": "aac_at"}
+AAC_PEAK = -1.0
+# Полосы SPLIT, где место голосу решает разборчивость слов: 500–1000, 1000–2000, 2000–4000 Гц.
+POCKET = (3, 4, 5)
 PASSES = {"gotovoe": "не испорти готовое", "syroe": "сделай из сырого"}
 
 
@@ -87,6 +100,23 @@ def attack(path: Path) -> float:
     rises = sorted(level[i] - level[i - 2] for a, b in skleyka._lines(level)
                    for i in range(max(2, int(a * rate)), int(b * rate)))
     return rises[int(0.9 * (len(rises) - 1))]
+
+
+def coded(path: Path, suffix: str) -> Path:
+    """Звук после кодека 128 кбит/с — рядом, с расширением suffix; меряется прямо он."""
+    dest = path.with_suffix(suffix)
+    skleyka._ffmpeg("-i", path, "-c:a", CODEC[suffix], "-b:a", "128k", dest)
+    return dest
+
+
+def pocket(voice: Path, beat: Path) -> dict[int, float]:
+    """Голос к биту по полосам POCKET, дБ: медиана разницы уровней середины по окнам
+    0,1 с внутри строк голоса. Доля окон, где бит громче голоса целиком (masked),
+    места в полосе не видит: +3,6 → +4,4 % у неё — шум. В бите эталона место голосу
+    уже сделано, поэтому плюс у бота — глубина его провала поверх релиза."""
+    over, under = (skleyka._bands(path, f"{skleyka.MID},") for path in (voice, beat))
+    sung = skleyka._sung(skleyka._lines(skleyka._envelope(voice)), min(len(over[0]), len(under[0])), 0.1)
+    return {b: statistics.median(over[b][i] - under[b][i] for i in sung) for b in POCKET}
 
 
 def exam(track: str, spoil: bool, root: Path, seed: int) -> dict[str, float]:
@@ -127,6 +157,8 @@ def exam(track: str, spoil: bool, root: Path, seed: int) -> dict[str, float]:
         "бит перекрывает голос, % окон": skleyka.masked(skleyka._gaps(heard, work / "beat.wav")[1])
                                          - skleyka.masked(skleyka._gaps(vocal, beat)[1]),
     }
+    ours, theirs, edges = pocket(heard, work / "beat.wav"), pocket(vocal, beat), skleyka.SPLIT
+    result |= {f"голос к биту {edges[b - 1]}–{edges[b]} Гц, дБ": ours[b] - theirs[b] for b in POCKET}
     fronts, spread = attack(vocal), skleyka.swing(vocal)
     result |= {"атака голоса, дБ за 20 мс": attack(heard) - fronts,
                "  атака после компрессии": attack(work / "vocal-comp.wav") - fronts,
@@ -141,11 +173,15 @@ def exam(track: str, spoil: bool, root: Path, seed: int) -> dict[str, float]:
         result |= {"испорчено: баланс, дБ": loudness(feed_vocal)[0] - beat_level - (want[0] - beat_level),
                    "испорчено: тембр голоса, среднее |откл.|":
                        statistics.fmean(abs(spoiled[f] - theirs[f]) for f in TONE)}
-    master = out / "skleyka.wav"
+    raw = out / "skleyka.wav"
+    master = coded(raw, ".mp3")
     ours, theirs = tone(master, FORMAT), tone(ref, FORMAT)
     result |= {f"тембр сведения {f} Гц, дБ": ours[f] - theirs[f] for f in TONE}
     got, want = _r128(master), _r128(ref)
-    result |= {"разброс сведения LRA, LU": got[1] - want[1], "пик к громкости сведения PLR, дБ": got[2] - want[2]}
+    result |= {"разброс сведения LRA, LU": got[1] - want[1], "пик к громкости сведения PLR, дБ": got[2] - want[2],
+               "  пик к громкости без MP3": _r128(raw)[2] - want[2],
+               f"пик после AAC 128 к порогу {AAC_PEAK:+.0f} dBTP, дБ (не к эталону; выше нуля — запаса нет)":
+                   loudness(coded(raw, ".m4a"))[1] - AAC_PEAK}
     (corr, loss), (corr0, loss0) = stereo(master), stereo(ref)
     result |= {"корреляция каналов": corr - corr0, "потеря в моно, LU": loss - loss0,
                "бит после места голосу, LU": loudness(work / "beat.wav")[0] - loudness(feed_beat)[0]}
