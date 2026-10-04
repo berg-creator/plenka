@@ -147,9 +147,9 @@ def priority(item: dict) -> tuple:
             item.get("source") == "telegram", item.get("released_at") or "")
 
 
-def due(runs: list[dict]) -> bool:
-    """Пора ли срочному заходу: час из config.URGENT_HOURS_MSK прошёл,
-    а запуска urgent.yml после него нет.
+def due(runs: list[dict], hours: tuple = config.URGENT_HOURS_MSK) -> bool:
+    """Пора ли заходу: час из hours (10.5 — это 10:30 МСК) прошёл,
+    а запуска воркфлоу после него нет.
 
     Отменённый запуск не в счёт — его вытеснил из очереди state-write другой.
     Упавший в счёт: повтор каждые 10 минут жёг бы генерацию на той же поломке,
@@ -158,10 +158,10 @@ def due(runs: list[dict]) -> bool:
     from .compose import MSK
 
     now = state.now().astimezone(MSK)
-    hours = [hour for hour in config.URGENT_HOURS_MSK if hour <= now.hour]
+    hours = [hour for hour in hours if hour <= now.hour + now.minute / 60]
     if not hours:
         return False
-    slot = now.replace(hour=hours[-1], minute=0, second=0, microsecond=0)
+    slot = now.replace(hour=int(hours[-1]), minute=round(hours[-1] % 1 * 60), second=0, microsecond=0)
     return not any(
         run.get("conclusion") != "cancelled"
         and (created := state._parse(run.get("created_at", ""))) and created >= slot
@@ -170,33 +170,45 @@ def due(runs: list[dict]) -> bool:
 
 
 def shift() -> None:
-    """Срочный заход — из дежурства, а не по крону (см. config.URGENT_HOURS_MSK).
+    """Заходы по часам — из дежурства, а не по крону (см. config.SHIFT_HOURS_MSK):
+    срочные новости, прослушка, сторис и годовщины.
 
     Дежурство идёт почти без дыр, поэтому оно раз в 10 минут спрашивает GitHub
-    о последних запусках urgent.yml и, когда пора, запускает его через
+    о последних запусках воркфлоу и, когда пора, запускает его через
     workflow_dispatch — как сборку ролика (reels.start_build). Сам заход
     в дежурстве не идёт: обход лент и генерация занимают минут восемь,
     и всё это время бот молчал бы. Локально, без GITHUB_TOKEN, ничего не делает.
+
+    За круг — один запуск: в группе state-write GitHub держит одного ожидающего,
+    и два запущенных разом вытеснили бы друг друга. Второй уйдёт через 10 минут.
     """
     import requests
 
     token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     if not (token and repo):
         return
-    api = f"https://api.github.com/repos/{repo}/actions/workflows/urgent.yml"
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
-    try:
-        response = requests.get(f"{api}/runs", params={"per_page": 5}, headers=headers, timeout=30)
-        response.raise_for_status()
-        if not due(response.json().get("workflow_runs", [])):
+    for workflow, hours in config.SHIFT_HOURS_MSK.items():
+        if not due([], hours):  # час ещё не настал — GitHub не спрашиваем
+            continue
+        api = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}"
+        body = {"ref": os.environ.get("GITHUB_REF_NAME", "main")}
+        if workflow == "quiz.yml":
+            # Ручной запуск прослушки по умолчанию шлёт её владельцу — дежурство
+            # называет адрес само, тот же, куда выпускает посты.
+            body["inputs"] = {"target": os.environ.get("PUBLISH_TARGET", "admin")}
+        try:
+            response = requests.get(f"{api}/runs", params={"per_page": 5}, headers=headers, timeout=30)
+            response.raise_for_status()
+            if not due(response.json().get("workflow_runs", []), hours):
+                continue
+            requests.post(f"{api}/dispatches", headers=headers, timeout=30, json=body).raise_for_status()
+        except requests.RequestException as exc:
+            # Смену не роняем: следующий заход через 10 минут попробует снова.
+            log.error("Заход %s не запущен: %s", workflow, exc)
             return
-        requests.post(f"{api}/dispatches", headers=headers, timeout=30,
-                      json={"ref": os.environ.get("GITHUB_REF_NAME", "main")}).raise_for_status()
-    except requests.RequestException as exc:
-        # Смену не роняем: следующий заход через 10 минут попробует снова.
-        log.error("Срочный заход не запущен: %s", exc)
+        print(f"Заход по часам: {workflow} запущен")
         return
-    print("Срочный заход: urgent.yml запущен")
 
 
 def run(limit: int, dry_run: bool, target: str) -> int:
@@ -305,6 +317,35 @@ def _selftest() -> int:
         assert due([{"created_at": "2026-09-16T10:59:00Z", "conclusion": "success"}])
     with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 9, 0, tzinfo=timezone.utc)):  # 12:00 МСК
         assert not due([])
+        # Сторис в 10:30: запуск в 10:29 — ещё вчерашний заход, в 10:31 — сегодняшний.
+        assert due([{"created_at": "2026-09-16T07:29:00Z", "conclusion": "success"}], (10.5,))
+        assert not due([{"created_at": "2026-09-16T07:31:00Z", "conclusion": "success"}], (10.5,))
+    with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 7, 29, tzinfo=timezone.utc)):  # 10:29 МСК
+        assert not due([], (10.5,))
+
+    # Дежурство в 15:05: сторис и срочное сегодня уже шли, годовщины и прослушка — нет.
+    # За круг уходит один запуск, прослушке называется адрес — иначе ушла бы владельцу.
+    import contextlib, io
+    asked_github, sent = [], []
+    class Reply:
+        def __init__(self, runs=()): self.runs = list(runs)
+        def raise_for_status(self): pass
+        def json(self): return {"workflow_runs": self.runs}
+    def get(url, **_):
+        asked_github.append(url.split("/")[-2])
+        return Reply([] if url.split("/")[-2] in ("calendar.yml", "quiz.yml") else [{"created_at": "2026-09-16T11:30:00Z"}])
+    env = {"GITHUB_TOKEN": "t", "GITHUB_REPOSITORY": "o/r", "GITHUB_REF_NAME": "main", "PUBLISH_TARGET": "channel"}
+    with (mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 12, 5, tzinfo=timezone.utc)),
+          mock.patch.object(config, "SHIFT_HOURS_MSK", {**config.SHIFT_HOURS_MSK, "calendar.yml": (16,)}),
+          mock.patch.dict(os.environ, env), mock.patch("requests.get", get),
+          mock.patch("requests.post", lambda url, json, **_: sent.append((url.split("/")[-2], json)) or Reply()),
+          contextlib.redirect_stdout(io.StringIO())):
+        shift()
+        assert asked_github == ["stories.yml", "urgent.yml", "quiz.yml"], asked_github  # до своего часа GitHub не спрашиваем
+        assert sent == [("quiz.yml", {"ref": "main", "inputs": {"target": "channel"}})], sent
+        with mock.patch.object(config, "SHIFT_HOURS_MSK", config.SHIFT_HOURS_MSK | {"calendar.yml": (8,)}):
+            shift()
+        assert sent[1:] == [("calendar.yml", {"ref": "main"})], sent  # один запуск, прослушка ждёт следующего круга
 
     asked, used, saved = [], [], []
     def generate(rubric: str, payload: dict) -> dict:
