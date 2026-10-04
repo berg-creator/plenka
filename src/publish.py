@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from . import card, config, footage, state, telegram
+from . import card, config, footage, quality, state, telegram
 from .sources import deezer, itunes
 
 log = logging.getLogger("publish")
@@ -596,15 +596,7 @@ def send_for_approval(post: dict, path: Path, chat_id: str, label: str = "") -> 
 
 
 def _poll_payload(text: str) -> dict | None:
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    question = (data.get("question") or "").strip()
-    options = [str(o).strip() for o in data.get("options", []) if str(o).strip()]
-    if not question or len(options) < 2:
-        return None
-    return {"question": question, "options": options, "is_anonymous": data.get("is_anonymous", True)}
+    return quality.poll(text)
 
 
 def _selftest() -> None:

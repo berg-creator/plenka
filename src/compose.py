@@ -506,12 +506,38 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
         share = pictures[n::memes] or pictures
         add("meme", {"scene": [a["name"] for a in sample], "pictures": share, "avoid": avoid}, {})
 
-    # ОПРОС — тоже из базы артистов.
-    for _ in range(quota.get("poll", 0)):
+    # ОПРОС — тоже из базы артистов. Доля от пачки ему не указ: сырья он не просит,
+    # и когда разборы молчат, пачка состояла бы из одних опросов (polls_due).
+    asked = poll_questions()
+    for _ in range(min(quota.get("poll", 0), polls_due())):
         sample = random.sample(artists, min(10, len(artists)))
-        add("poll", {"artists": [a["name"] for a in sample]}, {})
+        add("poll", {"artists": [a["name"] for a in sample], "asked": asked}, {})
 
     return jobs[:needed]
+
+
+def polls_due() -> int:
+    """Сколько опросов ещё можно написать на этой неделе (config.POLL_PER_WEEK).
+
+    В счёт идут и вышедшие за семь дней, и ждущие в очереди: потолок на одну
+    очередь не помог бы — она пустеет на два поста в день и на столько же
+    пополнялась бы опросами.
+    """
+    since = state.now() - timedelta(days=7)
+    out = [i for i in state.read_json(config.POSTED_FILE, {}).get("items", [])
+           if i.get("rubric") == "poll" and (state._parse(i.get("published_at", "")) or since) > since]
+    return max(0, config.POLL_PER_WEEK - len(out) - len(list(config.QUEUE.glob("*-poll.json"))))
+
+
+def poll_questions() -> list[str]:
+    """Вопросы вышедших и ждущих опросов — чтобы новый не повторял тему.
+
+    Пачка о прошлых не знала: из 15 опросов очереди 04.10.2026 девять спрашивали
+    «с чего всё началось» — пример из промпта рубрики.
+    """
+    texts = (state.read_json(path, {}).get("text", "") for folder in (config.ARCHIVE, config.QUEUE)
+             for path in sorted(folder.glob("*-poll.json")))
+    return [asked["question"] for asked in map(quality.poll, texts) if asked]
 
 
 def meme_openings() -> list[str]:
@@ -1504,6 +1530,21 @@ def _selftest() -> int:
         finally:
             config.ARCHIVE, config.QUEUE, config.LINEAGE_FILE = real_paths
     assert saved["release"] and news["release"] == "", (saved["release"], news["release"])
+    # Опросов — не больше config.POLL_PER_WEEK в неделю, считая вышедшие и ждущие; новый знает прошлые вопросы.
+    with tempfile.TemporaryDirectory() as tmp:
+        real_paths = config.ARCHIVE, config.QUEUE, config.POSTED_FILE
+        config.ARCHIVE, config.QUEUE, config.POSTED_FILE = Path(tmp) / "a", Path(tmp) / "q", Path(tmp) / "p.json"
+        try:
+            assert polls_due() == config.POLL_PER_WEEK and poll_questions() == []
+            assert [job[2]["asked"] for job in plan(40) if job[1] == "poll"] == [[]] * config.POLL_PER_WEEK
+            state.write_json(config.QUEUE / "1-poll.json", {"text": '{"question": "Кто?", "options": ["А", "Б"]}'})
+            state.write_json(config.POSTED_FILE, {"items": [
+                {"rubric": "poll", "published_at": state.now().isoformat()},
+                {"rubric": "poll", "published_at": (state.now() - timedelta(days=8)).isoformat()}]})
+            assert polls_due() == config.POLL_PER_WEEK - 2 and poll_questions() == ["Кто?"]
+            assert not [job for job in plan(40) if job[1] == "poll"]
+        finally:
+            config.ARCHIVE, config.QUEUE, config.POSTED_FILE = real_paths
 
     print("релиз: предзаказ, старше суток и дубль магазина не пишутся, на релиз один пост; "
           "разбор несёт треки концов связи")

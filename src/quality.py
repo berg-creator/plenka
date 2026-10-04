@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import html
+import json
 import re
 
 from .telegram import visible_len
@@ -294,6 +295,22 @@ def _quoted(matches: list[str]) -> str:
     return ", ".join(f"«{m}»" for m in dict.fromkeys(matches))
 
 
+POLL_ISSUE = "опрос не разобран"
+
+
+def poll(text: str) -> dict | None:
+    """Опрос из текста поста: вопрос и варианты; None — в тексте не опрос."""
+    try:
+        data = json.loads(text)
+        question = (data.get("question") or "").strip()
+        options = [str(o).strip() for o in data.get("options", []) if str(o).strip()]
+    except (ValueError, AttributeError, TypeError):
+        return None
+    if not question or len(options) < 2:
+        return None
+    return {"question": question, "options": options, "is_anonymous": data.get("is_anonymous", True)}
+
+
 def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
     """Список причин, по которым пост нельзя публиковать. Пусто — годится.
 
@@ -306,8 +323,15 @@ def problems(text: str, rubric: str, payload: dict | None = None) -> list[str]:
     if not stripped:
         return ["пустой текст"]
 
-    # Опрос — это JSON по замыслу, к нему текстовые правила не применяются.
+    # Опрос — это JSON по замыслу, к нему текстовые правила не применяются. Но JSON
+    # он быть обязан: 01–03.10.2026 модель десять раз из пятнадцати вернула пост
+    # с «🔥 — вариант» под реакции, и publish.send отправил бы его текстом без голосования.
     if rubric == "poll":
+        asked = poll(stripped)
+        if not asked:
+            return [f"{POLL_ISSUE}: в text нужен только JSON с question и options, без заголовка и вступления"]
+        if len(asked["question"]) > 300 or len(asked["options"]) > 4 or max(map(len, asked["options"])) > 100:
+            return [f"{POLL_ISSUE}: вопрос до 300 знаков, вариантов от 2 до 4, каждый до 100 знаков"]
         return []
 
     # Мем держится на картинке: две короткие надписи и строка подписи —
@@ -510,6 +534,13 @@ def _selftest() -> None:
 
     def timed(text: str, facts: dict | None, rubric: str = "release") -> bool:
         return any(p.startswith(DURATION_ISSUE) for p in problems(text, rubric, facts))
+
+    # Опрос обязан быть опросом: пост «🔥 — вариант» под реакции ушёл бы текстом без голосования.
+    asked = '{"question": "Кто?", "options": ["А", "Б"], "is_anonymous": true}'
+    assert problems(asked, "poll") == [] and poll(asked)["options"] == ["А", "Б"]
+    for broken in ("<b>КТО?</b>\n\n🔥 — А\n❤ — Б", '{"question": "Кто?", "options": ["А"]}', '["А", "Б"]',
+                   '{"question": "Кто?", "options": ["А", "Б", "В", "Г", "Д"]}'):
+        assert problems(broken, "poll")[0].startswith(POLL_ISSUE), broken
 
     # Живой пример от 11.09.2026: опись пересказана в первом абзаце, и с 29.09.2026
     # это прежде всего длительность — брак, за который пост пропадает.
