@@ -961,13 +961,15 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     if not kits.parent.is_dir() or not serum.parent.is_dir():
         return "библиотеки FL или пресетов Serum на этой машине нет"
     git("fetch", "-q", "origin", "+refs/heads/claude/beats-*:refs/remotes/origin/claude/beats-*")
-    heads = dict(line.split() for line in git("for-each-ref", "--format=%(refname:short) %(objectname)",
+    heads = dict(line.split() for line in git("for-each-ref", "--sort=committerdate", "--format=%(refname:short) %(objectname)",
                                               "refs/remotes/origin/claude/beats-*").splitlines())
     ids = {ref.removeprefix("origin/claude/beats-"): sha for ref, sha in heads.items()
            if re.fullmatch(r"origin/claude/beats-[0-9a-z-]+", ref)}
     if not ids:
         return "веток с битами нет"
-    beat = max(ids)                                 # id начинается с даты
+    # id начинается с даты; два бита за день (утренний забракован, рутина перезапущена) — нужен поздний по коммиту,
+    # а не по алфавиту пары: ветки идут в порядке коммитов
+    beat = max(enumerate(ids), key=lambda x: (x[1][:8], x[0]))[1]
     mark = f"{beat} {ids[beat]}"
     if (kits / ".бит").exists() and (kits / ".бит").read_text("utf-8") == mark:
         return f"{beat}: уже собрано"
