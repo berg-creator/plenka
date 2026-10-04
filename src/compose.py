@@ -1244,8 +1244,8 @@ def _selftest() -> int:
     joint = old("Wu-Tang Clan", "MYSTERY OF RAW - Single", "6797938184")
     artists = {"City Morgue": {"itunes_id": 1361386830}, "Wu-Tang Clan": {"itunes_id": 200986}}
 
-    real = itunes.recent_releases, itunes.album_credit
-    itunes.recent_releases = lambda _id: listing
+    real = itunes.recent_many, itunes.album_credit
+    itunes.recent_many = lambda ids: {artist_id: listing for artist_id in ids}
     itunes.album_credit = lambda album: store[album]
     try:
         found = collect.collect_releases([{"name": "City Morgue", "itunes_id": 1361386830}], set())
@@ -1256,7 +1256,7 @@ def _selftest() -> int:
         guest_before = {**guest, "released_at": state.iso(state.now() - timedelta(days=3))}
         assert previous_releases(found[0], [guest_before], artists) == []
     finally:
-        itunes.recent_releases, itunes.album_credit = real
+        itunes.recent_many, itunes.album_credit = real
     assert [(r["artist"], r["tracked"]) for r in found] == [
         ("City Morgue, ZillaKami & SosMula", "City Morgue")
     ], found

@@ -119,14 +119,16 @@ def collect_releases(artists: list[dict], seen: state.Seen) -> list[dict]:
     cutoff = state.now() - timedelta(days=RELEASE_MAX_AGE_DAYS)
     found: list[dict] = []
 
-    for artist in artists:
-        if not in_collect(artist):
-            continue
+    artists = [artist for artist in artists if in_collect(artist)]
+    try:  # iTunes — одной пачкой на всех: по одному артисту сбор шёл восемь минут
+        listings = itunes.recent_many([a["itunes_id"] for a in artists if a.get("itunes_id")])
+    except Exception as exc:
+        log.warning("iTunes: релизы не получены (%s)", exc)
+        listings = {}
 
-        raw: list[dict] = []
+    for artist in artists:
+        raw: list[dict] = list(listings.get(artist.get("itunes_id"), []))
         try:
-            if artist.get("itunes_id"):
-                raw += itunes.recent_releases(artist["itunes_id"])
             if artist.get("deezer_id"):
                 raw += deezer.recent_releases(artist["deezer_id"])
         except Exception as exc:  # источник может отвалиться — это не повод падать

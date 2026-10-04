@@ -17,6 +17,9 @@ LOOKUP_URL = "https://itunes.apple.com/lookup"
 # iTunes не документирует жёсткий лимит, но при частых запросах отдаёт 403.
 MIN_INTERVAL = 3.0
 
+# Столько id lookup берёт одним запросом: 100 артистов — 597 строк за секунду (03.10.2026).
+BATCH = 100
+
 
 def find_artist_id(name: str, *, exact: bool = False) -> int | None:
     """Ищет id артиста по имени. Используется один раз при заполнении базы.
@@ -57,22 +60,39 @@ def resolve_name(name: str) -> str:
     return results[0].get("artistName", "") if results else ""
 
 
+def recent_many(artist_ids: list[int], limit: int = 5) -> dict[int, list[dict]]:
+    """Последние альбомы сразу многих артистов, свежие сверху, — по id артиста.
+
+    Сбор спрашивал артистов по одному: 153 запроса через паузу MIN_INTERVAL — восемь минут,
+    и всё это время запуск держал очередь state-write. Альбомы в ответе идут следом за строкой
+    своего артиста и делятся по ней, а не по artistId альбома: тот называет основного
+    исполнителя, у фита и совместного релиза он чужой (04.10.2026: по artistId с одиночными
+    запросами разошлись 12 артистов из 15, по месту в ответе — ни один).
+    """
+    found: dict[int, list[dict]] = {}
+    for start in range(0, len(artist_ids), BATCH):
+        data = get_json(
+            LOOKUP_URL,
+            params={
+                "id": ",".join(map(str, artist_ids[start:start + BATCH])),
+                "entity": "album",
+                "limit": limit,
+                "sort": "recent",
+            },
+            min_interval=MIN_INTERVAL,
+        )
+        owner = None
+        for item in (data or {}).get("results", []):
+            if item.get("wrapperType") == "artist":
+                owner = item.get("artistId")
+            elif release := _release(item):
+                found.setdefault(owner, []).append(release)
+    return found
+
+
 def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
     """Последние альбомы артиста, свежие сверху."""
-    data = get_json(
-        LOOKUP_URL,
-        params={
-            "id": artist_id,
-            "entity": "album",
-            "limit": limit,
-            "sort": "recent",
-        },
-        min_interval=MIN_INTERVAL,
-    )
-    if not data:
-        return []
-
-    return [release for item in data.get("results", []) if (release := _release(item))]
+    return [release for rows in recent_many([artist_id], limit).values() for release in rows]
 
 
 def _release(item: dict) -> dict:

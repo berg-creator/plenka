@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from .http import get_json
 
 BASE = "https://api.deezer.com"
-MIN_INTERVAL = 1.0  # Deezer ограничивает примерно 50 запросами за 5 секунд
+MIN_INTERVAL = 0.2  # Deezer ограничивает примерно 50 запросами за 5 секунд
 
 # Адрес-заглушка: хеш пустой строки. Так Deezer отвечает, когда портрета нет.
 EMPTY_PICTURE = "d41d8cd98f00b204e9800998ecf8427e"
