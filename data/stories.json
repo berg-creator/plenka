@@ -341,6 +341,12 @@
       "published_at": "2026-10-03T12:40:49+00:00",
       "rubric": "lineage",
       "story_id": "456239072"
+    },
+    {
+      "key": "098b49a77c51394c",
+      "published_at": "2026-10-04T07:36:39+00:00",
+      "rubric": "poll",
+      "story_id": "456239073"
     }
   ]
 }
