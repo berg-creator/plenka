@@ -56,6 +56,7 @@ import html
 import logging
 import re
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
@@ -83,6 +84,17 @@ def find(text: str) -> dict:
     у альбома ещё track_count, released_at и links — прямые ссылки других площадок.
     У трека, чьим именем артист назвал и альбом, — album: код для кнопки «💿 Альбом».
     Пусто — ни то ни другое: куплет в несколько строк, мусор, нет в магазинах."""
+    started = time.monotonic()
+    found = _find(text)
+    # Время — в журнал смены, без текста человека: журнал Actions открыт. Обычная реплика
+    # до площадок не доходит и строки не оставляет. По этим строкам и «карточка» в send
+    # решается, качать ли картинки в общем пуле (NEXT.md, 95).
+    if (spent := time.monotonic() - started) >= 0.1:
+        print(f"ВКЛАДЫШ: поиск {spent:.1f} с, {'найдено' if found else 'пусто'}")
+    return found
+
+
+def _find(text: str) -> dict:
     text = text.strip()
     if "\n" in text:
         return {}
@@ -247,16 +259,19 @@ def caption(track: dict, show: str = "") -> str:
 
 def send(chat_id: str, track: dict) -> None:
     """Карточка с подписью; нет ни обложки, ни фото артиста — одна подпись."""
+    started = time.monotonic()
     with ThreadPoolExecutor() as pool:  # Афиша и обложка качаются разом: каждая — секунда-две
         show = pool.submit(concert, track["artist"])
         image = card.cover({"cover": track.get("cover", ""), "artist": track["artist"],
                             "track": track["title"], "kicker": KICKER})
+        drawn = time.monotonic() - started
     text = caption(track, show.result())
     if image is None:
         telegram.send_message(chat_id, text)
-        return
-    telegram.send_photo_file(chat_id, image, text)
-    image.unlink(missing_ok=True)  # карточка уже у человека
+    else:
+        telegram.send_photo_file(chat_id, image, text)
+        image.unlink(missing_ok=True)  # карточка уже у человека
+    print(f"ВКЛАДЫШ: карточка {time.monotonic() - started:.1f} с, из них картинка {drawn:.1f} с")
 
 
 ARTIST_KICKER = "КАРТОЧКА АРТИСТА"
