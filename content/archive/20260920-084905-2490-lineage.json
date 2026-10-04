@@ -33,6 +33,13 @@
       "url": "https://www.deezer.com/track/836932812"
     }
   ],
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 239
+  },
+  "photo": "70e14467434f03630553055b2366d1a659a699a699ae09ad057f07ff03ff03ff",
   "preview": "",
   "release": "",
   "released_at": "",
