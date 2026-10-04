@@ -60,6 +60,8 @@
 бита и пик выше потолка бот чинит и говорит об этом строкой в подписи; пропавший голос, голос
 мимо бита и тишину внутри трека не починить — трек уходит всё равно, владельцу строка в личку.
 Отказ вместо трека отвергнут: человек ждал, и трек с изъяном ему полезнее, чем «не вышло».
+Провал короче — бит замолк перед входом следующей части, а голос ещё молчит — закрывает само
+сведение: эхо последнего слова держится до входа (_hold), человеку — тоже строка в подписи.
 
 Выход из лимита суток — только тому, кто в него упёрся: две кнопки под отказом,
 бесплатная функция остаётся бесплатной. «Позвать артиста» — личная ссылка
@@ -1125,6 +1127,70 @@ def _throws(voice: Path, throws: list[tuple[float, float, float]], length: float
     return out
 
 
+# Остановка бита, где молчит и голос. Бит перед входом следующей части замолкает сам, а в файле
+# голоса между частями — цифровая тишина: в заказе ручного сведения 04.10.2026 в готовом треке
+# выходили провалы до −34…−49 дБ длиной около секунды, владелец: «ничего не слышно, как будто
+# срезаны паузы». Его правило — внутри трека нет окна HOLD_WINDOW тише −26 дБ при мастере на
+# −11 LUFS, на 15 дБ тише громкого; в сумме до мастера это HOLD_BELOW к середине окон: мастер
+# громкое сжимает на 2–3 дБ, а тихое только поднимает. Меряется сумма, а не один бит: хвост
+# отзвука, эдлиб или бросок провал уже могли закрыть. И сам бит в этом окне должен замолкнуть —
+# стать на HOLD_BELOW тише, чем под последней фразой: тихое вступление, где голос идёт с паузами
+# поверх еле слышной подложки, — не остановка. Нет такого окна в паузе голоса — в трек
+# не добавляется ничего.
+# Лечится, как в ручной версии: эхо последнего слова держится до входа следующей части. Слово —
+# последняя восьмая фразы — повторяется встык каждую восьмую от стены к стене (HOLD_PAN), шина
+# эха — на HOLD_DB LU к голосу, как броски. В ручной версии повтор гас на 1,5 дБ, а конец паузы
+# закрывал разворот первого слова; разворота у бота нет, поэтому эхо гаснет медленнее —
+# на HOLD_FALL дБ в секунду.
+# Пауза короче HOLD_PAUSE[0] — рисунок артиста, а не дыра. Длиннее HOLD_PAUSE[1] эхом не закрыть:
+# слово, повторенное десяток раз, — заевшая пластинка, и к концу паузы оно всё равно ушло бы
+# под порог. Такая остановка и остановка до первого слова (повторять нечего) остаются как были.
+HOLD_WINDOW = 0.25
+HOLD_BELOW = 17.0
+HOLD_PAUSE = (1.0, 4.0)
+HOLD_DB = -8.0
+HOLD_FALL = -1.0
+HOLD_PAN = (0.85, 0.45)
+
+
+def _hold(total: Path, voice: Path, beat: Path, rhythm: tuple[float, float] | None, work: Path, echo: float = 0.0) -> list[float]:
+    """Эхо последнего слова в остановках бита (HOLD_*): сумма total переписывается с ним.
+    Возвращает секунды, где слово кончилось; остановок нет — пусто, и total не тронут."""
+    n, down = round(HOLD_WINDOW * ENV_RATE), 10 ** (-HOLD_BELOW / 20)
+
+    def windows(path: Path) -> list[float]:
+        level = [10 ** (db / 20) for db in _envelope(path)]
+        return [statistics.fmean(level[i:i + n]) for i in range(len(level) - n + 1)]
+
+    track, played, stops = windows(total), windows(beat), []
+    floor, phrases = statistics.median(track) * down, _lines(_envelope(voice), PHRASE_RANGE, PHRASE_PAUSE)
+    for (start, end), (nxt, _) in zip(phrases, phrases[1:]):
+        a, b = round(end * ENV_RATE), round((nxt - HOLD_WINDOW) * ENV_RATE) + 1
+        under = statistics.fmean(played[round(start * ENV_RATE):a] or [0.0]) * down
+        if HOLD_PAUSE[0] <= nxt - end <= HOLD_PAUSE[1] and any(t < floor and p < under for t, p in zip(track[a:b], played[a:b])):
+            stops.append((end, nxt))
+    if not stops:
+        return []
+    step, graph = (rhythm or grid(beat))[0] / 2, f"[0:a]asplit={len(stops)}" + "".join(f"[v{j}]" for j in range(len(stops))) + ";"
+    for j, (end, nxt) in enumerate(stops):
+        start, taps = max(0.0, end - step), range(1, math.ceil((nxt - end) / step) + 1)
+        graph += (f"[v{j}]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS,highpass=f=200,lowpass=f=5000,"
+                  f"pan=mono|c0=0.5*c0+0.5*c1,afade=t=in:d=0.05,afade=t=out:st={end - start - 0.01:.3f}:d=0.01,"
+                  f"apad=pad_dur={nxt - end:.3f},asplit[a{j}][b{j}];"
+                  + "".join(f"[{side}{j}]aecho=in_gain=0:out_gain=1:delays=" + "|".join(f"{1000 * step * k:.0f}" for k in taps)
+                            + ":decays=" + "|".join(f"{HOLD_PAN[(k + odd) % 2] * 10 ** (HOLD_FALL * step * (k - 1) / 20):.3f}" for k in taps)
+                            + f"[{side}{side}{j}];" for odd, side in enumerate("ab"))
+                  + f"[aa{j}][bb{j}]amerge=inputs=2,atrim=end={nxt - start:.3f},afade=t=out:st={nxt - start - 0.1:.3f}:d=0.1,"
+                    f"adelay={1000 * start:.0f}:all=1[o{j}];")
+    held = work / "hold.wav"
+    _ffmpeg("-i", voice, "-filter_complex", graph + "".join(f"[o{j}]" for j in range(len(stops)))
+            + f"amix=inputs={len(stops)}:normalize=0:duration=longest[w]", "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, held)
+    _sum([(total, 0.0), (held, loudness(voice)[0] + HOLD_DB + echo - _quiet(held))], work / "sum-hold.wav").replace(total)
+    print("  остановки бита, где молчит голос: эхо последнего слова до входа следующей части, с "
+          + ", ".join(f"{end:.1f}" for end, _ in stops) + " с")
+    return [end for end, _ in stops]
+
+
 def _phone(voice: Path, spans: list[tuple[float, float]], work: Path) -> Path:
     """Голос через телефон (PHONE) на отрезках spans, той же громкости; края — по 10 мс."""
     on = [(0.0, -120.0)] + [p for a, b in spans for p in ((a - 0.01, -120.0), (a, 0.0), (b - 0.01, 0.0), (b, -120.0))]
@@ -1259,7 +1325,7 @@ TOTAL = "sum.wav"  # голос с битом до мастера, там же: 
 
 def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
         voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = (), like: Path | None = None,
-        lost: list[str] | None = None) -> Path:
+        lost: list[str] | None = None, held: list[float] | None = None) -> Path:
     """Сведение в out/skleyka.wav, промежуточное — в out/work.
 
     parts — дорожки по отдельности, [(роль, файл)]: даблы, бэки и эдлибы встают вокруг
@@ -1272,7 +1338,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     съел бы поправку; echo — доля отзвука, дилея и бросков к своей, дБ («эха
     больше / меньше» — по ±4); дабл не эхо, его не трогает. like — превью трека, к которому
     подтянуть тембр, ширину и громкость («как у <артиста>», _like). lost — сюда роли
-    частей, которые в трек не вошли: обработка их испортила."""
+    частей, которые в трек не вошли: обработка их испортила; held — сюда секунды остановок
+    бита, где придержано эхо последнего слова (_hold)."""
     look, work = STYLES[style], out / "work"
     work.mkdir(parents=True, exist_ok=True)
     project = abs(clips.probe_seconds(vocal) - clips.probe_seconds(beat)) <= SAME_PROJECT
@@ -1411,6 +1478,13 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     # Голос без бита — звук приложения «🎚 Двигать голос»: сырой голос там тонул под битом.
     # Трюки саунд-дизайна привязаны к месту голоса и к биту — при сдвиге они были бы не там.
     _sum([*plain, *((wet, gains[wet]) for wet, _ in wets[:own] if wet in gains)], work / VOICES)
+    try:
+        stops = _hold(total, ridden, beat, rhythm, work, echo)
+    except Exception as exc:  # noqa: BLE001 — без эха в остановке трек всё равно уходит, каким был
+        stops = []
+        print(f"  эхо в остановках бита не собралось: {type(exc).__name__}")
+    if held is not None:
+        held += stops
     if tricks:
         print("  слышно: " + _audible(bed, [(name, path, gains.get(path, 0.0), spans, ref)
                                             for name, path, _, spans, ref in tricks if path and spans]))
@@ -2718,6 +2792,7 @@ TALKED = "Поговорили про этот трек достаточно —
 LIKE_MISSING = "«{name}» в магазинах не нашёл — звук ни к чему не подтягивал."
 LIKE_LOST = "Отрывок «{name}» не скачался — звук к нему не подтягивал.\n"
 LOST = "В трек не вошло: {parts} — на обработке сломался звук, свёл без этого. Разберусь, если напишешь /vopros.\n"
+HELD = "Бит замолкает, а голос ещё не вошёл ({at}) — придержал там эхо последнего слова, чтобы не было дыры.\n"
 TALK_KNOBS = ("style", "design", "voice", "echo", "at")
 TALK_ASK = ("✏️ Что поменять — напиши словами, как другу: «слов не слышно», «голос входит на дропе», "
             "«голос на долю позже», «эха меньше», «погрязнее», «как у Travis Scott».")
@@ -3847,12 +3922,14 @@ def run_job(spec_path: Path) -> int:
                 if not extra["like"]:
                     note += LIKE_LOST.format(name=html.escape(like["title"]))
                     spec["knobs"] = dict(knobs, like=None)
-            lost = []
+            lost, held = [], []
             master = mix(_bus(lead, True, work / "lead.wav"), beat, work / "out", knobs["style"], knobs["design"],
                          parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead],
-                         lost=lost, **extra)
+                         lost=lost, held=held, **extra)
             if lost:
                 note += LOST.format(parts=", ".join(lost))
+            if held:
+                note += HELD.format(at=", ".join(map(_minutes, held)))
             clip = None
             if config.SKLEYKA_APP_URL and spec["left"] != 0:
                 # Голос для приложения — каким встал в трек, но без сдвига at: страница сдвигает его сама.
@@ -5118,6 +5195,21 @@ def _selftest() -> None:
         assert not fixed and wrong == ["тишина внутри трека с 0:05 по 0:14",
                                        "голос разошёлся с битом: 9 с звучит до начала бита или после его конца"], (fixed, wrong)
 
+        # Остановка бита, где молчит и голос: эхо последнего слова закрывает провал — второй замер
+        # его уже не находит; бит без остановки и пауза длиннее HOLD_PAUSE — сумма не тронута.
+        def stop(name: str, beat_when: str, voice_when: str, level: float = 0.3) -> tuple:
+            """Сумма бита и голоса и остальное для _hold: голос, бит, сетка (восьмая — 0,25 с), папка."""
+            bed, word = wave(f"{name}-beat", 220, level, beat_when, *reels.VOICE_CODEC), wave(f"{name}-voice", 440, 0.3, voice_when)
+            return _sum([(bed, 0.0), (word, 0.0)], tmp / f"hold-{name}.wav"), word, bed, (0.5, 0.0), tmp
+
+        case = stop("stop", "lt(t,15.5)+gt(t,17)", "between(t,5,15)+between(t,17,25)")
+        assert _hold(*case) == [15.0] and _hold(*case) == []
+        # Бит еле слышен, но не замолкал: в паузе голоса сумма тихая, а остановки нет.
+        case = stop("steady", "1", "between(t,5,15)+between(t,17,25)", 0.01)
+        before = case[0].read_bytes()
+        assert _hold(*case) == [] and case[0].read_bytes() == before
+        assert _hold(*stop("long", "lt(t,15.5)+gt(t,21)", "between(t,5,15)+between(t,21,25)")) == []
+
         # Замер записи для отбора в ручное сведение. «Голос» — слоги по 0,2 с, две секунды из трёх:
         # тон с обертонами, согласные на 5 и 12 кГц, тихий шум в паузах. Шумная, перегруженная,
         # глухая и гулкая запись — брак; чистая, чистая с вырезанными паузами, голос в одном канале
@@ -5189,7 +5281,7 @@ def _selftest() -> None:
         service.SOURCES_FILE = real_sources
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
-          "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
+          "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
           "реферал за трек и звёзды, «свести руками» один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется — ок")
 
 
