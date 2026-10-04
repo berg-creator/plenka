@@ -741,7 +741,8 @@ def _ticks() -> int:
     """
     global _stuck_since
     try:
-        skleyka.tick()
+        if skleyka.tick():
+            push_state()  # напоминание клиенту ушло — отметка о нём не должна потеряться со сменой
         wait = SKLEYKA_POLL if skleyka.busy() else POLL_TIMEOUT
         _stuck_since = 0.0
     except Exception as exc:  # noqa: BLE001 — сведение не держит дежурство

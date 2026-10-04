@@ -1394,6 +1394,10 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         skleyka.cancel(chat_id)
         telegram.send_message(chat_id, skleyka.CANCELLED)
         return False
+    if not text.startswith("/") and not otbor.URL.search(text) and skleyka.sale_text(chat_id, text):
+        # Идёт продажа ручного сведения (src/skleyka.py): текст клиента — звукорежиссёру. Раньше просьбы
+        # к треку и разбора вкуса: на «а можно голос погромче» иначе ответил бы бот, а не человек.
+        return False
     if not text.startswith("/") and skleyka.wish(chat_id, text):
         # Просьба словами заранее — «голос входит на дропе»: в заявку или трек в очереди, а не в разбор.
         return False
@@ -1694,7 +1698,8 @@ def handle_callback(query: dict, data: dict) -> None:
         if action == "sk":
             skleyka.callback(chat_id, user_id, subject, admin=admin,
                              message_id=query.get("message", {}).get("message_id"), who=query.get("from", {}),
-                             keyboard=(query.get("message", {}).get("reply_markup") or {}).get("inline_keyboard"))
+                             keyboard=(query.get("message", {}).get("reply_markup") or {}).get("inline_keyboard"),
+                             text=query.get("message", {}).get("text") or "")
         elif _subscribed(chat_id, user_id, admin, retry="skleyka"):
             otbor.cancel(chat_id)
             skleyka.start(chat_id, user_id, admin=admin)

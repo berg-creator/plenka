@@ -75,6 +75,11 @@
 владельца ответом на него бот пересылает человеку сам. За звёзды — только число треков.
 Коды, бонусы и номера платежей — в SKLEYKA_FILE, приватном хранилище.
 
+Ручное сведение («🎧 Свести руками») бот продаёт сам: кусок → перевод → целый трек. Файлы звукорежиссёр
+шлёт с Мака ботом владельцу в личку (--hand), а клиенту их копирует дежурство по кнопке владельца —
+состояние пишет только оно, запись с Мака дежурство затёрло бы своей. Оплата звёздами отвергнута:
+это перевод человеку, и приход денег подтверждает владелец кнопкой, бот банка не видит.
+
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   сведение, пара ДО/ПОСЛЕ одной громкости и ролик
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --style грязно --design
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --voice 2 --echo -4   ручки «голос громче», «эха меньше»
@@ -82,6 +87,8 @@
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --like ТРЕК   тембр, ширина и громкость — к чужому треку
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --old СТАРЫЙ   голос с чужого бита — на БИТ, темп до ±8 %
     python -m src.skleyka --beats Kizaru --bpm 142   бесплатные биты в темпе голоса, без Telegram
+    python -m src.skleyka --hand 026a4b --price 1500 --piece КУСОК ДО-ПОСЛЕ --full WAV MP3 --text ТЕКСТ
+                                                     ручное сведение владельцу в личку, дальше — кнопками (только Мак)
 """
 
 from __future__ import annotations
@@ -93,6 +100,7 @@ import contextlib
 import hashlib
 import hmac
 import html
+import itertools
 import json
 import math
 import re
@@ -2441,14 +2449,15 @@ def look(knobs: dict) -> str:
 
 
 def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: bool = False,
-             message_id: int | None = None, who: dict | None = None, keyboard: list | None = None) -> None:
+             message_id: int | None = None, who: dict | None = None, keyboard: list | None = None,
+             text: str = "") -> None:
     """Кнопки сведения. Под готовым треком — пересборка с новыми ручками новой заявкой,
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y), саунд-дизайн (e),
     справка (h), «нет бита» (g), «голос на чужом бите» (o) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
-    «🎧 Свести руками» (u) — под треком и под лимитом —
+    «🎧 Свести руками» (u) — под треком и под лимитом; кнопки продажи ручного сведения (h…, _sale) —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
-    keyboard — кнопки того сообщения."""
+    keyboard — кнопки того сообщения, text — его текст (текст клиенту под «📤 Отправить клиенту»)."""
     chat_id = str(chat_id)
     head, _, code = subject.partition(":")
     data = load()
@@ -2461,6 +2470,9 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         return
     if subject == "u" or len(head) != 1 and code == "u":
         _hand(data, chat_id, "" if subject == "u" else head, who or {})
+        return
+    if len(head) != 1 and code.startswith("h"):
+        _sale(data, chat_id, head, code, admin, message_id, text)
         return
     if len(head) != 1:
         _tweak(data, chat_id, head, code, admin)
@@ -2617,7 +2629,7 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
         f"{'по дорожкам' if split else 'вокал + бит'}, {config.SKLEYKA_HAND_RUB[split]} ₽"
     words = "\n".join(filter(None, (track.get("wish"), track.get("said"))))
     card = telegram.send_message(admin, "\n".join([
-        f"🎧 <b>Свести руками</b> · {mode}",
+        f"🎧 <b>Свести руками</b> · {mode} · заказ <code>{track_id}</code>",
         f"{html.escape(name)} · {contact}",
         *([f"Дорожки: {html.escape(_what([(f['n'], f['r']) for f in files]))}"] if files else []),
         *(f"Ссылка: {html.escape(link['u'])} — {html.escape(link.get('say', ''))}" for link in track.get("links", [])),
@@ -2641,6 +2653,271 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
             lost.append(what)
     if lost:
         telegram.send_message(admin, HAND_LOST.format(what=", ".join(lost)))
+
+
+# Продажу ручного сведения ведёт бот: кусок → перевод → целый трек (владелец, 04.10.2026).
+# Файлы звукорежиссёр шлёт с Мака ботом владельцу в личку (--hand), клиенту их копирует дежурство
+# по кнопке владельца: состояние с Мака писать нельзя — дежурство перезаписало бы его своей версией.
+# Номера сообщений целого трека берутся только из записи трека, куда их положило нажатие владельца:
+# данные кнопки клиент может прислать любые и вытянул бы чужое сообщение из лички владельца.
+# Денег бот не видит — перевод подтверждает владелец; отказ, подарок и вторую правку решает он же,
+# бот ничего не обещает. Реквизиты — секрет SKLEYKA_HAND_PAY: репозиторий открытый.
+SALE_DAYS = 7  # столько после выдачи текст клиента идёт звукорежиссёру: правка входит в цену
+# ponytail: неоплаченная продажа закрывается сама через 30 дней; закрыть раньше — «🎁 Отдать без оплаты».
+SALE_UNPAID_DAYS = 30
+SALE_CLAIM_MINUTES = 5  # «Я оплатил» чаще — владельцу второй раз не пишем
+SALE_NUDGE_HOURS = 24
+SALE_MB, SALE_FILES = 50, 7  # предел загрузки Bot API; больше файлов не влезет в 64 байта кнопки
+SALE_PAY = "{pay}\n\nК оплате — {price} ₽. Перевёл — жми «Я оплатил»: звукорежиссёр проверит, и целый трек придёт сюда."
+SALE_PAY_NONE = "Реквизиты пришлёт звукорежиссёр — сюда же. К оплате — {price} ₽. Перевёл — жми «Я оплатил»."
+SALE_CLAIMED = "Передал, жду подтверждения — целый трек придёт сюда."
+SALE_CLAIMED_AGAIN = "Уже передал — жду подтверждения."
+SALE_NOT_SEEN = "Перевод пока не вижу. Проверь и нажми ещё раз или напиши сюда."
+SALE_PAID = ("Спасибо, деньги пришли — целый трек выше. Одна правка входит в цену: напиши сюда, что поправить.\n\n"
+             "И две просьбы: пара слов отзыва и разрешение показывать твоё «до-после» — ответь здесь же.")
+SALE_GIFT = "Трек твой — файлы выше. Взамен — отзыв и разрешение показывать твоё «до-после»: напиши сюда пару слов."
+SALE_DONE = "Целый трек уже у тебя — выше. Правка или вопрос — напиши сюда."
+SALE_WRONG = ("Напиши одним сообщением, что не устраивает, и секунду, где это слышно: голос, ноты, громкость, "
+              "эффекты, паузы. Одна правка до оплаты бесплатная.",
+              "Понял. Напиши, что именно не так, — передам. Не сойдёмся — денег не надо, версия бота остаётся у тебя.")
+SALE_NUDGE = "Послушал кусок? Нравится — жми кнопку, нет — напиши, что не так."
+SALE_PASSED = "Передал звукорежиссёру, ответит здесь."
+SALE_LOST = ("⚠️ Заказ {track}: клиенту ушло не всё ({why}). Сообщение удалено или человек остановил бота — "
+             "отметки нет, после починки кнопка сработает снова; файлы пропали — запусти --hand заново.")
+SALE_BAD = "⚠️ Заказ {track}: {why} — запусти --hand заново."
+
+
+def _sale_keys(track_id: str) -> list[list[dict]]:
+    return [[{"text": "Нравится — как оплатить?", "callback_data": f"{PREFIX}{track_id}:hl"}],
+            [{"text": "Что-то не так", "callback_data": f"{PREFIX}{track_id}:hw"}]]
+
+
+def _pay_key(track_id: str) -> list[list[dict]]:
+    return [[{"text": "Я оплатил", "callback_data": f"{PREFIX}{track_id}:hp"}]]
+
+
+def _selling(track: dict) -> bool:
+    """Открыта ли продажа: от отправки клиенту до SALE_DAYS после выдачи. Владелец, прошедший путь
+    клиента на своём треке, после выдачи свободен сразу — иначе неделю писал бы сам себе."""
+    sale = track.get("sale")
+    if not sale:
+        return False
+    if not sale.get("given"):
+        return _age(sale["sent"]) < SALE_UNPAID_DAYS * 86400
+    return _age(sale["given"]) < SALE_DAYS * 86400 and track["chat"] != config.secret("TELEGRAM_ADMIN_ID", required=False)
+
+
+def _owner(track_id: str, track: dict, line: str, keys: list[list[dict]] | None = None) -> None:
+    """Строка владельцу о продаже — с меткой вопроса: его ответ на неё уйдёт клиенту (answer).
+    Метка стоит раньше имени и слов клиента: answer берёт первую, и подложенная в текст чужая
+    увела бы ответ владельца в чужой чат."""
+    telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), f"🎧 Заказ {track_id} · {QUESTION_TAG}{track['chat']}\n{line}\n\n"
+                          "<i>Ответ на это сообщение уйдёт клиенту.</i>", buttons=keys)
+
+
+def _give(data: dict, track_id: str, track: dict, words: str) -> bool:
+    """Выдача целого трека — одна на оплату, подарок и правку: копии файлов из записи продажи и текст
+    следом. Отметка given — когда ушло всё: не скопировалось — владельцу строка, клиенту текста нет
+    («трек выше» при пропавшем файле было бы ложью), и следующее нажатие попробует снова."""
+    owner, sale = config.secret("TELEGRAM_ADMIN_ID"), track["sale"]
+    try:
+        for message in sale["full"]:
+            telegram.copy_message(track["chat"], owner, message)
+        telegram.send_message(track["chat"], words)
+    except telegram.TelegramError as exc:
+        telegram.send_message(owner, SALE_LOST.format(track=track_id, why=html.escape(str(exc))))
+        return False
+    sale["given"] = state.iso()
+    save(data)
+    return True
+
+
+def _sale_send(data: dict, track_id: str, track: dict, payload: str, message_id: int | None, text: str) -> None:
+    """«📤 Отправить клиенту» под текстом с Мака: клиенту — копии куска и этот текст с кнопками
+    «Нравится» и «Что-то не так»; куска нет (правка после оплаты) — сразу целые файлы и текст.
+    Отметка — номер самого сообщения с кнопкой: второе нажатие той же кнопки ничего не шлёт, а новая
+    отправка по тому же треку (новый кусок после правки) заменяет прежнюю. Счёт «что-то не так»
+    переезжает в новую отправку: бесплатную правку бот обещает один раз на трек."""
+    owner, chat, old = config.secret("TELEGRAM_ADMIN_ID"), track["chat"], track.get("sale") or {}
+    if old.get("text") == message_id:
+        return
+    try:
+        price, count, steps = payload.split(".")
+        price, count, ids = int(price), int(count), list(itertools.accumulate(map(int, steps.split(","))))
+    except ValueError:
+        price, count, ids = 0, 0, []
+    if not ids[count:] or not text.strip():
+        telegram.send_message(owner, SALE_BAD.format(track=track_id, why="кнопка не читается: нет текста или номеров файлов"))
+        return
+    try:
+        who = telegram.get_chat(chat)
+        name = html.escape(" ".join(filter(None, (who.get("first_name"), who.get("last_name")))) or "без имени")
+        name += f" · @{who['username']}" if who.get("username") else ""
+    except telegram.TelegramError:
+        name = "клиент"
+    track["sale"] = sale = {"price": price, "piece": ids[:count], "full": ids[count:], "text": message_id,
+                            "sent": state.iso(), "who": name, "wrong": old.get("wrong", 0)}
+    if not sale["piece"]:
+        if not _give(data, track_id, track, html.escape(text)):
+            return
+        telegram.edit_markup(owner, message_id, None)
+        _owner(track_id, track, f"{name}: целый трек и текст ушли клиенту.")
+        return
+    try:
+        for message in sale["piece"]:
+            telegram.copy_message(chat, owner, message)
+        telegram.send_message(chat, html.escape(text), buttons=_sale_keys(track_id))
+    except telegram.TelegramError as exc:  # не сохранено — кнопка сработает снова
+        telegram.send_message(owner, SALE_LOST.format(track=track_id, why=html.escape(str(exc))))
+        return
+    save(data)
+    telegram.edit_markup(owner, message_id, None)
+    _owner(track_id, track, f"{name}: кусок и текст ушли клиенту, цена {price} ₽. Жду его ответа.",
+           [[{"text": "🎁 Отдать без оплаты", "callback_data": f"{PREFIX}{track_id}:hg"}]])
+
+
+def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, message_id: int | None, text: str) -> None:
+    """Кнопки продажи ручного сведения. Клиента — «как оплатить» (hl), «что-то не так» (hw),
+    «я оплатил» (hp) — только из чата самого трека и пока продажа открыта; владельца — отправить
+    клиенту (hs…), деньги пришли или нет (hy, hn), отдать без оплаты (hg) — только от владельца
+    в его личке. Чужое нажатие — молча мимо: отвечать подделке нечего."""
+    owner, track = config.secret("TELEGRAM_ADMIN_ID"), data["tracks"].get(track_id)
+    if code in ("hl", "hw", "hp"):
+        if not track or track["chat"] != chat_id or not _selling(track):
+            return
+        sale, name = track["sale"], track["sale"].get("who", "клиент")
+        sale.setdefault("touched", state.iso())  # нажал — напоминать о куске не нужно
+        if sale.get("given"):
+            save(data)
+            telegram.send_message(chat_id, SALE_DONE)
+        elif code == "hw":
+            sale["wrong"] = sale.get("wrong", 0) + 1
+            save(data)
+            telegram.send_message(chat_id, SALE_WRONG[sale["wrong"] > 1])
+            _owner(track_id, track, f"{name}: что-то не так ({sale['wrong']}-й раз), жду его текст.")
+        elif code == "hl":
+            first, pay = "liked" not in sale, config.secret("SKLEYKA_HAND_PAY", required=False)
+            sale.setdefault("liked", state.iso())
+            save(data)
+            telegram.send_message(chat_id, (SALE_PAY if pay else SALE_PAY_NONE).format(pay=html.escape(pay), price=sale["price"]),
+                                  buttons=_pay_key(track_id))
+            if first:
+                _owner(track_id, track, f"{name}: клиенту понравилось." + (
+                    "" if pay else " Реквизитов у бота нет (секрет SKLEYKA_HAND_PAY пуст) — пришли их ответом на это сообщение."))
+        elif _age(sale.get("claim", "")) < SALE_CLAIM_MINUTES * 60:
+            save(data)
+            telegram.send_message(chat_id, SALE_CLAIMED_AGAIN)
+        else:
+            sale["claim"] = state.iso()
+            save(data)
+            _owner(track_id, track, f"{name} пишет, что перевёл {sale['price']} ₽ — проверь банк.",
+                   [[{"text": "✅ Деньги пришли", "callback_data": f"{PREFIX}{track_id}:hy"},
+                     {"text": "Не пришли", "callback_data": f"{PREFIX}{track_id}:hn"}]])
+            telegram.send_message(chat_id, SALE_CLAIMED)
+        return
+    if not admin or chat_id != owner:
+        return
+    if not track:
+        telegram.send_message(owner, SALE_BAD.format(track=track_id, why="такого трека в записях нет (номер неверный или трек стёрт)"))
+        return
+    if code.startswith("hs"):
+        _sale_send(data, track_id, track, code[2:], message_id, text)
+        return
+    sale = track.get("sale")
+    if sale and not sale.get("given"):  # отдаётся один раз
+        if code == "hn":
+            sale.pop("claim", None)  # следующее «Я оплатил» дойдёт до владельца сразу
+            save(data)
+            telegram.send_message(track["chat"], SALE_NOT_SEEN, buttons=_pay_key(track_id))
+        elif code not in ("hy", "hg") or not _give(data, track_id, track, SALE_GIFT if code == "hg" else SALE_PAID):
+            return
+        else:
+            _owner(track_id, track, f"{sale.get('who', 'клиент')}: целый трек ушёл клиенту"
+                   + (" без оплаты." if code == "hg" else f", {sale['price']} ₽ получено."))
+    telegram.edit_markup(owner, message_id, None)
+
+
+def sale_text(chat_id: str | int, text: str) -> bool:
+    """Свободный текст клиента при открытой продаже — звукорежиссёру, путём /vopros: метка в строке
+    владельцу, его ответ на неё уходит клиенту (answer). Зовётся раньше просьбы к треку и ПРОЯВКИ
+    (src/service.py): на «а можно голос погромче» иначе ответил бы разбор вкуса или пересобралась бы
+    версия бота. Лимита вопросов нет: это разговор с клиентом, а не обращение со стороны."""
+    chat, data = str(chat_id), load()
+    found = next(((key, track) for key, track in data["tracks"].items() if track["chat"] == chat and _selling(track)), None)
+    if not found:
+        return False
+    track_id, track = found
+    if "touched" not in track["sale"]:
+        track["sale"]["touched"] = state.iso()
+        save(data)
+    _owner(track_id, track, f"{track['sale'].get('who', 'клиент')}:\n\n{html.escape(text[:2000])}")
+    telegram.send_message(chat, SALE_PASSED)
+    return True
+
+
+def _nudge(data: dict) -> bool:
+    """Клиент сутки молчит над куском — ни нажатия, ни текста: одно напоминание с теми же кнопками,
+    владельцу строка. Один раз на отправку и не ночью (publish.night). Отметка пишется раньше
+    сообщения: сорвалась отправка — напоминания не будет, зато второго не будет точно."""
+    from .publish import night  # publish тянет полканала — только на круге дежурства
+
+    if night(state.now()):
+        return False
+    told = False
+    for track_id, track in data["tracks"].items():
+        sale = track.get("sale") or {}
+        if not sale.get("piece") or any(sale.get(key) for key in ("given", "touched", "nudged")) \
+                or _age(sale["sent"]) < SALE_NUDGE_HOURS * 3600:
+            continue
+        sale["nudged"] = told = state.iso()
+        save(data)
+        try:
+            telegram.send_message(track["chat"], SALE_NUDGE, buttons=_sale_keys(track_id))
+            _owner(track_id, track, f"{sale.get('who', 'клиент')} молчит сутки, напомнил.")
+        except telegram.TelegramError as exc:
+            print(f"  продажа {track_id}: напоминание не ушло: {exc}")
+    return bool(told)
+
+
+def hand_send(track_id: str, price: int | None, piece: list[Path], full: list[Path], words: Path | None, dry_run: bool) -> int:
+    """Звукорежиссёр — с Мака: кусок, целый трек и текст клиенту уходят ботом владельцу в личку,
+    под текстом — «📤 Отправить клиенту». Состояния Мак не пишет (его пишет дежурство): всё, что
+    нужно нажатию, едет в самой кнопке — заказ, цена, число файлов куска и номера сообщений
+    (первый целиком, остальные — шагом от предыдущего, иначе не влезть в 64 байта)."""
+    files = [*(("кусок", path) for path in piece), *(("целый трек", path) for path in full)]
+    text = words.read_text(encoding="utf-8").strip() if words and words.is_file() else ""
+    bad = [f"{path} — нет файла" for _, path in files if not path.is_file()]
+    bad += [f"{path.name} — больше {SALE_MB} МБ, Bot API не возьмёт: сожми во FLAC или MP3" for _, path in files
+            if path.is_file() and path.stat().st_size > SALE_MB * 2**20]
+    bad += [why for why, wrong in (("заказ — шесть знаков, как 026a4b", not re.fullmatch(r"[0-9a-f]{6}", track_id)),
+                                   ("нужна цена: --price 1500", bool(piece) and (not price or price < 0)),
+                                   ("нужен целый трек: --full ФАЙЛ", not full),
+                                   (f"файлов больше {SALE_FILES} — не влезут в кнопку", len(files) > SALE_FILES),
+                                   ("нужен непустой текст клиенту: --text ФАЙЛ", not text),
+                                   ("текст длиннее 4000 знаков", len(text) > 4000)) if wrong]
+    price = price or 0
+    label = f"📤 Отправить клиенту · {price} ₽" if piece else "📤 Отдать клиенту целый трек — без оплаты"
+    print(f"Заказ {track_id}" + (f", {price} ₽" if piece else "") + " — владельцу в личку"
+          + (" (сухой прогон, ничего не отправлено)" if dry_run else "") + ":")
+    for kind, path in files:
+        print(f"  {kind}: {path.name}" + (f" — {path.stat().st_size / 2**20:.1f} МБ" if path.is_file() else ""))
+    print(f"  текст клиенту ({len(text)} знаков):\n" + "\n".join(f"    {line}" for line in text.splitlines()))
+    print(f"  кнопка: «{label}»" + ("" if piece else " — куска нет, клиент получит целый трек сразу"))
+    if bad:
+        print("Не отправлено:\n" + "\n".join(f"  {why}" for why in bad))
+        return 1
+    if dry_run:
+        return 0
+    admin = config.secret("TELEGRAM_ADMIN_ID")
+    ids = [telegram.send_document(admin, path)["message_id"] for _, path in files]
+    steps = ",".join(str(b - a) for a, b in zip([0, *ids], ids))
+    data = f"{PREFIX}{track_id}:hs{price}.{len(piece)}.{steps}"
+    if len(data.encode()) > 64:
+        print(f"Не отправлено: кнопка вышла длиннее 64 байт ({data}) — файлы ушли без неё, запусти ещё раз с меньшим числом файлов.")
+        return 1
+    telegram.send_message(admin, html.escape(text), buttons=[[{"text": label, "callback_data": data}]])
+    print("Ушло. Дальше — кнопка под текстом в личке бота.")
+    return 0
 
 
 def _tweak(data: dict, chat_id: str, track_id: str, code: str, admin: bool) -> None:
@@ -3249,9 +3526,10 @@ def busy(drafts: bool = True) -> bool:
     return bool(_RUNNING or data["jobs"] or drafts and data["drafts"])
 
 
-def tick() -> None:
+def tick() -> bool:
     """Круг дежурства: заявки — в работу, кончившееся сведение — прочь из очереди,
-    следующая — в ход. Ошибка здесь не должна ронять дежурство — ловит вызывающий."""
+    следующая — в ход. Ошибка здесь не должна ронять дежурство — ловит вызывающий.
+    True — клиенту ручного сведения ушло напоминание (_nudge): дежурство сохраняет состояние сразу."""
     global _RUNNING
     data = load()
     changed = _drafts(data)
@@ -3268,11 +3546,13 @@ def tick() -> None:
     for chat_id in [chat_id for chat_id, search in _BEATS.items() if search.poll() is not None]:
         del _BEATS[chat_id]  # poll уже собрал кончившийся процесс, иначе копились бы зомби
     for track_id, track in list(data["tracks"].items()):
-        if _age(track["at"]) > TRACK_DAYS * 86400:
+        # Трек с открытой продажей ручного сведения живёт дольше ручек: в нём её запись.
+        if _age(track["at"]) > TRACK_DAYS * 86400 and not _selling(track):
             del data["tracks"][track_id]
             changed = True
     if changed:
         save(data)
+    return _nudge(data)
 
 
 def _spawn(data: dict, job: dict) -> tuple[subprocess.Popen, dict, Path]:
@@ -4950,6 +5230,190 @@ def _selftest() -> None:
         callback(6, 6, "t9:u", who={"username": "lilpi"})
         assert sent[-2] == HAND + HAND_TRACKS and "Запись: не мерилась" in sent[-1] \
             and [p["message_id"] for _, p in calls] == [21, 97], "битый замер — заказ идёт как раньше"
+        # Продажа ручного сведения: кусок → перевод → целый трек. Мак шлёт файлы и текст владельцу,
+        # дальше всё по кнопкам: «📤» владельца, «Нравится» и «Я оплатил» клиента, «✅ Деньги пришли».
+        # Номера файлов целого трека — только из записи трека; чужой чат и подделка кнопки — мимо.
+        real_time, real_doc, stamp, pay = state.now, telegram.send_document, state.now(), ["Перевод по номеру 100 <Банк>"]
+        config.secret = lambda name, required=True: {"TELEGRAM_ADMIN_ID": "1", "SKLEYKA_HAND_PAY": pay[0]}.get(name, "")
+        state.now = lambda: stamp
+        gone: set[int] = set()
+
+        def fake_call(method, payload, files=None):
+            calls.append((method, payload))
+            if payload.get("message_id") in gone:
+                raise telegram.TelegramError("message to copy not found")
+            return {"first_name": "Лил", "username": "lilpi"} if method == "getChat" else {}
+
+        def copies() -> list[tuple]:
+            return [(p["chat_id"], p["from_chat_id"], p["message_id"]) for m, p in calls if m == "copyMessage"]
+
+        def press(chat, code, mid=700, text="", track="t5"):
+            calls[:] = []
+            said, shown = len(sent), len(keys)
+            callback(chat, chat, f"{track}:{code}", admin=str(chat) == "1", message_id=mid, text=text)
+            return sent[said:], keys[shown:]
+
+        telegram._call = fake_call
+        head = {chat: f"🎧 Заказ t{track} · {QUESTION_TAG}{chat}\n" for chat, track in ((5, 5), (6, 8))}
+        # С Мака: сухой прогон ничего не шлёт; настоящий — файлы по порядку и текст с кнопкой, где
+        # заказ, цена, число файлов куска и номера сообщений (первый целиком, дальше шагом).
+        paths = [tmp / name for name in ("кусок.mp3", "до-после.mp3", "трек.wav", "трек.mp3")]
+        for path in paths:
+            path.write_bytes(b"1")
+        (tmp / "клиенту.txt").write_text("Вот кусок <сведения> — послушай.\n")
+        numbers = iter((501, 502, 505, 506))
+        telegram.send_document = lambda chat, path, caption="", **_: calls.append(("doc", chat, path.name)) or {"message_id": next(numbers)}
+        count, calls[:] = len(sent), []
+        assert hand_send("t5", 1500, paths[:2], paths[2:], tmp / "клиенту.txt", False) == 1 and not calls, "номер заказа — шесть знаков"
+        assert hand_send("026a4b", 1500, paths[:2], [tmp / "нет.wav"], tmp / "клиенту.txt", False) == 1 and not calls
+        assert hand_send("026a4b", 1500, paths[:2], paths[2:], tmp / "клиенту.txt", True) == 0 and not calls and len(sent) == count
+        assert hand_send("026a4b", 1500, paths[:2], paths[2:], tmp / "клиенту.txt", False) == 0
+        assert hand_send("026a4b", None, paths[:2], paths[2:], tmp / "клиенту.txt", True) == 1, "с куском цена обязательна"
+        assert hand_send("026a4b", None, [], paths[2:], tmp / "клиенту.txt", True) == 0, "правка после оплаты — без цены"
+        assert calls == [("doc", "1", path.name) for path in paths] and sent[-1] == "Вот кусок &lt;сведения&gt; — послушай."
+        assert keys[-1] == [[{"text": "📤 Отправить клиенту · 1500 ₽", "callback_data": f"{PREFIX}026a4b:hs1500.2.501,1,3,1"}]]
+        offer = keys[-1][0][0]["callback_data"].removeprefix(f"{PREFIX}026a4b:")
+        assert len(keys[-1][0][0]["callback_data"].encode()) <= 64
+
+        # «📤»: не владелец — ничего; владелец — клиенту копии куска и текст с двумя кнопками, целый трек ждёт.
+        said = "Вот кусок <сведения> — послушай."
+        assert press(5, offer, text=said) == ([], []) and not calls and "sale" not in load()["tracks"]["t5"], "кнопка владельца — только владельцу"
+        got, rows = press(1, offer, text=said)
+        assert copies() == [("5", "1", 501), ("5", "1", 502)], calls
+        assert got[0] == "Вот кусок &lt;сведения&gt; — послушай." and rows[0] == _sale_keys("t5") \
+            and [key["text"] for row in rows[0] for key in row] == ["Нравится — как оплатить?", "Что-то не так"]
+        assert got[1].startswith(head[5] + "Лил · @lilpi: кусок и текст ушли клиенту, цена 1500 ₽") \
+            and rows[1][0][0]["text"] == "🎁 Отдать без оплаты", got[1]
+        sale = load()["tracks"]["t5"]["sale"]
+        assert (sale["price"], sale["piece"], sale["full"], sale["text"]) == (1500, [501, 502], [505, 506], 700)
+        assert press(1, offer, text=said) == ([], []) and not calls, "повторное нажатие той же кнопки ничего не шлёт"
+
+        # Текст клиента при открытой продаже — звукорежиссёру, а не в просьбу к треку и не в разбор:
+        # service зовёт sale_text раньше; ответ владельца на строку находит клиента по метке.
+        # Проверка идёт модулем __main__, а service держит src.skleyka: файл состояния и Telegram у них общие.
+        theirs, wishes, count = service.skleyka, [], len(sent)
+        real_wish, theirs.wish = theirs.wish, lambda chat, text: wishes.append(text) or True
+        try:
+            assert service.handle_message({"chat": {"id": 5, "type": "private"}, "from": {"id": 5},
+                                           "text": "а можно голос погромче"}, {}) is False
+            assert service.handle_message({"chat": {"id": 5, "type": "private"}, "from": {"id": 5},
+                                           "text": "/vopros"}, {}) is False and sent[-1] == QUESTION_ASK, "команда — своим путём"
+        finally:
+            theirs.wish = real_wish
+        assert not wishes and sent[count + 1:-1] == [SALE_PASSED] and "а можно голос погромче" in sent[count] \
+            and sent[count].startswith(head[5] + "Лил · @lilpi:\n\n"), sent[count:]
+        assert answer(sent[count], "сделаю") == "Отправил." and sent[-1] == ANSWER.format(text="сделаю")
+        assert sale_text(5, f"{QUESTION_TAG}777 привет") and re.search(re.escape(QUESTION_TAG) + r"(\d+)", sent[-2]).group(1) == "5", \
+            "чужая метка в тексте клиента ответ владельца не уводит"
+        assert not sale_text(8, "привет") and not sale_text(6, "привет"), "без продажи текст идёт своим путём"
+        assert load()["tracks"]["t5"]["sale"]["touched"], "написал — напоминать не о чем"
+
+        # Кнопки клиента из чужого чата — отказ молча; подложенные в кнопку номера не читаются вовсе.
+        for code in ("hl", "hw", "hp", "hp1.0.900,1"):
+            assert press(8, code) == ([], []) and not calls, code
+        assert press(5, "hy") == ([], []) and press(5, "hg") == ([], []) and press(5, "hs0.0.900") == ([], []) \
+            and not calls and "given" not in load()["tracks"]["t5"]["sale"], "клиент целый трек себе не выдаст"
+
+        # «Что-то не так»: первый раз — одна бесплатная правка, второй — другой текст, обещаний нет; счёт у владельца.
+        got, _ = press(5, "hw")
+        assert got[0] == SALE_WRONG[0] and "Одна правка до оплаты бесплатная" in got[0] \
+            and got[1].startswith(head[5] + "Лил · @lilpi: что-то не так (1-й раз), жду его текст."), got
+        got, _ = press(5, "hw")
+        assert got[0] == SALE_WRONG[1] and "бесплатная" not in got[0] and "что-то не так (2-й раз)" in got[1], got
+
+        # Новый кусок после правки — тем же инструментом и той же кнопкой: номера заменяют прежние,
+        # отметка «отправлено» — у отправки, а не у трека; счёт «что-то не так» переезжает.
+        got, rows = press(1, "hs1500.1.601,1", mid=710, text="Поправил — вот новый кусок.")
+        sale = load()["tracks"]["t5"]["sale"]
+        assert copies() == [("5", "1", 601)] and got[0] == "Поправил — вот новый кусок." and rows[0] == _sale_keys("t5") \
+            and (sale["piece"], sale["full"], sale["text"], sale["wrong"]) == ([601], [602], 710, 2) and "touched" not in sale
+        assert press(1, "hs1500.1.601,1", mid=710, text="Поправил — вот новый кусок.") == ([], []) and not calls
+        got, _ = press(5, "hw")
+        assert got[0] == SALE_WRONG[1] and "(3-й раз)" in got[1], "вторую бесплатную правку бот не обещает"
+
+        # «Нравится»: реквизиты из секрета, цена и «Я оплатил»; владельцу «понравилось» один раз.
+        got, rows = press(5, "hl")
+        assert got[0] == SALE_PAY.format(pay="Перевод по номеру 100 &lt;Банк&gt;", price=1500) and rows[0] == _pay_key("t5") \
+            and rows[0][0][0]["text"] == "Я оплатил" and got[1].startswith(head[5] + "Лил · @lilpi: клиенту понравилось."), got
+        got, _ = press(5, "hl")
+        assert len(got) == 1 and "Перевод по номеру 100" in got[0], "повтор — реквизиты ещё раз, владельцу ничего"
+
+        # «Я оплатил»: владельцу — проверить банк, две кнопки; повтор раньше пяти минут его не тревожит.
+        got, rows = press(5, "hp")
+        assert got == [got[0], SALE_CLAIMED] and got[0].startswith(head[5] + "Лил · @lilpi пишет, что перевёл 1500 ₽ — проверь банк.") \
+            and [(key["text"], key["callback_data"]) for key in rows[0][0]] == [("✅ Деньги пришли", f"{PREFIX}t5:hy"),
+                                                                                 ("Не пришли", f"{PREFIX}t5:hn")], got
+        assert press(5, "hp")[0] == [SALE_CLAIMED_AGAIN], "двойное нажатие — владельцу одно уведомление"
+        state.now = lambda: stamp + timedelta(minutes=6)
+        assert len(press(5, "hp")[0]) == 2, "через пять минут — можно напомнить"
+        # «Не пришли»: клиенту — проверь и нажми ещё раз, кнопка остаётся, и следующее нажатие доходит сразу.
+        got, rows = press(1, "hn")
+        assert got == [SALE_NOT_SEEN] and rows[0] == _pay_key("t5") and not copies()
+        assert len(press(5, "hp")[0]) == 2
+
+        # «✅ Деньги пришли»: целые файлы — номерами из записи трека — и «спасибо»; пропал файл — владельцу
+        # строка, клиенту ни слова, отметки нет; починилось — отдаётся, и только один раз.
+        gone.add(602)
+        got, _ = press(1, "hy")
+        assert got == [SALE_LOST.format(track="t5", why="message to copy not found")] and SALE_PAID not in sent[-3:] \
+            and "given" not in load()["tracks"]["t5"]["sale"], "пропал файл — клиенту ничего ложного"
+        gone.clear()
+        got, _ = press(1, "hy")
+        assert copies() == [("5", "1", 602)] and got[0] == SALE_PAID and "Одна правка входит в цену" in got[0] \
+            and "отзыв" in got[0] and "до-после" in got[0] and got[1] == (
+                head[5] + "Лил · @lilpi: целый трек ушёл клиенту, 1500 ₽ получено.\n\n<i>Ответ на это сообщение уйдёт клиенту.</i>"), got
+        assert press(1, "hy") == ([], []) and press(1, "hg") == ([], []) and not calls, "отдаётся один раз"
+        assert press(5, "hp")[0] == [SALE_DONE] and press(5, "hl")[0] == [SALE_DONE], "после выдачи платить не просим"
+        # Правка после оплаты: куска нет — целые файлы и текст сразу, без кнопок оплаты.
+        got, rows = press(1, "hs1500.0.801", mid=720, text="Сделал голос громче.")
+        assert copies() == [("5", "1", 801)] and got[0] == "Сделал голос громче." and rows[0] is None \
+            and load()["tracks"]["t5"]["sale"]["given"], got
+        # Текст клиента идёт звукорежиссёру ещё SALE_DAYS после выдачи; пока продажа открыта, чистка (tick)
+        # трек не стирает. Владелец на своём треке после выдачи свободен сразу.
+        assert _selling(load()["tracks"]["t5"]) and sale_text(5, "спасибо, огонь")
+        assert not _selling(dict(load()["tracks"]["t5"], chat="1")), "репетиция владельца кончается выдачей"
+        state.now = lambda: stamp + timedelta(days=SALE_DAYS + 1)
+        assert not _selling(load()["tracks"]["t5"]) and not sale_text(5, "ещё вопрос"), "продажа закрылась"
+
+        # «🎁 Отдать без оплаты» — та же выдача с другим текстом; секрета нет — реквизиты пришлёт звукорежиссёр.
+        state.now, pay[0] = (lambda: stamp), ""
+        data = load()
+        data["tracks"]["t8"]["sale"] = {"price": 2500, "piece": [901], "full": [902, 903], "text": 730, "sent": state.iso(), "who": "Лил"}
+        save(data)
+        got, rows = press(6, "hl", track="t8")
+        assert got[0] == SALE_PAY_NONE.format(price=2500) and "пришлёт звукорежиссёр" in got[0] and rows[0] == _pay_key("t8") \
+            and got[1].startswith(head[6] + "Лил: клиенту понравилось. Реквизитов у бота нет (секрет SKLEYKA_HAND_PAY пуст)"), got
+        got, _ = press(1, "hg", track="t8")
+        assert copies() == [("6", "1", 902), ("6", "1", 903)] and got[0] == SALE_GIFT and "Трек твой" in got[0] \
+            and "отзыв" in got[0] and "до-после" in got[0] and "целый трек ушёл клиенту без оплаты." in got[1], got
+        assert press(1, "hg", track="t8") == ([], []) and not calls
+        assert press(1, "hy", track="нет000")[0] == [SALE_BAD.format(track="нет000", why="такого трека в записях нет (номер неверный или трек стёрт)")]
+
+        # Молчание: сутки ни нажатия, ни текста — одно напоминание с теми же кнопками и строка владельцу;
+        # не ночью, не раньше суток, второй раз — никогда; нажавшему и получившему трек — не шлём.
+        noon = stamp.replace(hour=9, minute=0)  # 12:00 МСК
+        data = load()
+        data["tracks"]["t9"]["sale"] = {"price": 1500, "piece": [911], "full": [912], "text": 740, "who": "Лил",
+                                        "sent": state.iso(noon - timedelta(hours=40))}
+        data["tracks"]["t6"]["sale"] = dict(data["tracks"]["t9"]["sale"], touched=state.iso())
+        save(data)
+        count, shown = len(sent), len(keys)
+        state.now = lambda: noon - timedelta(hours=10)  # 02:00 МСК
+        assert not _nudge(load()) and len(sent) == count, "ночью не напоминаем"
+        data = load()
+        data["tracks"]["t9"]["sale"]["sent"] = state.iso(noon - timedelta(hours=23))
+        save(data)
+        state.now = lambda: noon
+        assert not _nudge(load()) and len(sent) == count, "суток не прошло"
+        data = load()
+        data["tracks"]["t9"]["sale"]["sent"] = state.iso(noon - timedelta(hours=25))
+        save(data)
+        assert _nudge(load()) and sent[count:] == [SALE_NUDGE, sent[-1]] and keys[shown] == _sale_keys("t9") \
+            and sent[-1].startswith(f"🎧 Заказ t9 · {QUESTION_TAG}6\nЛил молчит сутки, напомнил."), sent[count:]
+        state.now = lambda: noon + timedelta(days=2)
+        assert not _nudge(load()) and len(sent) == count + 2 and load()["tracks"]["t9"]["sale"]["nudged"], "напоминание — ровно одно"
+        state.now, telegram.send_document = real_time, real_doc
+        config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
         telegram._call = mock
         start(1, 1, admin=True)
         assert sent[-1] == INTRO and keys[-1] == [*MODES, [HELP_BUTTON]]
@@ -5329,6 +5793,14 @@ def main() -> int:
                         help="с --mix: бит, на котором записан голос, — голос переносится с него на БИТ")
     # Чат для ответа: так --beats запускает дежурство (beats), руками — не нужен.
     parser.add_argument("--chat", help=argparse.SUPPRESS)
+    parser.add_argument("--hand", metavar="ЗАКАЗ",
+                        help="ручное сведение — владельцу в личку с кнопкой «📤 Отправить клиенту» (только Мак): "
+                             "номер заказа из карточки; с --price, --piece, --full, --text; --dry-run — без отправки")
+    parser.add_argument("--price", type=int, metavar="РУБЛИ", help="с --hand: цена")
+    parser.add_argument("--piece", nargs="*", type=Path, default=[], metavar="ФАЙЛ",
+                        help="с --hand: кусок и «до-после»; без них клиент получит целый трек сразу (правка после оплаты)")
+    parser.add_argument("--full", nargs="+", type=Path, default=[], metavar="ФАЙЛ", help="с --hand: целый трек, один файл или несколько")
+    parser.add_argument("--text", type=Path, metavar="ФАЙЛ", help="с --hand: текст клиенту — уйдёт вместе с куском")
     parser.add_argument("--talk-check", action="store_true",
                         help="просьбы о месте голоса — живому генератору: куда он ставит голос (только из Actions)")
     args = parser.parse_args()
@@ -5356,6 +5828,8 @@ def main() -> int:
         return 0
     if args.job:
         return run_job(args.job)
+    if args.hand:
+        return hand_send(args.hand, args.price, args.piece, args.full, args.text, args.dry_run)
     if args.dry_run:
         data = load()
         print(f"Заявок открыто: {len(data['drafts'])}, в очереди на сведение: {len(data['jobs'])}, "
