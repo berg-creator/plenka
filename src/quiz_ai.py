@@ -80,6 +80,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from itertools import combinations
@@ -900,6 +901,26 @@ def _git(*args: str, cwd: Path = MAC_STATE) -> str:
     return _run("git", "-C", cwd, *args).stdout
 
 
+PULL_TRIES, PULL_PAUSE = 3, 60
+
+
+def _pull() -> None:
+    """Подтянуть хранилище; сбой сети не должен стоить недели — следующий запуск launchd через семь дней.
+
+    03.10.2026 первый же субботний запуск упал здесь, а почему — неизвестно: вывод git
+    пойман и в журнал не попал. Поэтому причина печатается, а попыток три.
+    """
+    for attempt in range(PULL_TRIES):
+        try:
+            _git("pull", "-q", "--rebase", "--autostash")
+            return
+        except subprocess.CalledProcessError as error:
+            print(f"Хранилище не подтянулось: {(error.stderr or '').strip()[-300:]}", flush=True)
+            if attempt == PULL_TRIES - 1:
+                raise
+            time.sleep(PULL_PAUSE)
+
+
 def _checkout() -> Path:
     """Своя копия приватного хранилища — только папка запаса; git ходит ключом владельца из связки."""
     if not (MAC_STATE / ".git").exists():
@@ -909,7 +930,7 @@ def _checkout() -> Path:
         _git("sparse-checkout", "set", "--no-cone", f"/{STOCK}/")
         _git("checkout", "-q")
     else:
-        _git("pull", "-q", "--rebase", "--autostash")
+        _pull()
     return MAC_STATE / STOCK
 
 
@@ -918,7 +939,7 @@ def _push(message: str) -> None:
     if subprocess.run(["git", "-C", str(MAC_STATE), "diff", "--cached", "--quiet"]).returncode == 0:
         return
     _git("commit", "-q", "-m", message)
-    _git("pull", "-q", "--rebase", "--autostash")
+    _pull()
     _git("push", "-q")
 
 
@@ -1123,6 +1144,17 @@ def _selftest() -> int:
         finally:
             log.removeHandler(handler)
         assert records and not any("Секретный" in r or "Тайна" in r or "r1" in r for r in records), records
+    # Хранилище не подтянулось с первого раза — вторая попытка, а не потерянная неделя.
+    down = subprocess.CalledProcessError(1, "git", stderr="сеть легла")
+    with mock.patch(f"{__name__}._git", side_effect=[down, ""]) as pull, mock.patch.object(time, "sleep"):
+        _pull()
+        assert pull.call_count == 2
+    with mock.patch(f"{__name__}._git", side_effect=[down] * PULL_TRIES), mock.patch.object(time, "sleep"):
+        try:
+            _pull()
+            raise AssertionError("три отказа подряд — запуск падает, а не молчит")
+        except subprocess.CalledProcessError:
+            pass
     print("где ИИ: все проверки прошли")
     return 0
 
