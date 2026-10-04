@@ -51,6 +51,15 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 берётся из имени файла: звук в KITS читать нельзя (заглушки iCloud), а петля без темпа в имени в список не идёт.
 Отвергнуто: брать любые петли набора — Lex Luger и прочее с archive.org лежат в той же папке без лицензии.
 
+Бас, второй голос и свои звуки (владелец, 04.10.2026: «у баса мелодия и рисунок плохие», «контрмелодию не слышно
+совсем», «почему не используешь мои остальные киты»). 808 в тот день ходил по восьми ступеням, до шести высот в такте,
+треть нот — на нечётной шестнадцатой; в трёх его собственных партиях 808 (30 нот) — три высоты на весь рисунок,
+не больше двух в такте, все ноты на сетке восьмых, слайдов нет. Контрмелодия была темой октавой ниже и тише,
+в регистре перебора и пэда, со срезом верха: закрыта по построению. Оба случая `problems` бракует числом (`_bass`,
+`_counter`): пороги стоят между его партиями с битом 01.10, который он предпочёл, и битами 02.10 и 04.10. Список
+звуков расширен источниками, из которых он берёт барабаны сам (`OWN`). Отвергнуто: мерить, «из аккорда ли» нота 808, —
+аккорды есть не в каждом бите, а в его проектах их видно только в одном.
+
     python -m src.noty --selftest          приёмы пианоролла, замер нот и запись партитуры FL и MIDI, без сети
     python -m src.noty --build ПАПКА       собрать и проверить бит из ПАПКА/make.py, без Telegram
     python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py прошлых битов: та же форма, мелодия, цвет или смесь — отказ
@@ -116,6 +125,18 @@ LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient")
 LOOP_TEMPO = .08            # отход темпа бита от темпа петли (или двойного): дальше растяжка слышна; мерка skleyka.SWAP_TEMPO
 LOOP_FROM = "20261005"      # с этого дня обычный бит — петлёй: 03.10 и 04.10 — пробы злого и кино, они партиями
 LISTED += ((LOOPS, "*.wav"),)
+# Барабаны и 808, которые владелец ставит сам (разбор его проектов 04.10.2026: до этого дня низ и барабаны каждое утро
+# шли из набора 09, которого никто не слушал). Источник — приставка имени файла, набор — тот, где он его брал: одни
+# и те же файлы лежат в нескольких наборах, а всё подряд — 5000 имён. Петель и мелодических сэмплов нет.
+# Lex Luger, Cymatics и Trap по-прежнему мимо списка (лицензия, см. выше), хотя Lex Luger он ставит чаще всего:
+# снять запрет — решение владельца. Лицензии остальных источников не сверены: README наборов читать нельзя (iCloud)
+ROLES = ("Kicks", "808s", "Hats", "Open Hats", "Claps", "Snares", "Percs")
+OWN = {"KITS/01 - ASAP Rocky Kit": ("808-909", "MusicRadar 808"), "KITS/03 - SpaceGhostPurrp Kit": ("Lo-Fi", "Horrorcore"),
+       "KITS/05 - Black Kray x Goth Money Kit": ("Icedancer",), "KITS/07 - Crystal Castles Kit": ("Obscure DM", "Korg DDM")}
+LISTED += tuple((kit, f"{role}/{source} - *.wav") for kit, sources in OWN.items() for source in sources for role in ROLES)
+LISTED += tuple(("KITS/Maxeyy Stash V5", f"{role}/*.wav")
+                for role in ("Kicks", "808s", "Hihats", "Openhats", "Claps", "Snares", "Percs", "FX", "Risers & Crashes"))
+HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 TODAY = "00 - Сегодня"      # папка копий на сегодня — в KITS и в User пресетов Serum; чистится только она
 
 
@@ -385,7 +406,65 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
         out += _mix(info, free)
     if info.get("loop"):
         out += _loop(info, tracks)
-    return (out + sugar(info, tracks))[:20]
+    return (out + _bass(tracks) + _counter(info, tracks) + sugar(info, tracks))[:20]
+
+
+def _bass(tracks: dict[str, list[N]]) -> list[str]:
+    """Линия 808 — опора, а не мелодия (владелец, 04.10.2026: «у баса мелодия плохая», «рисунок баса плох»).
+    Слева — три его партии 808 (30 нот) и бит 01.10, который он предпочёл; справа — биты 02.10 и 04.10:
+    высот в такте 2 и 1–3 против 6; ступеней на восемь тактов 3 и 4 против 7 и 8; нот мимо сетки восьмых
+    0% и 10–13% против 27 и 33%. Слайд-ноты не в счёт: съезд — событие, а не нота линии."""
+    bars: dict[int, list[N]] = {}
+    for n in (n for name, notes in tracks.items() if any(w in name for w in SAMPLED) for n in notes if not n.slide):
+        bars.setdefault(int(n.pos // 16), []).append(n)
+    if not bars:
+        return []
+    out, notes = [], [n for v in bars.values() for n in v]
+    b = max(bars, key=lambda b: len({n.key for n in bars[b]}))
+    if len({n.key for n in bars[b]}) > 3:
+        out.append(f"808, такт {b + 1}: {len({n.key for n in bars[b]})} разных высот в такте — не больше трёх: "
+                   "ноту повторяй, а не веди гамму")
+    for start in range(0, max(bars) + 1, 8):
+        tones = {n.key % 12 for b in range(start, start + 8) for n in bars.get(b, ())}
+        if len(tones) > 5:
+            out.append(f"808, такты {start + 1}–{start + 8}: {len(tones)} разных ступеней — не больше пяти на восемь тактов, "
+                       "у владельца их три")
+            break
+    off = sum(n.pos % 2 != 0 for n in notes) / len(notes)
+    if off > .2:
+        out.append(f"808: {off:.0%} нот мимо сетки восьмых — не больше пятой части: у владельца все ноты на восьмых")
+    return out
+
+
+def _counter(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Контрмелодия, которую слышно (владелец, 04.10.2026: «контрмелодию не слышно совсем»). Она была темой октавой
+    ниже, тише на 12, в регистре перебора и пэда и со срезом верха — закрыта по построению. Так же было 03.10,
+    и там он сам дорисовал ей ответы в конце такта силой 119 при мелодии 88–100. Мелодия в октаву — слой темы:
+    его место в партии «мелодия», а «контрмелодия» — свой рисунок."""
+    from statistics import median, quantiles
+
+    lead, out = _lead(tracks), []
+    at = {(round(n.pos, 2), n.key % 12) for n in lead}
+    band = [n.key for name, notes in tracks.items() if any(w in name for w in HARMONY) for n in notes]
+    # Полоса гармонии — без крайних десятых: одна высокая нота перебора не должна закрывать второму голосу весь верх
+    low, high = (quantiles(band, n=10)[0], quantiles(band, n=10)[-1]) if len(band) > 1 else (0, -1)
+    for name, notes in tracks.items():
+        notes = flat(notes)
+        if "контр" not in name or not notes or not lead:
+            continue
+        same = sum((round(n.pos, 2), n.key % 12) in at for n in notes) / len(notes)
+        if same > .5:
+            out.append(f"{name}: {same:.0%} нот — мелодия в унисон или октаву на тех же местах; её так не слышно — "
+                       "играй в паузах мелодии или встречным рисунком")
+        quiet = median(n.vel for n in lead) - median(n.vel for n in notes)
+        if quiet > 10:
+            out.append(f"{name}: тише мелодии на {quiet:g} — не больше чем на 10")
+        inside = sum(low <= n.key <= high for n in notes) / len(notes)
+        if inside > .5:
+            out.append(f"{name}: {inside:.0%} нот в регистре перебора и аккордов ({low:g}–{high:g}) — уведи выше или ниже")
+        if "срез верх" in str((info.get("fx") or {}).get(name, "")).lower():
+            out.append(f"{name}: срез верха в обработке — второй голос и так тише, без верха он пропадает")
+    return out
 
 
 def loop_bpm(name: str) -> int | None:
@@ -489,7 +568,7 @@ def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
             both, close = both + t, close + t * (abs(a.key - b.key) % 12 in (3, 4, 8, 9))
     if both >= 16 and close > .5 * both:
         out.append(f"мелодия: голоса идут в терцию или сексту {close / both:.0%} общего времени — "
-                   "второй голос в октаву, квинту или не разом с первым")
+                   "второй голос — в квинту или не разом с первым")
     # Тишина — паузы от доли и длиннее, где молчит вся музыка (808 не в счёт): щель между короткими нотами
     # закроет хвост пресета. У «кино» остинато не молчит — там порога нет.
     # Нота длится ещё и «звучит» своего пресета Serum — сколько он после ноты держится выше −12 дБ. Это мерка,
@@ -935,6 +1014,25 @@ def selftest() -> None:
     assert "синтезатор" not in "\n".join(problems(info | {"tonal": ["808"]}, {"808": glide(0, 4, 29, 41)}))
     doubled = {"808": [N(i * 4, 3, 29) for i in range(4)], "бочка": [N(i * 4, 1) for i in range(4)]}
     assert "под каждой нотой 808" in "\n".join(problems(info | {"tonal": ["808"]}, doubled))
+    # Линия 808 — опора: гамма по такту, шесть ступеней и ноты мимо восьмых — брак; рисунок владельца (две высоты
+    # в такте, всё на восьмых, съезд слайдом) проходит
+    walk = {"808": [N(b * 16 + p, 1, k) for b in range(2) for p, k in ((0, 35), (2, 33), (7, 37), (12, 30), (14, 28), (15, 32))]}
+    said = "\n".join(_bass(walk))
+    assert all(w in said for w in ("6 разных высот в такте", "6 разных ступеней", "33% нот мимо сетки восьмых")), said
+    assert "6 разных высот" in "\n".join(problems(info | {"bars": 2, "tonal": []}, walk)), "бас проверяется в сборке"
+    assert _bass({"808": [N(0, 8, 28), N(12, 2, 31), N(14, 2, 31), N(16, 8, 31)] + glide(28, 4, 43, 36)}) == []
+    # Контрмелодия: тема октавой ниже, тише, в регистре перебора и со срезом верха — брак; ответ в паузе выше перебора — нет
+    lead = [N(b * 16, 6, 61 + b) for b in range(4)]
+    band = {"гитара": [N(i * 2, 2, k) for i, k in enumerate((49, 56, 52, 56) * 8)], "мелодия": lead}
+    said = "\n".join(_counter({"fx": {"контрмелодия": "Fruity Chorus → Pro-Q 4: срез верха от 6 кГц"}},
+                              band | {"контрмелодия": [n._replace(key=n.key - 12, vel=80) for n in lead]}))
+    assert all(w in said for w in ("100% нот — мелодия в унисон или октаву", "тише мелодии на 20", "в регистре перебора",
+                                   "срез верха")), said
+    assert _counter({}, band | {"контрмелодия": [N(b * 16 + 10, 2, 68, 96) for b in range(4)]}) == [], "ответ в паузе слышно"
+    # Свои наборы владельца: его источники в списке, источники без лицензии — нет, и сборка такой звук принимает
+    own = sorted(n for n in known() if any(n.startswith(f"{kit}/{role}/") for kit in OWN for role in ROLES))
+    assert own and not any("/Lex Luger - " in n or "/Trap - " in n for n in known()), "noty --sounds на Маке"
+    assert "нет в списке" not in "\n".join(problems(info | {"sounds": {"мелодия": own[0]}}, plain))
     named = "\n".join(problems(info | {"sounds": {"мелодия": "KITS/такого нет.wav"}}, plain))
     assert "нет в списке" in named and "хэт: партии не назван звук" in named, named
     assert "Звуки и пресеты" in about(info | {"twist": "ложный вход", "form": "x", "sounds": {"хэт": ["KITS/a.wav"]}}) \
@@ -996,7 +1094,8 @@ def selftest() -> None:
     assert _pages("а\n" * 3000) == ["а\n" * 2000, "а\n" * 1000] and _pages("коротко") == ["коротко"], "длинная записка — частями"
     assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
-          "сверка с прошлым битом, неожиданный ход, музыка петлёй, звуки по списку и папка «Сегодня» — в порядке")
+          "сверка с прошлым битом, неожиданный ход, музыка петлёй, звуки по списку и папка «Сегодня», 808 — опора, "
+          "а не гамма, контрмелодию слышно, свои наборы владельца — в порядке")
 
 
 def main() -> None:
