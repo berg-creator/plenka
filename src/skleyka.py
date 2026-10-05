@@ -2688,6 +2688,7 @@ SALE_LOST = ("⚠️ Заказ {track}: клиенту ушло не всё ({w
              "отметки нет, после починки кнопка сработает снова; файлы пропали — запусти --hand заново.")
 SALE_BAD = "⚠️ Заказ {track}: {why} — запусти --hand заново."
 SALE_PIN_WRONG = "Пин не тот — трек не отдан. Кнопка «🎁» снова на месте."
+SALE_PIN_NONE = "⚠️ Пин не задан — трек не отдан. Без пина «🎁» не работает: нужен секрет SKLEYKA_HAND_PIN из цифр."
 
 
 def _sale_keys(track_id: str) -> list[list[dict]]:
@@ -2743,8 +2744,12 @@ def _pin(track_id: str, typed: str, message_id: int | None) -> bool:
     """Пин перед «🎁 Отдать без оплаты» (владелец, 05.10.2026): кнопка висит под строкой заказа, на которую
     он отвечает клиенту, и промах пальцем отдавал трек даром. Цифры набираются кнопками и едут в данных
     самой кнопки: память смены не нужна, а пин текстом в этом чате ушёл бы клиенту — ответом не на то
-    сообщение. Пин — секрет SKLEYKA_HAND_PIN; нет его — кнопка отдаёт сразу, как раньше."""
+    сообщение. Пин — секрет SKLEYKA_HAND_PIN; нет его или он не из цифр — кнопка не отдаёт ничего
+    и говорит об этом владельцу: пропавший секрет иначе молча вернул бы выдачу одним нажатием."""
     owner, pin = config.secret("TELEGRAM_ADMIN_ID"), config.secret("SKLEYKA_HAND_PIN", required=False)
+    if not pin.isdigit():
+        telegram.send_message(owner, SALE_PIN_NONE)
+        return False
     if typed == pin:
         return True
     if len(typed) < len(pin):
@@ -5434,7 +5439,10 @@ def _selftest() -> None:
         assert got[0] == SALE_PAY_NONE.format(price=2500) and "пришлёт звукорежиссёр" in got[0] and rows[0] == _pay_key("t8") \
             and got[1].startswith(head[6] + "Лил: клиенту понравилось. Реквизитов у бота нет (секрет SKLEYKA_HAND_PAY пуст)"), got
         # Пин: «🎁» открывает цифры, набор едет в кнопках; не тот пин и «Не отдавать» возвращают кнопку,
-        # трек остаётся у владельца; чужое нажатие с верным пином — мимо.
+        # трек остаётся у владельца; чужое нажатие с верным пином — мимо. Секрета нет — кнопка закрыта.
+        edits.append(None)
+        assert press(1, "hg", track="t8")[0] == [SALE_PIN_NONE] and edits[-1] is None and not copies() \
+            and "given" not in load()["tracks"]["t8"]["sale"], "пина нет — трек не отдан, кнопка на месте"
         pin[0] = "4071"
         assert press(1, "hg", track="t8") == ([], []) and not copies() and edits[-1][0][0]["callback_data"] == f"{PREFIX}t8:hg1" \
             and edits[-1][-1][0] == {"text": "↩️ Не отдавать · пин 0 из 4", "callback_data": f"{PREFIX}t8:hx"}, edits[-1]
