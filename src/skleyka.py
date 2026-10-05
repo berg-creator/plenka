@@ -902,7 +902,7 @@ def _reverb(seconds: float, before: str = "highpass=f=300,lowpass=f=7000,adelay=
     )
 
 
-def _tempo_delay(length: float, under: float | None = None, key: str = "") -> str:
+def _tempo_delay(length: float, under: float | None = None, key: str = "", seconds: float = 0.0) -> str:
     """Дилей в темп от стены к стене: слева повторы через четверть, справа — через
     восьмую (главный и второй у инженеров Sound On Sound), по три с затуханием;
     на возврат — полоса 200 Гц – 5 кГц (Элмхёрст в Mix With The Masters).
@@ -910,7 +910,8 @@ def _tempo_delay(length: float, under: float | None = None, key: str = "") -> st
     under — громкость голоса, LUFS: под голосом дилей приседает на 8–10 дБ
     (2:1, атака сразу, отпуск 150 мс, как у Сениора) и раскрывается в паузах.
     Иначе повторы ложились бы на следующие слова и мутили их. key — вход с голосом
-    для ключа («[1:a]»), если на входе дилея не весь голос, а только броски."""
+    для ключа («[1:a]»), если на входе дилея не весь голос, а только броски; с ним
+    seconds — длина входа дилея: выход будет ровно такой."""
     head, tail = "[0:a]", "[w]"
     if under is not None:
         duck = f"sidechaincompress=threshold={10 ** ((under - 18) / 20):.4f}:ratio=2:attack=0.01:release=150"
@@ -918,11 +919,14 @@ def _tempo_delay(length: float, under: float | None = None, key: str = "") -> st
         if key:
             # Ключ — другой файл, и sidechaincompress закрывает выход с концом любого входа,
             # бросая не дождавшееся пары (как в _room): шина выходила то целой, то на 0,08 с
-            # короче, и два сведения одного кода расходились побайтно. Дилей дополнен тишиной
-            # (ROOM_PAD), ключ — без конца, а длину возвращает amerge с немой копией входа:
+            # короче, и два сведения одного кода расходились побайтно. Дилей и ключ дополнены
+            # тишиной (ROOM_PAD), ключ перед тем — до длины входа seconds: он бывает короче,
+            # а бесконечный apad здесь оборвать нечем, кроме конца соседней ветки, — такой
+            # связки на ffmpeg сервера не было. Длину возвращает amerge с немой копией входа:
             # он кончает по ней и своего не бросает.
             head = "[0:a]asplit[x][z];[z]volume=0,pan=stereo|c0=c0|c1=c0[mute];[x]"
-            tail = f",{ROOM_PAD}[d];{key}apad[k];[d][k]{duck}[c];[mute][c]amerge=inputs=2,pan=stereo|c0=c2|c1=c3[w]"
+            tail = (f",{ROOM_PAD}[d];{key}apad=whole_dur={seconds:.2f},{ROOM_PAD}[k];[d][k]{duck}[c];"
+                    "[mute][c]amerge=inputs=2,pan=stereo|c0=c2|c1=c3[w]")
     return (
         f"{head}highpass=f=200,lowpass=f=5000,pan=mono|c0=0.5*c0+0.5*c1,asplit[a][b];"
         + "".join(f"[{side}]aecho=in_gain=0:out_gain=1:delays={d:.0f}|{2 * d:.0f}|{3 * d:.0f}"
@@ -1163,7 +1167,8 @@ def _throws(voice: Path, throws: list[tuple[float, float, float]], length: float
                       for j, (a, e, k) in enumerate(throws))
             + "".join(f"[o{j}]" for j in range(n)) + f"amix=inputs={n}:normalize=0,apad=whole_dur={clips.probe_seconds(voice):.2f}",
             *reels.VOICE_CODEC, send)
-    _ffmpeg("-i", send, "-i", voice, "-filter_complex", _tempo_delay(length, loudness(voice)[0], "[1:a]"),
+    _ffmpeg("-i", send, "-i", voice, "-filter_complex",
+            _tempo_delay(length, loudness(voice)[0], "[1:a]", clips.probe_seconds(send)),
             "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, out)
     return out
 
@@ -1448,7 +1453,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     # Эхо эдлибов — своё, в темп, приседает под ведущим: повторы — в его паузах.
     for n, (path, gain) in enumerate(adlibs):
         wet = work / f"adlib-echo{n}.wav"
-        _ffmpeg("-i", path, "-i", ridden, "-filter_complex", _tempo_delay(rhythm[0], level, "[1:a]"),
+        _ffmpeg("-i", path, "-i", ridden, "-filter_complex", _tempo_delay(rhythm[0], level, "[1:a]", clips.probe_seconds(path)),
                 "-map", "[w]", "-ar", RATE, *reels.VOICE_CODEC, wet)
         wets.append((wet, loudness(path)[0] + gain + ADLIB_ECHO + echo))
     # Голос и его шины до трюков саунд-дизайна (телефон меняет и сам голос).
@@ -1632,9 +1637,13 @@ ADLIB_ECHO = -8.0
 # из них топит, а часть ставит вровень с ведущим. Каждый выкрик подтягивается к медиане
 # дорожки, но не дальше ADLIB_EVEN дБ: больше не даёт запас огибающей (_gain_track, +6 дБ),
 # и шорох между выкриками не дорастает до выкрика. Уровень выкрика — там, где он звучит,
-# в ADLIB_BODY дБ от своего верха: хвост в конце окна его не занижает.
+# в ADLIB_BODY дБ от своего верха: хвост в конце окна его не занижает. Событие тише медианы
+# больше чем на ADLIB_FAINT дБ — вдох или шорох, а не выкрик, и не трогается вовсе: на той
+# дорожке выкрики лежат от −5,5 до +3,1 дБ к медиане, а три события по 0,17–0,25 с —
+# на 20–23 дБ тише, между ними пусто, порог — посередине.
 ADLIB_EVEN = 6.0
 ADLIB_BODY = 20.0
+ADLIB_FAINT = 12.0
 # Эдлибы присылают и под именем «бэк» (заказ 31c22c, 05.10.2026: 38 выкриков, медиана
 # 0,44 с, вместе 22 с при 126 с голоса). Целиком «в стороны, −10 дБ» они шли от −13
 # до −5 дБ к ведущему. Бэк, где кусок по медиане не длиннее BACK_SHOUT секунд, а все куски
@@ -1677,11 +1686,12 @@ def _scatter(events: list[tuple[float, float]], first: int = 0,
 
 def _even(heard: list[float], events: list[tuple[float, float]]) -> list[float]:
     """Поправка каждому выкрику, дБ: его уровень по огибающей heard (ADLIB_BODY) — к медиане
-    дорожки, не дальше ADLIB_EVEN."""
+    дорожки, не дальше ADLIB_EVEN; шорох (ADLIB_FAINT) остаётся как был."""
     spans = [heard[round(a * ENV_RATE):round(b * ENV_RATE)] for a, b in events]
     loud = [10 * math.log10(statistics.fmean(10 ** (db / 10) for db in span if db > top - ADLIB_BODY))
             for span, top in zip(spans, map(max, spans))]
-    return [max(-ADLIB_EVEN, min(ADLIB_EVEN, statistics.median(loud) - db)) for db in loud]
+    middle = statistics.median(loud)
+    return [0.0 if middle - db > ADLIB_FAINT else max(-ADLIB_EVEN, min(ADLIB_EVEN, middle - db)) for db in loud]
 
 
 def _shouts(path: Path, lead: float) -> bool:
@@ -6052,6 +6062,9 @@ def _selftest() -> None:
         # громкости; долгие ноты, строки припева и слоги плотным рядом остаются бэком. lavfi — только с длиной d=.
         assert [round(db) for db in _even([-20.0] * 50 + [-34.0] * 50 + [-25.0] * 50, [(0, .5), (.5, 1), (1, 1.5)])] == [-5, 6, 0], \
             "выкрик — к медиане дорожки, не дальше ADLIB_EVEN"
+        assert [round(db) for db in _even([-20.0] * 50 + [-40.0] * 50 + [-26.0] * 50 + [-10.0] * 50,
+                                          [(0, .5), (.5, 1), (1, 1.5), (1.5, 2)])] == [-3, 0, 3, -6], \
+            "шорох на 17 дБ тише медианы не поднимается, громкий по-прежнему тянется вниз"
         backs = {"shouts": "(0.2+0.3*lt(mod(t,6),3))*sin(2*PI*440*t)*lt(mod(t,3),0.4)", "notes": "0.3*sin(2*PI*330*t)*lt(mod(t,20),4)",
                  "lines": "0.3*sin(2*PI*330*t)*lt(mod(t,2.3),1.8)*lt(t,9)", "dense": "0.3*sin(2*PI*550*t)*lt(mod(t,0.8),0.4)"}
         for name, sound in backs.items():
