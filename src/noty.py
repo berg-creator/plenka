@@ -57,7 +57,8 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 и сверки очереди и скелета о нём молчат — характер по дате, петля только обычному биту, бочка под 808 по мерке
 лидеров, цвет прошлых битов, а хэт меряется его меркой только после перелома: до него стоит рисунок названного трека
 (в «Six Speed» — ровные шестнадцатые). Остальное бракуется как всегда: вкус владельца заказ не отменяет.
-Звуки драм-машины Boss DR-660 в наборе 11 — CC BY: строку об авторе для описания ролика записка добавляет сама.
+Звуки драм-машины Boss DR-660 и голоса VocalSet в наборе 11 — CC BY: строку об авторе для описания ролика записка
+добавляет сама, каждому источнику свою.
 Отвергнуто: четвёртый характер «заказ» — по характеру выбирается фото значка и мерка приторного, а автор следующего
 дня считает по нему круг; с полем круг просто пропускает такой бит.
 
@@ -182,7 +183,9 @@ LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient")
 NET = "KITS/11 - Сеть Kit"
 NET_LOOPS = NET + "/Loops"
 # CC BY: автора звука надо назвать в описании ролика. Строку несёт записка — автор нот о ней забудет
-CREDIT = ("/Boss DR-660 - ", "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0, archive.org/details/DR660Samples")
+CREDIT = (("/Boss DR-660 - ", "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0, archive.org/details/DR660Samples"),
+          ("/VocalSet - ", "VocalSet by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo, CC BY 4.0, "
+                           "zenodo.org/records/1193957"))
 LOOP_FROM = "20261005"      # с этого дня обычный бит — петлёй: 03.10 и 04.10 — пробы злого и кино, они партиями
 NOTES = "C C# D D# E F F# G G# A A# B".split()
 # Петля под мелодию: звучащих нот в ней от трёх до восьми. Меньше — мотиву не из чего собраться, больше —
@@ -1123,8 +1126,8 @@ def about(info: dict) -> str:
         *(["Звуки и пресеты — в папке «00 - Сегодня» в браузере FL и в меню Serum → User (нужно Rescan); "
            "их кладёт Мак, когда не спит:",
            *(f"• {part} — {n}" for part, names in _sounds(info).items() for n in _names(names)), ""] if _sounds(info) else []),
-        *([f"В описание ролика — строка об авторе барабанов, её требует лицензия: {CREDIT[1]}", ""]
-          if any(CREDIT[0] in n for names in _sounds(info).values() for n in _names(names)) else []),
+        *(line for mark, who in CREDIT if any(mark in n for names in _sounds(info).values() for n in _names(names))
+          for line in (f"В описание ролика — строка об авторе звуков, её требует лицензия: {who}", "")),
         *_loop_note(info),
         *(["Обработка — цепочки из интервью продюсеров и замера. Ни пресетов, ни эффектов автор нот не слышал: "
            "это с чего начать, а не как должно звучать:",
@@ -1828,7 +1831,9 @@ def selftest() -> None:
         "после перелома — мерка владельца; «Г» вторым скелетом поблажки не даёт"
     assert _kind(ordered) == _kind(long) == "разом", "паспорт без слова вида — «разом», как до 06.10.2026"
     credit = about(base | {"sounds": {"бочка": f"{NET}/Kicks/Boss DR-660 - TR808K.wav"}})
-    assert "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0" in credit and "Shpitz" not in about(base), "строка об авторе звуков CC BY — в записке"
+    assert "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0" in credit and "Shpitz" not in about(base) and "VocalSet" not in credit \
+        and "VocalSet by Julia Wilkins" in about(base | {"sounds": {"мелодия": f"{NET}/Vocals/VocalSet - f1 a A4.wav"}}), \
+        "строка об авторе звуков CC BY — в записке, каждому источнику своя"
     with tempfile.TemporaryDirectory() as tmp:          # сборка бита петлёй отдаёт Маку план дорожки и обе петли
         tmp = Path(tmp)
         (tmp / "petlya").mkdir()
