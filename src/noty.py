@@ -101,6 +101,7 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import random
 import re
@@ -163,6 +164,7 @@ LOOP_COMMON = 3             # общих нот у двух петель одн�
 # Перелом: где стоит и сколько тактов после него вправе повторять рисунки тактов до него — калибровка в `_switch`
 SWITCH_AT = (.5, .85)
 SWITCH_SAME = 1 / 3
+RETRY = 3                   # повторов сбора папки «Сегодня», пока iCloud докачивает звуки: круг помощника — десять минут
 FADE = .005                 # секунд затухания на краях паузы в дорожке петли: без него срез щёлкает
 LISTED += ((LOOPS, "*.wav"),)
 # Барабаны и 808, которые владелец ставит сам (разбор его проектов 04.10.2026: до этого дня низ и барабаны каждое утро
@@ -639,6 +641,33 @@ def _riff(name: str) -> str:
     return re.sub(r"-\d+\.wav$", "", name)
 
 
+def _twin(a: str, b: str, heard: dict[str, dict]) -> str:
+    """Почему петля b не годится второй к петле a; пусто — годится. Одно правило и проверке перелома, и подсказке
+    `--loop`: до 05.10.2026 подсказка отсеивала только по имени группы и первыми печатала пары, которые сборка
+    бракует, — `GuitarMix120B` к `SixStr120B`. Незамеренную петлю назовёт `_loop`."""
+    if _riff(a) == _riff(b):
+        return f"вторая петля — тот же риф ({_riff(b).rsplit(' - ', 1)[-1]}): бери петлю другой группы, а не другой номер той же"
+    one, two = heard.get(a), heard.get(b)
+    if not (one and two):
+        return ""
+    # `GuitarMix120B-04` — тот же риф, что `SixStr120B-01`, сведённый с другими гитарами: имя другое, музыка та же
+    if (one["notes"], one["roots"]) == (two["notes"], two["roots"]):
+        return (f"у второй петли те же ноты и те же опоры по тактам ({' '.join(two['roots'])}) — это тот же риф "
+                "в другом составе, а не другая музыка")
+    common = [x for x in one["notes"] if x in two["notes"]]
+    if len(common) < LOOP_COMMON:
+        return (f"у двух петель общих нот {len(common)} ({' '.join(common) or 'нет'}) — нужно не меньше "
+                f"{LOOP_COMMON}: иначе это другая тональность, а не другой бит")
+    return ""
+
+
+def _scale(heard: dict[str, dict], *names: str) -> list[int]:
+    """Поле scale паспорта для бита на этих петлях — так, как его вписывают: ноты всех петель, первой — тоника
+    первой петли (от неё `problems` разрешает долгие малую секунду и тритон), дальше по порядку от неё."""
+    tonic = NOTES.index(heard[names[0]]["key"].split()[0])
+    return sorted({tonic} | {NOTES.index(x) for name in names for x in heard[name]["notes"]}, key=lambda k: (k - tonic) % 12)
+
+
 def _cut(info: dict) -> int | None:
     """Шестнадцатая, с которой бит другой, — по полю switch. None — перелома нет или такт назван негодно."""
     sw = info.get("switch")
@@ -762,19 +791,8 @@ def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         pair, heard = _pair(info), loops()
         if len(pair) < 2:
             out.append("switch: у бита петлёй после перелома играет вторая петля — поле «петля» в switch")
-        elif _riff(pair[0]) == _riff(pair[1]):
-            out.append(f"switch: вторая петля — тот же риф ({_riff(pair[1]).rsplit(' - ', 1)[-1]}): бери петлю другой группы, "
-                       "а не другой номер той же")
-        elif all(name in heard for name in pair):
-            one, two = (heard[name] for name in pair)
-            common = [x for x in one["notes"] if x in two["notes"]]
-            # `GuitarMix120B-04` — тот же риф, что `SixStr120B-01`, сведённый с другими гитарами: имя другое, музыка та же
-            if (one["notes"], one["roots"]) == (two["notes"], two["roots"]):
-                out.append(f"switch: у второй петли те же ноты и те же опоры по тактам ({' '.join(two['roots'])}) — это тот же риф "
-                           "в другом составе, а не другая музыка")
-            if len(common) < LOOP_COMMON:
-                out.append(f"switch: у двух петель общих нот {len(common)} ({' '.join(common) or 'нет'}) — нужно не меньше "
-                           f"{LOOP_COMMON}: иначе это другая тональность, а не другой бит")
+        elif why := _twin(*pair, heard):
+            out.append(f"switch: {why}")
     else:
         music = [n for name, notes in tracks.items() if name in info.get("tonal", ())
                  and not any(w in name for w in SAMPLED) for n in flat(notes)]
@@ -1203,12 +1221,20 @@ def lay(built: Path | None, sounds: dict, kits: Path, serum: Path,
             src = roots[key] / rel
             dst = (serum if key == "Serum" else kits) / f"{label[:1].upper()}{label[1:]} — {src.name}"
             try:
-                shutil.copyfile(src, dst)           # заглушку iCloud чтение скачает — так и надо
+                shutil.copyfile(src, dst)           # из Терминала чтение само скачает заглушку iCloud, помощнику — отказ
                 copied.setdefault(str(part), (dst, name))
             except OSError as e:
                 dst.unlink(missing_ok=True)
-                missed.append(f"{label}: «{name}» — " + ("нет на диске" if isinstance(e, FileNotFoundError)
-                                                        else "не прочитался: выгружен в iCloud и не скачался"))
+                why = "нет на диске" if isinstance(e, FileNotFoundError) else f"не прочитался ({e.strerror})"
+                # Фоновому процессу (помощник под launchd) macOS заглушку не отдаёт: errno 11 сразу, скачивание не начинается.
+                # `brctl download` оттуда же работает — файл на месте через секунды (проба 05.10.2026); заберёт повтор (`_mark`)
+                if e.errno == errno.EDEADLK:
+                    try:
+                        subprocess.run(["brctl", "download", str(src)], capture_output=True, timeout=30)
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+                    why = "выгружен в iCloud и ещё не скачан: скачивание запрошено"
+                missed.append(f"{label}: «{name}» — {why}")
     for i, part in enumerate(("петля", "петля 2")):
         if isinstance(plan, dict) and part in copied:
             track = kits / f"{part.capitalize()} — на весь бит.wav"
@@ -1236,6 +1262,16 @@ def _sandboxed(folder: Path, tmp: Path) -> None:
                    env={"PATH": "/usr/bin:/bin", "HOME": str(tmp), "TMPDIR": str(tmp)}, capture_output=True, text=True)
 
 
+def _mark(mark: str, seen: str, missed: list[str]) -> str:
+    """Метка собранной папки. Звук не лёг из-за iCloud — к метке дописан номер попытки, и следующий круг помощника
+    соберёт папку заново: скачивание уже запрошено (`lay`). Не больше RETRY повторов: без сети папка не должна
+    пересобираться вечно. До 05.10.2026 метка ставилась и при недостаче: бочка, хэт и клэпы бита того дня
+    не легли с первого раза, и больше их никто не запрашивал."""
+    left = seen[len(mark):].strip() if seen.startswith(mark) else ""
+    tries = int(left) if left.isdigit() else 0
+    return f"{mark} {tries + 1}" if tries < RETRY and any("iCloud" in m for m in missed) else mark
+
+
 def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     """Свежая ветка claude/beats-* → папки «Сегодня» в браузере FL и в пресетах Serum. Собранное второй
     раз не трогается: помощник на Маке заходит сюда раз в десять минут. Спал Мак — соберёт, проснувшись."""
@@ -1259,7 +1295,8 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     # а не по алфавиту пары: ветки идут в порядке коммитов
     beat = max(enumerate(ids), key=lambda x: (x[1][:8], x[0]))[1]
     mark = f"{beat} {ids[beat]}"
-    if (kits / ".бит").exists() and (kits / ".бит").read_text("utf-8") == mark:
+    seen, missed = (kits / ".бит").read_text("utf-8") if (kits / ".бит").exists() else "", []
+    if seen == mark:
         return f"{beat}: уже собрано"
     with tempfile.TemporaryDirectory(prefix="noty-") as tmp:
         tmp = Path(tmp).resolve()
@@ -1276,7 +1313,7 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
             why = (getattr(e, "stderr", "") or getattr(e, "stdout", "") or str(e)).strip()[-1500:]
             (kits / "о бите.txt").write_text(f"{beat}: ноты на Маке не собрались — возьми архив из Telegram.\n\n{why}", "utf-8")
             done = "ноты не собрались, в папке записка"
-    (kits / ".бит").write_text(mark, "utf-8")
+    (kits / ".бит").write_text(_mark(mark, seen, missed), "utf-8")
     return f"{beat}: {done}"
 
 
@@ -1285,11 +1322,11 @@ def loop_card(word: str) -> str:
     Автору нот: звука он не слышит, и ноты петли — единственное, по чему пишутся мелодия и 808."""
     heard = loops()
 
-    def line(name: str) -> str:
+    def line(name: str, first: str = "") -> str:      # first — первая петля бита: scale тогда собран для пары
         m = heard[name]
-        return (f"{name} — {loop_bpm(name)} BPM, тактов {m['bars']}, ноты {' '.join(m['notes'])} "
-                f"(scale: {', '.join(str(NOTES.index(x)) for x in m['notes'])}), опоры по тактам {' '.join(m['roots'])}, "
-                f"тоника {m['key']} ({m['sure']:.2f})"
+        return (f"{name} — {loop_bpm(name)} BPM, тактов {m['bars']}, ноты {' '.join(m['notes'])}, "
+                f"опоры по тактам {' '.join(m['roots'])}, тоника {m['key']} ({m['sure']:.2f}), "
+                + (f"бит на обеих петлях — scale={_scale(heard, first, name)}" if first else f"scale={_scale(heard, name)}")
                 + ("" if LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1] else f" — нот не {LOOP_NOTES[0]}–{LOOP_NOTES[1]}: в бит не идёт"))
 
     fit = sorted(name for name in heard if word.lower() in name.lower())
@@ -1297,10 +1334,10 @@ def loop_card(word: str) -> str:
     if len(fit) == 1:
         a = fit[0]
         pairs = sorted(((len(set(heard[a]["notes"]) & set(m["notes"])), name) for name, m in heard.items()
-                        if loop_bpm(name) == loop_bpm(a) and _riff(name) != _riff(a)
-                        and LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1]), reverse=True)
+                        if loop_bpm(name) == loop_bpm(a) and LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1]
+                        and not _twin(a, name, heard)), reverse=True)
         out += ["", "Вторая петля на перелом — тот же темп, другой риф; впереди те, у кого больше общих нот:"]
-        out += [f"общих {c}: {line(name)}" for c, name in pairs[:12] if c >= LOOP_COMMON]
+        out += [f"общих {c}: {line(name, a)}" for c, name in pairs[:12]]
     return "\n".join(out) or "петель с таким словом в замере нет: python3 -m src.noty --loop Gtr"
 
 
@@ -1428,6 +1465,18 @@ def selftest() -> None:
         assert [m.split(":")[0] for m in missed] == ["хэт", "клэп", "перк"] and "нет на диске" in missed[0] \
             and "не прочитался" in missed[1] and "нет в списке" in missed[2], missed
         assert "Не легло в папку" in (kits / "о бите.txt").read_text("utf-8") and len(list(kits.iterdir())) == 6, list(kits.iterdir())
+        asked, real = [], (shutil.copyfile, subprocess.run)      # заглушка iCloud у фонового процесса: errno 11
+        shutil.copyfile = lambda *a: (_ for _ in ()).throw(OSError(errno.EDEADLK, "Resource deadlock avoided"))
+        subprocess.run = lambda cmd, **kw: asked.append(cmd)
+        try:
+            cloud = lay(None, {"бочка": "KITS/k/Kick.wav"}, kits, serum, {"KITS": lib, "Serum": pres}, listed)
+        finally:
+            shutil.copyfile, subprocess.run = real
+        assert "iCloud" in cloud[0] and asked == [["brctl", "download", str(lib / "k" / "Kick.wav")]], (cloud, asked)
+        assert "iCloud" not in "".join(missed), "нечитаемый файл — не повод пересобирать папку"
+        assert _mark("b s", "", cloud) == "b s 1" and _mark("b s", "b s 1", cloud) == "b s 2", "недостача из-за iCloud — сбор повторится"
+        assert _mark("b s", f"b s {RETRY}", cloud) == "b s" and _mark("b s", "b s 1", []) == "b s" \
+            and _mark("b s", "", missed) == "b s" and _mark("b s", "a z 2", cloud) == "b s 1", "повторы кончаются, всё легло — метка чистая"
         assert lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed) == [], "бит без поля звуков"
         assert sorted(f.suffix for f in kits.iterdir()) == [".fsc"] * 4 + [".txt"] and not list(serum.iterdir())
         assert json.loads((tmp / "out" / "beat.sounds.json").read_text("utf-8")) == base["sounds"]
@@ -1659,6 +1708,10 @@ def selftest() -> None:
         "смена бита стала переломом, а не ходом на выбор"
     card = loop_card("SixStr120B-01")
     assert "тактов 4" in card and "опоры по тактам" in card and "Вторая петля на перелом" in card and "общих" in card, card
+    assert mixed.rsplit("/", 1)[-1] not in card and "12Str120E-01" in card, "подсказка не предлагает пару, которую сборка забракует"
+    offered = [line.split(": ", 1)[1].split(" — ")[0] for line in card.splitlines() if line.startswith("общих ")]
+    assert offered and not any(_twin(mixed.replace("GuitarMix120B-04", "SixStr120B-01"), name, heard) for name in offered), offered
+    assert "scale=[9, 11, 1, 4, 6, 7, 8]" in card and "scale=[9, 10, 11, 1, 4, 6, 7, 8]" in card, "scale — с тоники, для пары — ноты обеих"
     assert _pages("а\n" * 3000) == ["а\n" * 2000, "а\n" * 1000] and _pages("коротко") == ["коротко"], "длинная записка — частями"
     assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
