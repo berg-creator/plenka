@@ -502,6 +502,9 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
         out += [f"{part}: звука «{n}» нет в списке data/beat_sounds.json"
                 for part, names in info["sounds"].items() for n in _names(names) if _nfc(n) not in listed]
         out += [f"{name}: партии не назван звук в sounds" for name in tracks if name not in info["sounds"]]
+    if info.get("net"):                 # звук по адресу из сети: здесь — форма поля и адрес по списку, без сети; качает Мак
+        from . import set11
+        out += set11.form(info["net"], tracks)
     if info.get("fx"):
         out += [f"{name}: партии не названа обработка в fx" for name in tracks
                 if name in info.get("tonal", ()) and name not in info["fx"]]
@@ -1115,6 +1118,18 @@ def _loop_note(info: dict) -> list[str]:
     return out + [""]
 
 
+def _net_note(info: dict) -> list[str]:
+    from . import set11
+    return set11.note(info.get("net"))
+
+
+def _net(plan: Path, kits: Path) -> list[str]:
+    """Звуки по адресам паспорта (поле net) — в «Сегодня»: только с адресов списка и после отбора (`set11.today`).
+    Возвращает, что не легло. Адресов в паспорте нет — пусто."""
+    from . import set11
+    return set11.today(json.loads(plan.read_text("utf-8")), kits) if plan.exists() else []
+
+
 def about(info: dict) -> str:
     """Записка владельцу: она же подпись к архиву."""
     return "\n".join([
@@ -1139,6 +1154,7 @@ def about(info: dict) -> str:
         *(line for mark, who in CREDIT if any(mark in n for names in _sounds(info).values() for n in _names(names))
           for line in (f"В описание ролика — строка об авторе звуков, её требует лицензия: {who}", "")),
         *_loop_note(info),
+        *_net_note(info),
         *(["Обработка — цепочки из интервью продюсеров и замера. Ни пресетов, ни эффектов автор нот не слышал: "
            "это с чего начать, а не как должно звучать:",
            *(f"• {part} — {chain}" for part, chain in info["fx"].items()), ""] if info.get("fx") else []),
@@ -1206,6 +1222,8 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
             z.write(f, f.relative_to(out))
     archive.with_suffix(".txt").write_text(about(info), encoding="utf-8")
     archive.with_suffix(".sounds.json").write_text(json.dumps(_sounds(info), ensure_ascii=False), encoding="utf-8")
+    if info.get("net"):                 # адреса звуков из сети: в Actions не качается ничего, файл ждёт Мака (`_net`)
+        archive.with_suffix(".net.json").write_text(json.dumps(info["net"], ensure_ascii=False), encoding="utf-8")
     if info.get("loop"):                # план дорожки петли на весь бит: её собирает Мак (`loop_track`), звук лежит там
         archive.with_suffix(".loop.json").write_text(json.dumps(
             {"bpm": info["bpm"], "bars": info["bars"], "rests": info["rests"], "switch": info["switch"]["такт"]}), encoding="utf-8")
@@ -1431,6 +1449,7 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
             plan = tmp / "out" / f"{beat}.loop.json"
             missed = lay(tmp / "out" / beat, json.loads((tmp / "out" / f"{beat}.sounds.json").read_text("utf-8")), kits, serum,
                          plan=json.loads(plan.read_text("utf-8")) if plan.exists() else None)
+            missed += _net(tmp / "out" / f"{beat}.net.json", kits)
             done = "ноты на месте" + (f", не легло звуков: {len(missed)}" if missed else "")
         except (subprocess.SubprocessError, OSError, ValueError) as e:      # не собрался — записка, а не падение
             lay(None, {}, kits, serum)
@@ -1856,15 +1875,23 @@ def selftest() -> None:
     assert "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0" in credit and "Shpitz" not in about(base) and "VocalSet" not in credit \
         and "VocalSet by Julia Wilkins" in about(base | {"sounds": {"мелодия": f"{NET}/Vocals/VocalSet - f1 a A4.wav"}}), \
         "строка об авторе звуков CC BY — в записке, каждому источнику своя"
+    # Звук по адресу из сети (поле net): сборка смотрит форму и адрес без сети, записка говорит, что его никто не слышал
+    wav = "https://freewavesamples.com/files/Kawai-K1r-Aah-C4.wav"
+    assert problems(base | {"net": {"мелодия": wav}}, demo()) == [] and "из сети" not in about(base) \
+        and "На слух звук из сети не проверен" in about(base | {"net": {"мелодия": wav}}), "разрешённый адрес принят, записка честна"
+    assert "net_sources" in "\n".join(problems(base | {"net": {"мелодия": "https://example.com/files/Aah.wav"}}, demo())) \
+        and "такой партии" in "\n".join(problems(base | {"net": {"орган": wav}}, demo())), "чужой адрес и чужая партия — брак сборки"
     with tempfile.TemporaryDirectory() as tmp:          # сборка бита петлёй отдаёт Маку план дорожки и обе петли
         tmp = Path(tmp)
         (tmp / "petlya").mkdir()
         (tmp / "petlya" / "make.py").write_text(
-            f"INFO = {looped!r}\n" + code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}"), encoding="utf-8")
+            f"INFO = {looped | {'net': {'мелодия': wav}}!r}\n" + code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}"), encoding="utf-8")
         archive = build(tmp / "petlya", tmp / "out")
         assert json.loads(archive.with_suffix(".loop.json").read_text("utf-8")) == {"bpm": 170, "bars": 16, "rests": [[8, 9], [12.5, 13]],
                                                                                     "switch": 9}
         assert json.loads(archive.with_suffix(".sounds.json").read_text("utf-8"))["петля 2"] == two
+        assert json.loads(archive.with_suffix(".net.json").read_text("utf-8")) == {"мелодия": wav} and _net(tmp / "нет.json", tmp) == [], \
+            "адреса звуков из сети — Маку отдельным файлом; нет файла — качать нечего"
     # Перелом: обязателен, стоит на стыке частей во второй половине, после него другие каркас, хэт и музыка,
     # а партии 808 и хэта те же. Бит без перелома бракуется понятной фразой
     assert "нет поля switch" in "\n".join(problems({k: v for k, v in base.items() if k != "switch"}, demo()))
@@ -1930,6 +1957,8 @@ def selftest() -> None:
     assert "scale=[9, 11, 1, 4, 6, 7, 8]" in card and "scale=[9, 10, 11, 1, 4, 6, 7, 8]" in card, "scale — с тоники, для пары — ноты обеих"
     assert _pages("а\n" * 3000) == ["а\n" * 2000, "а\n" * 1000] and _pages("коротко") == ["коротко"], "длинная записка — частями"
     assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
+    from . import set11
+    set11.selftest()
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
           "сверка с прошлым битом, неожиданный ход, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), "
           "перелом «разом» (другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка "
@@ -1950,6 +1979,8 @@ def main() -> None:
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
     p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
     p.add_argument("--gather", action="store_true", help="собрать папку «00 - Сегодня»: ноты свежего бита и его звуки (только Мак)")
+    p.add_argument("--net", action="store_true", help="ночной шаг: следующий источник из data/net_sources.json — в набор 11 (только Мак)")
+    p.add_argument("--dry-run", action="store_true", help="с --net: что взял бы шаг, без загрузки звука и записи")
     p.add_argument("--loop", metavar="СЛОВО", help="замер петель с этим словом в имени: ноты, опоры по тактам, вторая петля на перелом")
     a = p.parse_args()
     if a.selftest:
@@ -1970,6 +2001,9 @@ def main() -> None:
         print(f"{len(names)} имён → {config.BEAT_SOUNDS}")
     elif a.gather:
         print(gather())
+    elif a.net:
+        from . import set11
+        print(set11.run(a.dry_run))
     elif a.loop:
         print(loop_card(a.loop))
     else:

@@ -1,0 +1,163 @@
+{
+ "about": "Разрешённые источники звука из сети: набор KITS/11 - Сеть Kit и поле net паспорта бита (src/set11.py). Сюда идёт только источник, чья лицензия записана дословно в data/private/set11-sources.md на Маке владельца. name — приставка имени файла в наборе; terms — условия одной строкой; taken — что уже взято; from — узел и папка, откуда Мак вправе скачать прямой WAV по адресу из паспорта (нет поля — по адресу источник не берётся); take — очередь ночного шага (python -m src.noty --net): папка набора и шаблон пути в источнике, у петли — группа bpm; archive — zip целиком, list — оглавление репозитория GitHub, файлы оттуда качаются по одному из from. Источник с take, которого нет в отметке набора (.сеть.json), шаг возьмёт следующим, по порядку списка.",
+ "sources": [
+  {
+   "id": "vsco2-violins",
+   "name": "VSCO2 Violins",
+   "page": "https://github.com/sgossner/VSCO-2-CE",
+   "terms": "CC0 1.0 Universal — без условий, автора называть не нужно",
+   "from": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/",
+   "list": "https://api.github.com/repos/sgossner/VSCO-2-CE/git/trees/master?recursive=1",
+   "take": [{"folder": "Strings", "match": "^Strings/Violin Section/susVib/[^/]+\\.wav$"}],
+   "taken": "06.10.2026 ночным шагом: 20 долгих нот секции скрипок с вибрато в Strings, 16 бит; две тихие отбор не пропустил"
+  },
+  {
+   "id": "musicradar-twisted-orchestra",
+   "name": "MusicRadar Twisted Orchestra",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-300-free-twisted-orchestra-samples-260569",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-twisted-orchestra-samples.zip",
+   "take": [{"folder": "Loops", "match": "/LoopKit\\d+ (?P<bpm>\\d{2,3})bpm/Sound Type A/[^/]+\\.wav$"}],
+   "taken": "в очереди ночного шага: петли струнных и оркестра, вид A каждого набора петель; виды B–F — тот же материал в другой обработке"
+  },
+  {
+   "id": "musicradar-funk-soul-guitar",
+   "name": "MusicRadar Funk Soul Guitar",
+   "page": "https://www.musicradar.com/news/sampleradar-funk-soul-guitar-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/musicradar-funk-soul-guitar-samples.zip",
+   "take": [{"folder": "Loops", "match": "/DI/(?P<bpm>\\d{2,3})bpm/[^/]+\\.wav$"}],
+   "taken": "в очереди ночного шага: гитарные петли соула и фанка, папка DI, 90–120 BPM"
+  },
+  {
+   "id": "vsco2-violas",
+   "name": "VSCO2 Violas",
+   "page": "https://github.com/sgossner/VSCO-2-CE",
+   "terms": "CC0 1.0 Universal — без условий, автора называть не нужно",
+   "from": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/",
+   "list": "https://api.github.com/repos/sgossner/VSCO-2-CE/git/trees/master?recursive=1",
+   "take": [{"folder": "Strings", "match": "^Strings/Viola Section/susvib/[^/]+\\.wav$"}],
+   "taken": "в очереди ночного шага: секция альтов, долгие ноты с вибрато, по нотам"
+  },
+  {
+   "id": "vsco2-cellos",
+   "name": "VSCO2 Cellos",
+   "page": "https://github.com/sgossner/VSCO-2-CE",
+   "terms": "CC0 1.0 Universal — без условий, автора называть не нужно",
+   "from": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/",
+   "list": "https://api.github.com/repos/sgossner/VSCO-2-CE/git/trees/master?recursive=1",
+   "take": [{"folder": "Strings", "match": "^Strings/Cello Section/susvib/[^/]+\\.wav$"}],
+   "taken": "в очереди ночного шага: секция виолончелей, долгие ноты с вибрато, по нотам"
+  },
+  {
+   "id": "freewavesamples",
+   "name": "FreeWaveSamples",
+   "page": "https://freewavesamples.com/about-us-license",
+   "terms": "freeware, royalty-free: ссылка на сайт желательна, не обязательна; выкладывать файлы у себя нельзя",
+   "from": "https://freewavesamples.com/files/",
+   "taken": "06.10.2026 руками: 12 нот хора с железных синтезаторов в Choir; остальное — одиночные ноты синтезаторов и драм-машин, 16 бит"
+  },
+  {
+   "id": "boss-dr660",
+   "name": "Boss DR-660",
+   "page": "https://archive.org/details/DR660Samples",
+   "terms": "CC BY 3.0 — автора называть: DR 660 Sample Pack by Shpitz Audio",
+   "taken": "06.10.2026 руками: 166 из 255 — Kicks 51, Snares 53, Percs 49, Hats 5, Open Hats 4, Claps 4"
+  },
+  {
+   "id": "vocalset",
+   "name": "VocalSet",
+   "page": "https://zenodo.org/records/1193957",
+   "terms": "CC BY 4.0 — автора называть: VocalSet by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo",
+   "taken": "06.10.2026 руками: 16 одиночных нот живых голосов в Vocals; архив 2 ГБ и отдаётся медленно — ночному шагу не по пределам"
+  },
+  {
+   "id": "musicradar-808-weight",
+   "name": "MusicRadar 808 Weight",
+   "page": "https://www.musicradar.com/music-tech/samples/sampleradar-105-free-808-weight-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-808-weight-samples.zip",
+   "taken": "06.10.2026 руками: 36 в 808s"
+  },
+  {
+   "id": "musicradar-emo",
+   "name": "MusicRadar Emo",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-451-free-emo-samples-479864",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-emo-samples.zip",
+   "taken": "06.10.2026 руками: 9 гитарных петель"
+  },
+  {
+   "id": "musicradar-dream-pop",
+   "name": "MusicRadar Dream Pop",
+   "page": "https://www.musicradar.com/music-tech/samples/sampleradar-139-free-dream-pop-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/musicradar-dream-pop-samples.zip",
+   "taken": "06.10.2026 руками: 4 гитарные петли"
+  },
+  {
+   "id": "musicradar-hip-rock",
+   "name": "MusicRadar Hip-Rock",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-332-free-hip-rock-samples-572060",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-hip-rock-samples.zip",
+   "taken": "06.10.2026 руками: 5 гитарных петель"
+  },
+  {
+   "id": "musicradar-spiritual",
+   "name": "MusicRadar Spiritual",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-346-free-spiritual-samples-626733",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-spiritual-samples.zip",
+   "taken": "06.10.2026 руками: 23 петли (хор, орган, пианино) и 24 аккорда хора в Choir"
+  },
+  {
+   "id": "musicradar-cinematic-drama",
+   "name": "MusicRadar Cinematic Drama",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-293-free-cinematic-drama-samples-641124",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-cinematic-drama-samples.zip",
+   "taken": "06.10.2026 руками: 7 петель — голоса и струнные"
+  },
+  {
+   "id": "musicradar-glitch-vocals",
+   "name": "MusicRadar Glitch Vocals",
+   "page": "https://www.musicradar.com/news/sampleradar-glitch-vocal-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-glitch-vocals-samples.zip",
+   "taken": "06.10.2026 руками: 5 петель и 7 аккордов в Vocals"
+  },
+  {
+   "id": "musicradar-soulful-keys",
+   "name": "MusicRadar Soulful Keys",
+   "page": "https://www.musicradar.com/news/sampleradar-soulful-keys-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/sampleradar-soulful-keys-samples.zip",
+   "taken": "06.10.2026 руками: 12 петель клавиш"
+  },
+  {
+   "id": "musicradar-crate-digger",
+   "name": "MusicRadar Crate Digger",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-475-free-crate-diggers-samples-627136",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-crate-digger-samples.zip",
+   "taken": "06.10.2026 руками: 6 петель — клавиши и гитара"
+  },
+  {
+   "id": "musicradar-cosmic-soul",
+   "name": "MusicRadar Cosmic Soul",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-148-free-cosmic-soul-samples-515677",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-cosmic-soul-samples.zip",
+   "taken": "06.10.2026 руками: 4 петли родес-пиано"
+  },
+  {
+   "id": "musicradar-female-vocal",
+   "name": "MusicRadar Female Vocal",
+   "page": "https://www.musicradar.com/news/tech/free-female-vocal-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-female-vocal-samples.zip",
+   "taken": "06.10.2026 руками: 9 фраз в Vocals"
+  }
+ ]
+}
