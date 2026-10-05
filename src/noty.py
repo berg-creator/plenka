@@ -61,6 +61,19 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 Отвергнуто: четвёртый характер «заказ» — по характеру выбирается фото значка и мерка приторного, а автор следующего
 дня считает по нему круг; с полем круг просто пропускает такой бит.
 
+Скелет «Г» и перелом двух видов (владелец, 06.10.2026: о «Six Speed» — «современная драмка, её бы я вообще часто
+использовал»; о переломе по «Excuse Me» — «и то и то»). Рисунок «Six Speed» стал постоянным скелетом: бит, чей
+первый скелет в поле skeleton назван «Six Speed», до перелома держит хэт трека — ровные шестнадцатые с одной дробью, —
+и мерка владельца меряет его хэт только после перелома, как у заказа (`_six`). Остальные проверки такой бит проходит
+без поблажек: бочка в треке стоит раз на фразу, под одной нотой 808 из семи. Перелом — двух видов, слово в поле
+switch («вид»): «разом» — как с 05.10, после такта перелома другие каркас, хэт и музыка; «ступенями» — как в треке:
+до такта перелома две-три смены (поле «смены»), на каждой каркас и хэт держатся, а 808 и музыка меняются, и только
+концовка — с такта перелома — другой бит по тем же правилам, что у «разом». Без слова — «разом»: паспорта, писанные
+до этого дня, проходят как раньше. Виды чередуются от утра к утру: `--prev` сверяет вид с первым из названных битов —
+вчерашним; у бита с order не сверяет.
+Отвергнуто: такт перелома у «ступенями» — первая смена: вторая петля, замер нот до и после и хэт по мерке владельца
+привязаны к такту, с которого бит другой, а это концовка.
+
 Петля по звуку, мелодия и перелом (владелец, 05.10.2026, о первом бите петлёй: «может, ты мне дашь дорожку петли
 на весь трек сразу; и она по темпу немного отличается от бита, из-за этого я её сжал на stretch, иначе изменится
 и тон», «мелодии катастрофически не хватает в бите помимо петли», «я очень люблю, когда бит меняется в ходе трека,
@@ -180,6 +193,12 @@ LOOP_COMMON = 3             # общих нот у двух петель одн�
 # Перелом: где стоит и сколько тактов после него вправе повторять рисунки тактов до него — калибровка в `_switch`
 SWITCH_AT = (.5, .85)
 SWITCH_SAME = 1 / 3
+# Вид перелома — слово «вид» в switch; без слова — первый: так писаны паспорта до 06.10.2026
+SWITCHES = ("разом", "ступенями")
+# ponytail: порог не калиброван — в «Excuse Me» клэп стоит в каждом такте, бочка в трёх из четырёх, хэт восьмыми,
+# а своих битов «ступенями» ещё нет. Начнёт браковать годное — снять с первых трёх таких битов
+SWITCH_KEEP = .5            # «ступенями»: столько тактов каркаса и хэта после смены повторяют такты до неё
+SIX = "six speed"           # первый скелет «Г»: хэт до перелома — рисунок трека, мерка владельца — после (`_six`)
 RETRY = 3                   # повторов сбора папки «Сегодня», пока iCloud докачивает звуки: круг помощника — десять минут
 FADE = .005                 # секунд затухания на краях паузы в дорожке петли: без него срез щёлкает
 LISTED += ((LOOPS, "*.wav"), (NET, "**/*.wav"))
@@ -489,9 +508,9 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
         out += _switch(info, tracks)
     # После перелома — другой бит: приторное считается в каждом по отдельности, как раньше у «смены бита»
     sweet = [(f"{word}: " if word else "") + said for word, half, notes in _halves(info, tracks) for said in sugar(half, notes)]
-    # Заказ: до перелома хэт — рисунок названного трека (в «Six Speed» это ровные шестнадцатые с одной дробью),
-    # мерка владельца — после перелома: без этого его же слова «драмку как в этом треке» сборка бракует
-    mine = _halves(info, tracks)[-1][2] if info.get("order") else tracks
+    # Заказ и скелет «Г»: до перелома хэт — рисунок названного трека (в «Six Speed» это ровные шестнадцатые с одной
+    # дробью), мерка владельца — после перелома: без этого его же слова «драмку как в этом треке» сборка бракует
+    mine = _halves(info, tracks)[-1][2] if info.get("order") or _six(info) else tracks
     return (out + _hat(mine) + _bass(tracks) + _counter(info, tracks) + sweet)[:20]
 
 
@@ -698,6 +717,18 @@ def _cut(info: dict) -> int | None:
     return (bar - 1) * 16 if type(bar) is int and 1 < bar <= info["bars"] else None
 
 
+def _six(info: dict) -> bool:
+    """Первый скелет бита — «Г», рисунок «Six Speed» (prompts/beats.md, «Скелеты»). Имя скелета сборка читает только
+    здесь: оно решает, чем мерить хэт до перелома."""
+    return str(info.get("skeleton", "")).split("→")[0].strip().lower() == SIX
+
+
+def _kind(info: dict) -> str:
+    """Вид перелома; без слова — «разом»."""
+    sw = info.get("switch")
+    return sw.get("вид") or SWITCHES[0] if isinstance(sw, dict) else SWITCHES[0]
+
+
 def _halves(info: dict, tracks: dict[str, list[N]]) -> list[tuple[str, dict, dict[str, list[N]]]]:
     """Бит как два бита — до перелома и после (ноты второго сдвинуты к нулю): цвет и замер нот у каждого свои."""
     cut = _cut(info)
@@ -770,10 +801,46 @@ def _again(notes: list[N], cut: int, pitch: bool = False) -> float | None:
     return sum(v in before for v in after) / len(after) if before and after else None
 
 
+def _steps(info: dict, starts: set[int], frame: list[N], hat: list[N], bass: list[N], music: list[N]) -> list[str]:
+    """Перелом «ступенями» — как в «Excuse Me» (замер 05.10.2026: темп и каркас в треке не меняются вовсе, хэт на первой
+    смене остаётся, меняются бас и музыка, а другой бит — только концовка; владелец 06.10.2026: «и то и то»). До такта
+    перелома — две-три смены на стыках частей: на каждой каркас и хэт повторяют такты, уже игравшие до неё, а 808
+    и музыка не повторяют отрезок перед ней.
+    С чем сравнивается: барабаны — со всем, что было до смены (выключение на несколько тактов перед ней не мешает),
+    808 и музыка — только с соседним отрезком: в треке куплет после припева возвращается к нотам начала. Вход баса —
+    тоже смена (в треке до первой его нет), а музыка молчать не вправе; у бита петлёй музыку держит петля, и мелодия
+    поверх неё вправе на смене войти. Концовку — она и есть такт перелома — `_switch` проверяет правилами «разом»."""
+    sw, cut = info["switch"], _cut(info)
+    marks = sw.get("смены")
+    if not (isinstance(marks, (list, tuple)) and 2 <= len(marks) <= 3 and all(type(b) is int for b in marks)
+            and list(marks) == sorted(set(marks)) and marks[-1] < sw["такт"] and set(marks) <= starts - {1}):
+        return ["switch: у перелома «ступенями» поле «смены» — две-три смены баса и музыки до такта перелома: такты "
+                "по порядку, каждый — первый такт части из parts, например \"смены\": [17, 33, 49]"]
+    out, edges = [], [0, *((b - 1) * 16 for b in marks), cut]
+    for bar, lo, at, hi in zip(marks, edges, edges[1:], edges[2:]):
+        for word, notes, pitch in (("бочка и клэп", frame, True), ("хэт", hat, False)):
+            same = _again([n for n in notes if n.pos < hi], at, pitch)
+            if same is None:
+                out.append(f"switch: {word} — нет по одну сторону смены в такте {bar}: смена стоит там, где барабаны "
+                           "играют и до неё, и после")
+            elif same < SWITCH_KEEP:
+                out.append(f"switch: {word} — после смены в такте {bar} только {same:.0%} тактов повторяют такты до неё; "
+                           f"не меньше {SWITCH_KEEP:.0%}: у перелома «ступенями» каркас и хэт держатся, меняются бас и музыка")
+        for word, notes in (("808", bass), ("музыка", music)):
+            same = _again([n for n in notes if lo <= n.pos < hi], at, True)
+            if same is None and word == "музыка" and not info.get("loop"):
+                out.append(f"switch: музыка играет только по одну сторону смены в такте {bar} — на смене она другая, а не молчит")
+            elif same is not None and same > SWITCH_SAME:
+                out.append(f"switch: {word} — {same:.0%} тактов после смены в такте {bar} повторяют такты перед ней; "
+                           f"не больше {SWITCH_SAME:.0%}: другие ноты или другой рисунок")
+    return out
+
+
 def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     """Перелом (владелец, 05.10.2026: «я очень люблю, когда бит меняется в ходе трека, так что превращается совсем
     в другой в какой-то момент, но звучит это лаконично»). Один на бит, на стыке частей во второй половине: после него
     другие каркас (бочка с клэпом), хэт и музыка, а партии 808 и хэта — а с ними их звук — и темп те же.
+    Это вид «разом»; у вида «ступенями» те же правила держит концовка, а смены до неё проверяет `_steps`.
     Пороги сняты с шести битов 01–05.10.2026, где перелома не было: каркас после любого стыка частей во второй
     половине повторял такты до него в 56–100% тактов, музыка — в 37–100%. Из 25 склеек «начало одного из этих
     битов + конец другого» (стык в такте 41) проверку проходят 15: каркас у них повторяется в 0–32% тактов, музыка —
@@ -810,6 +877,12 @@ def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         if not any(any(n.pos < cut for n in notes) and any(n.pos >= cut for n in notes) for notes in parts.values()):
             out.append(f"switch: {word} играет только по одну сторону перелома — общее обязано остаться: "
                        "одна партия 808 и одна партия хэта (тот же звук) до перелома и после")
+    music = [n for name, notes in tracks.items() if name in info.get("tonal", ())
+             and not any(w in name for w in SAMPLED) for n in flat(notes)]
+    if _kind(info) not in SWITCHES:
+        out.append(f"switch: вид перелома «{_kind(info)}» — не из списка: {', '.join(SWITCHES)}")
+    elif _kind(info) == SWITCHES[1]:
+        out += _steps(info, starts, frame, sum(hat.values(), []), sum(part(*SAMPLED).values(), []), music)
     if loop:
         pair, heard = _pair(info), loops()
         if len(pair) < 2:
@@ -817,8 +890,6 @@ def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         elif why := _twin(*pair, heard):
             out.append(f"switch: {why}")
     else:
-        music = [n for name, notes in tracks.items() if name in info.get("tonal", ())
-                 and not any(w in name for w in SAMPLED) for n in flat(notes)]
         same = _again(music, cut, True)
         if same is None:
             out.append("switch: музыка играет только по одну сторону перелома — после него она другая, а не молчит")
@@ -961,14 +1032,19 @@ def _lead(tracks: dict[str, list[N]]) -> list[N]:
     return sorted(n for name, notes in tracks.items() if "мелод" in name and "контр" not in name for n in flat(notes))
 
 
-def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[str, list[N]]) -> list[str]:
+def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[str, list[N]], last: bool = False) -> list[str]:
     """Чем бит повторяет прошлый. Пусто — не повторяет. 02.10.2026 второй бит подряд вышел с тем же порядком
-    частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код."""
+    частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код.
+    last — прошлый бит вчерашний (первый в --prev): с ним одним сверяется вид перелома — видов два, они чередуются,
+    и с позавчерашним вид обязан совпасть. Заказу вид назвал владелец."""
     was = f"«{old.get('title', 'прошлый бит')}»"
     out = [f"{word} «{info[k]}» — как в {was}: возьми другое"
            for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"), ("color", "цвет"))
            if info.get(k) and info[k] == old.get(k) and not (k == "color" and info.get("order"))]   # цвет заказа назвал владелец
     out += [f"петля «{name}» — как в {was}: возьми другую" for name in _pair(info) if name in _pair(old)]
+    if last and not info.get("order") and _kind(info) == _kind(old):
+        out.append(f"вид перелома «{_kind(info)}» — как во вчерашнем бите {was} (он первый в --prev): виды чередуются, "
+                   f"сегодня — «{next(k for k in SWITCHES if k != _kind(info))}»")
     pair = [[_names(m.get(k) or ()) for k in ("основа", "чужое")] for m in (info.get("mix"), old.get("mix")) if isinstance(m, dict)]
     if len(pair) == 2 and pair[0] == pair[1]:
         out.append(f"смесь «{' + '.join(n for names in pair[0] for n in names)}» — как в {was}: возьми другую")
@@ -1040,7 +1116,9 @@ def about(info: dict) -> str:
            f"({', '.join(_names(m.get('чужое') or ()))}) — {', '.join(_names(m.get('элемент') or ()))}"]
           if isinstance(m := info.get("mix"), dict) else []),
         f"С чего снято: {info['like']}", f"Части: {info['parts']}",
-        *([f"Перелом: с такта {sw.get('такт')} бит другой — {sw.get('переход')}"] if isinstance(sw := info.get("switch"), dict) else []), "",
+        *([f"Перелом: с такта {sw.get('такт')} бит другой — {sw.get('переход')}"
+           + (f". До него, в тактах {', '.join(map(str, sw['смены']))}, меняются 808 и музыка, а барабаны те же"
+              if isinstance(sw.get("смены"), (list, tuple)) else "")] if isinstance(sw := info.get("switch"), dict) else []), "",
         "Что сделано нотами:", *(f"• {t}" for t in info["tricks"]), "",
         *(["Звуки и пресеты — в папке «00 - Сегодня» в браузере FL и в меню Serum → User (нужно Rescan); "
            "их кладёт Мак, когда не спит:",
@@ -1070,10 +1148,10 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     if folder.name[:8].isdigit() and folder.name[:8] >= LOOP_FROM and info.get("mood") == "обычный" \
             and not info.get("loop") and not info.get("order"):
         bad.append("обычный бит — петлёй (поле loop): музыка через день петлёй, через день партиями")
-    for path in prev:
+    for i, path in enumerate(prev):
         try:
             old = runpy.run_path(str(path))
-            bad += echoes(info, tracks, old["INFO"], old["compose"]())
+            bad += echoes(info, tracks, old["INFO"], old["compose"](), last=not i)
         except Exception as e:          # прошлый бит писан под старый noty — не повод остаться без сегодняшнего
             print(f"{path}: не прочитан ({e}) — сверка без него")
     if bad:
@@ -1741,6 +1819,14 @@ def selftest() -> None:
     assert "ровные четверти" in "\n".join(problems(long, both)) \
         and "хэт:" not in "\n".join(problems(long | {"order": "драмку как в X"}, both)), "хэт заказа меряется после перелома"
     assert "ровные четверти" in "\n".join(problems(long | {"order": "x"}, {"хэт": hits(0, "x" * 1024, ln=.5)})), "а после перелома — как у всех"
+    # Скелет «Г» — тот же рисунок без заказа: хэт трека до перелома проходит по имени первого скелета, после — мерка
+    six = long | {"skeleton": "Six Speed → сцена"}
+    assert _six(six) and _six(six | {"skeleton": "six speed"}) and not _six(long) and not _six(long | {"skeleton": "сцена → Six Speed"})
+    assert "хэт:" not in "\n".join(problems(six, both)), "скелет «Г»: хэт трека до перелома — не брак и без заказа"
+    assert "ровные четверти" in "\n".join(problems(six, {"хэт": hits(0, "x" * 1024, ln=.5)})) \
+        and "ровные четверти" in "\n".join(problems(long | {"skeleton": "сцена → Six Speed"}, both)), \
+        "после перелома — мерка владельца; «Г» вторым скелетом поблажки не даёт"
+    assert _kind(ordered) == _kind(long) == "разом", "паспорт без слова вида — «разом», как до 06.10.2026"
     credit = about(base | {"sounds": {"бочка": f"{NET}/Kicks/Boss DR-660 - TR808K.wav"}})
     assert "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0" in credit and "Shpitz" not in about(base), "строка об авторе звуков CC BY — в записке"
     with tempfile.TemporaryDirectory() as tmp:          # сборка бита петлёй отдаёт Маку план дорожки и обе петли
@@ -1776,6 +1862,35 @@ def selftest() -> None:
                                                                      "switch": looped["switch"] | {"петля": mixed}}, drums))
     assert "смена бита" not in TWISTS and "не из списка" in "\n".join(problems(base | {"twist": "смена бита"}, demo())), \
         "смена бита стала переломом, а не ходом на выбор"
+    # Перелом «ступенями»: 16 тактов по четыре — три отрезка с одними барабанами, где 808 и мелодия всякий раз другие,
+    # и концовка — другой бит. Те же 808 или мелодия на смене, другой клэп на смене, те же барабаны в концовке — брак
+    def stairs(low=(29, 32, 36, 29), at=((0, 6), (2, 10), (4, 12), (8, 14)), clap=(8, 8, 8, 4)):
+        seg = [(b, b // 4) for b in range(16) if b % 8 != 7]
+        return {"808": [n for b, s in seg for n in glide(b * 16, 12, low[s], low[s] + 12, at=10, over=2)],
+                "хэт": spread([n for b, s in seg for n in hits(b * 16, "x..x..x.x..x..x." if s == 3 else "x.x.x.x.x.x.x.x.")]),
+                "клэп": [N(b * 16 + clap[s], 1, vel=90 + b % 4 * 5) for b, s in seg],
+                "мелодия": [N(b * 16 + p, 2, k) for b, s in seg for p, k in zip(at[s], (72, 67) if s == 3 else (65, 68))]}
+
+    stepped = base | {"parts": "куплет 1–4, припев 5–8, куплет 9–12, концовка 13–16",
+                      "switch": {"вид": "ступенями", "смены": [5, 9], "такт": 13, "переход": "обрыв на последней доле"}}
+    assert problems(stepped, stairs()) == [], problems(stepped, stairs())
+    assert "До него, в тактах 5, 9, меняются 808 и музыка, а барабаны те же" in about(stepped) and "меняются 808" not in about(base)
+    for notes, why in ((stairs(low=(29, 29, 36, 29)), "808 — 100% тактов после смены в такте 5 повторяют"),
+                       (stairs(at=((0, 6), (0, 6), (4, 12), (8, 14))), "музыка — 100% тактов после смены в такте 5 повторяют"),
+                       (stairs(clap=(8, 8, 12, 4)), "бочка и клэп — после смены в такте 9 только 0% тактов"),
+                       (stairs(clap=(8, 8, 8, 8)), "бочка и клэп — 100% тактов после перелома")):
+        assert why in "\n".join(problems(stepped, notes)), (why, problems(stepped, notes))
+    for sw, why in (({"смены": [5]}, "поле «смены»"), ({"смены": [5, 6]}, "поле «смены»"), ({"смены": [9, 5]}, "поле «смены»"),
+                    ({"смены": [5, 13]}, "поле «смены»"), ({"вид": "плавно"}, "не из списка: разом, ступенями")):
+        assert why in "\n".join(problems(stepped | {"switch": stepped["switch"] | sw}, stairs())), (sw, why)
+    assert problems(stepped | {"switch": stepped["switch"] | {"вид": "разом"}}, stairs()) == [], "«разом» смен не проверяет"
+    # Виды чередуются: сверка — только со вчерашним битом (первым в --prev), заказ не сверяется
+    said = "\n".join(echoes(base, demo(), base, demo(), last=True))
+    assert "вид перелома «разом» — как во вчерашнем бите" in said and "сегодня — «ступенями»" in said, said
+    assert "сегодня — «разом»" in "\n".join(echoes(stepped, stairs(), stepped, stairs(), last=True))
+    assert not any("вид перелома" in "\n".join(e) for e in (
+        echoes(base, demo(), base, demo()), echoes(stepped, stairs(), base, demo(), last=True),
+        echoes(base | {"order": "x"}, demo(), base, demo(), last=True))), "позавчерашний бит, другой вид и заказ — не повтор"
     card = loop_card("SixStr120B-01")
     assert "тактов 4" in card and "опоры по тактам" in card and "Вторая петля на перелом" in card and "общих" in card, card
     assert mixed.rsplit("/", 1)[-1] not in card and "12Str120E-01" in card, "подсказка не предлагает пару, которую сборка забракует"
@@ -1786,9 +1901,10 @@ def selftest() -> None:
     assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
           "сверка с прошлым битом, неожиданный ход, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), "
-          "перелом (другие каркас, хэт и музыка, вторая петля), дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
+          "перелом «разом» (другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка "
+          "меняются), виды чередуются, дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
           "808 — опора, а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, свои наборы владельца, "
-          "петля набора 11 по числу перед BPM, заказ владельца вне очереди (хэт по мерке — после перелома), "
+          "петля набора 11 по числу перед BPM, заказ владельца вне очереди и скелет «Г» (хэт по мерке — после перелома), "
           "строка об авторе звуков CC BY в записке — в порядке")
 
 
@@ -1797,7 +1913,8 @@ def main() -> None:
     p.add_argument("--selftest", action="store_true", help="проверить приёмы и запись файлов, без сети")
     p.add_argument("--build", metavar="ПАПКА", type=Path, help="собрать архив из ПАПКА/make.py")
     p.add_argument("--prev", metavar="ФАЙЛ", type=Path, nargs="+", default=(),
-                   help="make.py прошлых битов: та же форма, приём, цвет, смесь или сама мелодия — бит не годен")
+                   help="make.py прошлых битов, первым — вчерашний: та же форма, приём, цвет, смесь, сама мелодия "
+                        "или вид перелома, как вчера, — бит не годен")
     p.add_argument("--out", metavar="КУДА", type=Path, help="куда положить архив (по умолчанию — временная папка)")
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
     p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
