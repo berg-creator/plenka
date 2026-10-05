@@ -49,6 +49,7 @@
     ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ --color            ещё и цвет музыки: яркость, регистр, ноты, аккорды, шум
     ~/.cache/whisper-venv/bin/python -m src.zamer --table data/beats_zamer.json   сводка: медианы по группам
     ~/.cache/whisper-venv/bin/python -m src.zamer --loops                переписать замер петель в data/beat_sounds.json (только Мак)
+    ~/.cache/whisper-venv/bin/python -m src.zamer --loops "11 - Сеть"    то же, но только петли с этим словом в имени: прочие не читаются
 
 Чужой звук — только для замера: стемы пишутся во временную папку и удаляются сразу.
 """
@@ -421,18 +422,19 @@ def loop(y: np.ndarray, sr: int, bpm: float) -> dict | None:
             "roots": [NOTES[int(c[1:3, :, a:b].sum((0, 2)).argmax())] for a, b in zip(edges, edges[1:])]}
 
 
-def loops() -> str:
+def loops(word: str = "") -> str:
     """Замер всех разрешённых петель библиотеки владельца → поле loops в data/beat_sounds.json, строкой на петлю,
     как лежит промер Serum: вложенные списки при записи с отступом дали бы тридцать строк на петлю.
-    Заглушку iCloud не читаем — чтение повисает на скачивании; её прошлый замер остаётся."""
+    Заглушку iCloud не читаем — чтение повисает на скачивании; её прошлый замер остаётся. word — мерить только петли
+    с этим словом в имени, у прочих замер прежний: новый набор не повод перечитывать старые."""
     import librosa
     from . import config, noty
     data = json.loads(config.BEAT_SOUNDS.read_text("utf-8"))
     rows, old, skipped = {}, data.get("loops", {}), {"заглушка iCloud": 0, "не 1, 2, 4 или 8 тактов": 0}
-    for name in sorted(n for n in data["sounds"] if n.startswith(noty.LOOPS + "/") and noty.loop_bpm(n)):
+    for name in sorted(n for n in data["sounds"] if n.startswith((noty.LOOPS + "/", noty.NET_LOOPS + "/")) and noty.loop_bpm(n)):
         path = noty.LIBRARY["KITS"] / name.partition("/")[2]
-        if not path.exists() or os.stat(path).st_flags & DATALESS:
-            skipped["заглушка iCloud"] += 1
+        if word.lower() not in name.lower() or not path.exists() or os.stat(path).st_flags & DATALESS:
+            skipped["заглушка iCloud"] += word.lower() in name.lower()
             rows |= {name: old[name]} if name in old else {}
             continue
         y, sr = librosa.load(path, sr=None)
@@ -643,15 +645,16 @@ def main() -> None:
     p.add_argument("--out", type=Path, help="куда дописать замеры (JSON-список)")
     p.add_argument("--table", type=Path, metavar="JSON", help="сводка по файлу замеров")
     p.add_argument("--color", action="store_true", help="ещё и цвет музыки: яркость, регистр, плотность нот, смены аккорда, шум, верха")
-    p.add_argument("--loops", action="store_true", help="замерить разрешённые петли библиотеки в data/beat_sounds.json (только Мак)")
+    p.add_argument("--loops", nargs="?", const="", metavar="СЛОВО",
+                   help="замерить разрешённые петли библиотеки в data/beat_sounds.json; со словом — только петли с ним в имени (только Мак)")
     p.add_argument("--selftest", action="store_true", help="проверить замер на синтетическом бите, без demucs")
     a = p.parse_args()
     if a.selftest:
         return selftest()
     if a.table:
         return print(table(json.loads(a.table.read_text("utf-8"))))
-    if a.loops:
-        return print(loops())
+    if a.loops is not None:
+        return print(loops(a.loops))
     for path in a.files:
         row = dict(group=a.group, **run(path, a.bpm, a.start, a.color))
         print(json.dumps(row, ensure_ascii=False))
