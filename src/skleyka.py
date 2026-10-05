@@ -275,6 +275,7 @@ ROOM_CAP = (1.5, 2.0, 3.0, 5.0, 5.0, 3.0, 1.5)
 ROOM_RELEASE = (250, 200, 150, 100, 80, 60, 50)
 ROOM_SHARE = 0.9
 ROOM_RATIO = 1.25
+ROOM_PAD = "apad=pad_dur=5"  # с запасом: входы сайдчейна расходились к концу на 0,2 с
 
 # --- баланс -----------------------------------------------------------------
 # Вокал к биту по EBU R128. Бит без пауз, а у вокала паузы отсекает сам замер,
@@ -987,10 +988,16 @@ def _room(beat: Path, dry: Path, head: str, lift: float, lines: list[tuple[float
         # Порог у компрессора не ниже −60 дБ, а верх голоса тише, поэтому порог стоит
         # на −20 дБ, а ключ поднимается до него. Ключ — голос, дополненный тишиной ровно
         # до длины бита (amix по первому входу): кончись голос раньше, сайдчейн оборвал
-        # бы бит.
+        # бы бит. Середина и ключ дополнены тишиной (ROOM_PAD): sidechaincompress закрывает
+        # выход с концом любого входа и бросает то, что не дождалось пары, а бит и голос —
+        # два файла, и кто кончится первым, решает планировщик ffmpeg. Полосы обрывались
+        # за 0–0,2 с до конца бита, от прогона к прогону по-разному: два мастера одного кода
+        # расходились в хвосте до −15 дБ, а через пересчёт порогов ниже — до −35 дБ по всему
+        # треку (05.10.2026). Теперь не дождавшееся — тишина, а длину возвращает amerge:
+        # бока не дополнены, и он кончает по ним.
         _ffmpeg("-i", beat, "-i", dry, "-filter_complex",
-                f"[0:a]{head}asplit[b][z];[b]{MS},channelsplit[m][s];[m]asplit={len(depth) + 1}[m0]"
-                + "".join(f"[p{b}]" for b in depth) + f";[z]volume=0,{MID}[zero];[1:a]{MID}[v];"
+                f"[0:a]{head}asplit[b][z];[b]{MS},channelsplit[m][s];[m]{ROOM_PAD},asplit={len(depth) + 1}[m0]"
+                + "".join(f"[p{b}]" for b in depth) + f";[z]volume=0,{MID},{ROOM_PAD}[zero];[1:a]{MID}[v];"
                 f"[zero][v]amix=inputs=2:duration=first:normalize=0,asplit={len(depth)}" + "".join(f"[k{b}]" for b in depth) + ";"
                 + "".join(f"[p{b}]bandpass=f={(edges[b - 1] * edges[b]) ** 0.5:.0f}:t=q:w=1.41,asplit[x{b}][y{b}];"
                           f"[k{b}]{_band(edges[b - 1], edges[b] if b < len(SPLIT) else 0, 2)},volume={-20 - key[b]:.2f}dB[q{b}];"
