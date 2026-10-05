@@ -70,8 +70,10 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 switch («вид»): «разом» — как с 05.10, после такта перелома другие каркас, хэт и музыка; «ступенями» — как в треке:
 до такта перелома две-три смены (поле «смены»), на каждой каркас и хэт держатся, а 808 и музыка меняются, и только
 концовка — с такта перелома — другой бит по тем же правилам, что у «разом». Без слова — «разом»: паспорта, писанные
-до этого дня, проходят как раньше. Виды чередуются от утра к утру: `--prev` сверяет вид с первым из названных битов —
-вчерашним; у бита с order не сверяет.
+до этого дня, проходят как раньше. Виды чередуются внутри характера: `--prev` сверяет вид с ближайшим прошлым битом
+того же mood (`_turn`); у бита с order не сверяет.
+Отвергнуто: чередовать виды от утра к утру — обычный бит выходит через день, и один вид навсегда достался бы ему,
+а другой — злому и кино.
 Отвергнуто: такт перелома у «ступенями» — первая смена: вторая петля, замер нот до и после и хэт по мерке владельца
 привязаны к такту, с которого бит другой, а это концовка.
 
@@ -1035,19 +1037,27 @@ def _lead(tracks: dict[str, list[N]]) -> list[N]:
     return sorted(n for name, notes in tracks.items() if "мелод" in name and "контр" not in name for n in flat(notes))
 
 
-def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[str, list[N]], last: bool = False) -> list[str]:
+def _turn(info: dict, olds: list[dict]) -> list[str]:
+    """Вид перелома чередуется внутри характера (владелец, 06.10.2026: «и то и то» — оба вида каждому характеру).
+    Обычный бит выходит через день, злой и кино — раз в четыре: чередование от утра к утру навсегда отдало бы
+    обычному один вид, а злому с кино другой. Сверка — с ближайшим прошлым битом того же mood: olds — паспорта
+    файлов --prev, от вчерашнего назад; такого среди них нет — сверять не с чем. Заказ не сверяется, но сам
+    в счёт своего характера идёт; бит без слова вида и бит, писанный до перелома, — «разом»."""
+    old = next((o for o in olds if o.get("mood") == info.get("mood")), None)
+    if info.get("order") or not old or _kind(info) != _kind(old):
+        return []
+    return [f"вид перелома «{_kind(info)}» — как в прошлом бите того же характера, «{old.get('title', 'прошлый бит')}»: "
+            f"у характера «{info.get('mood')}» виды чередуются, сегодня — «{next(k for k in SWITCHES if k != _kind(info))}»"]
+
+
+def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[str, list[N]]) -> list[str]:
     """Чем бит повторяет прошлый. Пусто — не повторяет. 02.10.2026 второй бит подряд вышел с тем же порядком
-    частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код.
-    last — прошлый бит вчерашний (первый в --prev): с ним одним сверяется вид перелома — видов два, они чередуются,
-    и с позавчерашним вид обязан совпасть. Заказу вид назвал владелец."""
+    частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код."""
     was = f"«{old.get('title', 'прошлый бит')}»"
     out = [f"{word} «{info[k]}» — как в {was}: возьми другое"
            for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"), ("color", "цвет"))
            if info.get(k) and info[k] == old.get(k) and not (k == "color" and info.get("order"))]   # цвет заказа назвал владелец
     out += [f"петля «{name}» — как в {was}: возьми другую" for name in _pair(info) if name in _pair(old)]
-    if last and not info.get("order") and _kind(info) == _kind(old):
-        out.append(f"вид перелома «{_kind(info)}» — как во вчерашнем бите {was} (он первый в --prev): виды чередуются, "
-                   f"сегодня — «{next(k for k in SWITCHES if k != _kind(info))}»")
     pair = [[_names(m.get(k) or ()) for k in ("основа", "чужое")] for m in (info.get("mix"), old.get("mix")) if isinstance(m, dict)]
     if len(pair) == 2 and pair[0] == pair[1]:
         out.append(f"смесь «{' + '.join(n for names in pair[0] for n in names)}» — как в {was}: возьми другую")
@@ -1144,19 +1154,25 @@ def about(info: dict) -> str:
 
 def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     """Архив бита из ПАПКА/make.py; рядом — записка .txt, она же подпись при отправке.
-    prev — make.py прошлых битов: повтор их формы или мелодии — тоже брак."""
+    prev — make.py прошлых битов, от вчерашнего назад: повтор формы или мелодии двух первых — тоже брак. Файлы после
+    второго нужны только виду перелома (`_turn`): злой и кино выходят раз в четыре дня, а сверять с битом
+    четырёхдневной давности форму и приём нельзя — приём «один аккорд» у злого бита всякий раз тот же."""
     made = runpy.run_path(str(folder / "make.py"))
     info, tracks = made["INFO"], made["compose"]()
     bad = problems(info, tracks, _free(folder.name))
     if folder.name[:8].isdigit() and folder.name[:8] >= LOOP_FROM and info.get("mood") == "обычный" \
             and not info.get("loop") and not info.get("order"):
         bad.append("обычный бит — петлёй (поле loop): музыка через день петлёй, через день партиями")
+    olds = []
     for i, path in enumerate(prev):
         try:
             old = runpy.run_path(str(path))
-            bad += echoes(info, tracks, old["INFO"], old["compose"](), last=not i)
+            olds.append(old["INFO"])
+            if i < 2:
+                bad += echoes(info, tracks, old["INFO"], old["compose"]())
         except Exception as e:          # прошлый бит писан под старый noty — не повод остаться без сегодняшнего
             print(f"{path}: не прочитан ({e}) — сверка без него")
+    bad += _turn(info, olds)
     if bad:
         raise SystemExit("Бит не годен:\n" + "\n".join(bad))
     root = out / folder.name
@@ -1548,6 +1564,12 @@ def selftest() -> None:
             raise AssertionError("повтор прошлого бита должен браковаться")
         except SystemExit as e:
             assert all(w in str(e) for w in ("форма «песня»", "цвет «ржавчина»", "смесь «Chief Keef + кино»", "в том же порядке")), e
+        (tmp / "kino.py").write_text((tmp / "beat" / "make.py").read_text("utf-8").replace("'mood': 'злой'", "'mood': 'кино'"), encoding="utf-8")
+        try:                            # третий файл --prev — бит того же характера: с ним сверяется только вид перелома
+            build(tmp / "beat", tmp / "out", prev=(tmp / "kino.py", tmp / "kino.py", tmp / "beat" / "make.py"))
+            raise AssertionError("тот же вид перелома, что у прошлого бита того же характера, должен браковаться")
+        except SystemExit as e:
+            assert str(e).count("форма «песня»") == 2 and "вид перелома «разом» — как в прошлом бите того же характера" in str(e), e
         (tmp / "20261005-a-b-140-fm").mkdir()               # обычный бит с 05.10.2026 без петли — отказ
         (tmp / "20261005-a-b-140-fm" / "make.py").write_text(
             (tmp / "beat" / "make.py").read_text("utf-8").replace("'mood': 'злой'", "'mood': 'обычный'"), encoding="utf-8")
@@ -1889,13 +1911,17 @@ def selftest() -> None:
                     ({"смены": [5, 13]}, "поле «смены»"), ({"вид": "плавно"}, "не из списка: разом, ступенями")):
         assert why in "\n".join(problems(stepped | {"switch": stepped["switch"] | sw}, stairs())), (sw, why)
     assert problems(stepped | {"switch": stepped["switch"] | {"вид": "разом"}}, stairs()) == [], "«разом» смен не проверяет"
-    # Виды чередуются: сверка — только со вчерашним битом (первым в --prev), заказ не сверяется
-    said = "\n".join(echoes(base, demo(), base, demo(), last=True))
-    assert "вид перелома «разом» — как во вчерашнем бите" in said and "сегодня — «ступенями»" in said, said
-    assert "сегодня — «разом»" in "\n".join(echoes(stepped, stairs(), stepped, stairs(), last=True))
-    assert not any("вид перелома" in "\n".join(e) for e in (
-        echoes(base, demo(), base, demo()), echoes(stepped, stairs(), base, demo(), last=True),
-        echoes(base | {"order": "x"}, demo(), base, demo(), last=True))), "позавчерашний бит, другой вид и заказ — не повтор"
+    # Виды чередуются внутри характера: сверка — с ближайшим прошлым битом того же mood, сколько бы чужих ни стояло
+    # перед ним; заказ не сверяется, но сам в счёт идёт; бит, писанный до перелома, — «разом»
+    kino, was = base | {"mood": "кино"}, base | {"title": "Вчера"}
+    said = "\n".join(_turn(base, [kino, kino, was]))
+    assert "вид перелома «разом» — как в прошлом бите того же характера, «Вчера»" in said \
+        and "у характера «злой» виды чередуются, сегодня — «ступенями»" in said, said
+    assert "сегодня — «разом»" in "\n".join(_turn(stepped, [kino, stepped]))
+    assert _turn(base, [was | {"order": "x"}]) and _turn(stepped, [{"mood": "злой", "title": "до перелома"}]) == [] \
+        and _turn(base, [{"mood": "злой"}]), "заказ в счёт своего характера; бит без перелома — «разом»"
+    assert [_turn(base, olds) for olds in ([], [kino, kino], [stepped, was], [kino, stepped, was])] == [[]] * 4 \
+        and _turn(base | {"order": "x"}, [was]) == [], "нет бита того же характера, ближайший — другого вида, заказ — не повтор"
     card = loop_card("SixStr120B-01")
     assert "тактов 4" in card and "опоры по тактам" in card and "Вторая петля на перелом" in card and "общих" in card, card
     assert mixed.rsplit("/", 1)[-1] not in card and "12Str120E-01" in card, "подсказка не предлагает пару, которую сборка забракует"
@@ -1907,7 +1933,7 @@ def selftest() -> None:
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
           "сверка с прошлым битом, неожиданный ход, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), "
           "перелом «разом» (другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка "
-          "меняются), виды чередуются, дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
+          "меняются), виды чередуются внутри характера, дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
           "808 — опора, а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, свои наборы владельца, "
           "петля набора 11 по числу перед BPM, заказ владельца вне очереди и скелет «Г» (хэт по мерке — после перелома), "
           "строка об авторе звуков CC BY в записке — в порядке")
@@ -1918,8 +1944,8 @@ def main() -> None:
     p.add_argument("--selftest", action="store_true", help="проверить приёмы и запись файлов, без сети")
     p.add_argument("--build", metavar="ПАПКА", type=Path, help="собрать архив из ПАПКА/make.py")
     p.add_argument("--prev", metavar="ФАЙЛ", type=Path, nargs="+", default=(),
-                   help="make.py прошлых битов, первым — вчерашний: та же форма, приём, цвет, смесь, сама мелодия "
-                        "или вид перелома, как вчера, — бит не годен")
+                   help="make.py прошлых битов, от вчерашнего назад: та же форма, приём, цвет, смесь или мелодия, что в двух "
+                        "первых, или вид перелома, как у ближайшего бита того же характера, — бит не годен")
     p.add_argument("--out", metavar="КУДА", type=Path, help="куда положить архив (по умолчанию — временная папка)")
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
     p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
