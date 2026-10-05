@@ -1079,6 +1079,12 @@
       "file": "20260920-084905-2490-lineage.json",
       "published_at": "2026-10-04T16:01:20+00:00",
       "rubric": "lineage"
+    },
+    {
+      "chat": "channel",
+      "file": "20260921-000000-6965-poll.json",
+      "published_at": "2026-10-05T07:08:35+00:00",
+      "rubric": "poll"
     }
   ],
   "photos": [
