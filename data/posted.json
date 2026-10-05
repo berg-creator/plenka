@@ -1085,6 +1085,12 @@
       "file": "20260921-000000-6965-poll.json",
       "published_at": "2026-10-05T07:08:35+00:00",
       "rubric": "poll"
+    },
+    {
+      "chat": "channel",
+      "file": "20261005-111201-1211-news.json",
+      "published_at": "2026-10-05T11:12:12+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1236,6 +1242,7 @@
     "a618ad4c85369076990e9dcecd0ecab6cdaca52c91d0859c9192819088e084c8",
     "d3cdd38e935ea33b81fb19f432fc72d8165c0e2e122e82c7c2fc30b8ee46fd9a",
     "044d33318a4e869c1d0e17173333b332b2b462e31e468b4e0d6c1a4952492d35",
-    "70e14467434f03630553055b2366d1a659a699a699ae09ad057f07ff03ff03ff"
+    "70e14467434f03630553055b2366d1a659a699a699ae09ad057f07ff03ff03ff",
+    "6c186600fdc28c9eed0ead26eb267ea69ac6d9e6d9e68de68e0e9796c8d1ab14"
   ]
 }
