@@ -46,10 +46,25 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 
 Музыка петлёй (владелец, 02.10.2026: «да», через день). Разбор его проектов показал, что музыку он делает
 гитарными петлями набора 01 через Gross Beat и Love Philter, а Serum почти не трогает. Обычный бит с 05.10.2026
-называет петлю полем loop и партий музыки не несёт: ноты — барабаны, 808 и не больше одной партии сэмплером.
-Злой и кино остаются партиями — характер и так чередуется через день, своего расписания у петли нет. Темп петли
-берётся из имени файла: звук в KITS читать нельзя (заглушки iCloud), а петля без темпа в имени в список не идёт.
+называет петлю полем loop. Злой и кино остаются партиями — характер и так чередуется через день, своего расписания
+у петли нет. Темп петли берётся из имени файла, петля без темпа в имени в список не идёт.
 Отвергнуто: брать любые петли набора — Lex Luger и прочее с archive.org лежат в той же папке без лицензии.
+
+Петля по звуку, мелодия и перелом (владелец, 05.10.2026, о первом бите петлёй: «может, ты мне дашь дорожку петли
+на весь трек сразу; и она по темпу немного отличается от бита, из-за этого я её сжал на stretch, иначе изменится
+и тон», «мелодии катастрофически не хватает в бите помимо петли», «я очень люблю, когда бит меняется в ходе трека,
+так что превращается совсем в другой в какой-то момент, но звучит это лаконично»). В тот день бит был на 122 при петле
+на 120, без единой партии музыки, а тональность читалась с буквы в имени файла — си минор. Замер звука той петли:
+ноты C# E F# G G# A B, опоры тактов A A B F# — буква оказалась опорной нотой одного такта из четырёх, и мелодию
+по имени файла писать нельзя. Отсюда четыре правила, все числом:
+темп бита — ровно темп петли или вдвое выше, растяжки нет вовсе; ноты партий с высотой — из нот, которые в петле
+звучат (`zamer --loops` меряет петли на Маке, замер лежит в data/beat_sounds.json полем loops); поверх петли
+обязательна мелодия; в каждом бите, и петлёй, и партиями, есть перелом (поле switch, `_switch`). Дорожку петли
+на весь бит — повторы по сетке тактов, паузы из поля rests, после перелома вторая петля — Мак собирает сам
+(`loop_track`): темп совпадает точно, поэтому хватает стандартной библиотеки.
+Отвергнуто: растягивать петлю к темпу бита — в ffmpeg на Маке нет rubberband, а atempo на гитаре слышно.
+Отвергнуто: «смена бита» последними 16 тактами как один из неожиданных ходов — перелом теперь у каждого бита,
+и два перелома на бит лаконичными не бывают: ход из списка убран.
 
 Бас, второй голос и свои звуки (владелец, 04.10.2026: «у баса мелодия и рисунок плохие», «контрмелодию не слышно
 совсем», «почему не используешь мои остальные киты»). 808 в тот день ходил по восьми ступеням, до шести высот в такте,
@@ -79,6 +94,7 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
     python -m src.noty --send АРХИВ        отправить собранный архив владельцу
     python -m src.noty --sounds            переписать data/beat_sounds.json: имена звуков и пресетов библиотеки (только Мак)
     python -m src.noty --gather            папка «00 - Сегодня»: ноты свежей ветки битов, её звуки и пресеты (только Мак)
+    python -m src.noty --loop СЛОВО        что замер знает о петлях с этим словом в имени: ноты, опоры по тактам, чем сменить на переломе
 
 Сетка — шестнадцатые: такт = 16, доля = 4.
 """
@@ -95,7 +111,9 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
+import wave
 import zipfile
+from array import array
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -111,7 +129,7 @@ GM_DRUM = {"бочка": 36, "клэп": 39, "снейр": 38, "открыт": 4
 
 SAMPLED = ("808", "бас")    # партии с высотой, которые владелец играет сэмплером, а не синтезатором
 # Неожиданный ход (владелец, 02.10.2026: «удивлять слушателей»): один на бит, на стыке частей — prompts/beats.md
-TWISTS = ("смена бита", "ложный вход", "половинный темп", "сдвиг вниз", "чужой тембр", "задом наперёд")
+TWISTS = ("ложный вход", "половинный темп", "сдвиг вниз", "чужой тембр", "задом наперёд")
 MOODS = ("обычный", "злой", "кино")
 # Цвет музыки — гармония, мелодия, тембр — и референсы звука, с которых он снят (владелец, 02.10.2026;
 # признаки каждого — prompts/beats.md, «Цвет»). Имена — про звук, а не про название бита: пара в названии — по спросу
@@ -135,8 +153,17 @@ LISTED = (("KITS/09 - Scene 2026 Kit", "**/*.wav"), ("KITS/10 - Кино Kit", "
 # Музыка петлёй. Папка Loops плоская: вид петли — приставка имени. Только MusicRadar — royalty-free по README набора
 LOOPS = "KITS/01 - ASAP Rocky Kit/Loops"
 LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient")
-LOOP_TEMPO = .08            # отход темпа бита от темпа петли (или двойного): дальше растяжка слышна; мерка skleyka.SWAP_TEMPO
 LOOP_FROM = "20261005"      # с этого дня обычный бит — петлёй: 03.10 и 04.10 — пробы злого и кино, они партиями
+NOTES = "C C# D D# E F F# G G# A A# B".split()
+# Петля под мелодию: звучащих нот в ней от трёх до восьми. Меньше — мотиву не из чего собраться, больше —
+# хрома не разобрала нот (шум, пласт), и сверять мелодию не с чем. Из 487 замеренных петель годятся 349 (05.10.2026)
+LOOP_NOTES = (3, 8)
+LOOP_OFF = .1               # доля времени партии на нотах, которых в петле нет: проходящие можно, жить на них нельзя
+LOOP_COMMON = 3             # общих нот у двух петель одного бита: при трёх пара находится каждой годной петле (медиана 53)
+# Перелом: где стоит и сколько тактов после него вправе повторять рисунки тактов до него — калибровка в `_switch`
+SWITCH_AT = (.5, .85)
+SWITCH_SAME = 1 / 3
+FADE = .005                 # секунд затухания на краях паузы в дорожке петли: без него срез щёлкает
 LISTED += ((LOOPS, "*.wav"),)
 # Барабаны и 808, которые владелец ставит сам (разбор его проектов 04.10.2026: до этого дня низ и барабаны каждое утро
 # шли из набора 09, которого никто не слушал). Источник — приставка имени файла, набор — тот, где он его брал: одни
@@ -398,8 +425,8 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
     # form … fx обязательны здесь, а не в сверке с прошлым битом: beats.yml собирает без --prev,
     # и «Фосфор» 02.10.2026 ушёл владельцу без единого из этих полей
     out += [f"в паспорте нет поля {k}" for k in ("title", "bpm", "key", "scale", "bars", "skeleton", "like", "parts", "tricks",
-                                                 "form", "melody", "mood", "twist", "color", "mix", "sounds", "fx")
-            if not info.get(k) and not (k == "melody" and info.get("loop"))]      # у бита петлёй мелодии нет
+                                                 "form", "melody", "mood", "twist", "switch", "color", "mix", "sounds", "fx")
+            if not info.get(k)]
     out += [f"{word} «{info[k]}» — не из списка: {', '.join(names)}"
             for k, word, names in (("twist", "неожиданный ход", TWISTS), ("mood", "характер", MOODS), ("color", "цвет", COLORS))
             if info.get(k) and info[k] not in names]
@@ -439,7 +466,11 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
         out += _mix(info, free)
     if info.get("loop"):
         out += _loop(info, tracks)
-    return (out + _hat(tracks) + _bass(tracks) + _counter(info, tracks) + sugar(info, tracks))[:20]
+    if info.get("switch"):
+        out += _switch(info, tracks)
+    # После перелома — другой бит: приторное считается в каждом по отдельности, как раньше у «смены бита»
+    sweet = [(f"{word}: " if word else "") + said for word, half, notes in _halves(info, tracks) for said in sugar(half, notes)]
+    return (out + _hat(tracks) + _bass(tracks) + _counter(info, tracks) + sweet)[:20]
 
 
 def _bass(tracks: dict[str, list[N]]) -> list[str]:
@@ -585,24 +616,174 @@ def loop_bpm(name: str) -> int | None:
     return next((int(d) for d in re.findall(r"(?<!\d)\d{2,3}(?!\d)", stem) if 60 <= int(d) <= 200), None)
 
 
+def loops() -> dict[str, dict]:
+    """Замер петель по звуку (`zamer --loops`, только Мак): имя → такты, звучащие ноты, тоника, опора каждого такта.
+    Петли, которой здесь нет, сборка не берёт: её не прочли (заглушка iCloud) или она не в 1, 2, 4 или 8 тактов."""
+    from . import config
+    data = json.loads(config.BEAT_SOUNDS.read_text("utf-8")).get("loops", {}) if config.BEAT_SOUNDS.exists() else {}
+    out = {}
+    for name, row in data.items():
+        bars, notes, key, _, roots, _ = (part.split() for part in row.split(" | "))
+        out[name] = {"bars": int(bars[0]), "notes": notes, "key": " ".join(key[:2]), "sure": float(key[2]), "roots": roots}
+    return out
+
+
+def _pair(info: dict) -> list[str]:
+    """Петли бита: первая и та, что играет после перелома."""
+    sw = info.get("switch")
+    return [_nfc(str(x)) for x in (info.get("loop"), sw.get("петля") if isinstance(sw, dict) else None) if x and info.get("loop")]
+
+
+def _riff(name: str) -> str:
+    """Группа рифа — имя петли без номера варианта: `AC_SixStr120B-01` и `-02` — один риф, `120C-01` — другой."""
+    return re.sub(r"-\d+\.wav$", "", name)
+
+
+def _cut(info: dict) -> int | None:
+    """Шестнадцатая, с которой бит другой, — по полю switch. None — перелома нет или такт назван негодно."""
+    sw = info.get("switch")
+    bar = sw.get("такт") if isinstance(sw, dict) else None
+    return (bar - 1) * 16 if type(bar) is int and 1 < bar <= info["bars"] else None
+
+
+def _halves(info: dict, tracks: dict[str, list[N]]) -> list[tuple[str, dict, dict[str, list[N]]]]:
+    """Бит как два бита — до перелома и после (ноты второго сдвинуты к нулю): цвет и замер нот у каждого свои."""
+    cut = _cut(info)
+    if cut is None:
+        return [("", info, tracks)]
+    return [("до перелома", info | {"bars": cut // 16}, {k: [n for n in v if n.pos < cut] for k, v in tracks.items()}),
+            ("после перелома", info | {"bars": info["bars"] - cut // 16},
+             {k: [n._replace(pos=n.pos - cut) for n in v if n.pos >= cut] for k, v in tracks.items()})]
+
+
 def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
-    """Музыка петлёй: петля — из разрешённых, темп бита — её темп или вдвое быстрее, партий музыки рядом
-    не больше одной, и та сэмплером. Нот у петли нет: где она играет и чем обработана — словами в parts и fx."""
-    loop, tempo = _nfc(str(info["loop"])), loop_bpm(str(info["loop"]))
-    if not (loop.startswith(LOOPS + "/") and tempo and loop in known()):
-        return [f"loop: «{loop}» — не из разрешённых петель: {LOOPS}, виды {', '.join(LOOP_KINDS)}, "
-                "с темпом в имени — точное имя бери из data/beat_sounds.json"]
-    out = []
-    if info.get("bpm") and min(abs(info["bpm"] / (tempo * k) - 1) for k in (1, 2)) > LOOP_TEMPO:
-        out.append(f"loop: темп бита {info['bpm']} не сходится с темпом петли {tempo} — бит в её темпе "
-                   f"или вдвое быстрее, отход не больше {LOOP_TEMPO:.0%}")
+    """Музыка петлёй: петля — из разрешённых и замерена по звуку, темп бита — ровно её темп или вдвое выше, поверх
+    неё мелодия, ноты партий — из нот петли, паузы петли — полем rests. Чем она обработана — словами в fx.
+    Порог нот мимо (`LOOP_OFF`) — ориентир, а не замер: проходящая нота в шестнадцатую — не брак, жить на чужой
+    ноте нельзя. Единственный бит петлёй (05.10.2026) его не проверяет: 808 там стоял на B, F#, E и A, все четыре
+    в петле звучат. Начнёт браковать годное на слух — поднять порог или считать только ноты длиннее доли."""
+    heard, pair, out, end, good = loops(), _pair(info), [], info["bars"] * 16, {}
+    for word, name in zip(("loop", "switch, вторая петля"), pair):
+        tempo, m = loop_bpm(name), heard.get(name)
+        if not (name.startswith(LOOPS + "/") and tempo and name in known()):
+            out.append(f"{word}: «{name}» — не из разрешённых петель: {LOOPS}, виды {', '.join(LOOP_KINDS)}, "
+                       "с темпом в имени — точное имя бери из data/beat_sounds.json")
+        elif not m:
+            out.append(f"{word}: «{name}» не замерена по звуку (не в 1, 2, 4 или 8 тактов или не скачана из iCloud) — "
+                       "бери петлю из замера: python3 -m src.noty --loop СЛОВО")
+        elif not LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1]:
+            out.append(f"{word}: в петле звучат {len(m['notes'])} нот ({' '.join(m['notes'])}) — мелодию по ней не написать: "
+                       f"бери петлю, где нот от {LOOP_NOTES[0]} до {LOOP_NOTES[1]}")
+        elif info.get("bpm") not in (tempo, tempo * 2):
+            out.append(f"{word}: темп бита {info.get('bpm')}, а петля в темпе {tempo} — бит ровно в её темпе или ровно "
+                       f"вдвое быстрее ({tempo} или {tempo * 2}): петлю не растягиваем")
+        else:
+            good[name] = m
     if info.get("mood") != "обычный":
         out.append("loop: петлёй — только обычный бит; злой и кино — партиями")
     music = [name for name in tracks if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED)]
-    if len(music) > 1 or any(s.startswith("Serum/") for name in music for s in _names((info.get("sounds") or {}).get(name, ()))):
-        out.append(f"loop: рядом с петлёй партии музыки ({', '.join(music)}) — не больше одной, и та сэмплером, а не Serum")
-    if "петля" not in (info.get("fx") or {}):
-        out.append("loop: в fx нет строки «петля» — цепочки обработки петли")
+    if not 1 <= len(music) <= 3 or not any("мелод" in name and "контр" not in name for name in music):
+        out.append("loop: поверх петли нужна мелодия — партий музыки, кроме 808, от одной до трёх, и одна из них «мелодия» "
+                   f"(имя — в tonal); сейчас: {', '.join(music) or 'ни одной'}")
+    out += [f"loop: в fx нет строки «{k}» — цепочки обработки петли" for k in ("петля", "петля 2")[:len(pair)]
+            if k not in (info.get("fx") or {})]
+    rests = info.get("rests")
+    if not (isinstance(rests, (list, tuple)) and rests and all(
+            isinstance(r, (list, tuple)) and len(r) == 2 and all(isinstance(x, (int, float)) for x in r)
+            and 1 <= r[0] < r[1] <= info["bars"] + 1 for r in rests)):
+        out.append("rests: где петля молчит — пары тактов «с — до», счёт с 1, «до» не входит, полтакта — дробью: "
+                   "[(8.5, 9), (16, 17)] — вторая половина такта 8 и весь такт 16; хотя бы одна пауза")
+    cut = _cut(info)
+    for i, name in enumerate(pair):             # до перелома ноты сверяются с первой петлёй, после — со второй
+        lo, hi = ((cut or end, end) if i else (0, cut or end))
+        allowed = {NOTES.index(x) for x in good.get(name, {}).get("notes", NOTES)}
+        for part in info.get("tonal", ()):
+            notes = [n for n in flat(tracks.get(part, [])) if lo <= n.pos < hi]
+            off = [n for n in notes if n.key % 12 not in allowed]
+            if notes and (share := sum(n.ln for n in off) / sum(n.ln for n in notes)) > LOOP_OFF:
+                out.append(f"{part}{', после перелома' if i else ''}: {share:.0%} времени на нотах, которых в петле нет "
+                           f"({' '.join(sorted({NOTES[n.key % 12] for n in off}, key=NOTES.index))}), — в петле звучат "
+                           f"{' '.join(good[name]['notes'])}; мимо — не больше {LOOP_OFF:.0%}")
+    return out
+
+
+def _again(notes: list[N], cut: int, pitch: bool = False) -> float | None:
+    """Доля тактов после перелома, чей рисунок уже был до него. None — по одну из сторон нот нет. Рисунок такта —
+    места нот в нём; pitch — ещё и высота без октавы: мелодия октавой ниже остаётся той же мелодией."""
+    bars: dict[int, list] = {}
+    for n in notes:
+        bars.setdefault(int(n.pos // 16), []).append((round(n.pos % 16, 2), n.key % 12 if pitch else 0))
+    sig = {b: tuple(sorted(v)) for b, v in bars.items()}
+    before, after = {v for b, v in sig.items() if b * 16 < cut}, [v for b, v in sig.items() if b * 16 >= cut]
+    return sum(v in before for v in after) / len(after) if before and after else None
+
+
+def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Перелом (владелец, 05.10.2026: «я очень люблю, когда бит меняется в ходе трека, так что превращается совсем
+    в другой в какой-то момент, но звучит это лаконично»). Один на бит, на стыке частей во второй половине: после него
+    другие каркас (бочка с клэпом), хэт и музыка, а партии 808 и хэта — а с ними их звук — и темп те же.
+    Пороги сняты с шести битов 01–05.10.2026, где перелома не было: каркас после любого стыка частей во второй
+    половине повторял такты до него в 56–100% тактов, музыка — в 37–100%. Из 25 склеек «начало одного из этих
+    битов + конец другого» (стык в такте 41) проверку проходят 15: каркас у них повторяется в 0–32% тактов, музыка —
+    в 0%; у десяти остальных каркас — 40–86% или хэт — 44–91%: это биты с общим рисунком бочки, клэпа или хэта,
+    то есть не «совсем другой». Клэп отдельно не бракуется: доля на прежнем месте — то общее, что вправе остаться,
+    а каркас меняет бочка. Хэт по правилу `_hat` и без перелома не ходит по кругу (12–47% в битах 04.10 и 05.10) —
+    его порог ловит хэт, перенесённый из первой части.
+    Перелом стоит на стыке частей из parts, а не на границе восьмёрки: у форм со вступлением в 4–5 тактов
+    части начинаются не с тактов 9, 17, 25. Как звучит стык, сборка не знает: переход — словами, числом не меряется."""
+    sw, cut, loop = info["switch"], _cut(info), info.get("loop")
+    if cut is None or not str(sw.get("переход") or "").strip():
+        return ["switch: перелом — словарь: «такт» — с какого такта бит другой, «переход» — как устроен стык, словами"
+                + (", «петля» — вторая петля" if loop else "")]
+    bar, out = sw["такт"], []
+    starts = {int(x) for x in re.findall(r"(\d+)\s*[–—-]\s*\d+", str(info.get("parts", "")))}
+    fit = sorted(b for b in starts if SWITCH_AT[0] <= (b - 1) / info["bars"] <= SWITCH_AT[1])
+    if bar not in fit:
+        out.append(f"switch: перелом в такте {bar}, а стоит он на стыке частей из parts между {SWITCH_AT[0]:.0%} и "
+                   f"{SWITCH_AT[1]:.0%} бита: " + (f"подходят такты {', '.join(map(str, fit))}" if fit else
+                                                   "там в parts ни одна часть не начинается — начни часть с такта перелома"))
+
+    def part(*words, skip=()):
+        return {name: [n for n in notes if not n.slide] for name, notes in tracks.items()
+                if any(w in name for w in words) and not any(w in name for w in skip)}
+
+    frame = [n._replace(key=i) for i, words in enumerate((("бочка",), ("клэп", "снейр")))
+             for notes in part(*words).values() for n in notes]
+    hat = part("хэт", skip=("открыт",))
+    for word, same in (("бочка и клэп", _again(frame, cut, True)), ("хэт", _again(sum(hat.values(), []), cut))):
+        if same is not None and same > SWITCH_SAME:
+            out.append(f"switch: {word} — {same:.0%} тактов после перелома повторяют рисунки тактов до него: бит не стал "
+                       f"другим; не больше {SWITCH_SAME:.0%} — рисунок другой, звук тот же")
+    for word, parts in (("808", part(*SAMPLED)), ("хэт", hat)):
+        if not any(any(n.pos < cut for n in notes) and any(n.pos >= cut for n in notes) for notes in parts.values()):
+            out.append(f"switch: {word} играет только по одну сторону перелома — общее обязано остаться: "
+                       "одна партия 808 и одна партия хэта (тот же звук) до перелома и после")
+    if loop:
+        pair, heard = _pair(info), loops()
+        if len(pair) < 2:
+            out.append("switch: у бита петлёй после перелома играет вторая петля — поле «петля» в switch")
+        elif _riff(pair[0]) == _riff(pair[1]):
+            out.append(f"switch: вторая петля — тот же риф ({_riff(pair[1]).rsplit(' - ', 1)[-1]}): бери петлю другой группы, "
+                       "а не другой номер той же")
+        elif all(name in heard for name in pair):
+            one, two = (heard[name] for name in pair)
+            common = [x for x in one["notes"] if x in two["notes"]]
+            # `GuitarMix120B-04` — тот же риф, что `SixStr120B-01`, сведённый с другими гитарами: имя другое, музыка та же
+            if (one["notes"], one["roots"]) == (two["notes"], two["roots"]):
+                out.append(f"switch: у второй петли те же ноты и те же опоры по тактам ({' '.join(two['roots'])}) — это тот же риф "
+                           "в другом составе, а не другая музыка")
+            if len(common) < LOOP_COMMON:
+                out.append(f"switch: у двух петель общих нот {len(common)} ({' '.join(common) or 'нет'}) — нужно не меньше "
+                           f"{LOOP_COMMON}: иначе это другая тональность, а не другой бит")
+    else:
+        music = [n for name, notes in tracks.items() if name in info.get("tonal", ())
+                 and not any(w in name for w in SAMPLED) for n in flat(notes)]
+        same = _again(music, cut, True)
+        if same is None:
+            out.append("switch: музыка играет только по одну сторону перелома — после него она другая, а не молчит")
+        elif same > SWITCH_SAME:
+            out.append(f"switch: музыка — {same:.0%} тактов после перелома повторяют такты до него; не больше "
+                       f"{SWITCH_SAME:.0%}: другие рисунки мелодии и гармонии, тональность та же")
     return out
 
 
@@ -744,9 +925,9 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
     частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код."""
     was = f"«{old.get('title', 'прошлый бит')}»"
     out = [f"{word} «{info[k]}» — как в {was}: возьми другое"
-           for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"), ("color", "цвет"),
-                           ("loop", "петля"))
+           for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"), ("color", "цвет"))
            if info.get(k) and info[k] == old.get(k)]
+    out += [f"петля «{name}» — как в {was}: возьми другую" for name in _pair(info) if name in _pair(old)]
     pair = [[_names(m.get(k) or ()) for k in ("основа", "чужое")] for m in (info.get("mix"), old.get("mix")) if isinstance(m, dict)]
     if len(pair) == 2 and pair[0] == pair[1]:
         out.append(f"смесь «{' + '.join(n for names in pair[0] for n in names)}» — как в {was}: возьми другую")
@@ -776,8 +957,32 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
 
 
 def _sounds(info: dict) -> dict:
-    """Звуки паспорта вместе с петлёй: Мак кладёт её в папку «Сегодня» наравне с остальными."""
-    return (info.get("sounds") or {}) | ({"петля": info["loop"]} if info.get("loop") else {})
+    """Звуки паспорта вместе с петлями: Мак кладёт их в папку «Сегодня» наравне с остальными."""
+    return (info.get("sounds") or {}) | dict(zip(("петля", "петля 2"), _pair(info)))
+
+
+def _when(rests) -> str:
+    """Паузы петли словами: (16, 17) — «такт 16», (1, 5) — «такты 1–4», (8.5, 9) — «с 8.5 до 9»."""
+    return ", ".join(f"такт {a:g}" if b - a == 1 and a == int(a) else f"такты {a:g}–{b - 1:g}" if a == int(a) and b == int(b)
+                     else f"с {a:g} до {b:g}" for a, b in rests)
+
+
+def _loop_note(info: dict) -> list[str]:
+    """Что владельцу знать о петле: темп, готовая дорожка, ноты по замеру звука, паузы."""
+    pair, heard = _pair(info), loops()
+    if not pair:
+        return []
+    out = ["Музыка — петлёй, поверх неё мелодия. Петлю не растягивай: бит ровно в её темпе"
+           + (f" вдвое ({loop_bpm(pair[0])} → {info['bpm']}): такт петли — два такта бита" if info.get("bpm") != loop_bpm(pair[0]) else "")
+           + ". Дорожка «Петля — на весь бит.wav» в папке «Сегодня» уже расставлена по тактам, с паузами — поставь её с первого такта"
+           + ("; «Петля 2 — на весь бит.wav» — вторая петля, она играет после перелома и ставится тоже с первого такта"
+              if len(pair) > 1 else "") + "."]
+    out += [f"{'Вторая петля' if i else 'Петля'}: звучат ноты {' '.join(m['notes'])}; опора по её тактам — {' '.join(m['roots'])}; "
+            f"тоника, скорее всего, {m['key']}." for i, name in enumerate(pair) if (m := heard.get(name))]
+    out.append("Ноты и опоры — замер звука петли, а не буква в имени файла; замер грубый: обертон громкой ноты он считает нотой.")
+    if info.get("rests"):
+        out.append(f"Петля молчит: {_when(info['rests'])} (дробь — доля такта: 8.5 — середина такта 8).")
+    return out + [""]
 
 
 def about(info: dict) -> str:
@@ -792,14 +997,13 @@ def about(info: dict) -> str:
         *([f"Смесь: основа — {', '.join(_names(m.get('основа') or ()))}; от чужого звука "
            f"({', '.join(_names(m.get('чужое') or ()))}) — {', '.join(_names(m.get('элемент') or ()))}"]
           if isinstance(m := info.get("mix"), dict) else []),
-        f"С чего снято: {info['like']}", f"Части: {info['parts']}", "",
+        f"С чего снято: {info['like']}", f"Части: {info['parts']}",
+        *([f"Перелом: с такта {sw.get('такт')} бит другой — {sw.get('переход')}"] if isinstance(sw := info.get("switch"), dict) else []), "",
         "Что сделано нотами:", *(f"• {t}" for t in info["tricks"]), "",
         *(["Звуки и пресеты — в папке «00 - Сегодня» в браузере FL и в меню Serum → User (нужно Rescan); "
            "их кладёт Мак, когда не спит:",
            *(f"• {part} — {n}" for part, names in _sounds(info).items() for n in _names(names)), ""] if _sounds(info) else []),
-        *([f"Музыка — петлёй: темп в её имени — {loop_bpm(info['loop'])}, растяни её к темпу бита без смены высоты. "
-           "Тональность снята с имени петли, на слух не сверена: не строит — сдвинь партитуру 808 целиком.", ""]
-          if info.get("loop") else []),
+        *_loop_note(info),
         *(["Обработка — цепочки из интервью продюсеров и замера. Ни пресетов, ни эффектов автор нот не слышал: "
            "это с чего начать, а не как должно звучать:",
            *(f"• {part} — {chain}" for part, chain in info["fx"].items()), ""] if info.get("fx") else []),
@@ -850,7 +1054,8 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
                                    ("слайды", any(n.slide for n in notes)),
                                    ("дроби", any(n.ln < .5 for n in notes))) if yes]
         print(f"{i:02} {name:16} нот {len(notes):4}, сил {len({n.vel for n in notes}):2}  {', '.join(tricks)}")
-    print("замер нот: " + ", ".join(f"{k} {v:g}" for k, v in shape(info, tracks).items()))
+    for word, half, notes in _halves(info, tracks):         # до перелома и после — два бита: у каждого свой скелет
+        print(f"замер нот{' ' + word if word else ''}: " + ", ".join(f"{k} {v:g}" for k, v in shape(half, notes).items()))
     mid(root / "00 всё вместе (черновик).mid", info["bpm"], *draft)
     (root / "о бите.txt").write_text(about(info), encoding="utf-8")
     archive = out / f"{folder.name}.zip"
@@ -859,6 +1064,9 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
             z.write(f, f.relative_to(out))
     archive.with_suffix(".txt").write_text(about(info), encoding="utf-8")
     archive.with_suffix(".sounds.json").write_text(json.dumps(_sounds(info), ensure_ascii=False), encoding="utf-8")
+    if info.get("loop"):                # план дорожки петли на весь бит: её собирает Мак (`loop_track`), звук лежит там
+        archive.with_suffix(".loop.json").write_text(json.dumps(
+            {"bpm": info["bpm"], "bars": info["bars"], "rests": info["rests"], "switch": info["switch"]["такт"]}), encoding="utf-8")
     print(f"{info['bpm']} BPM, {info['bars']} тактов, {info['bars'] * 240 / info['bpm']:.0f} с → {archive}")
     return archive
 
@@ -899,13 +1107,84 @@ def library() -> list[str]:
     return sorted(out)
 
 
+def _pcm(raw: bytes, width: int) -> array:
+    """PCM 16 или 24 бита → отсчёты по 32 бита, значение сдвинуто в старшие байты. Срезами, а не циклом
+    по отсчётам: дорожка на весь бит — десяток миллионов отсчётов."""
+    wide = bytearray(len(raw) // width * 4)
+    for i in range(width):
+        wide[4 - width + i::4] = raw[i::width]
+    return array("i", bytes(wide))
+
+
+def _raw(pcm: array, width: int) -> bytes:
+    wide, out = pcm.tobytes(), bytearray(len(pcm) * width)
+    for i in range(width):
+        out[i::width] = wide[4 - width + i::4]
+    return bytes(out)
+
+
+def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool = False) -> None:
+    """Петля на весь бит одним файлом (владелец, 05.10.2026: «может, ты мне дашь дорожку петли на весь трек сразу»).
+    Длина — весь бит; повторы стоят по сетке тактов, а не встык по длине файла; в паузах (rests) тишина; первая петля
+    играет до перелома, вторая — после, и обе дорожки ставятся с первого такта. Затухание и возврат (`FADE`) — внутри
+    самой паузы: атака первой ноты после неё цела. Темп бита равен темпу петли или вдвое выше — растяжки нет, поэтому
+    хватает стандартной библиотеки, а формат файла остаётся прежним. plan пришёл из make.py — это числа, а не пути:
+    файлы называет вызывающий. Не PCM 16/24 или план негоден — исключение, в папке остаётся просто копия петли."""
+    bpm, bars, cut = float(plan["bpm"]), int(plan["bars"]), plan.get("switch")
+    rests = [(float(a), float(b)) for a, b in plan.get("rests") or ()]
+    if not (tempo and bpm in (tempo, tempo * 2) and bars >= 1 and bars * 240 / bpm <= 600):
+        raise ValueError("темп петли и бита не сходятся или бит длиннее десяти минут")
+    with wave.open(str(src), "rb") as w:
+        ch, width, sr, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+        if width not in (2, 3) or sys.byteorder != "little" or array("i").itemsize != 4:
+            raise ValueError(f"{width * 8} бит: читаются только 16 и 24")
+        one = _pcm(w.readframes(n), width)
+    total = round(bars * 240 / bpm * sr)
+
+    def at(bar: float) -> int:          # кадр, с которого начинается такт; дробный такт — доля такта
+        return min(max(round((bar - 1) * 240 / bpm * sr), 0), total)
+
+    period = round(n / sr * tempo / 240) * 240 / tempo * sr         # повтор — целое число тактов петли, в кадрах
+    if period < 1:
+        raise ValueError("петля короче такта")
+    lo, hi = (at(int(cut)), total) if second and cut else (total, total) if second else (0, at(int(cut)) if cut else total)
+    fade = round(FADE * sr)
+    out, k = array("i", bytes(4 * total * ch)), 0
+    while (a := lo + round(k * period)) < min(hi + fade, total):    # хвост в `fade` за переломом — под затухание
+        piece = one[:(min(lo + round((k + 1) * period), hi + fade, total) - a) * ch]
+        out[a * ch:a * ch + len(piece)] = piece
+        k += 1
+    quiet: list[list[int]] = []
+    for a, b in sorted([(0, lo), (hi, total)] + [(at(a), at(b)) for a, b in rests]):
+        if quiet and a <= quiet[-1][1]:             # паузы встык и внахлёст — одна: между ними нечему затухать
+            quiet[-1][1] = max(quiet[-1][1], b)
+        elif b > a:
+            quiet.append([a, b])
+    for a, b in quiet:
+        f = min(fade, (b - a) // 2)
+        down, up = f if a > 0 else 0, f if b < total else 0         # у края файла затухать не из чего и не во что
+        for i in range(f):
+            for j in range(ch):
+                if down:
+                    out[(a + i) * ch + j] = out[(a + i) * ch + j] * (f - i) // f
+                if up:
+                    out[(b - 1 - i) * ch + j] = out[(b - 1 - i) * ch + j] * (f - i) // f
+        out[(a + down) * ch:(b - up) * ch] = array("i", bytes(4 * (b - up - a - down) * ch))
+    with wave.open(str(dst), "wb") as w:
+        w.setnchannels(ch)
+        w.setsampwidth(width)
+        w.setframerate(sr)
+        w.writeframes(_raw(out, width))
+
+
 def lay(built: Path | None, sounds: dict, kits: Path, serum: Path,
-        roots: dict[str, Path] | None = None, listed: set[str] | None = None) -> list[str]:
+        roots: dict[str, Path] | None = None, listed: set[str] | None = None, plan: dict | None = None) -> list[str]:
     """Папки «Сегодня»: партитуры и записка собранного бита и копии названных звуков — сэмплы в kits,
     пресеты в serum, имя партии впереди. Прошлые файлы обеих папок убираются: там только копии.
     Оригиналы открываются лишь на чтение. sounds пришёл из make.py — это данные, а не доверенный путь:
-    копируется только то, что есть в списке. Возвращает, что не легло, — оно же дописано в записку."""
-    roots, listed, missed = roots or LIBRARY, known() if listed is None else listed, []
+    копируется только то, что есть в списке. plan — план дорожки петли на весь бит (`loop_track`): она собирается
+    из копии, уже лежащей в папке, сырая копия остаётся рядом. Возвращает, что не легло, — оно же дописано в записку."""
+    roots, listed, missed, copied = roots or LIBRARY, known() if listed is None else listed, [], {}
     for folder in (kits, serum):
         assert folder.name == TODAY, f"{folder}: чистится только папка «{TODAY}»"
         folder.mkdir(parents=True, exist_ok=True)
@@ -925,10 +1204,19 @@ def lay(built: Path | None, sounds: dict, kits: Path, serum: Path,
             dst = (serum if key == "Serum" else kits) / f"{label[:1].upper()}{label[1:]} — {src.name}"
             try:
                 shutil.copyfile(src, dst)           # заглушку iCloud чтение скачает — так и надо
+                copied.setdefault(str(part), (dst, name))
             except OSError as e:
                 dst.unlink(missing_ok=True)
                 missed.append(f"{label}: «{name}» — " + ("нет на диске" if isinstance(e, FileNotFoundError)
                                                         else "не прочитался: выгружен в iCloud и не скачался"))
+    for i, part in enumerate(("петля", "петля 2")):
+        if isinstance(plan, dict) and part in copied:
+            track = kits / f"{part.capitalize()} — на весь бит.wav"
+            try:
+                loop_track(copied[part][0], track, loop_bpm(copied[part][1]), plan, second=bool(i))
+            except (wave.Error, EOFError, OSError, ValueError, TypeError, KeyError, MemoryError) as e:
+                track.unlink(missing_ok=True)
+                missed.append(f"{part}: дорожка на весь бит не собралась ({e}) — в папке копия петли: расставь её по тактам")
     note = (built / "о бите.txt").read_text("utf-8") if built and (built / "о бите.txt").exists() else ""
     (kits / "о бите.txt").write_text(note + ("\n\nНе легло в папку:\n" + "\n".join(f"• {m}" for m in missed) if missed else ""),
                                      encoding="utf-8")
@@ -979,7 +1267,9 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
         (tmp / beat / "make.py").write_text(git("show", f"origin/claude/beats-{beat}:content/beats/{beat}/make.py"), "utf-8")
         try:
             _sandboxed(tmp / beat, tmp)
-            missed = lay(tmp / "out" / beat, json.loads((tmp / "out" / f"{beat}.sounds.json").read_text("utf-8")), kits, serum)
+            plan = tmp / "out" / f"{beat}.loop.json"
+            missed = lay(tmp / "out" / beat, json.loads((tmp / "out" / f"{beat}.sounds.json").read_text("utf-8")), kits, serum,
+                         plan=json.loads(plan.read_text("utf-8")) if plan.exists() else None)
             done = "ноты на месте" + (f", не легло звуков: {len(missed)}" if missed else "")
         except (subprocess.SubprocessError, OSError, ValueError) as e:      # не собрался — записка, а не падение
             lay(None, {}, kits, serum)
@@ -988,6 +1278,30 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
             done = "ноты не собрались, в папке записка"
     (kits / ".бит").write_text(mark, "utf-8")
     return f"{beat}: {done}"
+
+
+def loop_card(word: str) -> str:
+    """Что замер знает о петлях с этим словом в имени; петля одна — ещё и чем сменить её на переломе.
+    Автору нот: звука он не слышит, и ноты петли — единственное, по чему пишутся мелодия и 808."""
+    heard = loops()
+
+    def line(name: str) -> str:
+        m = heard[name]
+        return (f"{name} — {loop_bpm(name)} BPM, тактов {m['bars']}, ноты {' '.join(m['notes'])} "
+                f"(scale: {', '.join(str(NOTES.index(x)) for x in m['notes'])}), опоры по тактам {' '.join(m['roots'])}, "
+                f"тоника {m['key']} ({m['sure']:.2f})"
+                + ("" if LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1] else f" — нот не {LOOP_NOTES[0]}–{LOOP_NOTES[1]}: в бит не идёт"))
+
+    fit = sorted(name for name in heard if word.lower() in name.lower())
+    out = [line(name) for name in fit[:40]]
+    if len(fit) == 1:
+        a = fit[0]
+        pairs = sorted(((len(set(heard[a]["notes"]) & set(m["notes"])), name) for name, m in heard.items()
+                        if loop_bpm(name) == loop_bpm(a) and _riff(name) != _riff(a)
+                        and LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1]), reverse=True)
+        out += ["", "Вторая петля на перелом — тот же темп, другой риф; впереди те, у кого больше общих нот:"]
+        out += [f"общих {c}: {line(name)}" for c, name in pairs[:12] if c >= LOOP_COMMON]
+    return "\n".join(out) or "петель с таким словом в замере нет: python3 -m src.noty --loop Gtr"
 
 
 def _pages(text: str, limit: int = 4000) -> list[str]:
@@ -1059,31 +1373,39 @@ def selftest() -> None:
         assert read_mid(tmp / "a.mid") == (len(flat(notes)),) * 2
         (tmp / "beat").mkdir()
         one = min(known())                          # любой звук из списка: имена в нём меняет только Мак владельца
-        (tmp / "beat" / "make.py").write_text(
-            "from src.noty import N, roll, spread, glide\n"
-            "INFO = dict(title='A x B — Тест', bpm=140, key='Fm', scale=[5, 7, 8, 10, 0, 1, 3], bars=2, skeleton='сцена',\n"
-            "            like='x', parts='x', tricks=['x'], tonal=['808'], form='песня', melody='один аккорд', mood='злой',\n"
-            "            twist='ложный вход', color='ржавчина', fx={'808': 'Fruity Fast Dist'},\n"
-            "            mix={'основа': 'Chief Keef', 'чужое': 'кино', 'элемент': 'оркестровый слой'},\n"
-            f"            sounds=dict.fromkeys(('808', 'хэт', 'клэп'), {one!r}))\n"
-            "def compose():\n"
-            "    return {'808': glide(0, 16, 29, 41, at=12, over=4), 'хэт': spread([N(i, 1) for i in range(32)]),\n"
-            "            'клэп': [N(8, 1)] + roll(28, 4, 16)}\n", encoding="utf-8")
+        # Пробный бит: 16 тактов, с девятого — другой: клэп с 8 уходит на 4 и 12, хэт и мелодия — другим рисунком;
+        # такты 8 и 16 пустые. Высоты — доводами: петлям ниже нужны ноты из их замера
+        code = ("from src.noty import N, glide, hits, roll, spread\n"
+                "def compose(low=29, keys=(65, 68, 72, 67), same=False):\n"
+                "    def half(a, b):\n"
+                "        return [n for x in range(16) if x % 8 != 7 for n in hits(x * 16, a if x < 8 or same else b)]\n"
+                "    return {'808': [n for x in (0, 2, 4, 9, 11, 13) for n in glide(x * 16, 16, low, low + 12, at=12, over=4)],\n"
+                "            'хэт': spread(half('x.x.x.x.x.x.x.x.', 'x..x..x.x..x..x.')),\n"
+                "            'клэп': half('........x.......', '....x.......x...') + roll(108, 4, 16),\n"
+                "            'мелодия': [N(x * 16 + p, 2, keys[i]) for x in range(16) if x % 8 != 7\n"
+                "                        for p, i in (((0, 0), (6, 1)) if x < 8 or same else ((2, 2), (10, 3)))]}\n")
+        base = dict(title="A x B — Тест", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=16, skeleton="сцена", like="x",
+                     parts="игра 1–8, перелом 9–16", tricks=["x"], tonal=["808", "мелодия"], form="песня", melody="один аккорд",
+                     mood="злой", twist="ложный вход", color="ржавчина", fx={"808": "Fruity Fast Dist", "мелодия": "без обработки"},
+                     switch={"такт": 9, "переход": "такт тишины, клэп уходит с третьей доли на вторую и четвёртую"},
+                     mix={"основа": "Chief Keef", "чужое": "кино", "элемент": "оркестровый слой"},
+                     sounds=dict.fromkeys(("808", "хэт", "клэп", "мелодия"), one))
+        (tmp / "beat" / "make.py").write_text(f"INFO = {base!r}\n{code}", encoding="utf-8")
         archive = build(tmp / "beat", tmp / "out")
         names = zipfile.ZipFile(archive).namelist()
         assert "beat/fl/02 хэт.fsc" in names and "beat/midi/01 808.mid" in names and "beat/о бите.txt" in names
         note = archive.with_suffix(".txt").read_text("utf-8")
         assert "бит A x B — Тест, 140 Fm" in note and "Цвет: ржавчина" in note and "автор нот не слышал" in note, note
+        assert "Перелом: с такта 9 бит другой — такт тишины" in note and not archive.with_suffix(".loop.json").exists(), note
         assert "основа — Chief Keef; от чужого звука (кино) — оркестровый слой" in note, note
         try:                            # собранный бит против самого себя: та же форма, цвет и смесь — отказ
             build(tmp / "beat", tmp / "out", prev=(tmp / "beat" / "make.py",))
             raise AssertionError("повтор прошлого бита должен браковаться")
         except SystemExit as e:
-            assert all(w in str(e) for w in ("форма «песня»", "цвет «ржавчина»", "смесь «Chief Keef + кино»")) \
-                and "в том же порядке" not in str(e), e                                           # parts='x' — частей не названо
+            assert all(w in str(e) for w in ("форма «песня»", "цвет «ржавчина»", "смесь «Chief Keef + кино»", "в том же порядке")), e
         (tmp / "20261005-a-b-140-fm").mkdir()               # обычный бит с 05.10.2026 без петли — отказ
         (tmp / "20261005-a-b-140-fm" / "make.py").write_text(
-            (tmp / "beat" / "make.py").read_text("utf-8").replace("mood='злой'", "mood='обычный'"), encoding="utf-8")
+            (tmp / "beat" / "make.py").read_text("utf-8").replace("'mood': 'злой'", "'mood': 'обычный'"), encoding="utf-8")
         try:
             build(tmp / "20261005-a-b-140-fm", tmp / "out")
             raise AssertionError("обычный бит без петли должен браковаться")
@@ -1105,10 +1427,57 @@ def selftest() -> None:
         assert (kits / "02 хэт.fsc").exists() and not (kits / "старое.wav").exists() and (lib / "k" / "Kick.wav").read_bytes() == b"k"
         assert [m.split(":")[0] for m in missed] == ["хэт", "клэп", "перк"] and "нет на диске" in missed[0] \
             and "не прочитался" in missed[1] and "нет в списке" in missed[2], missed
-        assert "Не легло в папку" in (kits / "о бите.txt").read_text("utf-8") and len(list(kits.iterdir())) == 5, list(kits.iterdir())
+        assert "Не легло в папку" in (kits / "о бите.txt").read_text("utf-8") and len(list(kits.iterdir())) == 6, list(kits.iterdir())
         assert lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed) == [], "бит без поля звуков"
-        assert sorted(f.suffix for f in kits.iterdir()) == [".fsc", ".fsc", ".fsc", ".txt"] and not list(serum.iterdir())
-        assert json.loads((tmp / "out" / "beat.sounds.json").read_text("utf-8")) == dict.fromkeys(("808", "хэт", "клэп"), one)
+        assert sorted(f.suffix for f in kits.iterdir()) == [".fsc"] * 4 + [".txt"] and not list(serum.iterdir())
+        assert json.loads((tmp / "out" / "beat.sounds.json").read_text("utf-8")) == base["sounds"]
+        demo = runpy.run_path(str(tmp / "beat" / "make.py"))["compose"]
+        # Дорожка петли на весь бит. Петля — два такта на 120 и ещё десять кадров сверху: отсчёт помнит своё место,
+        # так что видно, что повторы стоят по сетке тактов, а не встык по длине файла. 8000 кадров в секунду — такт 16 000
+        def wav(path, frames, width=2, ch=1):
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(ch), w.setsampwidth(width), w.setframerate(8000)
+                w.writeframes(b"".join((i + 1).to_bytes(width, "little") * ch for i in range(frames)))
+
+        def read(path):
+            with wave.open(str(path), "rb") as w:
+                assert (w.getframerate(), w.getnframes()) == (8000, 128000), "длина дорожки — длина бита"
+                return [int.from_bytes(w.readframes(1)[:w.getsampwidth()], "little", signed=True) for _ in range(w.getnframes())], w.getparams()
+
+        wav(tmp / "loop.wav", 32010)
+        plan = {"bpm": 120, "bars": 8, "rests": [(1, 2), (3.5, 4)], "switch": 5}
+        loop_track(tmp / "loop.wav", tmp / "a.wav", 120, plan)
+        a, _ = read(tmp / "a.wav")
+        assert not any(a[:15960]) and a[16000] == 16001, "пауза с первого такта — тишина без хвоста, после неё петля со своего места"
+        assert a[32000] == 1 and a[39999] == 8000, "второй повтор — с третьего такта, а не через 32 010 кадров"
+        assert a[40000] == 8001 and 0 < a[40020] < 8021 and not any(a[40040:47960]) and 0 < a[47990] < 15991 and a[48000] == 16001, \
+            "полтакта тишины: затухание и возврат по 5 мс внутри паузы"
+        assert a[63999] == 32000 and 0 < a[64020] < 21 and not any(a[64040:]), "после перелома первая петля молчит"
+        loop_track(tmp / "loop.wav", tmp / "b.wav", 120, plan, second=True)
+        b, _ = read(tmp / "b.wav")
+        assert not any(b[:64000]) and b[64000] == 1 and b[96000] == 1 and b[127999] == 32000, "вторая петля — с перелома, с её начала"
+        loop_track(tmp / "loop.wav", tmp / "c.wav", 120, {"bpm": 240, "bars": 16, "rests": []})
+        c, _ = read(tmp / "c.wav")
+        assert c[0] == 1 and c[32000] == 1 and c[127999] == 32000, "бит вдвое быстрее петли: петля идёт своим темпом"
+        raw = bytes(range(256)) * 3
+        assert _raw(_pcm(raw, 3), 3) == raw and _raw(_pcm(raw, 2), 2) == raw and _pcm(b"\xff\xff\xff", 3)[0] == -256, "24 бита — без потерь"
+        for bad in ({"bpm": 122, "bars": 8}, {"bpm": 120, "bars": 4000}, {"bars": 8}, {"bpm": 120, "bars": 8, "rests": [1]}):
+            try:
+                loop_track(tmp / "loop.wav", tmp / "d.wav", 120, bad)
+                raise AssertionError(f"негодный план должен отказать: {bad}")
+            except (ValueError, TypeError, KeyError):
+                pass
+        # В папке «Сегодня»: сырая копия петли остаётся, рядом дорожка на весь бит в формате петли (24 бита, стерео);
+        # петля, которая не читается, — только копия и строка в записке
+        (lib / "k" / "Acoustic Gtr - AC_Test120A-01.wav").unlink(missing_ok=True)
+        wav(lib / "k" / "Acoustic Gtr - AC_Test120A-01.wav", 32000, width=3, ch=2)
+        (lib / "k" / "Acoustic Gtr - AC_Test120B-01.wav").write_bytes(b"x")                 # не звук
+        both = {"KITS/k/Acoustic Gtr - AC_Test120A-01.wav", "KITS/k/Acoustic Gtr - AC_Test120B-01.wav"}
+        missed = lay(None, dict(zip(("петля", "петля 2"), sorted(both))), kits, serum, {"KITS": lib, "Serum": pres}, both, plan)
+        d, params = read(kits / "Петля — на весь бит.wav")
+        assert (params.nchannels, params.sampwidth) == (2, 3) and d[16000] == 16001 and not any(d[64040:]), params
+        assert (kits / "Петля — Acoustic Gtr - AC_Test120A-01.wav").exists() and (kits / "Петля 2 — Acoustic Gtr - AC_Test120B-01.wav").exists()
+        assert not (kits / "Петля 2 — на весь бит.wav").exists() and len(missed) == 1 and "дорожка на весь бит не собралась" in missed[0], missed
     tune = [N(b * 16 + p, 2, k) for b in range(4) for p, k in ((0, 67), (6, 63), (8, 65), (12, 67))]
     song = dict(title="A — Б", form="песня", melody="линия", mood="обычный", twist="ложный вход", sounds={"мелодия": "x"},
                 parts="вступление 1–4, припев 5–12, конец 13–16", color="лёд")
@@ -1204,32 +1573,98 @@ def selftest() -> None:
     assert "основа — один референс своего цвета" in _mix(one | {"color": "дым"}, False)[0]
     assert "не из списка звуков" in _mix(one | {"mix": one["mix"] | {"чужое": "Boulevard Depo"}}, False)[0]
     assert "чужое — звук другого цвета" in _mix(one | {"mix": one["mix"] | {"чужое": "Black Kray"}}, False)[0]
-    # Музыка петлёй: без партий музыки проходит; чужая папка, чужой темп, злой бит и набор партий Serum — брак
+    # Музыка петлёй: петля замерена по звуку, темп бита — ровно её или вдвое, поверх мелодия нотами петли, паузы —
+    # полем rests, после перелома — вторая петля другого рифа; чужая папка, чужой темп, ноты мимо петли, злой бит — брак
     assert loop_bpm("Acoustic Gtr - AC_12Str120A-01.wav") == 120 and loop_bpm("Country Crunk - K01AcouMix84C-02.wav") == 84
     assert not loop_bpm("Western Gtr - WW_AcouG_Chord-Amin.wav") and not loop_bpm("Country Crunk - K02Beat110-01.wav") \
         and not loop_bpm("Lex Luger - Strings140.wav"), "без темпа, барабаны и чужой набор — не петли"
-    loop = min((n for n in known() if n.startswith(LOOPS) and loop_bpm(n) == 85), default="")
-    assert loop, "в data/beat_sounds.json нет петель: перепиши список на Маке — noty --sounds"
-    drums = {"808": glide(0, 16, 29, 41, at=12, over=4), "хэт": spread([N(i, 1) for i in range(32)]), "клэп": [N(8, 1)] + roll(28, 4, 16)}
-    looped = dict(title="t", bpm=170, key="Am", scale=[9, 11, 0, 2, 4, 5, 7], bars=2, skeleton="сцена", like="x", parts="x",
-                  tricks=["x"], tonal=["808"], form="песня", mood="обычный", twist="ложный вход", color="рифф", loop=loop,
-                  mix={"основа": "Lil Peep", "чужое": "кино", "элемент": "обработка"}, sounds=dict.fromkeys(drums, loop),
-                  fx={"808": "Fruity Fast Dist", "петля": "Gross Beat → Fruity Love Philter"})
-    assert problems(looped, drums) == [] and problems(looped | {"bpm": 88}, drums) == [], problems(looped, drums)
-    assert "Музыка — петлёй: темп в её имени — 85" in about(looped) and f"• петля — {loop}" in about(looped)
-    assert "не сходится с темпом петли 85" in "\n".join(problems(looped | {"bpm": 140}, drums))
+    heard = loops()
+    today = heard.get(f"{LOOPS}/Acoustic Gtr - AC_SixStr120B-01.wav", {})
+    assert today.get("bars") == 4 and len(today["roots"]) == 4 and {"A", "B", "F#", "G#"} <= set(today["notes"]), \
+        "в data/beat_sounds.json нет замера петель: на Маке — zamer --loops"
+    assert not any("RevRev85" in n for n in heard), "петля в два с половиной такта в замер не идёт"
+    fit = sorted(n for n, m in heard.items() if n in known() and loop_bpm(n) == 85 and LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1])
+    loop, two = next((a, b) for a in fit for b in fit if _riff(a) != _riff(b)
+                     and len(set(heard[a]["notes"]) & set(heard[b]["notes"])) >= LOOP_COMMON
+                     and (heard[a]["notes"], heard[a]["roots"]) != (heard[b]["notes"], heard[b]["roots"]))
+    pcs = [NOTES.index(x) for x in heard[loop]["notes"] if x in heard[two]["notes"]]            # общие ноты двух петель
+    off = next(k for k in range(12) if NOTES[k] not in heard[loop]["notes"] + heard[two]["notes"])
+    keys = (60 + pcs[0], 60 + pcs[1], 60 + pcs[2], 60 + pcs[1])
+    drums = demo(24 + pcs[0], keys)
+    looped = base | dict(bpm=170, scale=sorted({NOTES.index(x) for x in heard[loop]["notes"] + heard[two]["notes"]}),
+                          mood="обычный", color="рифф", melody="линия", loop=loop, rests=[(8, 9), (12.5, 13)],
+                          switch={"такт": 9, "петля": two, "переход": "такт тишины, вторая петля входит с первой доли"},
+                          mix={"основа": "Lil Peep", "чужое": "кино", "элемент": "обработка"}, sounds=dict.fromkeys(drums, loop),
+                          fx={"808": "Fruity Fast Dist", "мелодия": "без обработки", "петля": "Gross Beat", "петля 2": "Gross Beat"})
+    assert problems(looped, drums) == [] and problems(looped | {"bpm": 85}, drums) == [], problems(looped, drums)
+    note = about(looped)
+    assert "Петлю не растягивай: бит ровно в её темпе вдвое (85 → 170)" in note and f"• петля — {loop}" in note \
+        and f"• петля 2 — {two}" in note and "Петля молчит: такт 8, с 12.5 до 13" in note and "Перелом: с такта 9" in note, note
+    assert f"Петля: звучат ноты {' '.join(heard[loop]['notes'])}; опора по её тактам — {' '.join(heard[loop]['roots'])}" in note \
+        and "Вторая петля: звучат ноты" in note and "на слух не сверена" not in note, note
+    assert _sounds(looped)["петля 2"] == two and "вторая половина" not in _when([(1, 5)]) and _when([(1, 5), (16, 17)]) == "такты 1–4, такт 16"
+    for bpm in (140, 172, 84):
+        assert "петлю не растягиваем" in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 85"
     for alien in ("KITS/01 - ASAP Rocky Kit/Loops/Lex Luger - Strings140.wav", loop.replace(LOOPS, "KITS/09 - Scene 2026 Kit")):
         assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": alien}, drums)), alien
-    full = {**drums, "аккорды": [N(0, 8, 57)], "мелодия": [N(8, 2, 60)]}
-    said = "\n".join(problems(looped | {"tonal": ["808", "аккорды", "мелодия"], "mood": "злой", "fx": {"808": "x"},
-                                        "sounds": dict.fromkeys(full, loop)}, full))
-    assert all(w in said for w in ("не больше одной", "только обычный бит", "нет строки «петля»")), said
-    assert "петля «" in "\n".join(echoes(looped, drums, looped, drums)), "та же петля, что в прошлом бите, — повтор"
+    unheard = next(n for n in sorted(known()) if n.startswith(LOOPS) and loop_bpm(n) and n not in heard)
+    assert "не замерена по звуку" in "\n".join(problems(looped | {"loop": unheard}, drums)), unheard
+    noisy = next((n for n, m in sorted(heard.items()) if len(m["notes"]) > LOOP_NOTES[1]), "")
+    assert "мелодию по ней не написать" in "\n".join(problems(looped | {"loop": noisy}, drums)), "петля, где звучат все ноты"
+    said = "\n".join(problems(looped | {"tonal": ["808"]}, drums))
+    assert "поверх петли нужна мелодия" in said and "сейчас: ни одной" in said, said
+    said = "\n".join(problems(looped, demo(24 + off, keys)))
+    assert f"808: 100% времени на нотах, которых в петле нет ({NOTES[off]})" in said and "808, после перелома: 100%" in said, said
+    said = "\n".join(problems(looped, demo(24 + pcs[0], keys[:2] + (60 + off, 60 + off))))
+    assert "мелодия, после перелома: 100% времени" in said and "мелодия: " not in said, said
+    passing = {**drums, "мелодия": drums["мелодия"] + [N(x * 16 + 9, .5, 60 + off) for x in range(3)]}
+    assert problems(looped, passing) == [], problems(looped, passing)      # проходящая нота мимо петли — не брак
+    said = "\n".join(problems(looped | {"mood": "злой", "fx": {"808": "x", "мелодия": "x", "петля": "x"}, "rests": [(0, 1)]}, drums))
+    assert all(w in said for w in ("только обычный бит", "нет строки «петля 2»", "rests: где петля молчит")), said
+    assert "rests:" in "\n".join(problems({k: v for k, v in looped.items() if k != "rests"}, drums)), "паузы петли обязательны"
+    assert f"петля «{loop}»" in "\n".join(echoes(looped, drums, looped, drums)), "та же петля, что в прошлом бите, — повтор"
+    assert f"петля «{two}»" in "\n".join(echoes(looped, drums, looped | {"loop": two, "switch": {}}, drums)), "и вторая петля тоже"
+    with tempfile.TemporaryDirectory() as tmp:          # сборка бита петлёй отдаёт Маку план дорожки и обе петли
+        tmp = Path(tmp)
+        (tmp / "petlya").mkdir()
+        (tmp / "petlya" / "make.py").write_text(
+            f"INFO = {looped!r}\n" + code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}"), encoding="utf-8")
+        archive = build(tmp / "petlya", tmp / "out")
+        assert json.loads(archive.with_suffix(".loop.json").read_text("utf-8")) == {"bpm": 170, "bars": 16, "rests": [[8, 9], [12.5, 13]],
+                                                                                    "switch": 9}
+        assert json.loads(archive.with_suffix(".sounds.json").read_text("utf-8"))["петля 2"] == two
+    # Перелом: обязателен, стоит на стыке частей во второй половине, после него другие каркас, хэт и музыка,
+    # а партии 808 и хэта те же. Бит без перелома бракуется понятной фразой
+    assert "нет поля switch" in "\n".join(problems({k: v for k, v in base.items() if k != "switch"}, demo()))
+    assert problems(base, demo()) == [], problems(base, demo())
+    said = "\n".join(problems(base, demo(same=True)))
+    assert all(w in said for w in ("бочка и клэп — 100% тактов после перелома", "хэт — 100% тактов", "музыка — 100% тактов")), said
+    for sw, why in (({"такт": 9}, "перелом — словарь"), ({"такт": 5, "переход": "x"}, "на стыке частей из parts между 50% и 85% бита: подходят такты 9"),
+                    ({"такт": 16, "переход": "x"}, "подходят такты 9"), ({"такт": "9", "переход": "x"}, "перелом — словарь")):
+        assert why in "\n".join(problems(base | {"switch": sw}, demo())), (sw, why)
+    assert "ни одна часть не начинается" in "\n".join(problems(base | {"parts": "игра 1–16"}, demo()))
+    gone = {k: [n for n in v if n.pos < 128] if k in ("808", "мелодия") else v for k, v in demo().items()}
+    said = "\n".join(problems(base, gone))
+    assert "808 играет только по одну сторону" in said and "музыка играет только по одну сторону" in said, said
+    swap = {**demo(), "хэт": [n for n in demo()["хэт"] if n.pos < 128], "хэт 2": [n for n in demo()["хэт"] if n.pos >= 128]}
+    assert "хэт играет только по одну сторону" in "\n".join(problems(base | {"sounds": dict.fromkeys(swap, min(known()))}, swap)), \
+        "после перелома другой звук хэта — общего не осталось"
+    sibling = next(n for n in sorted(heard) if _riff(n) == _riff(loop) and n != loop)
+    assert "тот же риф" in "\n".join(problems(looped | {"switch": looped["switch"] | {"петля": sibling}}, drums)), sibling
+    assert "после перелома играет вторая петля" in "\n".join(problems(looped | {"switch": {"такт": 9, "переход": "x"}}, drums))
+    mixed = f"{LOOPS}/Acoustic Gtr - AC_GuitarMix120B-04.wav"               # тот же риф, сведённый с другими гитарами
+    assert "те же ноты и те же опоры" in "\n".join(problems(looped | {"bpm": 120, "loop": mixed.replace("GuitarMix120B-04", "SixStr120B-01"),
+                                                                     "switch": looped["switch"] | {"петля": mixed}}, drums))
+    assert "смена бита" not in TWISTS and "не из списка" in "\n".join(problems(base | {"twist": "смена бита"}, demo())), \
+        "смена бита стала переломом, а не ходом на выбор"
+    card = loop_card("SixStr120B-01")
+    assert "тактов 4" in card and "опоры по тактам" in card and "Вторая петля на перелом" in card and "общих" in card, card
     assert _pages("а\n" * 3000) == ["а\n" * 2000, "а\n" * 1000] and _pages("коротко") == ["коротко"], "длинная записка — частями"
     assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
-          "сверка с прошлым битом, неожиданный ход, музыка петлёй, звуки по списку и папка «Сегодня», 808 — опора, "
-          "а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, свои наборы владельца — в порядке")
+          "сверка с прошлым битом, неожиданный ход, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), "
+          "перелом (другие каркас, хэт и музыка, вторая петля), дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
+          "808 — опора, а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, свои наборы владельца — в порядке")
 
 
 def main() -> None:
@@ -1242,6 +1677,7 @@ def main() -> None:
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
     p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
     p.add_argument("--gather", action="store_true", help="собрать папку «00 - Сегодня»: ноты свежего бита и его звуки (только Мак)")
+    p.add_argument("--loop", metavar="СЛОВО", help="замер петель с этим словом в имени: ноты, опоры по тактам, вторая петля на перелом")
     a = p.parse_args()
     if a.selftest:
         selftest()
@@ -1261,6 +1697,8 @@ def main() -> None:
         print(f"{len(names)} имён → {config.BEAT_SOUNDS}")
     elif a.gather:
         print(gather())
+    elif a.loop:
+        print(loop_card(a.loop))
     else:
         p.print_help()
 

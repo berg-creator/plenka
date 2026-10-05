@@ -31,6 +31,16 @@
 раза и на 7%. Отвергнута сумма приростов спектра по частотам как онсет: хвост одного хэта она
 читала дробью, а синус 808 в коротком окне — нотами.
 
+Петли (`--loops`, владелец 05.10.2026: мелодии поверх петли «катастрофически не хватает»). Чтобы писать ноты
+поверх гитарной петли, надо знать, какие ноты в ней звучат, а имя файла этого не говорит: буква после темпа —
+в лучшем случае опорная нота, у `AC_SixStr120C-01` и `-02` под одной буквой разные наборы нот. Поэтому каждая
+разрешённая петля (`noty.loop_bpm`) меряется по звуку — длина в тактах, звучащие ноты, оценка тоники, строй,
+опора каждого такта — и ложится в `data/beat_sounds.json` полем `loops`; сборка бита берёт ноты оттуда.
+В список идут петли ровно в 1, 2, 4 или 8 тактов: 2,5 такта (`AC_RevRev85`) на сетку не ложатся, а 3, 5 и 6 —
+это 2 или 4 такта и хвост ревера, который пришлось бы накладывать на следующий повтор.
+Отвергнуто: `chroma_cqt` как есть — три полосы CQT на полутон складываются окном, и громкая нота «звучит»
+в обоих соседних полутонах; берётся одна центральная полоса.
+
 Тяжёлое (demucs, librosa) есть только на Маке, как у src/quiz_ai.py, — запуск оттуда же:
 
     ~/.cache/whisper-venv/bin/python -m src.zamer --selftest             замер на синтетическом бите с известным рисунком
@@ -38,6 +48,7 @@
     ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ --bpm 142          темп известен (дрилл, двухтактный рисунок)
     ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ --color            ещё и цвет музыки: яркость, регистр, ноты, аккорды, шум
     ~/.cache/whisper-venv/bin/python -m src.zamer --table data/beats_zamer.json   сводка: медианы по группам
+    ~/.cache/whisper-venv/bin/python -m src.zamer --loops                переписать замер петель в data/beat_sounds.json (только Мак)
 
 Чужой звук — только для замера: стемы пишутся во временную папку и удаляются сразу.
 """
@@ -45,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -57,6 +69,14 @@ SR, HOP = 44100, 128                       # кадр 2,9 мс: 1/64 на 160 BP
 WINDOW = 90                                # секунд под demucs: дольше — диск и время, а рисунок тот же
 FRAME = HOP / SR
 GRIDS = {2: "1/8", 1: "1/16", .5: "1/32", .25: "1/64", 4 / 3: "1/8T", 2 / 3: "1/16T", 1 / 3: "1/32T"}
+# Нота в петле «звучит», если её энергия — от 8% энергии самой громкой. Снято с 487 петель набора 01 (05.10.2026):
+# при 8% у петли чаще всего 5–7 нот (медиана 6), при 3% — у каждой шестой все 12, при 20% — медиана 4
+LOOP_NOTE = .08
+LOOP_BARS = (1, 2, 4, 8)
+# Профили Крумхансла — Кесслера: насколько каждая ступень «своя» в мажоре и в миноре, от тоники
+KEYS = {"мажор": (6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88),
+        "минор": (6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)}
+DATALESS = 0x40000000                      # st_flags заглушки iCloud (SF_DATALESS): чтение повисло бы на скачивании
 
 
 def _run(*cmd) -> None:
@@ -371,6 +391,66 @@ def color(other: np.ndarray, bpm: float | None, bar0: float = 0.0) -> dict:
     return out
 
 
+def loop(y: np.ndarray, sr: int, bpm: float) -> dict | None:
+    """Замер петли: такты, веса двенадцати нот, звучащие ноты, тоника и лад, строй, опора каждого такта.
+    None — петля не в 1, 2, 4 или 8 тактов по темпу из имени: на сетку бита такая не ложится.
+
+    ponytail: наивная хрома, и читать её надо с этим. Обертон громкой ноты считается нотой: квинта (3-я гармоника),
+    большая терция (5-я) и малая септима (7-я) — у ля «звучат» ми, до-диез и соль, даже когда их никто не играл.
+    Опора такта — самый громкий класс высот в C2–B3, а не нижняя нота аккорда: мелодия в этом регистре её перевесит.
+    Тоника — ближайший из 24 профилей мажора и минора: у петли на одном аккорде это аккорд, а не тональность,
+    уверенность — отрыв от второго по счёту. Строй — оценка librosa, у петли с шумом или перебором гуляет на десятки
+    центов. Станет мало — мультипитч (basic-pitch) вместо хромы и f0 баса (pyin по нижней полосе) вместо опоры."""
+    import librosa
+    from .noty import NOTES
+    bars = len(y) / sr * bpm / 240
+    if round(bars) not in LOOP_BARS or abs(bars - round(bars)) > .02:
+        return None
+    bars = round(bars)
+    tune = float(librosa.estimate_tuning(y=y, sr=sr))
+    # 36 полос на октаву от C1, семь октав; из трёх полос полутона — только центральная
+    c = np.abs(librosa.cqt(y, sr=sr, fmin=librosa.note_to_hz("C1"), n_bins=36 * 7, bins_per_octave=36,
+                           tuning=tune, hop_length=512))[0::3].reshape(7, 12, -1) ** 2
+    weights = c.sum((0, 2)) / max(c.sum((0, 2)).max(), 1e-12)
+    fit = sorted(((float(np.corrcoef(np.sqrt(weights), np.roll(profile, tonic))[0, 1]), tonic, mode)
+                  for mode, profile in KEYS.items() for tonic in range(12)), reverse=True)
+    edges = np.linspace(0, c.shape[2], bars + 1).astype(int)
+    return {"bars": bars, "weights": [round(float(w), 2) for w in weights],
+            "notes": [NOTES[i] for i in range(12) if weights[i] >= LOOP_NOTE],
+            "tonic": NOTES[fit[0][1]], "mode": fit[0][2], "sure": round(fit[0][0] - fit[1][0], 2), "tune": round(tune * 100),
+            "roots": [NOTES[int(c[1:3, :, a:b].sum((0, 2)).argmax())] for a, b in zip(edges, edges[1:])]}
+
+
+def loops() -> str:
+    """Замер всех разрешённых петель библиотеки владельца → поле loops в data/beat_sounds.json, строкой на петлю,
+    как лежит промер Serum: вложенные списки при записи с отступом дали бы тридцать строк на петлю.
+    Заглушку iCloud не читаем — чтение повисает на скачивании; её прошлый замер остаётся."""
+    import librosa
+    from . import config, noty
+    data = json.loads(config.BEAT_SOUNDS.read_text("utf-8"))
+    rows, old, skipped = {}, data.get("loops", {}), {"заглушка iCloud": 0, "не 1, 2, 4 или 8 тактов": 0}
+    for name in sorted(n for n in data["sounds"] if n.startswith(noty.LOOPS + "/") and noty.loop_bpm(n)):
+        path = noty.LIBRARY["KITS"] / name.partition("/")[2]
+        if not path.exists() or os.stat(path).st_flags & DATALESS:
+            skipped["заглушка iCloud"] += 1
+            rows |= {name: old[name]} if name in old else {}
+            continue
+        y, sr = librosa.load(path, sr=None)
+        m = loop(y, sr, noty.loop_bpm(name))
+        if not m:
+            skipped["не 1, 2, 4 или 8 тактов"] += 1
+            continue
+        rows[name] = " | ".join((str(m["bars"]), " ".join(m["notes"]), f"{m['tonic']} {m['mode']} {m['sure']:.2f}", f"{m['tune']:+d}",
+                                 " ".join(m["roots"]), " ".join(str(round(w * 100)) for w in m["weights"])))
+    about = ("замер звука петли (zamer --loops), поля через « | »: такты по темпу из имени | звучащие ноты (энергия от "
+             f"{LOOP_NOTE:.0%} самой громкой) | тоника, лад и уверенность (отрыв от второго по счёту профиля) | строй, центы | "
+             "опора каждого такта петли (громчайшая нота в C2–B3) | веса нот от C до B, самая громкая — 100. "
+             "Обертоны громкой ноты считаются нотами, тоника и строй — оценка")
+    config.BEAT_SOUNDS.write_text(json.dumps(data | {"loops_about": about, "loops": rows}, ensure_ascii=False, indent=1) + "\n",
+                                  encoding="utf-8")
+    return f"петель замерено: {len(rows)}; мимо — " + ", ".join(f"{k}: {v}" for k, v in skipped.items())
+
+
 def sections(full: np.ndarray, sr: int, bpm: float, bar0: float) -> dict:
     """Части по всему треку: где низ (бочка и 808) играет, а где выключен. Сетка — по полтакта."""
     half = 120 / bpm
@@ -539,7 +619,19 @@ def selftest() -> None:
     assert .5 <= a["col_notes_bar"] <= 2 and 6 <= b["col_notes_bar"] <= 10, (a, b)
     assert a["col_chords_8"] == 0 and b["col_chords_8"] >= 7, (a, b)
     assert b["col_flat"] > 10 * a["col_flat"] and b["col_air"] > 10 * a["col_air"], (a, b)
-    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, части и цвет музыки на синтетике — в порядке")
+    # Петля из синусов известных нот: два такта на 120 — ля минор (A2, C4, E4) и соль мажор (G2, B3, D4)
+    tt = np.arange(2 * SR) / SR
+
+    def chord(*hz):
+        return sum(np.sin(2 * np.pi * f * tt) for f in hz) * np.minimum(1, tt / .01) * np.minimum(1, tt[::-1] / .01)
+
+    two = np.concatenate([chord(110, 261.63, 329.63), chord(98, 246.94, 293.66)])
+    m = loop(two, SR, 120)
+    assert m["bars"] == 2 and m["notes"] == ["C", "D", "E", "G", "A", "B"] and m["roots"] == ["A", "G"], m
+    assert abs(m["tune"]) <= 10 and len(m["weights"]) == 12 and max(m["weights"]) == 1, m      # строй чистых синусов — до −6: оценка
+    assert loop(two[:int(2.5 * SR)], SR, 120) is None and loop(np.tile(two, 3)[:10 * SR], SR, 120) is None, \
+        "такт с четвертью и пять тактов — не петля"
+    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, части, цвет музыки и ноты петли на синтетике — в порядке")
 
 
 def main() -> None:
@@ -551,12 +643,15 @@ def main() -> None:
     p.add_argument("--out", type=Path, help="куда дописать замеры (JSON-список)")
     p.add_argument("--table", type=Path, metavar="JSON", help="сводка по файлу замеров")
     p.add_argument("--color", action="store_true", help="ещё и цвет музыки: яркость, регистр, плотность нот, смены аккорда, шум, верха")
+    p.add_argument("--loops", action="store_true", help="замерить разрешённые петли библиотеки в data/beat_sounds.json (только Мак)")
     p.add_argument("--selftest", action="store_true", help="проверить замер на синтетическом бите, без demucs")
     a = p.parse_args()
     if a.selftest:
         return selftest()
     if a.table:
         return print(table(json.loads(a.table.read_text("utf-8"))))
+    if a.loops:
+        return print(loops())
     for path in a.files:
         row = dict(group=a.group, **run(path, a.bpm, a.start, a.color))
         print(json.dumps(row, ensure_ascii=False))
