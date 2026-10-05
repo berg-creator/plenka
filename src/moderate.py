@@ -348,8 +348,8 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
     for update in sorted(updates, key=lambda update: "pre_checkout_query" not in update):
         last_id = max(last_id, update.get("update_id", 0) + 1)
 
-        # Оплата звёздами (src/skleyka.py): товар — только треки СВЕДЕНИЯ сверх лимита, проверять перед
-        # списанием нечего, поэтому «да» сразу.
+        # Оплата звёздами (src/skleyka.py): треки СВЕДЕНИЯ сверх лимита и задаток за ручное сведение —
+        # проверять перед списанием нечего (задаток возвращается кнопкой владельца), поэтому «да» сразу.
         checkout = update.get("pre_checkout_query")
         if checkout:
             print(f"  оплата звёздами: {checkout.get('invoice_payload')}")
