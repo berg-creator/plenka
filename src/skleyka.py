@@ -657,33 +657,42 @@ def grid(beat: Path) -> tuple[float, float]:
     Меряется минута с начала места, где качает низ (reels.beat_start). Темп — в пределах
     60–120 ударов в минуту: быстрый бит считается вдвое медленнее, и каждая доля
     сетки остаётся сильной. Темп — автокорреляция ударов на долю и на две, три,
-    четыре доли вперёд, по всей полосе и по низу, где бочка и 808, одно на другое:
-    мягкий бит Coruscate по низу не читается вовсе (низ равен на всех темпах,
-    и решает вся полоса), а где бочка держит пульс, решает она. Одна автокорреляция
-    по низу с шагом 10 мс дала Coruscate 82,6 вместо 80 — к концу трека эхо ушло бы
-    с доли, — поэтому темп и первая доля уточняются гребёнкой с шагом 0,02 удара
-    в минуту. Выбирать гребёнкой и сам темп нельзя: на медленной сетке лежат только
-    самые громкие удары, и у M.E.R.C. Music она выбрала 80 вместо 107.
+    четыре доли вперёд, по всей полосе, по низу, где бочка и 808, и по верху (от 150 Гц
+    до 2 кГц: уровень меряется на 4 кГц, хэтов в нём нет), одно на другое: мягкий бит
+    Coruscate по низу не читается вовсе (низ равен на всех темпах, и решают остальные),
+    а где бочка держит пульс, решает она. Верх в счёте с 06.10.2026: 808 играет и свой
+    рисунок мимо доли, и на бите ручного заказа, где кроме него почти ничего нет, вся
+    полоса с низом выбрали 64,3 вместо 104,5 — броски и дилей ушли из такта. Убрать низ
+    нельзя: по одной всей полосе столько же битов портится, сколько чинится.
+    Одна автокорреляция по низу с шагом 10 мс дала Coruscate 82,6 вместо 80 — к концу
+    трека эхо ушло бы с доли, — поэтому темп и первая доля уточняются гребёнкой с шагом
+    0,01 удара в минуту, и по всему биту, а не по минуте: сетка тянется от сильной доли
+    на весь трек, а автокорреляция ошибается на 0,3–0,4 удара (у того же бита 104,8 —
+    за сто секунд это две шестнадцатых). Шире ±0,4 искать нельзя: на бите в полминуты
+    гребёнка уходит за шумом. Выбирать гребёнкой и сам темп нельзя: на медленной сетке
+    лежат только самые громкие удары, и у M.E.R.C. Music она выбрала 80 вместо 107.
     Первая доля — сильная доля такта: из четырёх фаз сетки та, где сильнее бьёт
     низ (бочка), и такты — через каждые четыре доли от неё.
     """
     offset = reels.beat_start(beat)
     cut = f"atrim=start={offset:.2f}:duration=60,"
-    full, low = _rise(beat, cut), _rise(beat, cut + "lowpass=f=120,lowpass=f=120,")
+    full, low, high = (_rise(beat, cut + band) for band in ("", "lowpass=f=120,lowpass=f=120,", "highpass=f=150,highpass=f=150,"))
 
     def score(rise: list[float]) -> list[float]:
         acf = [sum(a * b for a, b in zip(rise, rise[k:])) for k in range(ENV_RATE * 4 + 2)]
         return [sum(acf[int(m * p)] + (acf[int(m * p) + 1] - acf[int(m * p)]) * (m * p % 1) for m in range(1, 5))
                 for p in (60 * ENV_RATE / bpm for bpm in BPM)]
 
-    both = [f * lo for f, lo in zip(score(full), score(low))]
-    bpm = BPM[max(range(len(BPM)), key=both.__getitem__)]
+    every = [f * lo * hi for f, lo, hi in zip(score(full), score(low), score(high))]
+    bpm = BPM[max(range(len(BPM)), key=every.__getitem__)]
+    whole = _rise(beat, "")
 
     def comb(period: float) -> tuple[float, float, int]:
-        return max((statistics.fmean(full[round(s + k * period)] for k in range(int((len(full) - 1 - s) / period) + 1)),
+        return max((statistics.fmean(whole[round(s + k * period)] for k in range(int((len(whole) - 1 - s) / period) + 1)),
                     period, s) for s in range(int(period)))
 
-    _, period, start = max(comb(60 * ENV_RATE / (bpm + d / 50)) for d in range(-10, 11))
+    _, period, start = max(comb(60 * ENV_RATE / (bpm + d / 100)) for d in range(-40, 41))
+    start = (start - offset * ENV_RATE) % period  # гребёнка считала от начала файла, низ ниже — от начала минуты
 
     def kick(phase: int) -> float:
         return statistics.fmean(low[round(start + (4 * k + phase) * period)]
@@ -5968,6 +5977,13 @@ def _selftest() -> None:
 
         for bpm, want in ((140, 70), (100, 100)):
             assert abs(60 / grid(clicks(bpm))[0] - want) < 0.3, (bpm, 60 / grid(clicks(bpm))[0])
+        # Низ играет свой рисунок мимо доли (цикл в три восьмых), верх редкий — хлопок раз в такт:
+        # вся полоса с низом слышали здесь 66,7, а не 100; долю возвращает верх (бит заказа 06.10.2026).
+        offbeat = tmp / "offbeat.wav"
+        _ffmpeg("-f", "lavfi", "-i", "aevalsrc='" + "+".join(
+            f"0.6*sin(2*PI*55*t)*(1-exp(-100*mod(t+{shift},0.9)))*exp(-6*mod(t+{shift},0.9))" for shift in (0, 0.3))
+            + "+0.2*sin(2*PI*1000*t)*exp(-40*mod(t+1.2,2.4))+0.05*sin(2*PI*440*t)':d=20", offbeat)
+        assert abs(60 / grid(offbeat)[0] - 100) < 0.3, 60 / grid(offbeat)[0]
         assert abs(_rate(60 / 70, 60 / 73.5) - 1.05) < 1e-9 and abs(_rate(60 / 118, 60 / 61) - 122 / 118) < 1e-9
         assert _rate(60 / 70, 60 / 140) == 1.0 and round(_bpm(60 / 71)) == 142 and _bpm(0.6) == 100
         sung = tmp / "sung.wav"
