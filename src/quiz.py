@@ -346,9 +346,11 @@ def award() -> int:
 
 
 def _clip(target: str, item: dict, where: str) -> None:
+    from .publish import hushed  # звук в канале — у одного поста за сутки; publish здесь — своя функция
+
     if item.get("video"):
         telegram.send_video_file(target, Path(item["video"]), quiz_ai.INTRO.format(where=where),
-                                 seconds=item["seconds"])
+                                 seconds=item["seconds"], quiet=hushed(target))
         return
     telegram.send_audio(
         target,
@@ -357,6 +359,7 @@ def _clip(target: str, item: dict, where: str) -> None:
         # Ни имени, ни названия, ни обложки: всё это и есть ответ.
         title=QUESTION,
         performer="ПЛЁНКА",
+        quiet=hushed(target),
     )
 
 

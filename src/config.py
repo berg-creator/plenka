@@ -51,6 +51,8 @@ WEB_VOICE_FILE = DATA / "web_voice.json"
 WEB_VOICE_RETRY_HOURS = 12
 SEEN_FILE = DATA / "seen.json"
 POSTED_FILE = DATA / "posted.json"
+# Вступления в канал и уходы из него: время и направление, без id (moderate.member_row).
+MEMBERS_FILE = DATA / "members.jsonl"
 STORIES_FILE = DATA / "stories.json"
 # Журнал обращений к генератору: кто писал — основной или запасной.
 # Нужен сторожу: переход на запасной виден только строкой в логе запуска,
@@ -196,9 +198,11 @@ NEWS_MAX_AGE_HOURS = URGENT_MAX_AGE_HOURS + 12
 # не больше RELEASE_PER_DAY постов о релизах, самые весомые по score: остальные
 # протухают через сутки. Каждый релиз занимает обычный слот (publish.due).
 # Владелец 22.09.2026: в пятницу 18.09 вышло 14 постов, прочесть столько нельзя.
+# 06.10.2026 — два релиза в день вместо трёх: в канал приходят за ботом, и лента
+# из пересказа чужих релизов таким подписчикам ни к чему.
 RELEASE_MAX_AGE_HOURS = 24
 RELEASE_TRACK_WAIT_HOURS = 2
-RELEASE_PER_DAY = 3
+RELEASE_PER_DAY = 2
 # Чаще раза в час посты о релизах в ленту не идут: выход считает интервал
 # по журналу публикаций (publish.release_due), а не по расписанию GitHub.
 RELEASE_EVERY_HOURS = 1

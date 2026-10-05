@@ -93,6 +93,25 @@ def feed_day(moment: datetime):
     return (moment.astimezone(MSK) - timedelta(hours=config.QUIET_TO_HOUR)).date()
 
 
+def hushed(chat_id: str | int) -> bool:
+    """Без звука ли выходит пост. Ночью — любой (config.QUIET_FROM_HOUR), а в канале ещё
+    и каждый после первого за сутки ленты (владелец 06.10.2026).
+
+    В канал приходят за ботом — за сведением и битом, — и четыре-пять уведомлений в день
+    от такого канала читаются как повод отписаться. Звук достаётся первому посту дня;
+    бит владельца выходит раньше прочих (moderate.publish_shift) и забирает его себе.
+    Владельцу в личку пост идёт как раньше: там это не лента, а работа.
+    """
+    now = state.now()
+    if night(now):
+        return True
+    if str(chat_id) != config.secret("TELEGRAM_CHANNEL_ID", required=False):
+        return False
+    items = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
+    last = state._parse(items[-1].get("published_at", "")) if items else None
+    return bool(last and feed_day(last) == feed_day(now))
+
+
 def releases_today() -> int:
     """Сколько постов о релизах вышло за сутки ленты (feed_day)."""
     today = feed_day(state.now())
@@ -127,8 +146,9 @@ def due(post: dict) -> bool:
             return False
         regular = sum(
             1 for item in items
-            # Отбор (src/otbor.py) и ролик (src/reels.py) выходят мимо слотов и обычному посту место не занимают.
-            if item.get("rubric") not in ("news", "otbor", "reel")
+            # Отбор (src/otbor.py), ролик (src/reels.py) и бит (src/bity.py) выходят мимо слотов
+            # и обычному посту место не занимают.
+            if item.get("rubric") not in ("news", "otbor", "reel", "beat")
             and (moment := state._parse(item.get("published_at", "")))
             and feed_day(moment) == feed_day(now)
         )
@@ -464,6 +484,7 @@ def send(post: dict, chat_id: str) -> dict | None:
     """
     text = post.get("text", "").strip()
     rubric = post.get("rubric", "")
+    quiet = hushed(chat_id)
 
     if rubric == "poll":
         payload = _poll_payload(text)
@@ -484,7 +505,7 @@ def send(post: dict, chat_id: str) -> dict | None:
         image = card.meme(post)
         if image:
             try:
-                return _where(telegram.send_photo_file(chat_id, image, text, quiet=night(state.now())), "caption")
+                return _where(telegram.send_photo_file(chat_id, image, text, quiet=quiet), "caption")
             except telegram.TelegramError as exc:
                 log.warning("Мем с картинкой не ушёл (%s), отправляю текстом", exc)
         text = card.meme_text(post)
@@ -492,12 +513,25 @@ def send(post: dict, chat_id: str) -> dict | None:
     # Ролик владельца (src/reels.py) — тем же файлом, что ушёл ему в личку, по file_id.
     if rubric == "reel":
         return _where(telegram.send_video_url(chat_id, post["video"], text, width=post.get("width", 0),
-                                              height=post.get("height", 0), quiet=night(state.now())), "caption")
+                                              height=post.get("height", 0), quiet=quiet), "caption")
+
+    # Бит владельца (bity.air): значок бита кадром, ссылка на бота — в тексте. Имена артистов
+    # ссылками на карточки здесь не становятся: ссылка в посте одна — за битом.
+    if rubric == "beat":
+        import tempfile
+
+        from . import bity  # тянет за собой сведение и ролики — нужен только этому посту
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="beat-") as tmp:
+                shot = bity.shot(post["beat"], Path(tmp))
+                return _where(telegram.send_photo_file(chat_id, shot, text, quiet=quiet), "caption")
+        except Exception as exc:  # noqa: BLE001 — значок не нарисовался или не ушёл: бит выходит текстом
+            log.warning("Бит со значком не ушёл (%s), отправляю текстом", exc)
+        return _where(telegram.send_message(chat_id, text, quiet=quiet), "text")
 
     cover = post.get("cover", "")
     text = view(text, post)
-    # В тихие часы молчит любой пост (config.QUIET_FROM_HOUR).
-    quiet = night(state.now())
 
     # Пост — всегда одна плитка ленты: картинка в рамке, текст, ссылки на площадки
     # строкой в нём же. Плеера рядом нет (решение владельца 12.09.2026): полный
@@ -547,7 +581,8 @@ def crosspost_vk(post: dict) -> None:
 
     # Опросы во ВКонтакте создаются иначе, чем в Telegram, — пока пропускаем. Ролик туда
     # групповым ключом не залить (clips.deliver): в VK Клипы его кладёт владелец сам.
-    if post.get("rubric") in ("poll", "reel"):
+    # Бит зовёт в бота Telegram — во ВКонтакте идти по такой ссылке некому.
+    if post.get("rubric") in ("poll", "reel", "beat"):
         return
 
     # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
@@ -604,8 +639,9 @@ def _selftest() -> None:
     Пост — всегда одна плитка: фото в рамке с текстом, без кнопок и без плеера
     рядом (полный трек уходит первым комментарием, src/comments.py).
     send возвращает сообщение с текстом поста, to_channel кладёт его в архив.
-    Посты о релизах: свой выход, сутки на всё, окно на трек, звук у первых трёх
-    за московские сутки и не в тихие часы, обычный пост уступает им слот.
+    Посты о релизах: свой выход, сутки на всё, окно на трек, не больше двух
+    за сутки ленты, обычный пост уступает им слот. Звук в канале — у первого
+    поста за сутки ленты и не в тихие часы.
 
     Запуск: python -m src.publish --selftest
     """
@@ -745,6 +781,21 @@ def _selftest() -> None:
         state.now = lambda: now
         assert sent == [("фото", f"Текст.\n\n{TRACK_ALONE}", True, False)], sent
 
+        # Звук в канале — у одного поста за сутки ленты: первый звучит, следующие молчат,
+        # вчерашний ночной пост звука не отнимает. Владельцу в личку — как раньше.
+        with mock.patch.object(config, "secret", lambda name, required=True: "@канал"):
+            assert hushed("@канал") and not hushed("1"), "в канале сегодня уже выходили"
+            posted(("release", ago(hours=17)))
+            assert not hushed("@канал"), "пост в час ночи — хвост вчерашнего дня"
+            posted()
+            assert not hushed("@канал")
+            sent.clear()
+            send({**post, "rubric": "release"}, "@канал")
+            posted(("release", ago(minutes=1)))
+            send({**post, "rubric": "release"}, "@канал")
+            assert [entry[2] for entry in sent] == [False, True], sent
+        posted(("release", ago(hours=3)), ("verdict", ago(hours=2)))
+
         # Обычный пост уступает слот свежему релизу: релиз в счёте слотов идёт
         # за обычный пост, но годовщина ждать не может.
         posted(("meme", ago(hours=5)), ("release", ago(hours=1)))
@@ -823,15 +874,15 @@ def _selftest() -> None:
         assert release_due()
         # Больше config.RELEASE_PER_DAY за московские сутки не выходит; вчерашний
         # по Москве (22:00 МСК 10.09) в счёт не идёт.
-        posted(("release", ago(hours=20)), ("release", ago(hours=5)), ("verdict", ago(hours=4)))
+        posted(("release", ago(hours=20)), ("verdict", ago(hours=4)))
         assert release_due()
-        posted(("release", ago(hours=6)), ("release", ago(hours=5)), ("verdict", ago(hours=4)))
+        posted(("release", ago(hours=5)), ("verdict", ago(hours=4)))
         assert not release_due()
         # Ночные выходы (01:00–03:00 МСК) — хвост вчерашних суток: ни лимит релизов,
         # ни дневные слоты не съедают (26.09.2026 лента из-за них молчала весь день).
         posted(("release", ago(hours=17)), ("release", ago(hours=16)), ("verdict", ago(hours=15)))
         assert release_due() and due({"rubric": "meme"})
-        print("выходы релизов: сутки, окно на трек, три в день, обычный слот уступает")
+        print("выходы релизов: сутки, окно на трек, два в день, звук в канале — у одного поста за сутки, обычный слот уступает")
     finally:
         (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
          telegram.send_message, state.now, config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real

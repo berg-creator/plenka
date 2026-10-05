@@ -32,6 +32,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -331,6 +332,36 @@ def attach_track(message: dict, admin: str) -> str:
     return ""
 
 
+INSIDE = ("member", "administrator", "creator")
+
+
+def member_row(event: dict) -> dict | None:
+    """Строка журнала config.MEMBERS_FILE о вступлении в канал или уходе из него: время и направление.
+
+    Историю действий Telegram показывает только админу в приложении и хранит двое суток, а бот
+    уходы не записывал — после чего уходят из канала, не знал никто (06.10.2026). id человека
+    в журнал не идёт: репозиторий открытый. Ушедшему, который сводил трек ботом, пишется, сколько
+    часов прошло с его последнего готового трека (track_hours): так проверяется догадка «получил
+    трек — отписался». Чат обсуждений шлёт те же события — в него попадают, оставив комментарий, —
+    и в журнал они не идут.
+    """
+    if (event.get("chat") or {}).get("type") != "channel":
+        return None
+    was, now = ((event.get(side) or {}) for side in ("old_chat_member", "new_chat_member"))
+    before, after = (side.get("status") in INSIDE or bool(side.get("is_member")) for side in (was, now))
+    if before == after:
+        return None
+    moment = datetime.fromtimestamp(event["date"], timezone.utc) if event.get("date") else None
+    row = {"at": state.iso(moment), "way": "in" if after else "out"}
+    if not after:
+        user = str((now.get("user") or {}).get("id"))
+        done = [track["done"] for track in skleyka.load()["tracks"].values()
+                if track.get("chat") == user and track.get("done")]
+        if done:
+            row["track_hours"] = round(skleyka._age(max(done)) / 3600, 1)
+    return row
+
+
 def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset: int) -> tuple:
     """Разбирает пачку событий. Возвращает (нажатий, разборов, новый offset).
 
@@ -359,6 +390,19 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                     telegram.answer_pre_checkout(checkout["id"], skleyka.checkout(checkout.get("invoice_payload") or ""))
                 except Exception as exc:  # noqa: BLE001 — опоздали или сбой проверки: платёж отменён
                     log.error("Оплата звёздами не подтверждена: %s", exc)
+            continue
+
+        # Вступление в канал или уход из него — строкой в журнал (member_row), без id.
+        member = update.get("chat_member")
+        if member:
+            try:
+                row = member_row(member)
+                if row:
+                    print(f"  канал: {'пришёл' if row['way'] == 'in' else 'ушёл'}")
+                    if not args.dry_run:
+                        state.append_jsonl(config.MEMBERS_FILE, [row])
+            except Exception as exc:  # noqa: BLE001 — журнал уходов не держит дежурство
+                log.error("Вступление или уход не записаны: %s", exc)
             continue
 
         # Личное сообщение — это запрос к сервису разборов.
@@ -633,6 +677,15 @@ def publish_shift() -> None:
     через PUSH_EVERY попробует снова.
     """
     target = os.environ.get("PUBLISH_TARGET", "admin")
+    # Бит владельца — первым (bity.air): так он забирает единственный звук дня (publish.hushed).
+    # Следом в тот же заход ничего не выходит — два поста подряд в ленте ни к чему.
+    if target == "channel":
+        try:
+            if beat := bity.air():
+                print(f"Выход бита: №{beat} → {target}")
+                return
+        except Exception as exc:  # noqa: BLE001 — бит не держит выход остальных постов
+            log.error("Выход бита не удался: %s", exc)
     try:
         otbor.shift(target)
     except Exception as exc:  # noqa: BLE001 — отбор не держит выход остальных постов
@@ -1118,11 +1171,46 @@ def _selftest() -> int:
         tmp.cleanup()
     print("первый комментарий: вопрос под обычным постом, полный трек — под релизом")
 
-    # Выход из дежурства: релиз первым; обычный пост — только в канал и когда пора.
+    # Вступления и уходы: в журнал — время и направление, id человека туда не попадает; ушедшему
+    # после сведения — часы с готового трека; чат обсуждений и смена прав — мимо журнала.
+    def moved(was: str, now: str, kind: str = "channel", user: int = 77) -> dict:
+        return {"chat": {"id": -100, "type": kind}, "from": {"id": user},
+                "date": int(datetime(2026, 10, 3, 13, 0, tzinfo=timezone.utc).timestamp()),
+                "old_chat_member": {"user": {"id": user}, "status": was},
+                "new_chat_member": {"user": {"id": user}, "status": now}}
+
+    tracks = {"tracks": {"a": {"chat": "77", "done": "2026-10-03T10:00:00+00:00"},
+                         "b": {"chat": "77", "done": "2026-10-03T12:00:00+00:00"}, "c": {"chat": "5"}}}
+    with (tempfile.TemporaryDirectory() as folder,
+          mock.patch.object(config, "MEMBERS_FILE", Path(folder) / "members.jsonl"),
+          mock.patch.object(skleyka, "load", lambda: tracks),
+          mock.patch.object(state, "now", lambda: datetime(2026, 10, 3, 13, 30, tzinfo=timezone.utc)),
+          contextlib.redirect_stdout(io.StringIO())):
+        assert member_row(moved("left", "member")) == {"at": "2026-10-03T13:00:00+00:00", "way": "in"}
+        assert member_row(moved("member", "left")) == {"at": "2026-10-03T13:00:00+00:00", "way": "out", "track_hours": 1.5}
+        assert member_row(moved("member", "kicked", user=9)) == {"at": "2026-10-03T13:00:00+00:00", "way": "out"}
+        assert member_row(moved("member", "administrator")) is None, "смена прав — не вступление"
+        assert member_row(moved("member", "left", kind="supergroup")) is None, "чат обсуждений — не канал"
+        events = [{"update_id": 4, "chat_member": moved("left", "member")},
+                  {"update_id": 5, "chat_member": moved("member", "left")},
+                  {"update_id": 6, "chat_member": moved("member", "left", kind="supergroup")}]
+        assert process(events, {}, "1", True, 0) == (0, 0, 7) and not config.MEMBERS_FILE.exists(), "сухой прогон не пишет"
+        assert process(events, {}, "1", False, 0) == (0, 0, 7)
+        written = config.MEMBERS_FILE.read_text()
+        assert [row["way"] for row in state.read_jsonl(config.MEMBERS_FILE)] == ["in", "out"] and "77" not in written, written
+    # Без строки в allowed_updates Telegram события не шлёт вовсе — прежние (платежи, опросы) на месте.
+    with mock.patch.object(telegram, "_call", lambda method, payload: json.loads(payload["allowed_updates"])):
+        asked = telegram.get_updates()
+    assert set(asked) == {"message", "callback_query", "poll_answer", "pre_checkout_query", "chat_member"}, asked
+    print("журнал канала: пришёл и ушёл — время и направление без id, часы с готового трека, чат обсуждений мимо")
+
+    # Выход из дежурства: бит владельца первым и один; дальше релиз; обычный пост — только в канал и когда пора.
     delivered = []
-    for release_due, due, target in ((True, True, "channel"), (False, True, "channel"),
-                                     (False, False, "channel"), (False, True, "admin")):
-        with (mock.patch.object(publish, "release_due", lambda: release_due),
+    for release_due, due, target, beat in ((True, True, "channel", ""), (False, True, "channel", ""),
+                                           (False, False, "channel", ""), (False, True, "admin", "3"),
+                                           (True, True, "channel", "3")):
+        with (mock.patch.object(bity, "air", lambda: beat),
+              mock.patch.object(publish, "release_due", lambda: release_due),
               mock.patch.object(publish, "due", lambda post: due),
               mock.patch.object(publish, "next_post", lambda releases=False, **_: Path(f"{releases}.json")),
               mock.patch.object(publish, "deliver", lambda post, path, to: delivered.append((path.name, to))),
@@ -1131,7 +1219,7 @@ def _selftest() -> int:
               contextlib.redirect_stdout(io.StringIO())):
             publish_shift()
     assert delivered == [("True.json", "channel"), ("False.json", "channel")], delivered
-    print("выход из дежурства: релиз первым, обычный пост — в канал по часам")
+    print("выход из дежурства: бит владельца первым и один, дальше релиз, обычный пост — в канал по часам")
     return 0
 
 

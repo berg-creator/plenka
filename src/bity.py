@@ -60,7 +60,7 @@ import sys
 import tempfile
 import urllib.parse
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -140,6 +140,13 @@ ABOUT = ("Скачать бесплатно ({format}): Telegram → {bot} → �
 GIVEN = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
          "Бесплатно, и для релиза тоже. Одно условие — подпиши в названии трека: <b>{credit}</b>.\n\n"
          f"Записал голос? Жми «{MAKE}» — бит уже будет в заявке, пришлёшь только голос.")
+# Бит — постом в канал (air). В канал приходят за ботом, а лента была целиком из чужих релизов
+# и новостей: своё в ней — то, за чем подписались (владелец 06.10.2026). Не чаще раза в POST_EVERY.
+POST = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
+        "Бит ПЛЁНКИ. Бесплатно, и для релиза тоже — подпиши в названии трека: <b>{credit}</b>.\n\n"
+        '▸ <a href="{link}">Забрать бит в боте</a>. Там же бот бесплатно сведёт с ним твой голос.')
+POST_ASK = "Под кого сделать следующий бит?"  # первый комментарий (comments.seed берёт поле comment)
+POST_EVERY = timedelta(days=2)
 LIST = ("🎚 <b>Биты ПЛЁНКИ</b>\n\n"
         "Бесплатно, и для релиза тоже. Одно условие — подпиши в названии трека: <b>{credit}</b>.\n\n"
         "Выбери бит — пришлю файлом.")
@@ -353,6 +360,46 @@ def give(chat_id: str | int, beat_id: str, via: str = "link") -> None:
                         buttons=[[{"text": MAKE, "callback_data": f"{PREFIX}{beat_id}"}]])
     skleyka._count(_label(": выдан"))
     _hit(beat_id, via)
+
+
+def air() -> str:
+    """Следующий бит каталога — постом в канал: новый первым, по одному в POST_EVERY, не ночью.
+    Возвращает номер вышедшего бита или пустую строку.
+
+    Выходит сам, без кнопки владельцу: бит уже открыт всем в меню бота, решать тут нечего.
+    Отметка о выходе — файл поста в content/archive, как у ролика (reels.to_channel): каталог
+    ради неё не переписывается. Не вышло — отметка снимается, и следующий заход пробует снова.
+    """
+    from . import publish  # publish берёт значок отсюда (shot)
+
+    posted = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
+    last = max((item.get("published_at", "") for item in posted if item.get("rubric") == "beat"), default="")
+    if publish.night(state.now()) or skleyka._age(last) < POST_EVERY.total_seconds():
+        return ""
+    for beat_id, beat in newest():
+        path = config.ARCHIVE / f"beat-{beat_id}.json"
+        if path.exists():
+            continue
+        post = {"rubric": "beat", "beat": beat_id, "comment": POST_ASK,
+                "text": POST.format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
+                                    tempo=html.escape(_tempo(beat)), credit=html.escape(config.BEAT_CREDIT),
+                                    link=link(beat_id))}
+        config.ARCHIVE.mkdir(parents=True, exist_ok=True)
+        state.write_json(path, post)
+        try:
+            publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        return beat_id
+    return ""
+
+
+def shot(beat_id: str, folder: Path) -> Path:
+    """Значок бита файлом — кадр его поста в канале (publish.send)."""
+    path = folder / PREVIEW_NAME
+    cover(load()[beat_id]).resize(PREVIEW_SIZE, Image.LANCZOS).save(path, quality=92)
+    return path
 
 
 def _button(beat: dict) -> str:
@@ -888,10 +935,53 @@ def _selftest() -> None:
                                     {"title": "Тёмный принц — клип", "view_count": 10 ** 6}])
     assert found == {"name": "Тёмный принц", "videos": 3, "median": 300, "top": 900}, found
     assert demand("Никто", [])["median"] == 0
+
+    # Бит постом в канал: новый первым, по одному в POST_EVERY, ночью — нет, один бит дважды не выходит,
+    # сорванный выход отметки не оставляет.
+    from . import publish
+
+    aired: list[dict] = []
+    clock = [datetime(2026, 10, 6, 22, 0, tzinfo=timezone.utc)]  # час ночи по Москве
+
+    def out(post: dict, path: Path, chat: str) -> None:
+        if post["beat"] == "boom":
+            raise telegram.TelegramError("нет связи")
+        aired.append(post)
+        publish.record(post, path, chat)
+
+    with mock.patch.object(config, "BEATS_FILE", tmp / "air.json"), mock.patch.object(config, "ARCHIVE", tmp / "archive"), \
+            mock.patch.object(config, "POSTED_FILE", tmp / "posted.json"), \
+            mock.patch.object(config, "BEAT_PHOTOS", tmp / "none.json"), \
+            mock.patch.object(config, "secret", lambda name, required=True: "@канал"), \
+            mock.patch.object(publish, "to_channel", out), mock.patch.object(state, "now", lambda: clock[0]):
+        save({"1": {"artists": ["Kizaru"], "title": "Фары", "bpm": 140, "key": "Fm"},
+              "2": {"artists": ["Kizaru", "Toxi$"], "title": "Наждак", "bpm": None, "key": ""}})
+        assert air() == "" and not aired, "ночью бит не выходит"
+        clock[0] += timedelta(hours=9)
+        assert air() == "2" and aired[0]["rubric"] == "beat" and aired[0]["comment"] == POST_ASK, aired
+        assert aired[0]["text"].startswith("🎚 <b>«Наждак»</b> — Kizaru x Toxi$ type beat\n") and link("2") in aired[0]["text"]
+        assert air() == "", "чаще раза в POST_EVERY бит не выходит"
+        clock[0] += POST_EVERY
+        assert air() == "1" and ", 140 BPM, Fm" in aired[1]["text"]
+        clock[0] += POST_EVERY
+        assert air() == "" and len(aired) == 2, "оба бита уже выходили"
+        assert shot("1", tmp).stat().st_size and Image.open(tmp / PREVIEW_NAME).size == PREVIEW_SIZE
+    with mock.patch.object(config, "ARCHIVE", tmp / "archive"), \
+            mock.patch.object(config, "POSTED_FILE", tmp / "none.json"), \
+            mock.patch.object(config, "secret", lambda name, required=True: "@канал"), \
+            mock.patch.object(publish, "to_channel", out), mock.patch.object(state, "now", lambda: clock[0]), \
+            mock.patch.dict(globals(), {"newest": lambda: [("boom", {"artists": ["Kizaru"], "title": "Сбой", "bpm": None, "key": ""})]}):
+        try:
+            air()
+        except telegram.TelegramError:
+            assert not (tmp / "archive" / "beat-boom.json").exists(), "сорванный выход отметки не оставляет"
+        else:
+            raise AssertionError("сбой выхода должен дойти до дежурства")
     print("bity: подпись и маршрут бита, каталог и тексты для YouTube, описание без ссылки, на подъёме, "
           "ссылка beat_ по file_id, «🎚 БИТЫ»: один бит — сразу файл, несколько — список, метка меню, "
           "кнопка — заявка с битом, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, счёт по номеру бита, "
-          "значок — плёночный портрет со словом названия, без фото — спины, живой ролик в 50 МБ и превью, спрос по медиане без «ё» — ок")
+          "значок — плёночный портрет со словом названия, без фото — спины, живой ролик в 50 МБ и превью, спрос по медиане без «ё», "
+          "бит постом в канал: новый первым, раз в два дня, не ночью, один раз — ок")
 
 
 def main() -> int:

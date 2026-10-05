@@ -262,7 +262,10 @@ def get_updates(offset: int = 0, timeout: int = 0) -> list[dict]:
             # poll_answer — голоса в неанонимной прослушке под постом (src/quiz.py),
             # pre_checkout_query — оплата звёздами (src/skleyka.py): без них в списке
             # Telegram их боту не присылает вовсе, и платёж отменился бы сам.
-            "allowed_updates": json.dumps(["callback_query", "message", "poll_answer", "pre_checkout_query"]),
+            # chat_member — вступления в канал и уходы из него (moderate.member_row):
+            # их Telegram тоже шлёт только по явной просьбе и только админу чата.
+            "allowed_updates": json.dumps(["callback_query", "message", "poll_answer", "pre_checkout_query",
+                                           "chat_member"]),
         },
     )
 
@@ -362,7 +365,7 @@ def send_photo_file(
 
 def send_video_file(
     chat_id: str, path: Path, caption: str, *, seconds: int = 0, width: int = 1080, height: int = 1920,
-    reply_to: int | None = None, buttons: list[list[dict]] | None = None,
+    reply_to: int | None = None, buttons: list[list[dict]] | None = None, quiet: bool = False,
 ) -> dict:
     """Отправляет готовый ролик с диска.
 
@@ -387,6 +390,8 @@ def send_video_file(
         }
         if seconds:
             payload["duration"] = seconds
+        if quiet:
+            payload["disable_notification"] = True
         if reply_to is not None:
             payload["reply_parameters"] = json.dumps({"message_id": reply_to})
         if buttons:
