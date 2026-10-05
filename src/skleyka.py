@@ -83,7 +83,9 @@
 его кнопкой «↩️ Не беру»: она же метит трек, и новый счёт по нему не выставляется, а внесённый задаток
 второй раз не принять (checkout). Заказ идёт только из-под готового трека: без него звукорежиссёру нечего
 слушать, а ник в ответе уводил человека в личку мимо задатка. Целиком за звёзды цена отвергнута: остальное — перевод человеку, приход денег
-подтверждает владелец кнопкой, бот банка не видит.
+подтверждает владелец кнопкой, бот банка не видит. Под предложением — «🎧 Примеры: до и после»: по каждой работе два куска
+одного места и одной громкости, ДО свёл бот, ПОСЛЕ — звукорежиссёр. Отзывов и регалий нет по-прежнему — человек слушает сам.
+Каталог (config.SKLEYKA_HAND_EXAMPLES, пары file_id) пишет Мак (--example), дежурство его только читает; пуст — кнопки нет.
 
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   сведение, пара ДО/ПОСЛЕ одной громкости и ролик
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --style грязно --design
@@ -95,6 +97,7 @@
     python -m src.skleyka --hand 026a4b --price 1500 --piece КУСОК ДО-ПОСЛЕ --full WAV MP3 --text ТЕКСТ
                                                      ручное сведение владельцу в личку, дальше — кнопками (только Мак)
     python -m src.skleyka --deposit 026a4b [--dry-run]   заявке без задатка — условия и счёт задатка человеку (только Мак)
+    python -m src.skleyka --example ДО ПОСЛЕ [--dry-run]   пара примера ручного сведения — владельцу в личку и в каталог (только Мак)
 """
 
 from __future__ import annotations
@@ -1835,6 +1838,13 @@ HAND_DEPOSIT = HAND.rpartition("\n\n")[0] + (
     "Оплатишь — звукорежиссёр послушает дорожки и пришлёт сюда кусок готового трека.\n\n"
     "Не возьмётся за трек — задаток вернётся. Кусок готов и отправлен тебе — задаток остаётся за работу. "
     "Звёзды покупаются прямо в Telegram, при оплате счёта.")
+# Примеры работ под предложением (владелец, 06.10.2026): слова «сводят руками» ничего не доказывают, а кусок
+# до и после человек слышит сам. ДО — честная версия бота тех же дорожек, не сырой голос: сравнивать
+# с сырым значило бы врать о боте. Подписи и название в плеере — только номер примера: чужой трек не называем.
+EXAMPLES_BUTTON = {"text": "🎧 Примеры: до и после", "callback_data": f"{PREFIX}z"}
+EXAMPLE_SIDES = (("before", "ДО — свёл бот"), ("after", "ПОСЛЕ — свёл звукорежиссёр"))
+EXAMPLE_CAPTION = "Пример {n} · {side}"
+EXAMPLE_PERFORMER = "ПЛЁНКА · пример {n}"
 # Счёт задатка: номер трека едет в payload — оплату узнаёт paid, и состояния до неё не нужно
 # (счёт шлёт и Мак, --deposit, а запись с Мака дежурство затёрло бы).
 DEPOSIT = "hand:"
@@ -2174,10 +2184,34 @@ def checkout(item: str) -> str:
     return HAND_REFUSED if data["tracks"].get(track_id, {}).get("refused") else ""
 
 
+def _examples() -> list[dict]:
+    """Пары примеров ручного сведения из каталога. Запись без одной из сторон — мимо: предложение
+    с ценой не должно падать из-за правки каталога руками."""
+    pairs = state.read_json(config.SKLEYKA_HAND_EXAMPLES, [])
+    return [pair for pair in pairs if isinstance(pair, dict)
+            and all(isinstance(pair.get(key), str) and pair[key] for key, _ in EXAMPLE_SIDES)] if isinstance(pairs, list) else []
+
+
+def _examples_keys() -> list[list[dict]] | None:
+    """Кнопка примеров под предложением ручного сведения; каталог пуст — предложение как раньше."""
+    return [[EXAMPLES_BUTTON]] if _examples() else None
+
+
+def _show(chat_id: str, message_id: int | None) -> None:
+    """«🎧 Примеры: до и после»: по каждому примеру два аудио по file_id — ничего не качается и не
+    заливается, состояние и лимиты не тронуты. Кнопка снимается с нажатого сообщения, как у ролика
+    (_film), и до отправки: один показ на предложение, а новое «🎧 Отдать звукорежиссёру» вернёт её."""
+    if message_id:
+        telegram.edit_markup(chat_id, message_id, None)
+    for n, pair in enumerate(_examples(), 1):
+        for key, side in EXAMPLE_SIDES:
+            telegram.send_by_id(chat_id, "audio", pair[key], EXAMPLE_CAPTION.format(n=n, side=side))
+
+
 def _bill(chat_id: str, track_id: str) -> None:
     """Предложение ручного сведения: условия и счёт задатка. Состояния не пишет — зовётся и нажатием
     «🎧 Отдать звукорежиссёру», и с Мака (--deposit) для заявок, принятых до задатка."""
-    telegram.send_message(chat_id, HAND_DEPOSIT)
+    telegram.send_message(chat_id, HAND_DEPOSIT, buttons=_examples_keys())
     telegram.send_invoice(chat_id, DEPOSIT_TITLE, DEPOSIT_ABOUT, DEPOSIT + track_id, config.SKLEYKA_HAND_DEPOSIT)
 
 
@@ -2566,7 +2600,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y), саунд-дизайн (e),
     справка (h), «нет бита» (g), «голос на чужом бите» (o) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
-    «🎧 Отдать звукорежиссёру» (u) — под треком и под лимитом; кнопки продажи ручного сведения (h…, _sale) —
+    «🎧 Отдать звукорежиссёру» (u) — под треком и под лимитом, «🎧 Примеры: до и после» (z) — под его предложением; кнопки продажи ручного сведения (h…, _sale) —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
     keyboard — кнопки того сообщения, text — его текст (текст клиенту под «📤 Отправить клиенту»)."""
     chat_id = str(chat_id)
@@ -2581,6 +2615,9 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         return
     if subject == "u" or len(head) != 1 and code == "u":
         _hand(data, chat_id, "" if subject == "u" else head, who or {})
+        return
+    if subject == "z":
+        _show(chat_id, message_id)
         return
     if len(head) != 1 and code.startswith("h"):
         _sale(data, chat_id, head, code, admin, message_id, text)
@@ -2725,7 +2762,7 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
             save(data)
         return
     if not track:
-        telegram.send_message(chat_id, HAND_FIRST)
+        telegram.send_message(chat_id, HAND_FIRST, buttons=_examples_keys())
     elif track.get("sale") or _deposit(data, track_id):
         telegram.send_message(chat_id, HAND + HAND_TRACKS)
         if not track.get("hand"):
@@ -3135,6 +3172,40 @@ def hand_send(track_id: str, price: int | None, piece: list[Path], full: list[Pa
         return 1
     telegram.send_message(admin, html.escape(text), buttons=[[{"text": label, "callback_data": data}]])
     print("Ушло. Дальше — кнопка под текстом в личке бота.")
+    return 0
+
+
+def example_send(before: Path, after: Path, dry_run: bool) -> int:
+    """С Мака: пара примера ручного сведения — один и тот же кусок у бота (ДО) и у звукорежиссёра (ПОСЛЕ) —
+    ботом владельцу в личку, там он её и послушает; file_id из ответа — парой в каталог
+    config.SKLEYKA_HAND_EXAMPLES. В бот пример попадёт с коммитом каталога, и решает это владелец.
+    Название и исполнитель в плеере наши, имя файла Telegram получает нейтральное (telegram.send_audio):
+    ни клиента, ни названия его трека пример не несёт."""
+    pairs = _examples()
+    n = len(pairs) + 1
+    files = [(key, side, path) for (key, side), path in zip(EXAMPLE_SIDES, (before, after))]
+    bad = [f"{path} — нет файла" for *_, path in files if not path.is_file()]
+    bad += [f"{path.name} — нужен MP3 или M4A: другое Telegram плеером не покажет" for *_, path in files
+            if path.is_file() and path.suffix.lower() not in (".mp3", ".m4a")]
+    bad += [f"{path.name} — больше {SALE_MB} МБ, Bot API не возьмёт" for *_, path in files
+            if path.is_file() and path.stat().st_size > SALE_MB * 2**20]
+    if before.is_file() and after.is_file() and before.samefile(after):
+        bad.append("ДО и ПОСЛЕ — один и тот же файл")
+    print(f"Пример {n} — владельцу в личку" + (" (сухой прогон, ничего не отправлено)" if dry_run else "") + ":")
+    for _, side, path in files:
+        print(f"  {path.name}" + (f" — {path.stat().st_size / 2**20:.1f} МБ" if path.is_file() else "")
+              + f": подпись «{EXAMPLE_CAPTION.format(n=n, side=side)}», в плеере «{side}» · {EXAMPLE_PERFORMER.format(n=n)}")
+    print(f"  каталог: {config.SKLEYKA_HAND_EXAMPLES} — пар станет {n}")
+    if bad:
+        print("Не отправлено:\n" + "\n".join(f"  {why}" for why in bad))
+        return 1
+    if dry_run:
+        return 0
+    admin = config.secret("TELEGRAM_ADMIN_ID")
+    pair = {key: telegram.send_audio(admin, path.read_bytes(), EXAMPLE_CAPTION.format(n=n, side=side), title=side,
+                                     performer=EXAMPLE_PERFORMER.format(n=n))["audio"]["file_id"] for key, side, path in files}
+    state.write_json(config.SKLEYKA_HAND_EXAMPLES, [*pairs, pair])
+    print("Ушло и записано. В боте пример появится, когда каталог окажется в репозитории, — коммит руками.")
     return 0
 
 
@@ -4803,6 +4874,8 @@ def _selftest() -> None:
     config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
     tmp = Path(tempfile.mkdtemp(prefix="skleyka-test-"))
     config.SKLEYKA_FILE = tmp / "skleyka.json"
+    # Каталог примеров — тоже во временной папке: настоящий поставил бы кнопку под каждым предложением проверки.
+    real_examples, config.SKLEYKA_HAND_EXAMPLES = config.SKLEYKA_HAND_EXAMPLES, tmp / "hand_examples.json"
     from . import service
     real_sources, service.SOURCES_FILE = service.SOURCES_FILE, tmp / "sources.json"
     try:
@@ -5774,6 +5847,43 @@ def _selftest() -> None:
         state.now, telegram.send_document = real_time, real_doc
         config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
         telegram._call = mock
+        # Примеры ручного сведения: каталога нет — предложение без кнопки; есть — «🎧 Примеры: до и после» под ним,
+        # по нажатию пары по file_id с подписями ДО и ПОСЛЕ, кнопка с сообщения снята, состояние не тронуто;
+        # запись без одной стороны — мимо; --example всухую не шлёт и не пишет, по-настоящему — дописывает пару.
+        callback(8, 8, "u")
+        assert sent[-1] == HAND_FIRST and keys[-1] is None and not _examples(), "каталога нет — кнопки нет"
+        state.write_json(config.SKLEYKA_HAND_EXAMPLES, [{"before": "B1", "after": "A1"}, {"before": "B2"},
+                                                        {"before": "B3", "after": "A3"}])
+        callback(8, 8, "u")
+        assert sent[-1] == HAND_FIRST and keys[-1] == [[EXAMPLES_BUTTON]]
+        _bill("8", "t0")
+        assert sent[-1] == HAND_DEPOSIT and keys[-1] == [[EXAMPLES_BUTTON]], "кнопка — под предложением со счётом"
+        swept: list = []
+        telegram.edit_markup = lambda chat, message, markup: swept.append((chat, message, markup))
+        count, was, calls[:] = len(sent), load(), []
+        callback(8, 8, "z", message_id=77)
+        assert [(m, p["chat_id"], p["audio"], p["caption"]) for m, p in calls] == [
+            ("sendAudio", "8", "B1", "Пример 1 · ДО — свёл бот"), ("sendAudio", "8", "A1", "Пример 1 · ПОСЛЕ — свёл звукорежиссёр"),
+            ("sendAudio", "8", "B3", "Пример 2 · ДО — свёл бот"), ("sendAudio", "8", "A3", "Пример 2 · ПОСЛЕ — свёл звукорежиссёр")], calls
+        assert swept == [("8", 77, None)] and len(sent) == count and load() == was, "один показ на предложение, состояние то же"
+        telegram.edit_markup = lambda chat, message, markup: None
+        two_files = [tmp / "do.mp3", tmp / "posle.mp3"]
+        for one in two_files:
+            one.write_bytes(b"ID3" + one.name.encode())
+        calls[:] = []
+        assert example_send(*two_files, True) == 0 and not calls and len(_examples()) == 2, "сухой прогон не шлёт и не пишет"
+        assert example_send(two_files[0], tmp / "net.mp3", True) == 1 and example_send(two_files[0], two_files[0], True) == 1
+        tagged: list = []
+        real_audio, telegram.send_audio = telegram.send_audio, lambda chat, audio, caption, **tags: \
+            tagged.append((chat, caption, tags)) or {"audio": {"file_id": f"F{len(tagged)}"}}
+        try:
+            assert example_send(*two_files, False) == 0 and _examples()[-1] == {"before": "F1", "after": "F2"} and tagged == [
+                ("1", "Пример 3 · ДО — свёл бот", {"title": "ДО — свёл бот", "performer": "ПЛЁНКА · пример 3"}),
+                ("1", "Пример 3 · ПОСЛЕ — свёл звукорежиссёр", {"title": "ПОСЛЕ — свёл звукорежиссёр",
+                                                                 "performer": "ПЛЁНКА · пример 3"})], tagged
+        finally:
+            telegram.send_audio = real_audio
+        config.SKLEYKA_HAND_EXAMPLES.unlink()
         start(1, 1, admin=True)
         assert sent[-1] == INTRO and keys[-1] == [*MODES, [HELP_BUTTON]]
 
@@ -6109,6 +6219,7 @@ def _selftest() -> None:
         (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
          itunes.find_song, telegram._call) = real
         service.SOURCES_FILE = real_sources
+        config.SKLEYKA_HAND_EXAMPLES = real_examples
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
@@ -6170,6 +6281,9 @@ def main() -> int:
     parser.add_argument("--deposit", metavar="ЗАКАЗ",
                         help="заявке без задатка — предложение и счёт задатка звёздами человеку (только Мак, "
                              "нужен STATE_DIR); --dry-run — без отправки")
+    parser.add_argument("--example", nargs=2, type=Path, metavar=("ДО", "ПОСЛЕ"),
+                        help="пример ручного сведения: один кусок у бота и у звукорежиссёра — владельцу в личку "
+                             "и парой file_id в data/hand_examples.json (только Мак); --dry-run — без отправки и записи")
     parser.add_argument("--talk-check", action="store_true",
                         help="просьбы о месте голоса — живому генератору: куда он ставит голос (только из Actions)")
     args = parser.parse_args()
@@ -6201,6 +6315,8 @@ def main() -> int:
         return hand_send(args.hand, args.price, args.piece, args.full, args.text, args.dry_run)
     if args.deposit:
         return deposit_send(args.deposit, args.dry_run)
+    if args.example:
+        return example_send(*args.example, args.dry_run)
     if args.dry_run:
         data = load()
         print(f"Заявок открыто: {len(data['drafts'])}, в очереди на сведение: {len(data['jobs'])}, "
