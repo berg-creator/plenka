@@ -45,7 +45,8 @@
 
 Ручки бота — mix(..., voice=, echo=): голос к биту и доля эха, в дБ. Дорожки
 по отдельности — mix(..., parts=): даблы за ведущим его же райдером, бэки шире
-и дальше в отзвук, эдлибы — каждый выкрик в свою точку панорамы и в эхо (PARTS); место голосу — только в музыке,
+и дальше в отзвук, эдлибы — каждый выкрик в свою точку панорамы, к одной громкости и в эхо (PARTS), и так же
+бэк, который на деле — короткие выкрики между строк (BACK_SHOUT); место голосу — только в музыке,
 удары бочки — по барабанам и басу. Простой режим — две дорожки.
 
 Промежуточное — во float: пики выше нуля между шагами не срезаются, режет только
@@ -912,9 +913,16 @@ def _tempo_delay(length: float, under: float | None = None, key: str = "") -> st
     для ключа («[1:a]»), если на входе дилея не весь голос, а только броски."""
     head, tail = "[0:a]", "[w]"
     if under is not None:
-        head = "[0:a]" if key else "[0:a]asplit[x][k];[x]"
-        tail = (f"[d];[d]{key or '[k]'}sidechaincompress=threshold={10 ** ((under - 18) / 20):.4f}:ratio=2:attack=0.01:"
-                "release=150[w]")
+        duck = f"sidechaincompress=threshold={10 ** ((under - 18) / 20):.4f}:ratio=2:attack=0.01:release=150"
+        head, tail = "[0:a]asplit[x][k];[x]", f"[d];[d][k]{duck}[w]"
+        if key:
+            # Ключ — другой файл, и sidechaincompress закрывает выход с концом любого входа,
+            # бросая не дождавшееся пары (как в _room): шина выходила то целой, то на 0,08 с
+            # короче, и два сведения одного кода расходились побайтно. Дилей дополнен тишиной
+            # (ROOM_PAD), ключ — без конца, а длину возвращает amerge с немой копией входа:
+            # он кончает по ней и своего не бросает.
+            head = "[0:a]asplit[x][z];[z]volume=0,pan=stereo|c0=c0|c1=c0[mute];[x]"
+            tail = f",{ROOM_PAD}[d];{key}apad[k];[d][k]{duck}[c];[mute][c]amerge=inputs=2,pan=stereo|c0=c2|c1=c3[w]"
     return (
         f"{head}highpass=f=200,lowpass=f=5000,pan=mono|c0=0.5*c0+0.5*c1,asplit[a][b];"
         + "".join(f"[{side}]aecho=in_gain=0:out_gain=1:delays={d:.0f}|{2 * d:.0f}|{3 * d:.0f}"
@@ -1410,7 +1418,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     under = loudness(ducked)[0]
     ridden = _ride(dry, ducked, under + balance + voice - sung, balance + voice + RIDE_TARGET, work)
     level = loudness(ridden)[0]
-    placed = voices([(part, path) for part, path in parts if part in PARTS], level, work / "ride.wav", work, tune or "", project)
+    placed = voices([(part, path) for part, path in parts if part in PARTS], level, work / "ride.wav", work, tune or "", project,
+                    sum(b - a for a, b in lines))
 
     adlibs = [(path, gain) for path, gain, part in placed if part == "эдлиб"]
     rhythm = grid(beat) if design or adlibs or look.get("delay", ("",))[0] == "в темп" else None
@@ -1619,6 +1628,24 @@ ADLIB_PANS = (-0.7, 0.7, -0.4, 0.4)
 ADLIB_PAUSE = 0.2
 ADLIB_LONG = 2.0
 ADLIB_ECHO = -8.0
+# Выкрики одной дорожки записаны с разной силой, и громкость роли, одна на дорожку, часть
+# из них топит, а часть ставит вровень с ведущим. Каждый выкрик подтягивается к медиане
+# дорожки, но не дальше ADLIB_EVEN дБ: больше не даёт запас огибающей (_gain_track, +6 дБ),
+# и шорох между выкриками не дорастает до выкрика. Уровень выкрика — там, где он звучит,
+# в ADLIB_BODY дБ от своего верха: хвост в конце окна его не занижает.
+ADLIB_EVEN = 6.0
+ADLIB_BODY = 20.0
+# Эдлибы присылают и под именем «бэк» (заказ 31c22c, 05.10.2026: 38 выкриков, медиана
+# 0,44 с, вместе 22 с при 126 с голоса). Целиком «в стороны, −10 дБ» они шли от −13
+# до −5 дБ к ведущему. Бэк, где кусок по медиане не длиннее BACK_SHOUT секунд, а все куски
+# вместе короче BACK_SHARE от звучания ведущего, ведётся как эдлибы. Подпевка и дабл
+# припева остаются бэком: строка припева — такт без паузы, от 1,2 с и при 160 ударах
+# в минуту, поэтому мерка куска вдвое строже ADLIB_LONG; а короткие слоги, идущие плотно
+# (четверть голоса и больше), — партия, а не выкрики между строк. Мерка выкриков одна,
+# тот заказ; из настоящих бэков сверена одна шина ручного сведения (заказ a787f8: куски
+# по 4 с, звучит всё время голоса) — сырых записей бэков под рукой не было.
+BACK_SHOUT = 1.0
+BACK_SHARE = 0.25
 
 
 def _pan(position: float) -> str:
@@ -1627,14 +1654,16 @@ def _pan(position: float) -> str:
     return f"pan=stereo|c0={math.cos(angle):.4f}*c0|c1={math.sin(angle):.4f}*c0"
 
 
-def _scatter(events: list[tuple[float, float]], first: int = 0) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+def _scatter(events: list[tuple[float, float]], first: int = 0,
+             lift: list[float] = ()) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
     """Громкость левого и правого канала по ходу дорожки, точки (секунда, дБ) для _gain_track:
     выкрик events[i] — в точку ADLIB_PANS[first + i] с постоянной мощностью. Точка меняется
-    посреди паузы перед выкриком, за 5 мс: в тишине не щёлкает."""
+    посреди паузы перед выкриком, за 5 мс: в тишине не щёлкает. lift — поправка громкости
+    каждому выкрику, дБ (_even), ставится в те же точки."""
     left, right = [], []
     for i, (start, _) in enumerate(events):
-        angle = (ADLIB_PANS[(first + i) % len(ADLIB_PANS)] + 1) * math.pi / 4
-        gains = (20 * math.log10(max(math.cos(angle), 1e-6)), 20 * math.log10(max(math.sin(angle), 1e-6)))
+        angle, more = (ADLIB_PANS[(first + i) % len(ADLIB_PANS)] + 1) * math.pi / 4, lift[i] if lift else 0.0
+        gains = (20 * math.log10(max(math.cos(angle), 1e-6)) + more, 20 * math.log10(max(math.sin(angle), 1e-6)) + more)
         at = 0.0
         if i:
             at = (events[i - 1][1] + start) / 2
@@ -1646,14 +1675,35 @@ def _scatter(events: list[tuple[float, float]], first: int = 0) -> tuple[list[tu
     return left, right
 
 
+def _even(heard: list[float], events: list[tuple[float, float]]) -> list[float]:
+    """Поправка каждому выкрику, дБ: его уровень по огибающей heard (ADLIB_BODY) — к медиане
+    дорожки, не дальше ADLIB_EVEN."""
+    spans = [heard[round(a * ENV_RATE):round(b * ENV_RATE)] for a, b in events]
+    loud = [10 * math.log10(statistics.fmean(10 ** (db / 10) for db in span if db > top - ADLIB_BODY))
+            for span, top in zip(spans, map(max, spans))]
+    return [max(-ADLIB_EVEN, min(ADLIB_EVEN, statistics.median(loud) - db)) for db in loud]
+
+
+def _shouts(path: Path, lead: float) -> bool:
+    """Дорожка — выкрики между строк, а не подпевка (BACK_SHOUT, BACK_SHARE); lead — сколько
+    секунд звучит ведущий."""
+    spans = [b - a for a, b in _lines(_envelope(path), VOICE_RANGE, ADLIB_PAUSE)]
+    return len(spans) > 1 and statistics.median(spans) <= BACK_SHOUT and sum(spans) < BACK_SHARE * lead
+
+
 def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work: Path,
-           tune: str = "", keep: bool = False) -> list[tuple[Path, float, str]]:
+           tune: str = "", keep: bool = False, lead: float = 0.0) -> list[tuple[Path, float, str]]:
     """Части голоса сухими дорожками на своих местах: [(файл, поправка громкости в сумме, роль)].
 
     Цепочка — как у ведущего: срез, громкость к VOCAL_LUFS, компрессия, тембр по замеру,
     де-эссер своей роли; дальше — своя точка панорамы и своя громкость к ведущему level.
     tune — автотюн ведущего: ненастроенный дабл под настроенным голосом звучит фальшиво;
-    keep — дорожки из одного проекта, тембр артиста не трогается (TONE)."""
+    keep — дорожки из одного проекта, тембр артиста не трогается (TONE); lead — сколько
+    секунд звучит ведущий: бэк из коротких выкриков дальше идёт эдлибом (_shouts), и роль
+    в ответе — та, какой он обработан; без lead бэк остаётся бэком."""
+    if shouts := [path for part, path in parts if part == "бэк" and _shouts(path, lead)]:
+        parts = [("эдлиб" if path in shouts else part, path) for part, path in parts]
+        print("  бэк: короткие выкрики между строк — веду как эдлибы")
     placed = []
     for n, (part, path) in enumerate(parts):
         look, same = PARTS[part], [i for i, (other, _) in enumerate(parts) if other == part]
@@ -1667,11 +1717,14 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
         # в одну сторону — такие расходятся в стороны, как бэки.
         scattered = len(events) > 1 and statistics.median(b - a for a, b in events) <= ADLIB_LONG
         if scattered:
-            seconds = clips.probe_seconds(squeezed) + 1
+            # Уровень выкрика меряется после тембра и окраски: тембр по ходу сдвигает выкрики
+            # по-разному, и поправка по огибающей до него оставляла прежний разброс.
+            toned, seconds = work / f"part{n}-tone.wav", clips.probe_seconds(squeezed) + 1
+            _ffmpeg("-i", squeezed, "-af", f"{tone},aformat=channel_layouts=mono", *reels.VOICE_CODEC, toned)
             left, right = (_gain_track(points, seconds, work / f"part{n}-{side}.wav")
-                           for side, points in zip("lr", _scatter(events, 2 * same.index(n))))
-            _ffmpeg("-i", squeezed, "-i", left, "-i", right, "-filter_complex",
-                    f"[0:a]{tone},aformat=channel_layouts=mono,pan=stereo|c0=c0|c1=c0[s];[1:a]aresample={RATE}[l];[2:a]aresample={RATE}[r];"
+                           for side, points in zip("lr", _scatter(events, 2 * same.index(n), _even(_envelope(toned), events))))
+            _ffmpeg("-i", toned, "-i", left, "-i", right, "-filter_complex",
+                    f"[0:a]pan=stereo|c0=c0|c1=c0[s];[1:a]aresample={RATE}[l];[2:a]aresample={RATE}[r];"
                     "[l][r]join=inputs=2:channel_layout=stereo[g];[s][g]amultiply,volume=2", *reels.VOICE_CODEC, dry)
         elif len(same) == 1 and part != "дабл":
             _ffmpeg("-i", squeezed, "-filter_complex", f"[0:a]{tone}[t];" + DOUBLE.replace("[0:a]", "[t]"),
@@ -1682,7 +1735,7 @@ def voices(parts: list[tuple[str, Path]], level: float, ride: Path | None, work:
         if part == "дабл" and ride:
             dry = _apply(dry, ride, work / f"part{n}-ride.wav")
         placed.append((dry, level + look["gain"] - loudness(dry)[0], part))
-        where = (f"{len(events)} выкриков по панораме" if scattered
+        where = (f"{len(events)} выкриков по панораме, каждый к одной громкости" if scattered
                  else "в стороны" if len(same) == 1 and part != "дабл" else "панорама")
         print(f"  {part}: {where}, {look['gain']:+.0f} дБ к ведущему")
     return placed
@@ -3398,7 +3451,9 @@ FACTS = {
     "бит": "звучит как прислан: стемы складываются с теми уровнями, с какими выгружены, тембр и баланс бита не правятся; "
            "под голосом бит приседает по полосам выше 120 Гц, низ ниже 120 Гц сводится в моно",
     "части голоса": f"бэки на {-PARTS['бэк']['gain']:g} дБ тише ведущего и в своём отзвуке {PARTS_ROOM:g} с, "
-                    f"на {-PARTS['бэк']['reverb']:g} дБ тише их самих; даблы сухие; ручка эха двигает и отзвук бэков",
+                    f"на {-PARTS['бэк']['reverb']:g} дБ тише их самих; даблы сухие; ручка эха двигает и отзвук бэков; "
+                    "эдлибы и бэк из коротких выкриков — каждый выкрик в свою сторону и к одной громкости, "
+                    f"на {-PARTS['эдлиб']['gain']:g} дБ тише ведущего",
     "эхо стилей": {name: f"отзвук {kind['reverb'][0]:g} с на {kind['reverb'][1]:.0%} к голосу, эхо {kind['delay'][0]} "
                          f"на {kind['delay'][1]:.0%}" if "reverb" in kind else "у главного голоса ни отзвука, ни эха"
                    for name, kind in STYLES.items()},
@@ -5993,6 +6048,21 @@ def _selftest() -> None:
         left, right = _scatter([(1.0, 1.5), (2.0, 2.3), (4.0, 4.2)])
         assert left[0][1] > right[0][1] and left[-1][1] > right[-1][1] and left[2][1] < right[2][1], (left, right)
         assert all(1.5 < t < 2.0 for t, _ in left[1:3]) and len(left) == len(right) == 5
+        # Эдлибы под именем «бэк» (заказ 05.10.2026): короткие выкрики идут путём эдлибов и выходят одной
+        # громкости; долгие ноты, строки припева и слоги плотным рядом остаются бэком. lavfi — только с длиной d=.
+        assert [round(db) for db in _even([-20.0] * 50 + [-34.0] * 50 + [-25.0] * 50, [(0, .5), (.5, 1), (1, 1.5)])] == [-5, 6, 0], \
+            "выкрик — к медиане дорожки, не дальше ADLIB_EVEN"
+        backs = {"shouts": "(0.2+0.3*lt(mod(t,6),3))*sin(2*PI*440*t)*lt(mod(t,3),0.4)", "notes": "0.3*sin(2*PI*330*t)*lt(mod(t,20),4)",
+                 "lines": "0.3*sin(2*PI*330*t)*lt(mod(t,2.3),1.8)*lt(t,9)", "dense": "0.3*sin(2*PI*550*t)*lt(mod(t,0.8),0.4)"}
+        for name, sound in backs.items():
+            _ffmpeg("-f", "lavfi", "-i", f"aevalsrc='{sound}':d=30", tmp / f"back-{name}.wav")
+        assert [_shouts(tmp / f"back-{name}.wav", 60.0) for name in backs] == [True, False, False, False], "выкрики — только первая"
+        (tmp / "backs").mkdir()
+        placed = voices([("бэк", tmp / "back-shouts.wav"), ("бэк", tmp / "back-notes.wav")], -18.0, None, tmp / "backs", lead=60.0)
+        shouted = _envelope(placed[0][0])
+        loud = [max(shouted[i * 300 + 5:i * 300 + 35]) for i in range(10)]
+        assert [part for _, _, part in placed] == ["эдлиб", "бэк"] and max(loud) - min(loud) < 2, \
+            f"бэк из выкриков — эдлиб, выкрики (на входе 8 дБ врозь) — к одной громкости: {loud}"
 
         # Ссылка на облако при открытой заявке — дорожки, а не просьба; облако без скачивания — отказ.
         real_look = oblako.look
@@ -6222,7 +6292,7 @@ def _selftest() -> None:
         config.SKLEYKA_HAND_EXAMPLES = real_examples
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
-          "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
+          "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме и к одной громкости, бэк из коротких выкриков — эдлибом, "
           "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется — ок")
 
 
