@@ -2685,6 +2685,7 @@ SALE_PASSED = "Передал звукорежиссёру, ответит зд�
 SALE_LOST = ("⚠️ Заказ {track}: клиенту ушло не всё ({why}). Сообщение удалено или человек остановил бота — "
              "отметки нет, после починки кнопка сработает снова; файлы пропали — запусти --hand заново.")
 SALE_BAD = "⚠️ Заказ {track}: {why} — запусти --hand заново."
+SALE_PIN_WRONG = "Пин не тот — трек не отдан. Кнопка «🎁» снова на месте."
 
 
 def _sale_keys(track_id: str) -> list[list[dict]]:
@@ -2732,6 +2733,29 @@ def _give(data: dict, track_id: str, track: dict, words: str) -> bool:
     return True
 
 
+def _gift_key(track_id: str) -> list[list[dict]]:
+    return [[{"text": "🎁 Отдать без оплаты", "callback_data": f"{PREFIX}{track_id}:hg"}]]
+
+
+def _pin(track_id: str, typed: str, message_id: int | None) -> bool:
+    """Пин перед «🎁 Отдать без оплаты» (владелец, 05.10.2026): кнопка висит под строкой заказа, на которую
+    он отвечает клиенту, и промах пальцем отдавал трек даром. Цифры набираются кнопками и едут в данных
+    самой кнопки: память смены не нужна, а пин текстом в этом чате ушёл бы клиенту — ответом не на то
+    сообщение. Пин — секрет SKLEYKA_HAND_PIN; нет его — кнопка отдаёт сразу, как раньше."""
+    owner, pin = config.secret("TELEGRAM_ADMIN_ID"), config.secret("SKLEYKA_HAND_PIN", required=False)
+    if typed == pin:
+        return True
+    if len(typed) < len(pin):
+        rows = [[{"text": digit, "callback_data": f"{PREFIX}{track_id}:hg{typed}{digit}"} for digit in row]
+                for row in ("123", "456", "789", "0")]
+        back = {"text": f"↩️ Не отдавать · пин {len(typed)} из {len(pin)}", "callback_data": f"{PREFIX}{track_id}:hx"}
+        telegram.edit_markup(owner, message_id, rows + [[back]])
+    else:
+        telegram.edit_markup(owner, message_id, _gift_key(track_id))
+        telegram.send_message(owner, SALE_PIN_WRONG)
+    return False
+
+
 def _sale_send(data: dict, track_id: str, track: dict, payload: str, message_id: int | None, text: str) -> None:
     """«📤 Отправить клиенту» под текстом с Мака: клиенту — копии куска и этот текст с кнопками
     «Нравится» и «Что-то не так»; куска нет (правка после оплаты) — сразу целые файлы и текст.
@@ -2773,14 +2797,14 @@ def _sale_send(data: dict, track_id: str, track: dict, payload: str, message_id:
     save(data)
     telegram.edit_markup(owner, message_id, None)
     _owner(track_id, track, f"{name}: кусок и текст ушли клиенту, цена {price} ₽. Жду его ответа.",
-           [[{"text": "🎁 Отдать без оплаты", "callback_data": f"{PREFIX}{track_id}:hg"}]])
+           _gift_key(track_id))
 
 
 def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, message_id: int | None, text: str) -> None:
     """Кнопки продажи ручного сведения. Клиента — «как оплатить» (hl), «что-то не так» (hw),
     «я оплатил» (hp) — только из чата самого трека и пока продажа открыта; владельца — отправить
-    клиенту (hs…), деньги пришли или нет (hy, hn), отдать без оплаты (hg) — только от владельца
-    в его личке. Чужое нажатие — молча мимо: отвечать подделке нечего."""
+    клиенту (hs…), деньги пришли или нет (hy, hn), отдать без оплаты (hg и цифры пина, hx — передумал)
+    — только от владельца в его личке. Чужое нажатие — молча мимо: отвечать подделке нечего."""
     owner, track = config.secret("TELEGRAM_ADMIN_ID"), data["tracks"].get(track_id)
     if code in ("hl", "hw", "hp"):
         if not track or track["chat"] != chat_id or not _selling(track):
@@ -2823,17 +2847,22 @@ def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, messa
     if code.startswith("hs"):
         _sale_send(data, track_id, track, code[2:], message_id, text)
         return
-    sale = track.get("sale")
+    sale, gift = track.get("sale"), code.startswith("hg")
     if sale and not sale.get("given"):  # отдаётся один раз
         if code == "hn":
             sale.pop("claim", None)  # следующее «Я оплатил» дойдёт до владельца сразу
             save(data)
             telegram.send_message(track["chat"], SALE_NOT_SEEN, buttons=_pay_key(track_id))
-        elif code not in ("hy", "hg") or not _give(data, track_id, track, SALE_GIFT if code == "hg" else SALE_PAID):
+        elif code == "hx":
+            telegram.edit_markup(owner, message_id, _gift_key(track_id))
+            return
+        elif gift and not _pin(track_id, code[2:], message_id):
+            return  # пин не набран или не тот — трек остаётся у владельца
+        elif not (gift or code == "hy") or not _give(data, track_id, track, SALE_GIFT if gift else SALE_PAID):
             return
         else:
             _owner(track_id, track, f"{sale.get('who', 'клиент')}: целый трек ушёл клиенту"
-                   + (" без оплаты." if code == "hg" else f", {sale['price']} ₽ получено."))
+                   + (" без оплаты." if gift else f", {sale['price']} ₽ получено."))
     telegram.edit_markup(owner, message_id, None)
 
 
@@ -5234,7 +5263,9 @@ def _selftest() -> None:
         # дальше всё по кнопкам: «📤» владельца, «Нравится» и «Я оплатил» клиента, «✅ Деньги пришли».
         # Номера файлов целого трека — только из записи трека; чужой чат и подделка кнопки — мимо.
         real_time, real_doc, stamp, pay = state.now, telegram.send_document, state.now(), ["Перевод по номеру 100 <Банк>"]
-        config.secret = lambda name, required=True: {"TELEGRAM_ADMIN_ID": "1", "SKLEYKA_HAND_PAY": pay[0]}.get(name, "")
+        pin = [""]
+        config.secret = lambda name, required=True: {"TELEGRAM_ADMIN_ID": "1", "SKLEYKA_HAND_PAY": pay[0],
+                                                     "SKLEYKA_HAND_PIN": pin[0]}.get(name, "")
         state.now = lambda: stamp
         gone: set[int] = set()
 
@@ -5383,7 +5414,19 @@ def _selftest() -> None:
         got, rows = press(6, "hl", track="t8")
         assert got[0] == SALE_PAY_NONE.format(price=2500) and "пришлёт звукорежиссёр" in got[0] and rows[0] == _pay_key("t8") \
             and got[1].startswith(head[6] + "Лил: клиенту понравилось. Реквизитов у бота нет (секрет SKLEYKA_HAND_PAY пуст)"), got
-        got, _ = press(1, "hg", track="t8")
+        # Пин: «🎁» открывает цифры, набор едет в кнопках; не тот пин и «Не отдавать» возвращают кнопку,
+        # трек остаётся у владельца; чужое нажатие с верным пином — мимо.
+        pin[0] = "4071"
+        assert press(1, "hg", track="t8") == ([], []) and not copies() and edits[-1][0][0]["callback_data"] == f"{PREFIX}t8:hg1" \
+            and edits[-1][-1][0] == {"text": "↩️ Не отдавать · пин 0 из 4", "callback_data": f"{PREFIX}t8:hx"}, edits[-1]
+        assert press(1, "hg407", track="t8") == ([], []) and edits[-1][3][0]["callback_data"] == f"{PREFIX}t8:hg4070" \
+            and "пин 3 из 4" in edits[-1][-1][0]["text"] and len(edits[-1][3][0]["callback_data"].encode()) <= 64
+        assert press(1, "hg4070", track="t8")[0] == [SALE_PIN_WRONG] and edits[-1] == _gift_key("t8") and not copies() \
+            and "given" not in load()["tracks"]["t8"]["sale"], "не тот пин — трек не отдан"
+        edits.append(None)
+        assert press(1, "hx", track="t8") == ([], []) and edits[-1] == _gift_key("t8") and not copies()
+        assert press(6, "hg4071", track="t8") == ([], []) and not calls and "given" not in load()["tracks"]["t8"]["sale"]
+        got, _ = press(1, "hg4071", track="t8")
         assert copies() == [("6", "1", 902), ("6", "1", 903)] and got[0] == SALE_GIFT and "Трек твой" in got[0] \
             and "отзыв" in got[0] and "до-после" in got[0] and "целый трек ушёл клиенту без оплаты." in got[1], got
         assert press(1, "hg", track="t8") == ([], []) and not calls
