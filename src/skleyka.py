@@ -75,12 +75,14 @@
 владельца ответом на него бот пересылает человеку сам. За звёзды — только число треков.
 Коды, бонусы и номера платежей — в SKLEYKA_FILE, приватном хранилище.
 
-Ручное сведение («🎧 Свести руками») бот продаёт сам: задаток → кусок → перевод → целый трек. Файлы
+Ручное сведение («🎧 Отдать звукорежиссёру», до 05.10.2026 — «🎧 Свести руками») бот продаёт сам: задаток → кусок → перевод → целый трек. Файлы
 звукорежиссёр шлёт с Мака ботом владельцу в личку (--hand), а клиенту их копирует дежурство по кнопке
 владельца — состояние пишет только оно, запись с Мака дежурство затёрло бы своей. Задаток — звёздами
 и до начала работы (владелец, 05.10.2026): заказ стоил человеку одного нажатия, он получал готовый кусок
 и пропадал. Счёт тот же, что у «Больше треков», заявка уходит владельцу только после оплаты, возврат —
-его кнопкой «↩️ Не беру». Целиком за звёзды цена отвергнута: остальное — перевод человеку, приход денег
+его кнопкой «↩️ Не беру»: она же метит трек, и новый счёт по нему не выставляется, а внесённый задаток
+второй раз не принять (checkout). Заказ идёт только из-под готового трека: без него звукорежиссёру нечего
+слушать, а ник в ответе уводил человека в личку мимо задатка. Целиком за звёзды цена отвергнута: остальное — перевод человеку, приход денег
 подтверждает владелец кнопкой, бот банка не видит.
 
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   сведение, пара ДО/ПОСЛЕ одной громкости и ролик
@@ -1779,14 +1781,15 @@ KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swa
 PREFIX = "s:sk:"
 # Три выхода — только под отказом по лимиту: платное предложение в первом же ответе
 # отпугнуло бы тех, у кого нет денег на звукаря, а бесплатная функция остаётся бесплатной.
-HAND_BUTTON = {"text": "🎧 Свести руками", "callback_data": f"{PREFIX}u"}
+# До 05.10.2026 кнопка звалась «🎧 Свести руками» — читалось и как «сведу сам» (владелец).
+HAND_BUTTON = {"text": "🎧 Отдать звукорежиссёру", "callback_data": f"{PREFIX}u"}
 WAYS = [[{"text": "👥 Позвать артиста", "callback_data": f"{PREFIX}r"}],
         [{"text": "⭐️ Больше треков", "callback_data": f"{PREFIX}s"}],
         [HAND_BUTTON]]
-# «🎧 Свести руками» — под готовым треком и под лимитом, больше нигде. Бот себя не ругает:
+# «🎧 Отдать звукорежиссёру» — под готовым треком и под лимитом, больше нигде. Бот себя не ругает:
 # его сведение — для демо, к релизу сводят руками. Про звукорежиссёра — только имя: опыт
 # и отзывы были бы выдумкой. Цена — переводом ему самому, через бота идёт только задаток (HAND_DEPOSIT).
-HAND = ("🎧 <b>Свести руками</b>\n\n"
+HAND = ("🎧 <b>Отдать звукорежиссёру</b>\n\n"
         "Бот выставляет баланс и громкость — для демо и показать друзьям этого хватает. "
         "К релизу трек сводят руками: чистка, тюн, автоматизация, эффекты по смыслу песни. "
         f"Это делает звукорежиссёр ПЛЁНКИ — {config.SKLEYKA_HAND_ENGINEER}.\n\n"
@@ -1794,10 +1797,16 @@ HAND = ("🎧 <b>Свести руками</b>\n\n"
         f"Готово {config.SKLEYKA_HAND_TERM}.\n\n"
         # Возврат за приведённого — только за оплаченный заказ: готовый трек в боте можно
         # накрутить друзьями, а деньги нет. Считает звукорежиссёр сам, оплата мимо бота.
-        f"Приведёшь артиста, который закажет сведение руками, — вернёт тебе {config.SKLEYKA_HAND_BACK} ₽. "
+        f"Приведёшь артиста, который закажет у него сведение, — вернёт тебе {config.SKLEYKA_HAND_BACK} ₽. "
         "За каждого, пока не вернётся вся цена. Пусть при заказе назовёт твой ник.\n\n"
         "Напиши ему, что хочешь получить")
 HAND_TRACKS = ", — дорожки у него уже есть."
+# Готового трека нет — ни ника, ни счёта: номер трека в счёт поставить не из чего, а с ником человек
+# писал звукорежиссёру в личку, и задаток с него бот не брал.
+HAND_FIRST = ("🎧 <b>Отдать звукорежиссёру</b>\n\n"
+              "Сначала сведи трек ботом — /svedenie. Заказ — кнопкой «🎧 Отдать звукорежиссёру» под готовым треком: "
+              "дорожки и версию бота звукорежиссёр берёт оттуда.\n\n"
+              f"Вокал + бит — {config.SKLEYKA_HAND_RUB[0]} ₽, по дорожкам — {config.SKLEYKA_HAND_RUB[1]} ₽.")
 # Задаток звёздами до начала работы (владелец, 05.10.2026): заказ стоил одного нажатия, человек получал
 # готовый кусок и пропадал. Условия — в самом предложении, до счёта: что входит в цену, когда вернётся
 # и когда нет. Суммы доплаты названы обе: по ссылке на облако режим до сведения неизвестен. «Дорожки уйдут
@@ -1813,25 +1822,29 @@ HAND_DEPOSIT = HAND.rpartition("\n\n")[0] + (
 # Счёт задатка: номер трека едет в payload — оплату узнаёт paid, и состояния до неё не нужно
 # (счёт шлёт и Мак, --deposit, а запись с Мака дежурство затёрло бы).
 DEPOSIT = "hand:"
-DEPOSIT_TITLE = "Задаток за сведение руками"
+DEPOSIT_TITLE = "Задаток звукорежиссёру"
 DEPOSIT_ABOUT = (f"Входит в цену как {config.SKLEYKA_HAND_DEPOSIT_RUB} ₽. Вернётся, если звукорежиссёр не возьмётся "
                  "за трек; кусок готов и отправлен — остаётся за работу.")
 DEPOSIT_PAID = (f"Задаток {{stars}} ⭐️ получен — дорожки ушли звукорежиссёру {config.SKLEYKA_HAND_ENGINEER}. "
                 "Напиши ему, что хочешь получить; кусок готового трека придёт сюда.")
 DEPOSIT_BACK = "Звукорежиссёр за этот трек не возьмётся — задаток {stars} ⭐️ вернули. Версия бота остаётся у тебя."
 DEPOSIT_NONE = "Задатка по этому заказу нет: не вносили или уже вернули."
+# Без разметки: идёт и ответом на кнопку, и причиной отказа в окне оплаты (checkout).
+HAND_REFUSED = ("За этот трек звукорежиссёр не взялся — задаток вернули, новый счёт не нужен. "
+                "Версия бота остаётся у тебя. Вопрос — /vopros.")
+DEPOSIT_TWICE = "Задаток по этому треку уже внесён — второй раз платить не нужно."
 HAND_LOST = "⚠️ Не переслал: {what}. Сообщения удалены или трек сведён раньше этой кнопки — попроси у человека."
 # Отказ в ручном сведении — по замеру записи (gauge, flaws): запись с явным браком руками не вытянуть,
 # и взять за неё деньги значит продать ту же версию бота. Человеку — что не так и как перезаписать;
 # мерил бот, поэтому спорить можно — /vopros. Владельцу — одна строка вместо карточки и дорожек.
-HAND_NO = ("🎧 <b>Свести руками</b>\n\n"
+HAND_NO = ("🎧 <b>Отдать звукорежиссёру</b>\n\n"
            "За этот трек звукорежиссёр ПЛЁНКИ не возьмётся: дело в записи голоса, а запись сведением "
            "не исправить. Заплатишь — а разницы с версией бота почти не услышишь.\n\n"
            "{flaws}\n\n"
            "Пока пользуйся версией бота — она у тебя уже есть. Перезапишешь голос — присылай заново, "
            "/svedenie: под новым треком будет та же кнопка.\n\n"
            "Запись мерил бот, а не человек. Не согласен — напиши /vopros, посмотрит владелец.")
-HAND_SIFTED = ("🎧 Свести руками — бот не взял ({why}): {who}, трек {track}. Запись: {take}. "
+HAND_SIFTED = ("🎧 Отдать звукорежиссёру — бот не взял ({why}): {who}, трек {track}. Запись: {take}. "
                "Человеку — отказ и как перезаписать; ответ на это сообщение уйдёт ему. ")
 # Товары за звёзды: payload счёта → название (до 32 знаков).
 STARS = {"pack": f"+{config.SKLEYKA_PACK} трека на сутки",
@@ -1872,7 +1885,7 @@ HELP = ("❓ <b>Как это работает</b>\n\n"
         f"пришли старый бит, найду бесплатный того же темпа и перенесу голос на него (темп — до ±{SWAP_TEMPO:.0%}).\n"
         "• Упрёшься в лимит — докупи треки за звёзды или позови артиста: за его первый трек — ещё один тебе.\n"
         "• Спроси словами, почему трек звучит так, — объясню.\n"
-        f"• Нужен живой звукорежиссёр — «🎧 Свести руками» под готовым треком: от {config.SKLEYKA_HAND_RUB[0]} ₽, "
+        f"• Нужен живой звукорежиссёр — «🎧 Отдать звукорежиссёру» под готовым треком: от {config.SKLEYKA_HAND_RUB[0]} ₽, "
         f"готово {config.SKLEYKA_HAND_TERM}.\n"
         "• Что-то сломалось или другой вопрос, в том числе об оплате, — /vopros.\n\n"
         "Как пришлёшь?")
@@ -2133,9 +2146,21 @@ def _deposit(data: dict, track_id: str) -> dict | None:
     return next((p for payments in data["paid"].values() for p in payments if p["item"] == DEPOSIT + track_id), None)
 
 
+def checkout(item: str) -> str:
+    """Проверка перед списанием звёзд (pre_checkout_query): причина отказа или пусто. Отказ — только
+    задатку: по треку он уже внесён (счёт в чате живёт и после оплаты, второй платёж дал бы вторую
+    запись) или за трек не взялись — старый счёт после «↩️ Не беру» тоже остаётся в чате."""
+    if not item.startswith(DEPOSIT):
+        return ""
+    data, track_id = load(), item.removeprefix(DEPOSIT)
+    if _deposit(data, track_id):
+        return DEPOSIT_TWICE
+    return HAND_REFUSED if data["tracks"].get(track_id, {}).get("refused") else ""
+
+
 def _bill(chat_id: str, track_id: str) -> None:
     """Предложение ручного сведения: условия и счёт задатка. Состояния не пишет — зовётся и нажатием
-    «🎧 Свести руками», и с Мака (--deposit) для заявок, принятых до задатка."""
+    «🎧 Отдать звукорежиссёру», и с Мака (--deposit) для заявок, принятых до задатка."""
     telegram.send_message(chat_id, HAND_DEPOSIT)
     telegram.send_invoice(chat_id, DEPOSIT_TITLE, DEPOSIT_ABOUT, DEPOSIT + track_id, config.SKLEYKA_HAND_DEPOSIT)
 
@@ -2169,8 +2194,11 @@ def refund(charge: str) -> str:
             except telegram.TelegramError as exc:
                 return f"Не вернул: {exc}"
             data["paid"][chat].remove(p)
+            # Задаток возвращают, когда за трек не берутся, — и кнопкой владельца, и этой командой:
+            # отметка в треке, и повторное «🎧» по нему отвечает отказом, а не новым счётом (_hand).
+            if p["item"].startswith(DEPOSIT) and p["item"].removeprefix(DEPOSIT) in data["tracks"]:
+                data["tracks"][p["item"].removeprefix(DEPOSIT)]["refused"] = state.iso()
             save(data)
-            # Задаток возвращают, когда за трек не берутся, — и кнопкой владельца, и этой командой.
             telegram.send_message(chat, DEPOSIT_BACK.format(stars=p["stars"]) if p["item"].startswith(DEPOSIT)
                                   else f"Вернули {p['stars']} ⭐️ за «{_goods(p['item'])}».")
             return f"Вернул {p['stars']} ⭐️, «{_goods(p['item'])}» снято."
@@ -2458,7 +2486,7 @@ def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film
     не поправили словами, о подсказке в тексте не знали; голос с дропа, если он входит
     раньше (DROP_NOTE); стиль, голос, эхо, саунд-дизайн; «поменять» — когда вокал понят
     по звуку; согласие на ролик ПЛЁНКИ, пока его не дали (FILM_TERMS); «В ОТБОР» — дорога дальше;
-    последним — «🎧 Свести руками» (_hand), без строки о нём в самом сообщении."""
+    последним — «🎧 Отдать звукорежиссёру» (_hand), без строки о нём в самом сообщении."""
     def cb(code: str) -> str:
         return f"{PREFIX}{track}:{code}"
 
@@ -2522,7 +2550,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y), саунд-дизайн (e),
     справка (h), «нет бита» (g), «голос на чужом бите» (o) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
-    «🎧 Свести руками» (u) — под треком и под лимитом; кнопки продажи ручного сведения (h…, _sale) —
+    «🎧 Отдать звукорежиссёру» (u) — под треком и под лимитом; кнопки продажи ручного сведения (h…, _sale) —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
     keyboard — кнопки того сообщения, text — его текст (текст клиенту под «📤 Отправить клиенту»)."""
     chat_id = str(chat_id)
@@ -2655,13 +2683,14 @@ def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | 
 
 
 def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
-    """«🎧 Свести руками»: человеку — цена, условия и счёт задатка в звёздах (_bill); владельцу заявка
+    """«🎧 Отдать звукорежиссёру»: человеку — цена, условия и счёт задатка в звёздах (_bill); владельцу заявка
     уходит, только когда задаток внесён (paid → _deposited): до оплаты заказ — одно нажатие, и карточки
     он не стоит. Повтор до оплаты — счёт ещё раз, владельцу ничего. Задаток внесён или продажа уже идёт
     (заказ, принятый до задатка) — как раньше при повторе: контакт звукорежиссёра, а карточка — если
     ещё не уходила (отметка hand ставится после неё: не ушла — это нажатие пошлёт снова).
-    Под лимитом трек не назван — берётся последний готовый; нет его — только текст, без счёта:
-    пересылать нечего. Запись с явным браком (замер сведения, track["take"]) не берётся: человеку —
+    Под лимитом трек не назван — берётся последний готовый; нет его — HAND_FIRST: ни ника, ни счёта,
+    сперва трек ботом. От трека отказались («↩️ Не беру», отметка refused) — отказ, а не новый счёт;
+    задаток, внесённый после отказа по счёту с Мака (--deposit), важнее отметки. Запись с явным браком (замер сведения, track["take"]) не берётся: человеку —
     отказ HAND_NO без счёта, владельцу — строка, один раз (sifted). Замера нет или он не читается —
     заказ идёт как без него."""
     tracks = data["tracks"]
@@ -2680,13 +2709,15 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
             save(data)
         return
     if not track:
-        telegram.send_message(chat_id, HAND + ".")
-    elif not (track.get("sale") or _deposit(data, track_id)):
-        _bill(chat_id, track_id)
-    else:
+        telegram.send_message(chat_id, HAND_FIRST)
+    elif track.get("sale") or _deposit(data, track_id):
         telegram.send_message(chat_id, HAND + HAND_TRACKS)
         if not track.get("hand"):
             _card(data, track_id, track, who)
+    elif track.get("refused"):
+        telegram.send_message(chat_id, HAND_REFUSED)
+    else:
+        _bill(chat_id, track_id)
 
 
 def _gauged(track: dict | None) -> tuple[list[str], str]:
@@ -2716,7 +2747,7 @@ def _card(data: dict, track_id: str, track: dict, who: dict) -> None:
         f"{'по дорожкам' if split else 'вокал + бит'}, {config.SKLEYKA_HAND_RUB[split]} ₽"
     words = "\n".join(filter(None, (track.get("wish"), track.get("said"))))
     card = telegram.send_message(admin, "\n".join([
-        f"🎧 <b>Свести руками</b> · {mode} · заказ <code>{track_id}</code>",
+        f"🎧 <b>Отдать звукорежиссёру</b> · {mode} · заказ <code>{track_id}</code>",
         _client(who, chat_id),
         *([f"Дорожки: {html.escape(_what([(f['n'], f['r']) for f in files]))}"] if files else []),
         *(f"Ссылка: {html.escape(link['u'])} — {html.escape(link.get('say', ''))}" for link in track.get("links", [])),
@@ -2767,6 +2798,8 @@ SALE_DONE = "Целый трек уже у тебя — выше. Правка �
 SALE_WRONG = ("Напиши одним сообщением, что не устраивает, и секунду, где это слышно: голос, ноты, громкость, "
               "эффекты, паузы. Одна правка до оплаты бесплатная.",
               "Понял. Напиши, что именно не так, — передам. Не сойдёмся — денег не надо, версия бота остаётся у тебя.")
+# Доплату у трека с задатком называет код, а не текст с Мака: Мак состояния не пишет и о задатке не знает.
+SALE_OWED = "\n\nЦелый трек — после доплаты {owed}."
 SALE_NUDGE = "Послушал кусок? Нравится — жми кнопку, нет — напиши, что не так."
 SALE_PAY_NUDGE = ("Кусок понравился, а перевода пока нет. Реквизиты выше, к оплате — {price}. "
                   "Перевёл — жми «Я оплатил». Передумал или что-то смущает — напиши сюда.")
@@ -2871,7 +2904,8 @@ def _sale_send(data: dict, track_id: str, track: dict, payload: str, message_id:
     «Нравится» и «Что-то не так»; куска нет (правка после оплаты) — сразу целые файлы и текст.
     Отметка — номер самого сообщения с кнопкой: второе нажатие той же кнопки ничего не шлёт, а новая
     отправка по тому же треку (новый кусок после правки) заменяет прежнюю. Счёт «что-то не так»
-    переезжает в новую отправку: бесплатную правку бот обещает один раз на трек."""
+    переезжает в новую отправку: бесплатную правку бот обещает один раз на трек. У трека с задатком
+    сумма доплаты идёт сразу: клиенту — строкой под текстом куска, владельцу — рядом с ценой."""
     owner, chat, old = config.secret("TELEGRAM_ADMIN_ID"), track["chat"], track.get("sale") or {}
     if old.get("text") == message_id:
         return
@@ -2891,6 +2925,7 @@ def _sale_send(data: dict, track_id: str, track: dict, payload: str, message_id:
         name = "клиент"
     track["sale"] = sale = {"price": price, "piece": ids[:count], "full": ids[count:], "text": message_id,
                             "sent": state.iso(), "who": name, "wrong": old.get("wrong", 0)}
+    owed = _owed(data, track_id, sale) if _deposit(data, track_id) else ""
     if not sale["piece"]:
         if not _give(data, track_id, track, html.escape(text)):
             return
@@ -2900,13 +2935,15 @@ def _sale_send(data: dict, track_id: str, track: dict, payload: str, message_id:
     try:
         for message in sale["piece"]:
             telegram.copy_message(chat, owner, message)
-        telegram.send_message(chat, html.escape(text), buttons=_sale_keys(track_id))
+        telegram.send_message(chat, html.escape(text) + (SALE_OWED.format(owed=owed) if owed else ""),
+                              buttons=_sale_keys(track_id))
     except telegram.TelegramError as exc:  # не сохранено — кнопка сработает снова
         telegram.send_message(owner, SALE_LOST.format(track=track_id, why=html.escape(str(exc))))
         return
     save(data)
     telegram.edit_markup(owner, message_id, None)
-    _owner(track_id, track, f"{name}: кусок и текст ушли клиенту, цена {price} ₽. Жду его ответа.",
+    _owner(track_id, track, f"{name}: кусок и текст ушли клиенту, цена {price} ₽"
+           + (f", к доплате {owed}" if owed else "") + ". Жду его ответа.",
            _gift_key(track_id))
 
 
@@ -3090,8 +3127,9 @@ def deposit_send(track_id: str, dry_run: bool) -> int:
     записи трека (нужен свежий STATE_DIR), состояния Мак не пишет: оплату узнает дежурство по payload счёта."""
     data = load()
     track = data["tracks"].get(track_id)
-    if not track or _deposit(data, track_id):
-        print(f"Заказ {track_id}: " + ("задаток уже внесён." if track else
+    if not track or _deposit(data, track_id) or track.get("refused"):
+        print(f"Заказ {track_id}: " + ("от него отказались («↩️ Не беру») — оплату счёта бот не примет." if track and track.get("refused")
+                                       else "задаток уже внесён." if track else
                                        f"в записях нет — {config.SKLEYKA_FILE}; нужен свежий STATE_DIR."))
         return 1
     print(f"Заказ {track_id} — человеку в чат {track['chat']}" + (" (сухой прогон, ничего не отправлено)" if dry_run else "") + ":")
@@ -4042,7 +4080,7 @@ def _hush(parts: list[tuple[str, Path, str]], master: Path | None, work: Path) -
     return hushed
 
 
-# Замер записи — отбор заказов «🎧 Свести руками» (владелец, 03.10.2026): первый же заказ пришёл
+# Замер записи — отбор заказов «🎧 Отдать звукорежиссёру» (владелец, 03.10.2026): первый же заказ пришёл
 # с голосом, который сведение не вытягивает, — работа сделана, а разницы с версией бота почти нет.
 # Отбирает бот, без владельца: сырой голос меряется, пока лежит на диске (run_job), числа едут
 # в запись трека, и _hand читает готовое. Ложный отказ — потерянный платящий клиент, поэтому
@@ -5361,7 +5399,8 @@ def _selftest() -> None:
         telegram._call = lambda method, payload, files=None: calls.append((method, payload)) or {} \
             if payload.get("message_id") != 12 else (_ for _ in ()).throw(telegram.TelegramError("not found"))
         callback(5, 5, "u", who={"first_name": "Лил", "last_name": "Пи"})
-        assert sent[-1] == HAND + "." and not calls, "под лимитом трек ещё сводится — без карточки и без дорожек"
+        assert sent[-1] == HAND_FIRST and not calls and "/svedenie" in HAND_FIRST and "под готовым треком" in HAND_FIRST \
+            and config.SKLEYKA_HAND_ENGINEER not in HAND_FIRST, "готового трека нет — ни ника, ни счёта: сперва трек ботом"
         data = load()
         data["tracks"]["t5"].update(done=state.iso(), mix=99)
         save(data)
@@ -5420,7 +5459,7 @@ def _selftest() -> None:
             and calls == [("refundStarPayment", {"user_id": "4", "telegram_payment_charge_id": "d0"})], "трека нет — звёзды назад"
         calls[:] = []
         callback(8, 8, "t5:u")
-        assert sent[-1] == HAND + "." and not calls, "чужой трек — как без трека"
+        assert sent[-1] == HAND_FIRST and not calls, "чужой трек — как без трека"
         data = load()
         data["tracks"]["t6"] = {"chat": "6", "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(), "done": state.iso(),
                                 "mix": 98, "files": [], "links": [{"u": "https://disk.yandex.ru/d/x", "say": "папка, 5 WAV"}]}
@@ -5450,7 +5489,7 @@ def _selftest() -> None:
         person, owner = sent[count:]
         assert person == HAND_NO.format(flaws=f"• {TAKE_FLAWS['noise'][1]}\n\n• {TAKE_FLAWS['clip'][1]}") \
             and "/vopros" in person and "пользуйся версией бота" in person and "₽" not in person, person
-        assert owner.startswith("🎧 Свести руками — бот не взял (шум, перегруз): без имени · @lilpi, трек t7. Запись: шум на 12 дБ") \
+        assert owner.startswith("🎧 Отдать звукорежиссёру — бот не взял (шум, перегруз): без имени · @lilpi, трек t7. Запись: шум на 12 дБ") \
             and "срезано 3.00% (от 1%)" in owner and owner.endswith(f"{QUESTION_TAG}6") and not calls, "отсев — без счёта"
         callback(6, 6, "t7:u", who={"username": "lilpi"})
         assert sent[count + 2:] == [person] and not calls and "hand" not in load()["tracks"]["t7"], \
@@ -5512,10 +5551,26 @@ def _selftest() -> None:
         # человеку строка один раз; дальше трек без задатка, и доплата у него полная.
         assert press(6, "hr", track="t8") == ([], []) and not calls and _deposit(load(), "t8"), "кнопка возврата — только владельцу"
         got, _ = press(1, "hr", track="t8")
-        assert got == [DEPOSIT_BACK.format(stars=150), "Вернул 150 ⭐️, «задаток за сведение руками» снято."] \
+        assert got == [DEPOSIT_BACK.format(stars=150), "Вернул 150 ⭐️, «задаток звукорежиссёру» снято."] \
             and calls == [("refundStarPayment", {"user_id": "6", "telegram_payment_charge_id": "dt8"})] \
             and not _deposit(load(), "t8") and "не возьмётся" in got[0], got
         assert press(1, "hr", track="t8")[0] == [DEPOSIT_NONE] and not calls, "второй раз возвращать нечего"
+        # После отказа: «🎧» по этому треку — отказ, а не новый счёт; старый счёт из чата не оплатить,
+        # внесённый задаток второй раз — тоже; остальные покупки и трек без задатка проходят.
+        from . import moderate
+
+        count, calls[:] = len(sent), []
+        callback(6, 6, "t8:u", who={"username": "lilpi"})
+        assert load()["tracks"]["t8"]["refused"] and sent[count:] == [HAND_REFUSED] and not calls \
+            and "<" not in HAND_REFUSED and "/vopros" in HAND_REFUSED, "после «Не беру» — отказ без счёта"
+        assert (checkout("hand:t5"), checkout("hand:t8"), checkout("hand:t7"), checkout("hand:нет000"), checkout("pack")) \
+            == (DEPOSIT_TWICE, HAND_REFUSED, "", "", "")
+        moderate.process([{"update_id": n, "pre_checkout_query": {"id": f"q{n}", "invoice_payload": item}}
+                          for n, item in ((1, "hand:t5"), (2, "hand:t8"), (3, "hand:t7"))], {}, "1", False, 0)
+        assert [p for _, p in calls] == [{"pre_checkout_query_id": "q1", "ok": False, "error_message": DEPOSIT_TWICE},
+                                         {"pre_checkout_query_id": "q2", "ok": False, "error_message": HAND_REFUSED},
+                                         {"pre_checkout_query_id": "q3", "ok": True}], calls
+        assert deposit_send("t8", False) == 1 and not bills(), "счёт с Мака отказанному треку не шлём"
         assert _owed(load(), "t5", {"price": 1500}) == "1200 ₽ (задаток 150 ⭐️ учтён)" == owed \
             and _owed(load(), "t8", {"price": 2500}) == "2500 ₽" and _owed(load(), "t5", {"price": 200}).startswith("0 ₽")
 
@@ -5524,13 +5579,18 @@ def _selftest() -> None:
         assert press(5, offer, text=said) == ([], []) and not calls and "sale" not in load()["tracks"]["t5"], "кнопка владельца — только владельцу"
         got, rows = press(1, offer, text=said)
         assert copies() == [("5", "1", 501), ("5", "1", 502)], calls
-        assert got[0] == "Вот кусок &lt;сведения&gt; — послушай." and rows[0] == _sale_keys("t5") \
+        assert got[0] == f"Вот кусок &lt;сведения&gt; — послушай.\n\nЦелый трек — после доплаты {owed}." and rows[0] == _sale_keys("t5") \
             and [key["text"] for row in rows[0] for key in row] == ["Нравится — как оплатить?", "Что-то не так"]
-        assert got[1].startswith(head[5] + "Лил · @lilpi: кусок и текст ушли клиенту, цена 1500 ₽") \
+        assert got[1].startswith(head[5] + f"Лил · @lilpi: кусок и текст ушли клиенту, цена 1500 ₽, к доплате {owed}. Жду") \
             and rows[1][0][0]["text"] == "🎁 Отдать без оплаты", got[1]
         sale = load()["tracks"]["t5"]["sale"]
         assert (sale["price"], sale["piece"], sale["full"], sale["text"]) == (1500, [501, 502], [505, 506], 700)
         assert press(1, offer, text=said) == ([], []) and not calls, "повторное нажатие той же кнопки ничего не шлёт"
+        got, _ = press(1, offer, mid=701, text=said, track="t8")  # задаток вернули — про доплату ни слова
+        assert got[0] == "Вот кусок &lt;сведения&gt; — послушай." and "цена 1500 ₽. Жду" in got[1] and "доплат" not in got[1], got
+        data = load()
+        del data["tracks"]["t8"]["sale"]
+        save(data)
 
         # Текст клиента при открытой продаже — звукорежиссёру, а не в просьбу к треку и не в разбор:
         # service зовёт sale_text раньше; ответ владельца на строку находит клиента по метке.
@@ -5569,7 +5629,7 @@ def _selftest() -> None:
         # отметка «отправлено» — у отправки, а не у трека; счёт «что-то не так» переезжает.
         got, rows = press(1, "hs1500.1.601,1", mid=710, text="Поправил — вот новый кусок.")
         sale = load()["tracks"]["t5"]["sale"]
-        assert copies() == [("5", "1", 601)] and got[0] == "Поправил — вот новый кусок." and rows[0] == _sale_keys("t5") \
+        assert copies() == [("5", "1", 601)] and got[0] == "Поправил — вот новый кусок." + SALE_OWED.format(owed=owed) and rows[0] == _sale_keys("t5") \
             and (sale["piece"], sale["full"], sale["text"], sale["wrong"]) == ([601], [602], 710, 2) and "touched" not in sale
         assert press(1, "hs1500.1.601,1", mid=710, text="Поправил — вот новый кусок.") == ([], []) and not calls
         got, _ = press(5, "hw")
@@ -6029,7 +6089,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме, "
-          "реферал за трек и звёзды, «свести руками»: задаток звёздами до заявки владельцу, возврат кнопкой, доплата без задатка; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется — ок")
+          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется — ок")
 
 
 def talk_check() -> list[str]:

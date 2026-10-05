@@ -275,9 +275,11 @@ def send_invoice(chat_id: str, title: str, description: str, payload: str, stars
                                  "prices": json.dumps([{"label": title, "amount": stars}])})
 
 
-def answer_pre_checkout(query_id: str) -> None:
-    """Последнее «да» перед списанием: не ответить за 10 секунд — платёж отменится."""
-    _call("answerPreCheckoutQuery", {"pre_checkout_query_id": query_id, "ok": True})
+def answer_pre_checkout(query_id: str, error: str = "") -> None:
+    """Последнее «да» перед списанием: не ответить за 10 секунд — платёж отменится.
+    С причиной (error) — «нет»: её Telegram покажет человеку в окне оплаты."""
+    _call("answerPreCheckoutQuery", {"pre_checkout_query_id": query_id, "ok": not error,
+                                     **({"error_message": error} if error else {})})
 
 
 def refund_stars(user_id: str | int, charge_id: str) -> None:
