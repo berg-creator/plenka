@@ -2681,6 +2681,8 @@ SALE_WRONG = ("Напиши одним сообщением, что не уст�
               "эффекты, паузы. Одна правка до оплаты бесплатная.",
               "Понял. Напиши, что именно не так, — передам. Не сойдёмся — денег не надо, версия бота остаётся у тебя.")
 SALE_NUDGE = "Послушал кусок? Нравится — жми кнопку, нет — напиши, что не так."
+SALE_PAY_NUDGE = ("Кусок понравился, а перевода пока нет. Реквизиты выше, к оплате — {price} ₽. "
+                  "Перевёл — жми «Я оплатил». Передумал или что-то смущает — напиши сюда.")
 SALE_PASSED = "Передал звукорежиссёру, ответит здесь."
 SALE_LOST = ("⚠️ Заказ {track}: клиенту ушло не всё ({why}). Сообщение удалено или человек остановил бота — "
              "отметки нет, после починки кнопка сработает снова; файлы пропали — запусти --hand заново.")
@@ -2816,12 +2818,14 @@ def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, messa
             telegram.send_message(chat_id, SALE_DONE)
         elif code == "hw":
             sale["wrong"] = sale.get("wrong", 0) + 1
+            sale.pop("due", None)  # недоволен — об оплате не напоминаем
             save(data)
             telegram.send_message(chat_id, SALE_WRONG[sale["wrong"] > 1])
             _owner(track_id, track, f"{name}: что-то не так ({sale['wrong']}-й раз), жду его текст.")
         elif code == "hl":
             first, pay = "liked" not in sale, config.secret("SKLEYKA_HAND_PAY", required=False)
             sale.setdefault("liked", state.iso())
+            sale["due"] = state.iso()  # реквизиты показаны — с этой минуты ждём перевод (_nudge)
             save(data)
             telegram.send_message(chat_id, (SALE_PAY if pay else SALE_PAY_NONE).format(pay=html.escape(pay), price=sale["price"]),
                                   buttons=_pay_key(track_id))
@@ -2833,6 +2837,7 @@ def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, messa
             telegram.send_message(chat_id, SALE_CLAIMED_AGAIN)
         else:
             sale["claim"] = state.iso()
+            sale.pop("due", None)
             save(data)
             _owner(track_id, track, f"{name} пишет, что перевёл {sale['price']} ₽ — проверь банк.",
                    [[{"text": "✅ Деньги пришли", "callback_data": f"{PREFIX}{track_id}:hy"},
@@ -2851,6 +2856,7 @@ def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, messa
     if sale and not sale.get("given"):  # отдаётся один раз
         if code == "hn":
             sale.pop("claim", None)  # следующее «Я оплатил» дойдёт до владельца сразу
+            sale["due"] = state.iso()
             save(data)
             telegram.send_message(track["chat"], SALE_NOT_SEEN, buttons=_pay_key(track_id))
         elif code == "hx":
@@ -2876,8 +2882,11 @@ def sale_text(chat_id: str | int, text: str) -> bool:
     if not found:
         return False
     track_id, track = found
-    if "touched" not in track["sale"]:
-        track["sale"]["touched"] = state.iso()
+    sale = track["sale"]
+    if "touched" not in sale or "due" in sale:
+        sale.setdefault("touched", state.iso())
+        if "due" in sale:  # пишет, а не платит — сутки до напоминания об оплате считаются заново
+            sale["due"] = state.iso()
         save(data)
     _owner(track_id, track, f"{track['sale'].get('who', 'клиент')}:\n\n{html.escape(text[:2000])}")
     telegram.send_message(chat, SALE_PASSED)
@@ -2887,7 +2896,11 @@ def sale_text(chat_id: str | int, text: str) -> bool:
 def _nudge(data: dict) -> bool:
     """Клиент сутки молчит над куском — ни нажатия, ни текста: одно напоминание с теми же кнопками,
     владельцу строка. Один раз на отправку и не ночью (publish.night). Отметка пишется раньше
-    сообщения: сорвалась отправка — напоминания не будет, зато второго не будет точно."""
+    сообщения: сорвалась отправка — напоминания не будет, зато второго не будет точно.
+    Нажал «Нравится» и сутки не платит (владелец 05.10.2026: заказ «Бу» пришлось напоминать руками) —
+    второе, с кнопкой «Я оплатил». Срок — поле due: ставят реквизиты и «Не пришли», текст клиента
+    отодвигает на сутки, «Я оплатил» и «Что-то не так» снимают; напомнили — снято, пока клиент
+    или владелец не нажмут снова, поэтому цепочки напоминаний без чьего-то действия не бывает."""
     from .publish import night  # publish тянет полканала — только на круге дежурства
 
     if night(state.now()):
@@ -2895,14 +2908,20 @@ def _nudge(data: dict) -> bool:
     told = False
     for track_id, track in data["tracks"].items():
         sale = track.get("sale") or {}
-        if not sale.get("piece") or any(sale.get(key) for key in ("given", "touched", "nudged")) \
-                or _age(sale["sent"]) < SALE_NUDGE_HOURS * 3600:
+        pay = "due" in sale
+        if not sale.get("piece") or sale.get("given") or not pay and (sale.get("touched") or sale.get("nudged")) \
+                or _age(sale["due" if pay else "sent"]) < SALE_NUDGE_HOURS * 3600:
             continue
+        sale.pop("due", None)
         sale["nudged"] = told = state.iso()
         save(data)
         try:
-            telegram.send_message(track["chat"], SALE_NUDGE, buttons=_sale_keys(track_id))
-            _owner(track_id, track, f"{sale.get('who', 'клиент')} молчит сутки, напомнил.")
+            if pay:
+                telegram.send_message(track["chat"], SALE_PAY_NUDGE.format(price=sale["price"]), buttons=_pay_key(track_id))
+            else:
+                telegram.send_message(track["chat"], SALE_NUDGE, buttons=_sale_keys(track_id))
+            _owner(track_id, track, f"{sale.get('who', 'клиент')} "
+                   + ("нажал «Нравится» и сутки не платит, напомнил." if pay else "молчит сутки, напомнил."))
         except telegram.TelegramError as exc:
             print(f"  продажа {track_id}: напоминание не ушло: {exc}")
     return bool(told)
@@ -5455,6 +5474,30 @@ def _selftest() -> None:
             and sent[-1].startswith(f"🎧 Заказ t9 · {QUESTION_TAG}6\nЛил молчит сутки, напомнил."), sent[count:]
         state.now = lambda: noon + timedelta(days=2)
         assert not _nudge(load()) and len(sent) == count + 2 and load()["tracks"]["t9"]["sale"]["nudged"], "напоминание — ровно одно"
+
+        # Нажал «Нравится» и сутки не платит — одно напоминание с «Я оплатил»: текст клиента отодвигает
+        # его на сутки, «Что-то не так» и «Я оплатил» снимают, «Не пришли» ставит срок заново.
+        data = load()
+        data["tracks"]["t9"]["chat"] = "99"
+        save(data)
+        day = noon + timedelta(days=3)
+        assert press(99, "hl", track="t9")[1][0] == _pay_key("t9") and not _nudge(load())
+        state.now = lambda: day - timedelta(hours=1)
+        assert sale_text(99, "переведу вечером") and not _nudge(load())
+        state.now = lambda: day + timedelta(hours=22)
+        count, shown = len(sent), len(keys)
+        assert not _nudge(load()) and len(sent) == count, "после текста клиента суток не прошло"
+        state.now = lambda: day + timedelta(hours=24)
+        assert _nudge(load()) and sent[count] == SALE_PAY_NUDGE.format(price=1500) and keys[shown] == _pay_key("t9") \
+            and "\nЛил нажал «Нравится» и сутки не платит, напомнил." in sent[-1], sent[count:]
+        state.now = lambda: day + timedelta(days=3)
+        assert not _nudge(load()) and len(sent) == count + 2, "напоминание об оплате — одно"
+        press(99, "hl", track="t9"), press(99, "hw", track="t9")
+        assert "due" not in load()["tracks"]["t9"]["sale"], "недоволен — об оплате не напоминаем"
+        press(99, "hl", track="t9"), press(99, "hp", track="t9")
+        assert "due" not in load()["tracks"]["t9"]["sale"], "сказал, что оплатил, — ждём владельца"
+        press(1, "hn", track="t9")
+        assert "due" in load()["tracks"]["t9"]["sale"], "перевод не пришёл — срок считается заново"
         state.now, telegram.send_document = real_time, real_doc
         config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
         telegram._call = mock
