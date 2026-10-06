@@ -677,15 +677,16 @@ def publish_shift() -> None:
     через PUSH_EVERY попробует снова.
     """
     target = os.environ.get("PUBLISH_TARGET", "admin")
-    # Бит владельца — первым (bity.air): так он забирает единственный звук дня (publish.hushed).
+    # Бит недели — первым (bity.air, по понедельникам): так он забирает единственный звук дня
+    # (publish.hushed); в воскресенье вечером тем же местом выходит итог недели (otbor.final).
     # Следом в тот же заход ничего не выходит — два поста подряд в ленте ни к чему.
     if target == "channel":
         try:
-            if beat := bity.air():
-                print(f"Выход бита: №{beat} → {target}")
+            if beat := bity.air() or otbor.final():
+                print(f"Выход бита недели: {beat} → {target}")
                 return
         except Exception as exc:  # noqa: BLE001 — бит не держит выход остальных постов
-            log.error("Выход бита не удался: %s", exc)
+            log.error("Выход бита недели не удался: %s", exc)
         try:  # СОВЕТ НЕДЕЛИ: по четвергам, после бита — второй звук в день ему не достаётся (publish.hushed)
             from . import sovet
 

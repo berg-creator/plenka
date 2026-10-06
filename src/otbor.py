@@ -35,11 +35,24 @@ VK и Звук без входа ничего не отдают — челове
 и названием (card.cover, поле mixed); во ВКонтакте пост не дублируется — слушать
 там было бы нечего. Обычный отбор не изменился: там трек по-прежнему выложен.
 
-Конкурса нет — пока постов меньше трёх в неделю, соревноваться не с кем.
 Под треком в комментариях висит анонимный опрос «как вам» (comments.OTBOR_POLL):
 послушал и отметился там же. Выходит каждый, кто прошёл проверки,
 по порядку прихода, не больше одного в день и днём. Выпускает дежурство
 (src/moderate.py), как и релизы: крон занимал бы группу state-write.
+
+БИТ НЕДЕЛИ (владелец, 06.10.2026). Канал терял подписчиков: приходят те, кто сам
+делает музыку, а лента — чужие релизы. Теперь канал — сцена для пришедших в бот:
+в понедельник выходит бит владельца (bity.air), под него пишут и сводят ботом,
+и трек, сведённый с этим битом через «🎚 Свести с этим битом» и присланный сюда
+до конца субботы, выходит с меткой недели (week_of, build_post) — раньше обычных
+заявок и мимо правила «один в день», но не больше двух в сутки и не чаще раза
+в три часа (shift). Опрос под таким треком считается: в воскресенье вечером итог
+(final) закрывает опросы и выпускает пост — победитель по «🔥», все треки со счётом.
+Конкурса из двух треков нет: итог выходит, когда треков недели вышло не меньше
+трёх, иначе неделя кончается молча. Приз — ручное сведение бесплатно — бот только
+обещает: победителю сообщение, владельцу строка, а заказ владелец заводит сам
+(skleyka --hand и «🎁»). Отвергнуто: считать голоса без закрытия опроса — чтения
+опроса у Bot API нет, а пересылка опроса ради счёта сорила бы в чате обсуждений.
 
 Пост — шаблоном, без модели. О звуке канал не пишет ни слова: трек он не слушал,
 а шаблону выдумывать нечего. Сам трек идёт первым комментарием (comments.seed) —
@@ -51,7 +64,7 @@ VK и Звук без входа ничего не отдают — челове
 (config.OTBOR_POSTS), так что имя и трек попадают в открытый репозиторий
 только вышедшим постом, в архиве.
 
-    python -m src.otbor --selftest                 три способа прислать, трек из СВЕДЕНИЯ без площадки, отказы, пост — без сети
+    python -m src.otbor --selftest                 три способа прислать, трек из СВЕДЕНИЯ без площадки, отказы, пост, бит недели и его итог — без сети
     python -m src.otbor --dry-run                  какой пост отбора выйдет следующим
     python -m src.otbor --find "ссылка или Артист — Трек"   что бот найдёт и пустит ли в отбор
 """
@@ -81,6 +94,17 @@ MIN_SECONDS, MAX_SECONDS = 60, 8 * 60
 WEEK = timedelta(days=7)
 # Днём по Москве: утро занято обычными слотами, после девяти вечера лента уже забита.
 DAY_HOURS_MSK = range(12, 21)
+# Трек на бит недели идёт мимо правила «один пост отбора в сутки»: по одному в день шесть треков
+# заняли бы всю неделю, а седьмой вышел бы после итога. Но и не лентой подряд — не больше
+# WEEK_PER_DAY в сутки и не чаще раза в WEEK_GAP.
+WEEK_PER_DAY, WEEK_GAP = 2, timedelta(hours=3)
+# Итог — в воскресенье с FINAL_HOUR_MSK по Москве, когда треков недели вышло не меньше WEEK_MIN:
+# из двух победителя не выбирают.
+WEEK_MIN, FINAL_HOUR_MSK = 3, 19
+WEEK_KICKER = "БИТ НЕДЕЛИ"
+# Отметка итога в content/archive по понедельнику недели: файл есть — итог вышел или снят (final).
+FINAL_FILE = "week-{week}.json"
+FIRE, FINE = 0, 1  # места «🔥» и «👍» в comments.OTBOR_POLL
 
 URL = re.compile(r"https?://\S+")
 # Где найти артиста: страница ВКонтакте или свой канал в Telegram — читатель поста
@@ -143,6 +167,25 @@ CONSENT = ("Последнее: можно взять трек в ролик к�
            "На выход в канал ответ не влияет.")
 ACCEPTED = ("Принято ✅ Ты {place}-й в очереди. В канал выходит один трек в сутки, днём. "
             "Выйдет — пришлю ссылку.")
+# Трек на бит недели места в очереди не называет: он выходит раньше обычных заявок.
+ACCEPTED_WEEK = ("Принято ✅ Трек идёт на бит недели: выйдет в канале раньше обычной очереди, "
+                 "под ним — голосование. Выйдет — пришлю ссылку.")
+WEEK_MARK = "🎚 " + WEEK_KICKER + " · «{beat}»"
+WEEK_SENT = "Трек на бит недели прислал сам артист. Голосуй в комментариях ↓"
+# Итог недели (final) — шаблоном, как и пост отбора: о звуке ни слова, только счёт опросов.
+FINAL = ("🏆 <b>" + WEEK_KICKER + " · «{beat}» — ИТОГ</b>\n\n{table}\n\n"
+         "Победил трек «{title}»: звукорежиссёр сведёт его руками бесплатно.\n\n"
+         "Завтра — новый бит недели.")
+FINAL_ROW = '{place} <a href="{link}">{name}</a> — 🔥 {fire}'
+FINAL_MORE = "…и ещё {count}"
+FINAL_ASK = "За какой трек голосовал ты?"  # первый комментарий под итогом (comments.seed берёт поле comment)
+WON = ("🏆 Твой трек «{title}» выиграл бит недели: {link}\n\n"
+       "Приз — ручное сведение: звукорежиссёр сведёт этот трек руками бесплатно и напишет сюда.")
+# Метка чата — та же, что у /vopros (skleyka.QUESTION_TAG): ответ владельца на эту строку уходит победителю.
+WON_OWNER = ("🏆 Бит недели выиграл трек {name} — {link}. Победителю обещано ручное сведение бесплатно. "
+             "Ответ на это сообщение уйдёт ему · {tag}")
+WON_LOST = "чат победителя не нашёл, напиши ему сам"
+FINAL_FAILED = "🏆 Итог бита недели не вышел: до ночи не закрылись опросы под треками ({why}). Итога этой недели не будет."
 CANCELLED = "Отменил. Захочешь вернуться — /otbor."
 CLOSED = "Эта заявка уже закрыта. Новая — /otbor."
 PUBLISHED = "Вышло: {link}\n\nПерешли своим — пусть слушают и пишут в комментариях."
@@ -525,7 +568,9 @@ def mixed(chat_id: str, user_id: str, track_id: str = "", *, admin: bool = False
         denied = LENGTH.format(length=_clock(found["seconds"]))
     data["drafts"].pop(chat_id, None)
     if not denied:
-        data["drafts"][chat_id] = {"stage": "name", "user": user_id, "skleyka": True, "file_id": found["file"]}
+        # beat — номер бита ПЛЁНКИ, с которым трек сведён: по нему заявка идёт в зачёт бита недели (week_of).
+        data["drafts"][chat_id] = {"stage": "name", "user": user_id, "skleyka": True, "file_id": found["file"],
+                                   **({"beat": found["beat"]} if found.get("beat") else {})}
     save(data)
     telegram.send_message(chat_id, denied or MIX_NAME, buttons=None if denied else CANCEL_BUTTONS)
 
@@ -734,7 +779,7 @@ def callback(chat_id: str | int, user_id: str | int, choice: str, *, admin: bool
         telegram.send_message(chat_id, CLOSED)
 
 
-FIELDS = ("artist", "title", "url", "cover", "track_file_id", "seconds", "quote", "skleyka", *PAGES)
+FIELDS = ("artist", "title", "url", "cover", "track_file_id", "seconds", "quote", "skleyka", "beat", *PAGES)
 
 
 def submit(data: dict, chat_id: str, user_id: str, *, reel: bool, admin: bool) -> None:
@@ -746,19 +791,50 @@ def submit(data: dict, chat_id: str, user_id: str, *, reel: bool, admin: bool) -
             "chat": chat_id, "at": state.iso(), "reel": reel, "key": key(draft["artist"], draft["title"]),
         })
     save(data)
-    telegram.send_message(chat_id, denied or ACCEPTED.format(place=len(data["queue"])))
+    telegram.send_message(chat_id, denied or (ACCEPTED_WEEK if week_of(data["queue"][-1])
+                                              else ACCEPTED.format(place=len(data["queue"]))))
 
 
 # ─────────────────────────── выход в канал ───────────────────────────
 
 
+def week_of(application: dict) -> str:
+    """Неделя бита недели (дата понедельника), в зачёт которой идёт заявка; пусто — обычная заявка.
+
+    В зачёт идёт трек, сведённый с битом этой недели через «🎚 Свести с этим битом» (номер бита —
+    поле beat, от skleyka.song) и присланный на этой же неделе до конца субботы по Москве. Считается
+    в момент выхода, а не приёма: трек, не успевший выйти к итогу (final), в итог не идёт — после
+    итога и на следующей неделе он выходит обычным постом отбора, без метки и без очереди недели.
+    """
+    moment = state._parse(application.get("at", ""))
+    if not application.get("beat") or not moment:
+        return ""
+    from . import bity  # тянет за собой сведение и ролики — нужен только треку с битом ПЛЁНКИ
+    from .compose import MSK
+
+    monday = bity.week()
+    if bity.week(moment) != monday or moment.astimezone(MSK).weekday() == 6:
+        return ""
+    if application["beat"] != bity.weekly() or (config.ARCHIVE / FINAL_FILE.format(week=monday)).exists():
+        return ""
+    return monday
+
+
 def build_post(application: dict) -> dict:
-    """Пост шаблоном: имя, трек, кто прислал, слова артиста, ссылки. О звуке — ничего."""
+    """Пост шаблоном: имя, трек, кто прислал, слова артиста, ссылки. О звуке — ничего.
+    У трека на бит недели (week_of) первой строкой метка с названием бита, а в посте — поле week:
+    по нему итог недели находит свои треки (final)."""
     esc = html.escape
     artist, title = application["artist"], application["title"]
+    week = week_of(application)
+    if week:
+        from . import bity
+
+        beat = bity.load().get(application["beat"], {}).get("title", "")
     parts = [
+        *([WEEK_MARK.format(beat=esc(beat))] if week else []),
         f"<b>{esc(artist.upper())} — «{esc(title.upper())}»</b>",
-        "Трек прислал в отбор сам артист.",  # где слушать — строкой publish.track_note
+        WEEK_SENT if week else "Трек прислал в отбор сам артист.",  # где слушать — строкой publish.track_note
     ]
     if application.get("quote"):
         parts.append(f"Со слов артиста:\n<blockquote>{esc(application['quote'])}</blockquote>")
@@ -788,6 +864,7 @@ def build_post(application: dict) -> dict:
         # Сведён ботом и площадки нет (mixed): кадр поста — карточка с именем, а не фото по имени
         # (card.cover), и во ВКонтакте пост не идёт — слушать там нечего (publish.crosspost_vk).
         **({"mixed": True} if application.get("skleyka") and not application.get("url") else {}),
+        **({"week": week, "kicker": WEEK_KICKER} if week else {}),  # kicker — надпись на карточке (card.cover)
         "full_track_file_id": application.get("track_file_id", ""),
         # Согласие на ролик — в открытый архив: по нему бриф роликов собирает
         # «ТРИ ТРЕКА ИЗ БОТА», а к приватной заявке облачный сценарист доступа не имеет.
@@ -796,25 +873,38 @@ def build_post(application: dict) -> dict:
     }
 
 
-def _published_today() -> bool:
+def _lanes() -> tuple[bool, bool]:
+    """Что отбору можно выпустить сейчас: (трек на бит недели, обычную заявку). Считается по вышедшим
+    сегодня по Москве постам отбора: обычный — один в сутки, трек недели — не больше WEEK_PER_DAY
+    и не чаще раза в WEEK_GAP. Трек недели узнаётся по полю week поста в архиве."""
     from .compose import MSK
 
     today = state.now().astimezone(MSK).date()
-    return any(
-        item.get("rubric") == "otbor" and (moment := state._parse(item.get("published_at", "")))
-        and moment.astimezone(MSK).date() == today
-        for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
-    )
+    usual, week = [], []
+    for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", []):
+        moment = state._parse(item.get("published_at", ""))
+        if item.get("rubric") == "otbor" and moment and moment.astimezone(MSK).date() == today:
+            marked = item.get("file") and state.read_json(config.ARCHIVE / item["file"], {}).get("week")
+            (week if marked else usual).append(moment)
+    return len(week) < WEEK_PER_DAY and (not week or state.now() - max(week) >= WEEK_GAP), not usual
 
 
-def next_path(data: dict) -> tuple[Path | None, dict]:
-    """Пост отбора, который выходит следующим: готовый или собранный из первой заявки."""
+def _first(data: dict, lanes: tuple[bool, bool]) -> dict | None:
+    """Заявка, которая выходит следующей: трек на бит недели — раньше обычных, среди своих —
+    по порядку прихода. lanes — что сейчас можно выпустить (_lanes)."""
+    queue = [(not week_of(application), application) for application in data["queue"]]
+    return next((application for usual, application in sorted(queue, key=lambda pair: pair[0]) if lanes[usual]), None)
+
+
+def next_path(data: dict, lanes: tuple[bool, bool] = (True, True)) -> tuple[Path | None, dict]:
+    """Пост отбора, который выходит следующим: готовый или собранный из заявки (_first)."""
     pending = sorted(config.OTBOR_POSTS.glob("*.json"))
     if pending:
-        return pending[0], state.read_json(pending[0], {})
-    if not data["queue"]:
+        post = state.read_json(pending[0], {})
+        return (pending[0], post) if lanes[not post.get("week")] else (None, {})
+    application = _first(data, lanes)
+    if not application:
         return None, {}
-    application = data["queue"][0]
     name = f"{state.now():%Y%m%d-%H%M}-otbor-{state.fingerprint(application['key'])}.json"
     return config.OTBOR_POSTS / name, build_post(application)
 
@@ -831,19 +921,115 @@ def shift(target: str) -> None:
 
     data = load()
     notify(data)
-    if state.now().astimezone(MSK).hour not in DAY_HOURS_MSK or _published_today():
+    lanes = _lanes()
+    if state.now().astimezone(MSK).hour not in DAY_HOURS_MSK or not any(lanes):
         return
-    path, post = next_path(data)
+    path, post = next_path(data, lanes)
     if path is None or post.get("approval_sent_at"):
         return
     if not path.exists():
-        application = data["queue"].pop(0)
+        application = _first(data, lanes)
+        data["queue"].remove(application)
         state.write_json(path, post)
         data["done"].append({field: application[field] for field in ("chat", "at", "key", "reel")}
                             | {"file": path.name})
         save(data)
     publish.deliver(post, path, target)
     print(f"Выход отбора: {path.name} → {target}")
+
+
+def final() -> str:
+    """Итог бита недели — постом в канал: в воскресенье с FINAL_HOUR_MSK по Москве, не ночью, один
+    на неделю. Возвращает «итог <понедельник>» или пусто. Зовёт дежурство (moderate.publish_shift).
+
+    Треки недели — вышедшие посты отбора с полем week этой недели. Меньше WEEK_MIN — итога нет вовсе,
+    молча. Голоса отдаёт только закрытие опроса (telegram.stop_poll), и счёт сразу ложится в файл поста
+    полем votes: закрытый опрос второй раз не закрыть, а заход может повториться. Опроса под треком
+    нет — ноль голосов. Опрос не закрылся — попытка на следующем круге; в последний час перед ночью
+    сдаёмся: отметка без поста и строка владельцу. Победитель — по «🔥», при равенстве по «👍»,
+    затем — кто вышел раньше.
+
+    Отметка — content/archive/week-<понедельник>.json: сам пост итога (или запись о сбое). Не вышло —
+    отметка снимается, и следующий заход пробует снова; голоса к тому времени уже в файлах постов.
+    Победителю — сообщение от бота, владельцу — строка с меткой чата, как у /vopros: его ответ на неё
+    уходит победителю. Бесплатный заказ бот не заводит — владелец отдаёт его сам (skleyka --hand, «🎁»).
+    """
+    from . import bity, skleyka
+    from .compose import MSK
+
+    now = state.now()
+    local, monday = now.astimezone(MSK), bity.week(now)
+    mark = config.ARCHIVE / FINAL_FILE.format(week=monday)
+    if local.weekday() != 6 or local.hour < FINAL_HOUR_MSK or publish.night(now) or mark.exists():
+        return ""
+    # Имя файла поста начинается с даты выхода: старые недели не читаются, а порядок файлов — порядок выхода.
+    posts = [(path, state.read_json(path, {})) for path in sorted(config.ARCHIVE.glob("*-otbor-*.json"))
+             if path.name[:8] >= monday.replace("-", "")]
+    posts = [(path, post) for path, post in posts if post.get("week") == monday and post.get("message")]
+    if len(posts) < WEEK_MIN:
+        return ""
+    admin, failed = config.secret("TELEGRAM_ADMIN_ID"), ""
+    for path, post in posts:
+        if "votes" in post or not post.get("poll"):
+            continue
+        try:
+            poll = telegram.stop_poll(post["poll"]["chat"], post["poll"]["message_id"])
+        except telegram.TelegramError as exc:
+            failed = str(exc)[:120]
+            continue
+        post["votes"] = [option.get("voter_count", 0) for option in poll.get("options", [])]
+        state.write_json(path, post)
+    if failed:
+        # ponytail: сдаёмся в последний час перед ночью. Стояло дежурство весь этот час — строки
+        # владельцу не будет, неделя кончится молча; понадобится — сверять прошлую неделю в понедельник.
+        if local.hour >= config.QUIET_FROM_HOUR - 1:
+            # Сначала строка, потом отметка: не ушла строка — следующий круг скажет ещё раз.
+            telegram.send_message(admin, FINAL_FAILED.format(why=html.escape(failed)))
+            state.write_json(mark, {"rubric": "week", "week": monday, "failed": failed})
+        return ""
+
+    def votes(post: dict, place: int) -> int:
+        counted = post.get("votes") or []
+        return counted[place] if place < len(counted) else 0
+
+    # sorted стабилен: при равном счёте остаётся порядок выхода.
+    ranked = sorted(posts, key=lambda pair: (-votes(pair[1], FIRE), -votes(pair[1], FINE)))
+    handle = config.CHANNEL_HANDLE.lstrip("@")
+    links = [f"https://t.me/{handle}/{post['message']['message_id']}" for _, post in ranked]
+    rows = [FINAL_ROW.format(place=f"{number}." if number > 1 else "🥇", link=link, fire=votes(post, FIRE),
+                             name=html.escape(f"{post['artist']} — «{post['track']}»"))
+            for number, (link, (_, post)) in enumerate(zip(links, ranked), 1)]
+    won_path, won = ranked[0]
+    beat = bity.load().get(bity.weekly(now), {}).get("title", "")
+    shown = len(rows)
+    while True:
+        # Подпись к фото — до 1024 знаков: не влезло — хвост таблицы уходит под «…и ещё N», победитель остаётся.
+        table = "\n".join([*rows[:shown], *([FINAL_MORE.format(count=len(rows) - shown)] if shown < len(rows) else [])])
+        text = FINAL.format(beat=html.escape(beat), table=table, title=html.escape(won["track"]))
+        if shown == 1 or telegram.visible_len(text) <= telegram.MAX_CAPTION:
+            break
+        shown -= 1
+    # mixed и kicker — кадр поста: карточка с именем победителя (card.cover); во ВКонтакте итог не идёт.
+    post = {"rubric": "week", "week": monday, "text": text, "artist": won["artist"], "track": won["track"],
+            "mixed": True, "kicker": f"{WEEK_KICKER} · ИТОГ", "comment": FINAL_ASK, "winner": won_path.name,
+            "created_at": state.iso()}
+    state.write_json(mark, post)
+    try:
+        publish.to_channel(post, mark, config.secret("TELEGRAM_CHANNEL_ID"))
+    except Exception:
+        mark.unlink(missing_ok=True)
+        raise
+    chat = next((entry["chat"] for entry in load()["done"] if entry.get("file") == won_path.name), "")
+    name = html.escape(f"{won['artist']} — «{won['track']}»")
+    for whom, line in ((chat, WON.format(title=html.escape(won["track"]), link=links[0])),
+                       (admin, WON_OWNER.format(name=name, link=links[0],
+                                                tag=f"{skleyka.QUESTION_TAG}{chat}" if chat else WON_LOST))):
+        try:
+            if whom:
+                telegram.send_message(whom, line)
+        except telegram.TelegramError as exc:  # итог уже вышел — несказанное слово его не отменяет
+            log.warning("Весть об итоге бита недели не ушла: %s", exc)
+    return f"итог {monday}"
 
 
 def notify(data: dict) -> None:
@@ -1106,6 +1292,154 @@ def _selftest() -> None:
             notify(load())
         assert last("6") == PUBLISHED.format(link="https://t.me/plenka_fm/654") and len(cards) == 1, last("6")
 
+        # 5. БИТ НЕДЕЛИ. Бит №3 вышел в понедельник 14.09; трек, сведённый с ним, несёт номер бита
+        # из сведения в заявку и выходит с меткой недели, раньше обычных заявок.
+        from . import skleyka
+
+        stops: list[int] = []
+        finals: list[dict] = []
+        polls = {501: [5, 1, 0], 502: [5, 3, 1], 503: None}  # None — опрос не закрылся
+
+        def deliver(post: dict, path: Path, target: str) -> None:
+            """Как publish.to_channel: пост в архиве с сообщением канала, запись в журнале."""
+            delivered.append(post["text"])
+            state.write_json(config.ARCHIVE / path.name, {**post, "message": {"message_id": 700 + len(delivered)}})
+            path.unlink()
+            posted = state.read_json(config.POSTED_FILE, {"items": []})
+            posted["items"].append({"rubric": "otbor", "file": path.name, "published_at": state.iso()})
+            state.write_json(config.POSTED_FILE, posted)
+
+        def stop_poll(chat, message_id):
+            stops.append(message_id)
+            if polls[message_id] is None:
+                raise telegram.TelegramError("stopPoll: сеть")
+            return {"options": [{"voter_count": count} for count in polls[message_id]]}
+
+        def clock(day: int, hour: int, minute: int = 0) -> None:
+            nonlocal now
+            now = datetime(2026, 9, day, hour, minute, tzinfo=timezone.utc)
+
+        def archived(number: int) -> Path:
+            return next(path for path in sorted(config.ARCHIVE.glob("*-otbor-*.json"))
+                        if state.read_json(path, {})["message"]["message_id"] == number)
+
+        subscribed["9"] = True
+        songs[("9", "t9")] = dict(fine, file="MIX9", beat="3")
+        mark = config.ARCHIVE / FINAL_FILE.format(week="2026-09-14")
+        with mock.patch("src.skleyka.song", song), mock.patch.object(config, "BEATS_FILE", Path(tmp) / "beats.json"), \
+                mock.patch.dict(os.environ, {"TELEGRAM_ADMIN_ID": "900"}), mock.patch.object(publish, "deliver", deliver), \
+                mock.patch.object(publish, "to_channel", lambda post, path, chat: finals.append(post)), \
+                mock.patch.object(telegram, "stop_poll", stop_poll), mock.patch.object(card, "OUT_DIR", Path(tmp) / "cards"), \
+                mock.patch("src.vkladysh.send", lambda chat, track: cards.append((chat, track))):
+            state.write_json(config.BEATS_FILE, {"3": {"title": "Наждак", "artists": ["Kizaru"]}})
+            state.write_json(config.ARCHIVE / "beat-3.json", {"rubric": "beat", "beat": "3", "week": "2026-09-14",
+                                                             "message": {"message_id": 300}})
+            callback(9, 9, "mix:t9")
+            handle(msg(9, "Ваня — Гараж"))
+            callback(9, 9, "quiet")
+            callback(9, 9, "yes")
+            entry = load()["queue"][-1]
+            assert entry["beat"] == "3" and last("9") == ACCEPTED_WEEK and week_of(entry) == "2026-09-14", (entry, last("9"))
+            post = build_post(entry)
+            assert post["text"].startswith(f"🎚 БИТ НЕДЕЛИ · «Наждак»\n\n<b>ВАНЯ — «ГАРАЖ»</b>\n\n{WEEK_SENT}\n\n"), post["text"]
+            assert post["week"] == "2026-09-14" and post["kicker"] == WEEK_KICKER and post["mixed"], post
+            # Чужой бит, заявка в воскресенье и заявка прошлой недели — обычный пост отбора, без метки.
+            for other in ({**entry, "beat": "1"}, {**entry, "at": "2026-09-13T10:00:00+00:00"}):
+                assert not week_of(other) and "week" not in build_post(other) and "БИТ НЕДЕЛИ" not in build_post(other)["text"]
+            late = {**entry, "at": "2026-09-19T21:00:00+00:00"}  # воскресенье, 00:00 по Москве
+            clock(20, 10)
+            assert week_of({**entry, "at": "2026-09-19T20:59:00+00:00"}) == "2026-09-14", "суббота, 23:59 — ещё в зачёт"
+            assert not week_of(late) and "week" not in build_post(late), "после субботы — обычный отбор"
+            clock(21, 10)
+            assert not week_of(entry), "новая неделя — прежний бит уже не бит недели"
+
+            # Очередь: трек недели — раньше обычной заявки и мимо «одного в сутки» (обычный сегодня уже
+            # выходил), но не больше двух в сутки и не чаще раза в три часа.
+            clock(17, 10)
+            data = load()
+            assert [item["artist"] for item in data["queue"]] == ["Ghost Tape", "Ваня"], data["queue"]
+            data["queue"] += [{**entry, "chat": str(chat), "title": title, "key": key("Ваня", title)}
+                              for chat, title in ((10, "Двор"), (11, "Мост"))]
+            save(data)
+            count = len(delivered)
+            shift("channel")
+            assert len(delivered) == count + 1 and "«ГАРАЖ»" in delivered[-1] and "БИТ НЕДЕЛИ" in delivered[-1], delivered[-1]
+            shift("channel")
+            clock(17, 12, 59)
+            shift("channel")
+            assert len(delivered) == count + 1, "второй трек недели — не раньше чем через три часа"
+            clock(17, 13)
+            shift("channel")
+            assert len(delivered) == count + 2 and "«ДВОР»" in delivered[-1], delivered[-1]
+            clock(17, 16, 30)
+            shift("channel")
+            assert len(delivered) == count + 2, "третий трек недели за сутки и второй обычный не выходят"
+            # Двух треков для итога мало: воскресный вечер проходит молча, опросы не трогаются.
+            clock(20, 16)
+            assert final() == "" and not stops and not mark.exists() and not finals, "итог при двух треках"
+            clock(18, 10)
+            shift("channel")
+            assert len(delivered) == count + 3 and "«МОСТ»" in delivered[-1], "наутро трек недели — раньше обычной заявки"
+            shift("channel")
+            assert len(delivered) == count + 4 and "GHOST TAPE" in delivered[-1] and "БИТ НЕДЕЛИ" not in delivered[-1], \
+                "обычный отбор — как был: один в сутки"
+
+            # Итог: воскресенье с 19:00 по Москве. Голоса — закрытием опроса, сразу в файл поста;
+            # незакрывшийся опрос — попытка на следующем круге, закрытые второй раз не трогаются.
+            first, second, third = (archived(700 + count + number) for number in (1, 2, 3))
+            for path, number in ((first, 501), (second, 502), (third, 503)):
+                state.write_json(path, {**state.read_json(path, {}), "poll": {"chat": "-100", "message_id": number}})
+            clock(19, 17)
+            assert final() == "", "суббота — не день итога"
+            clock(20, 15, 59)
+            assert final() == "" and not stops, "воскресенье, 18:59 по Москве — рано"
+            clock(20, 16)
+            assert final() == "" and stops == [501, 502, 503] and not mark.exists() and not finals, stops
+            assert state.read_json(first, {})["votes"] == [5, 1, 0] and "votes" not in state.read_json(third, {})
+            polls[503] = [5, 3, 0]
+            clock(20, 16, 10)
+            assert final() == "итог 2026-09-14" and stops == [501, 502, 503, 503], stops
+            # При равенстве «🔥» решает «👍», при равенстве обоих — кто вышел раньше: «Двор» раньше «Моста».
+            urls = [f"https://t.me/plenka_fm/{700 + count + number}" for number in (1, 2, 3)]
+            assert finals[0]["text"] == (
+                "🏆 <b>БИТ НЕДЕЛИ · «Наждак» — ИТОГ</b>\n\n"
+                f'🥇 <a href="{urls[1]}">Ваня — «Двор»</a> — 🔥 5\n'
+                f'2. <a href="{urls[2]}">Ваня — «Мост»</a> — 🔥 5\n'
+                f'3. <a href="{urls[0]}">Ваня — «Гараж»</a> — 🔥 5\n\n'
+                "Победил трек «Двор»: звукорежиссёр сведёт его руками бесплатно.\n\n"
+                "Завтра — новый бит недели."), finals[0]["text"]
+            assert finals[0]["rubric"] == "week" and finals[0]["mixed"] and finals[0]["winner"] == second.name \
+                and (finals[0]["artist"], finals[0]["track"]) == ("Ваня", "Двор") and "chat" not in finals[0], finals[0]
+            assert card.cover(dict(finals[0])).stat().st_size > 10_000, "кадр итога — карточка с именем победителя"
+            # Победителю — сообщение, владельцу — строка с меткой чата: ответ на неё уходит победителю.
+            assert last("10") == WON.format(title="Двор", link=urls[1]) and "бесплатно" in WON
+            assert f"{skleyka.QUESTION_TAG}10" in last("900") and "обещано ручное сведение бесплатно" in last("900"), last("900")
+            assert final() == "" and len(finals) == 1 and len(stops) == 4, "итог — один на неделю"
+            # Трек, не успевший выйти к итогу, в итог не идёт: после итога он — обычный пост отбора.
+            assert not week_of(entry) and "week" not in build_post(entry)
+
+            # Длинная неделя: подпись к картинке не длиннее 1024 знаков — хвост таблицы под «…и ещё N».
+            # Опроса под треком нет — ноль голосов; сохранённые голоса второй раз не запрашиваются.
+            mark.unlink()
+            for number in range(15):
+                state.write_json(config.ARCHIVE / f"20260919-10{number:02d}-otbor-x.json", {
+                    "week": "2026-09-14", "artist": "Длинное Имя Артиста", "track": f"Очень длинное название трека {number}",
+                    "message": {"message_id": 800 + number}})
+            assert final() and len(stops) == 4 and "🥇" in finals[1]["text"].split("\n\n")[1], finals[1]["text"]
+            assert telegram.visible_len(finals[1]["text"]) <= telegram.MAX_CAPTION and "…и ещё " in finals[1]["text"]
+
+            # Опрос так и не закрылся: до последнего часа перед ночью — попытки, потом отметка без поста
+            # и одна строка владельцу.
+            mark.unlink()
+            state.write_json(third, {key_: value for key_, value in state.read_json(third, {}).items() if key_ != "votes"})
+            polls[503] = None
+            clock(20, 18, 59)
+            assert final() == "" and not mark.exists() and len(finals) == 2
+            clock(20, 19)
+            assert final() == "" and state.read_json(mark, {})["failed"] and last("900").startswith("🏆 Итог бита недели не вышел")
+            told = len(said)
+            assert final() == "" and len(said) == told and len(finals) == 2, "строка о сбое — одна"
+
         # Разборы понимают ссылку и «Артист — Трек»: в разбор уходит имя артиста.
         assert subject("Molchat Doma — Судно") == "Molchat Doma"
         assert subject("https://soundcloud.com/ghost/tape") == "Ghost Tape"
@@ -1117,7 +1451,10 @@ def _selftest() -> None:
     assert not _match("Nobody Homeless", "Night Drive", "Nobody Home", "Night Drive")
     print("отбор: три способа прислать, трек из СВЕДЕНИЯ без площадки (брак записи и чужое имя — отказ, старая кнопка — "
           "последний готовый, «💿» — обычный отбор без метки), отказы, пост шаблоном и без площадок, выход раз в день, "
-          "весть и вкладыш артисту")
+          "весть и вкладыш артисту; бит недели: метка у трека с битом недели, без неё — чужой бит, прошлая неделя "
+          "и заявка после субботы, трек недели раньше обычных — два в сутки и раз в три часа, итога нет при двух треках, "
+          "голоса закрытием опроса и один раз, равенство — по «👍» и по выходу, победителю и владельцу весть, "
+          "длинный итог в подписи к картинке, опросы не закрылись до ночи — строка владельцу")
 
 
 def main() -> int:

@@ -11,6 +11,13 @@ BEAT_CREDIT, и кнопкой «🎚 Свести с этим битом» от
 там только адрес бота, и человек приходит обычным /start. Поэтому описание ролика
 называет путь словами, а не ссылкой; сама ссылка жива — для мест, где её пускают.
 
+В канале бит — рамка недели (владелец 06.10.2026): в понедельник он выходит постом
+БИТ НЕДЕЛИ (air), под него пишут и сводят ботом, треки выходят в канале с опросом,
+в воскресенье — итог по голосам (src/otbor.py: week_of, final). Неделя — дата её
+понедельника по Москве (week), бит недели — пост бита с этой датой в архиве (weekly).
+Отвергнуто: бит постом раз в два дня, как было до того, — пост звал забрать бит
+и ничем не кончался, а лента оставалась чужой для тех, кто пришёл в бот делать своё.
+
 Бит владелец шлёт боту в личку файлом с подписью со слова «бит»:
 
     бит Kizaru x Toxi$ — Полёт, 140 Fm
@@ -140,13 +147,24 @@ ABOUT = ("Скачать бесплатно ({format}): Telegram → {bot} → �
 GIVEN = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
          "Бесплатно, и для релиза тоже. Одно условие — подпиши в названии трека: <b>{credit}</b>.\n\n"
          f"Записал голос? Жми «{MAKE}» — бит уже будет в заявке, пришлёшь только голос.")
-# Бит — постом в канал (air). В канал приходят за ботом, а лента была целиком из чужих релизов
-# и новостей: своё в ней — то, за чем подписались (владелец 06.10.2026). Не чаще раза в POST_EVERY.
-POST = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
-        "Бит ПЛЁНКИ. Бесплатно, и для релиза тоже — подпиши в названии трека: <b>{credit}</b>.\n\n"
-        '▸ <a href="{link}">Забрать бит в боте</a>. Там же бот бесплатно сведёт с ним твой голос.')
+# БИТ НЕДЕЛИ (air, владелец 06.10.2026). В канал приходят те, кто сам делает музыку, — свести трек
+# ботом, взять бит, — а лента была целиком из чужих релизов, и подписчики уходили. Бит стал рамкой
+# недели: в понедельник он выходит постом, под него пишут и сводят ботом, треки выходят в канале
+# с опросом, в воскресенье — итог по голосам (otbor.final). До этого бит выходил раз в два дня
+# и ничего за собой не вёл. Приз назван условно: первую неделю треков может прийти меньше трёх.
+POST = ("🎚 <b>БИТ НЕДЕЛИ · «{title}»</b>\n{artists} type beat{tempo}\n\n"
+        "Бесплатно, и для релиза тоже — подпиши в названии трека: <b>{credit}</b>.\n\n"
+        "Как участвовать:\n"
+        '1. <a href="{link}">Забери бит в боте</a> и запиши под него голос.\n'
+        f"2. Под битом нажми «{MAKE}» и пришли голос — только так бот поймёт, что трек на бит недели.\n"
+        f"3. Под готовым треком нажми «{skleyka.OTBOR_KEYS[0]['text']}».\n\n"
+        "Треки выходят здесь, под каждым — голосование. Приём — до конца субботы. Наберётся три трека — "
+        "в воскресенье итог по голосам, и трек-победитель звукорежиссёр сведёт руками бесплатно.")
 POST_ASK = "Под кого сделать следующий бит?"  # первый комментарий (comments.seed берёт поле comment)
-POST_EVERY = timedelta(days=2)
+# Понедельник, с десяти утра по Москве: неделя начинается с бита, и звук дня достаётся ему (publish.hushed).
+WEEK_DAY, WEEK_HOUR_MSK = 0, 10
+LAST_NEW = ("🎚 Бит недели: в канал вышел последний новый бит — «{title}». Запас новых кончился: "
+            "не пришлёшь новый — в следующий понедельник выйдет повтор.")
 LIST = ("🎚 <b>Биты ПЛЁНКИ</b>\n\n"
         "Бесплатно, и для релиза тоже. Одно условие — подпиши в названии трека: <b>{credit}</b>.\n\n"
         "Выбери бит — пришлю файлом.")
@@ -362,37 +380,77 @@ def give(chat_id: str | int, beat_id: str, via: str = "link") -> None:
     _hit(beat_id, via)
 
 
+def week(moment: datetime | None = None) -> str:
+    """Неделя бита — дата её понедельника по Москве: по ней трек находит свой бит (otbor.week_of),
+    а итог — свои треки (otbor.final)."""
+    from .compose import MSK
+
+    day = (moment or state.now()).astimezone(MSK).date()
+    return (day - timedelta(days=day.weekday())).isoformat()
+
+
+def _aired() -> dict[str, dict]:
+    """Посты битов из архива по номеру бита: content/archive/beat-<номер>.json."""
+    return {path.stem.removeprefix("beat-"): state.read_json(path, {}) for path in config.ARCHIVE.glob("beat-*.json")}
+
+
+def weekly(moment: datetime | None = None) -> str:
+    """Номер бита этой недели; пусто — бит недели ещё не вышел."""
+    monday = week(moment)
+    return next((beat_id for beat_id, post in _aired().items() if post.get("week") == monday), "")
+
+
 def air() -> str:
-    """Следующий бит каталога — постом в канал: новый первым, по одному в POST_EVERY, не ночью.
+    """Бит недели — постом в канал: в понедельник с WEEK_HOUR_MSK по Москве, не ночью, один на неделю.
     Возвращает номер вышедшего бита или пустую строку.
+
+    Берётся бит каталога, который ещё не выходил, новый первым. Не выходивших нет — тот, что
+    выходил давнее всех: повтор лучше пустой недели. С последним новым владельцу уходит строка —
+    запас кончился. Понедельник пропущен целиком (дежурство стояло) — бита недели на этой неделе нет.
 
     Выходит сам, без кнопки владельцу: бит уже открыт всем в меню бота, решать тут нечего.
     Отметка о выходе — файл поста в content/archive, как у ролика (reels.to_channel): каталог
-    ради неё не переписывается. Не вышло — отметка снимается, и следующий заход пробует снова.
+    ради неё не переписывается. Поле week поста — неделя, по нему бит недели узнаётся (weekly);
+    повтор переписывает файл новым постом. Файл beat-<номер>.json, положенный руками, держит бит
+    вне канала, как и раньше: новым такой бит уже не считается, а в повтор идут только посты
+    с сообщением канала (поле message) — его номером и меряется давность. Не вышло — файл
+    возвращается к прежнему виду, и следующий заход пробует снова.
     """
     from . import publish  # publish берёт значок отсюда (shot)
+    from .compose import MSK
 
-    posted = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
-    last = max((item.get("published_at", "") for item in posted if item.get("rubric") == "beat"), default="")
-    if publish.night(state.now()) or skleyka._age(last) < POST_EVERY.total_seconds():
+    now = state.now()
+    local = now.astimezone(MSK)
+    if local.weekday() != WEEK_DAY or local.hour < WEEK_HOUR_MSK or publish.night(now) or weekly(now):
         return ""
-    for beat_id, beat in newest():
-        path = config.ARCHIVE / f"beat-{beat_id}.json"
-        if path.exists():
-            continue
-        post = {"rubric": "beat", "beat": beat_id, "comment": POST_ASK,
-                "text": POST.format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
-                                    tempo=html.escape(_tempo(beat)), credit=html.escape(config.BEAT_CREDIT),
-                                    link=link(beat_id))}
-        config.ARCHIVE.mkdir(parents=True, exist_ok=True)
-        state.write_json(path, post)
-        try:
-            publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
-        except Exception:
+    aired, catalog = _aired(), dict(newest())
+    new = [beat_id for beat_id in catalog if beat_id not in aired]
+    again = sorted((beat_id for beat_id in catalog if aired.get(beat_id, {}).get("message")),
+                   key=lambda beat_id: aired[beat_id]["message"]["message_id"])
+    if not new and not again:
+        return ""
+    beat_id = (new or again)[0]
+    beat, path = catalog[beat_id], config.ARCHIVE / f"beat-{beat_id}.json"
+    post = {"rubric": "beat", "beat": beat_id, "week": week(now), "comment": POST_ASK,
+            "text": POST.format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
+                                tempo=html.escape(_tempo(beat)), credit=html.escape(config.BEAT_CREDIT),
+                                link=link(beat_id))}
+    config.ARCHIVE.mkdir(parents=True, exist_ok=True)
+    state.write_json(path, post)
+    try:
+        publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
+    except Exception:
+        if beat_id in aired:
+            state.write_json(path, aired[beat_id])
+        else:
             path.unlink(missing_ok=True)
-            raise
-        return beat_id
-    return ""
+        raise
+    if len(new) == 1:
+        try:
+            telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), LAST_NEW.format(title=html.escape(beat["title"])))
+        except telegram.TelegramError as exc:  # бит уже вышел — строка владельцу его не отменяет
+            print(f"  бит недели: строка о запасе не ушла: {str(exc)[:120]}")
+    return beat_id
 
 
 def shot(beat_id: str, folder: Path) -> Path:
@@ -442,8 +500,10 @@ def callback(chat_id: str | int, user_id: str | int, beat_id: str, *, admin: boo
     if not beat:
         telegram.send_message(chat_id, MISSING, buttons=[[skleyka.BEAT_BUTTON]])
         return
+    # b — номер бита в каталоге: по нему готовый трек узнаётся треком на бит недели (skleyka.song,
+    # otbor.week_of). Лежит в записи файла, а не заявки: сменил человек бит — номер ушёл вместе с файлом.
     item = {"m": beat["message"], "f": beat["file_id"], "n": f"{beat['title'][:50]}{Path(beat['name']).suffix}",
-            "s": beat["size"], "g": ""}
+            "s": beat["size"], "g": "", "b": beat_id}
     _hit(beat_id, "mix")
     skleyka.start(chat_id, user_id, admin=admin, beat=item)
 
@@ -805,7 +865,8 @@ def _selftest() -> None:
                                      "message": {"message_id": 3, "chat": {"id": 42}}}, {})
         draft = skleyka.load()["drafts"]["42"]
         assert draft["plan"] == ["вокал", "бит"] and draft["beat"] == "own" and draft["asked"] == 0
-        assert draft["files"] == [{"m": 5, "f": "F5", "n": "Полёт.wav", "s": 40 * 2**20, "g": "", "r": "бит"}]
+        # Номер бита едет в заявку с файлом: по нему трек узнаётся треком на бит недели.
+        assert draft["files"] == [{"m": 5, "f": "F5", "n": "Полёт.wav", "s": 40 * 2**20, "g": "", "b": "1", "r": "бит"}]
         assert "пришли вокал" in sent[-1][2]
         skleyka.take({**message("", sender="42", message_id=20), "caption": None})
         assert [f["r"] for f in skleyka.load()["drafts"]["42"]["files"]] == ["бит", "вокал"]
@@ -936,52 +997,76 @@ def _selftest() -> None:
     assert found == {"name": "Тёмный принц", "videos": 3, "median": 300, "top": 900}, found
     assert demand("Никто", [])["median"] == 0
 
-    # Бит постом в канал: новый первым, по одному в POST_EVERY, ночью — нет, один бит дважды не выходит,
-    # сорванный выход отметки не оставляет.
+    # Бит недели постом в канал: только в понедельник с WEEK_HOUR_MSK и не ночью, один на неделю, новый
+    # первым; запас новых кончился — строка владельцу, дальше повтор того, что выходил давнее всех;
+    # файл, положенный руками, держит бит вне канала; сорванный выход отметку возвращает как была.
     from . import publish
 
     aired: list[dict] = []
-    clock = [datetime(2026, 10, 6, 22, 0, tzinfo=timezone.utc)]  # час ночи по Москве
+    told: list[str] = []
+    broken: set[str] = set()
+    clock = [datetime(2026, 10, 5, 6, 30, tzinfo=timezone.utc)]  # понедельник, 09:30 по Москве
 
     def out(post: dict, path: Path, chat: str) -> None:
-        if post["beat"] == "boom":
+        if post["beat"] in broken:
             raise telegram.TelegramError("нет связи")
         aired.append(post)
         publish.record(post, path, chat)
+        state.write_json(path, {**post, "message": {"message_id": 100 + len(aired)}})
 
+    def monday(day: int, hour: int = 8, month: int = 10) -> str:  # 08:00 UTC — 11:00 по Москве
+        clock[0] = datetime(2026, month, day, hour, 0, tzinfo=timezone.utc)
+        return air()
+
+    assert week(datetime(2026, 10, 11, 20, 59, tzinfo=timezone.utc)) == "2026-10-05", "воскресенье 23:59 по Москве"
+    assert week(datetime(2026, 10, 11, 21, 0, tzinfo=timezone.utc)) == "2026-10-12", "понедельник 00:00 по Москве"
     with mock.patch.object(config, "BEATS_FILE", tmp / "air.json"), mock.patch.object(config, "ARCHIVE", tmp / "archive"), \
             mock.patch.object(config, "POSTED_FILE", tmp / "posted.json"), \
             mock.patch.object(config, "BEAT_PHOTOS", tmp / "none.json"), \
             mock.patch.object(config, "secret", lambda name, required=True: "@канал"), \
+            mock.patch.object(telegram, "send_message", lambda chat, text, **_: told.append(text)), \
             mock.patch.object(publish, "to_channel", out), mock.patch.object(state, "now", lambda: clock[0]):
         save({"1": {"artists": ["Kizaru"], "title": "Фары", "bpm": 140, "key": "Fm"},
               "2": {"artists": ["Kizaru", "Toxi$"], "title": "Наждак", "bpm": None, "key": ""}})
-        assert air() == "" and not aired, "ночью бит не выходит"
-        clock[0] += timedelta(hours=9)
-        assert air() == "2" and aired[0]["rubric"] == "beat" and aired[0]["comment"] == POST_ASK, aired
-        assert aired[0]["text"].startswith("🎚 <b>«Наждак»</b> — Kizaru x Toxi$ type beat\n") and link("2") in aired[0]["text"]
-        assert air() == "", "чаще раза в POST_EVERY бит не выходит"
-        clock[0] += POST_EVERY
-        assert air() == "1" and ", 140 BPM, Fm" in aired[1]["text"]
-        clock[0] += POST_EVERY
-        assert air() == "" and len(aired) == 2, "оба бита уже выходили"
+        assert air() == "" and not aired, "до десяти утра бит не выходит"
+        assert monday(6) == "" and monday(11, 16) == "" and not aired, "вторник и воскресенье — не день бита"
+        assert monday(5, 7) == "2" and aired[0]["rubric"] == "beat" and aired[0]["comment"] == POST_ASK, aired
+        text = aired[0]["text"]
+        assert text.startswith("🎚 <b>БИТ НЕДЕЛИ · «Наждак»</b>\nKizaru x Toxi$ type beat\n") and link("2") in text, text
+        assert all(part in text for part in (config.BEAT_CREDIT, MAKE, "🎙 Этот трек — в канал ПЛЁНКИ", "до конца субботы",
+                                             "Наберётся три трека", "сведёт руками бесплатно")), text
+        assert telegram.visible_len(text) <= telegram.MAX_CAPTION, "пост бита недели — подпись к картинке"
+        assert aired[0]["week"] == "2026-10-05" and weekly() == "2" and not told, "неделя — дата понедельника"
+        assert monday(5, 12) == "" and len(aired) == 1, "бит недели один на неделю"
+        clock[0] = datetime(2026, 10, 11, 16, 0, tzinfo=timezone.utc)
+        assert weekly() == "2", "в воскресенье бит недели тот же"
+        assert monday(12, 20) == "" and weekly() == "", "понедельник, 23:00 по Москве: ночью бит не выходит"
+        assert monday(12) == "1" and ", 140 BPM, Fm" in aired[1]["text"] and weekly() == "1"
+        assert told == [LAST_NEW.format(title="Фары")], "ушёл последний новый бит — владельцу строка"
+        # Новых нет — повтор того, что выходил давнее всех; строка о запасе второй раз не уходит.
+        assert monday(19) == "2" and aired[2]["week"] == "2026-10-19" and len(told) == 1, aired[2]
+        # Файл бита, положенный руками (без сообщения канала): ни новым, ни повтором бит не выходит.
+        save({**load(), "3": {"artists": ["Toxi$"], "title": "Ручной", "bpm": None, "key": ""}})
+        state.write_json(config.ARCHIVE / "beat-3.json", {})
+        assert monday(26) == "1" and len(told) == 1, "ручная отметка держит бит вне канала"
+        # Сорванный выход: у повтора отметка возвращается к прежнему посту, у нового — снимается.
+        broken.update({"2", "4"})
+        kept = state.read_json(config.ARCHIVE / "beat-2.json", {})
+        for name, left in (("2", kept), ("4", {})):
+            try:
+                monday(2, month=11)
+            except telegram.TelegramError:
+                assert state.read_json(config.ARCHIVE / f"beat-{name}.json", {}) == left, "сорванный выход вернул отметку"
+            else:
+                raise AssertionError("сбой выхода должен дойти до дежурства")
+            save({**load(), "4": {"artists": ["Kizaru"], "title": "Сбой", "bpm": None, "key": ""}})
         assert shot("1", tmp).stat().st_size and Image.open(tmp / PREVIEW_NAME).size == PREVIEW_SIZE
-    with mock.patch.object(config, "ARCHIVE", tmp / "archive"), \
-            mock.patch.object(config, "POSTED_FILE", tmp / "none.json"), \
-            mock.patch.object(config, "secret", lambda name, required=True: "@канал"), \
-            mock.patch.object(publish, "to_channel", out), mock.patch.object(state, "now", lambda: clock[0]), \
-            mock.patch.dict(globals(), {"newest": lambda: [("boom", {"artists": ["Kizaru"], "title": "Сбой", "bpm": None, "key": ""})]}):
-        try:
-            air()
-        except telegram.TelegramError:
-            assert not (tmp / "archive" / "beat-boom.json").exists(), "сорванный выход отметки не оставляет"
-        else:
-            raise AssertionError("сбой выхода должен дойти до дежурства")
     print("bity: подпись и маршрут бита, каталог и тексты для YouTube, описание без ссылки, на подъёме, "
           "ссылка beat_ по file_id, «🎚 БИТЫ»: один бит — сразу файл, несколько — список, метка меню, "
-          "кнопка — заявка с битом, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, счёт по номеру бита, "
+          "кнопка — заявка с битом и его номером, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, счёт по номеру бита, "
           "значок — плёночный портрет со словом названия, без фото — спины, живой ролик в 50 МБ и превью, спрос по медиане без «ё», "
-          "бит постом в канал: новый первым, раз в два дня, не ночью, один раз — ок")
+          "бит недели постом в канал: только в понедельник с 10:00 и не ночью, один на неделю, новый первым, запас кончился — "
+          "строка владельцу и повтор давнего, ручная отметка держит бит вне канала, сорванный выход возвращает отметку — ок")
 
 
 def main() -> int:

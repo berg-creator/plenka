@@ -753,6 +753,13 @@ def send_poll(chat_id: str, question: str, options: list[str], *, anonymous: boo
     return _call("sendPoll", payload)
 
 
+def stop_poll(chat_id: str | int, message_id: int) -> dict:
+    """Закрывает опрос бота и отдаёт его с голосами: options — по порядку вариантов, в каждом
+    voter_count. Иначе голоса анонимного опроса боту не узнать: чтения опроса у Bot API нет.
+    Закрытый опрос второй раз не закрыть — Telegram ответит ошибкой, поэтому счёт сохраняют сразу."""
+    return _call("stopPoll", {"chat_id": chat_id, "message_id": message_id})
+
+
 # Пояснение к викторине Telegram обрезает жёстко — двести знаков и ни одним
 # больше, иначе запрос отклоняется целиком.
 MAX_EXPLANATION = 200

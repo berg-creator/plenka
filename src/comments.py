@@ -287,7 +287,12 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                     telegram.send_audio(chat_id, file, "" if number else ask(post, rubric, "трек"), reply_to=message_id)
                 if rubric == "otbor":
                     try:
-                        telegram.send_poll(chat_id, *OTBOR_POLL, reply_to=message_id)
+                        poll = telegram.send_poll(chat_id, *OTBOR_POLL, reply_to=message_id) or {}
+                        if post.get("file") and poll.get("message_id"):
+                            # Опрос считается (otbor.final): итог бита недели закрывает его по этому номеру.
+                            path = config.ARCHIVE / post["file"]
+                            state.write_json(path, {**state.read_json(path, {}),
+                                                    "poll": {"chat": chat_id, "message_id": poll["message_id"]}})
                     except telegram.TelegramError as exc:
                         # Трек уже в ветке — без опроса она всё равно живая.
                         log.warning("Опрос под отбором не ушёл: %s", exc)
@@ -502,6 +507,12 @@ def _selftest() -> None:
         telegram.send_poll = lambda chat, question, options, reply_to=None, **_: sent.append(
             ("опрос", question, reply_to))
         assert seed(forwarded) and sent == [("трек", "T"), ("опрос", OTBOR_POLL[0], 5)], sent
+        # Опрос считается: его номер и чат ложатся в файл поста — по ним итог бита недели закрывает опрос.
+        real_write, written = state.write_json, []
+        state.write_json = lambda path, payload: written.append((path.name, payload.get("poll")))
+        telegram.send_poll = lambda chat, question, options, reply_to=None, **_: {"message_id": 77}
+        assert seed(forwarded) and written == [("s.json", {"chat": "-100", "message_id": 77})], written
+        state.write_json = real_write
         # Разбор: файлов нет — первым комментарием треки обоих концов связи ссылками
         # на площадки и вопрос, одним сообщением; ветка запоминается под поздний файл.
         sent.clear()
@@ -619,6 +630,7 @@ def _selftest() -> None:
         globals()["widget"], config.ARCHIVE = real_widget, real_archive
 
     print("первый комментарий: пост находится по номеру пересылки, сниппет уходит роликом, "
+          "под треком отбора опрос, его номер — в файле поста, "
           "под разбором — треки концов связи файлами или ссылками, "
           "вопрос пишется по посту, а брак ответа уводит в запасной набор; "
           "ветка старого поста читается со страницы виджета, треки под старым разбором — "

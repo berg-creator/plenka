@@ -146,9 +146,10 @@ def due(post: dict) -> bool:
             return False
         regular = sum(
             1 for item in items
-            # Отбор (src/otbor.py), ролик (src/reels.py) и бит (src/bity.py) выходят мимо слотов
+            # Отбор (src/otbor.py), ролик (src/reels.py), бит недели (src/bity.py), её итог (otbor.final),
+            # совет недели (src/sovet.py) и ДО И ПОСЛЕ (skleyka.doposle_air) выходят мимо слотов
             # и обычному посту место не занимают.
-            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "sovet", "doposle")
+            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "week", "sovet", "doposle")
             and (moment := state._parse(item.get("published_at", "")))
             and feed_day(moment) == feed_day(now)
         )
@@ -819,6 +820,9 @@ def _selftest() -> None:
         # Пропущенный наверстывается, лишний ждёт 19:00; новости, отбор и вчерашнее не в счёт.
         posted(("news", ago(hours=6)), ("otbor", ago(hours=4)))
         assert due({"rubric": "meme"})
+        # Бит недели и её итог — тоже мимо слотов.
+        posted(("beat", ago(hours=6)), ("week", ago(hours=4)))
+        assert due({"rubric": "meme"})
         posted(("lineage", ago(hours=6)), ("news", ago(hours=4)))
         assert not due({"rubric": "meme"})
         posted(*[("meme", ago(hours=h)) for h in (26, 24, 22, 20)])
@@ -901,7 +905,8 @@ def _selftest() -> None:
         # ни дневные слоты не съедают (26.09.2026 лента из-за них молчала весь день).
         posted(("release", ago(hours=17)), ("release", ago(hours=16)), ("verdict", ago(hours=15)))
         assert release_due() and due({"rubric": "meme"})
-        print("выходы релизов: сутки, окно на трек, лимит в день, звук в канале — у одного поста за сутки, обычный слот уступает")
+        print("выходы релизов: сутки, окно на трек, лимит в день, звук в канале — у одного поста за сутки, обычный слот уступает, "
+              "бит недели и её итог — мимо слотов")
     finally:
         (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
          telegram.send_message, state.now, config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real

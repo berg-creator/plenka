@@ -2950,7 +2950,10 @@ def song(chat_id: str | int, track_id: str = "") -> dict:
 
     file_id сведение кладёт в запись (_send, поле song). Записи до 06.10.2026 помнят только номер
     сообщения с MP3 (mix): его пересылка человеку же отдаёт file_id в ответе — заодно видно, какой
-    трек взят. Сообщение стёрто — трека нет."""
+    трек взят. Сообщение стёрто — трека нет.
+
+    beat — номер бита ПЛЁНКИ из каталога, если трек сведён через «🎚 Свести с этим битом»
+    (bity.callback кладёт его в запись файла бита): по нему отбор узнаёт трек на бит недели."""
     chat_id, data = str(chat_id), load()
     track = data["tracks"].get(track_id or _ready(data, chat_id))
     if not track or track["chat"] != chat_id or not track.get("done"):
@@ -2963,8 +2966,9 @@ def song(chat_id: str | int, track_id: str = "") -> dict:
             print(f"  отбор: MP3 трека не переслался: {str(exc)[:120]}")
     if not track.get("song"):
         return {}
+    beat = next((f["b"] for f in track.get("files") or [] if f.get("r") == "бит" and f.get("b")), "")
     return {"file": track["song"], "seconds": (track.get("timing") or {}).get("length") or 0,
-            "flaws": [TAKE_FLAWS[key][1] for key in _gauged(track)[0]]}
+            "flaws": [TAKE_FLAWS[key][1] for key in _gauged(track)[0]], **({"beat": beat} if beat else {})}
 
 
 def _gauged(track: dict | None) -> tuple[list[str], str]:
@@ -5868,7 +5872,10 @@ def _selftest() -> None:
             for key, extra in (("s1", {"done": "2026-10-01T10:00:00+00:00", "mix": 61, "take": fine}),
                                ("s2", {"done": "2026-10-02T10:00:00+00:00", "song": "MP3-S2", "timing": {"length": 153.0},
                                        "take": dict(fine, noise=12.0, clip=0.03)}),
-                               ("s3", {"mix": 63}), ("s4", {"done": "2026-09-30T10:00:00+00:00", "mix": 12}))})
+                               ("s3", {"mix": 63}), ("s4", {"done": "2026-09-30T10:00:00+00:00", "mix": 12}),
+                               ("s5", {"done": "2026-09-29T10:00:00+00:00", "song": "MP3-S5", "take": fine, "files": [
+                                   {"m": 1, "f": "V", "n": "vox.wav", "s": 1, "g": "", "r": "вокал"},
+                                   {"m": 5, "f": "F5", "n": "Наждак.wav", "s": 1, "g": "", "b": "3", "r": "бит"}]}))})
         save(data)
         real_forward = telegram.forward_message
         telegram.forward_message = lambda chat, source, message: forwards.append((chat, source, message)) \
@@ -5879,6 +5886,8 @@ def _selftest() -> None:
             assert song(66) == {"file": "MP3-S2", "seconds": 153.0, "flaws": [TAKE_FLAWS["noise"][1], TAKE_FLAWS["clip"][1]]}
             assert song(8, "s1") == {} and song(66, "s3") == {} and song(66, "нет000") == {} and song(67) == {}
             assert song(66, "s4") == {} and "song" not in load()["tracks"]["s4"], "сообщения с MP3 уже нет"
+            # Трек, сведённый через «🎚 Свести с этим битом», несёт номер бита каталога — для бита недели.
+            assert song(66, "s5") == {"file": "MP3-S5", "seconds": 0, "flaws": [], "beat": "3"}, song(66, "s5")
         finally:
             telegram.forward_message = real_forward
         data = load()
