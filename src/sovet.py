@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import os
 import sys
 import tempfile
@@ -55,13 +56,22 @@ def monday(moment: datetime):
 
 
 def count(data: dict) -> tuple[int, dict[str, int]]:
-    """Замерено голосов за TRACK_DAYS и в скольких найден каждый вид брака."""
+    """Замерено голосов за TRACK_DAYS и в скольких найден каждый вид брака.
+
+    Один и тот же файл голоса, сведённый дважды, даёт два трека с замером цифра в цифру — считается
+    один раз: на настоящих данных 06.10.2026 из 14 замеров три пары были повторами, и порог
+    «в двух записях» иначе брал бы один человек, приславший одну запись два раза.
+    """
     from . import skleyka
 
-    total, hits = 0, {}
+    total, hits, seen = 0, {}, set()
     for track in data.get("tracks", {}).values():
         if not track.get("take") or skleyka._age(track.get("at", "")) > skleyka.TRACK_DAYS * 86400:
             continue
+        mark = json.dumps(track["take"], sort_keys=True)
+        if mark in seen:
+            continue
+        seen.add(mark)
         total += 1
         for key in skleyka.flaws(track["take"]):
             hits[key] = hits.get(key, 0) + 1
@@ -152,7 +162,8 @@ def _selftest() -> None:
     stamp = lambda days: state.iso(state.now() - timedelta(days=days))  # noqa: E731
     bad = {"noise": 5.0, "clip": 0.0, "air": -30.0, "body": -20.0, "room": None}
     fine = {"noise": 45.0, "clip": 0.0, "air": -30.0, "body": -20.0, "room": 40.0}
-    tracks = {f"t{n}": {"at": stamp(1), "take": bad if n < 3 else fine} for n in range(6)}
+    tracks = {f"t{n}": {"at": stamp(1), "take": {**(bad if n < 3 else fine), "air": -30.0 - n}} for n in range(6)}
+    tracks["again"] = {"at": stamp(1), "take": dict(tracks["t0"]["take"])}  # тот же файл второй раз — не считается
     tracks["old"] = {"at": stamp(9), "take": bad}      # старше срока — не считается
     tracks["none"] = {"at": stamp(1)}                  # замера нет
     data = {"tracks": tracks}
