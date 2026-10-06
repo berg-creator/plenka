@@ -194,10 +194,19 @@ LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient")
 # Набор 11 — звуки из сети: в него кладут только годное на раздачу, поэтому в список он идёт целиком. Петли — папка Loops
 NET = "KITS/11 - Сеть Kit"
 NET_LOOPS = NET + "/Loops"
-# CC BY: автора звука надо назвать в описании ролика. Строку несёт записка — автор нот о ней забудет
+# Набор 12 — банк «The Glorified Zenology Bank» (@aye.shark, audiovault.co). Владелец, 06.10.2026: «звуки бери и для раздачи.
+# я куплю банк»; страница товара: «All sounds are 100% Royalty Free! Just credit ya boy» — отсюда его строка в CREDIT.
+# Одиночные звуки идут в список только с нотой в скобках: её дал замер высоты (`zamer.root`), а звук, где замер
+# неуверен, имени с нотой не получил — партия от неверной корневой ноты фальшивит вся. Петли — восемь тактов, вырезанные
+# из файлов банка в WAV (сами файлы — MP3 на сотню тактов со слоями): темп — число перед «BPM», как в наборе 11
+GLORY = "KITS/12 - Glorified Kit"
+GLORY_LOOPS = GLORY + "/Loops"
+# CC BY и банк Glorified: автора звука надо назвать в описании ролика. Строку несёт записка — автор нот о ней забудет
 CREDIT = (("/Boss DR-660 - ", "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0, archive.org/details/DR660Samples"),
           ("/VocalSet - ", "VocalSet by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo, CC BY 4.0, "
-                           "zenodo.org/records/1193957"))
+                           "zenodo.org/records/1193957"),
+          (f"/{GLORY.partition('/')[2]}/", "The Glorified Zenology Bank by @aye.shark, "
+                                           "audiovault.co/products/the-glorified-zenology-bank"))
 LOOP_FROM = "20261005"      # с этого дня обычный бит — петлёй: 03.10 и 04.10 — пробы злого и кино, они партиями
 NOTES = "C C# D D# E F F# G G# A A# B".split()
 # Петля под мелодию: звучащих нот в ней от трёх до восьми. Меньше — мотиву не из чего собраться, больше —
@@ -216,7 +225,7 @@ SWITCH_KEEP = .5            # «ступенями»: столько такто�
 SIX = "six speed"           # первый скелет «Г»: хэт до перелома — рисунок трека, мерка владельца — после (`_six`)
 RETRY = 3                   # повторов сбора папки «Сегодня», пока iCloud докачивает звуки: круг помощника — десять минут
 FADE = .005                 # секунд затухания на краях паузы в дорожке петли: без него срез щёлкает
-LISTED += ((LOOPS, "*.wav"), (NET, "**/*.wav"))
+LISTED += ((LOOPS, "*.wav"), (NET, "**/*.wav"), (GLORY, "Oneshots/* (*).wav"), (GLORY, "Loops/*.wav"))
 # Барабаны и 808, которые владелец ставит сам (разбор его проектов 04.10.2026: до этого дня низ и барабаны каждое утро
 # шли из набора 09, которого никто не слушал). Источник — приставка имени файла, набор — тот, где он его брал: одни
 # и те же файлы лежат в нескольких наборах, а всё подряд — 5000 имён. Петель и мелодических сэмплов нет.
@@ -698,10 +707,10 @@ def _counter(info: dict, tracks: dict[str, list[N]]) -> list[str]:
 
 def loop_bpm(name: str) -> int | None:
     """Темп петли из имени файла: «AC_NylStr85A-01» — 85, «K02Organ110E-03» — 110. None — петля не из разрешённых
-    видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои. У петли набора 11
+    видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои. У петли наборов 11 и 12
     (узнаётся по папке, поэтому имя нужно полное) темп — число перед «BPM»: «… Am 140 BPM» — 140, нет его — None."""
     stem = name.rsplit("/", 1)[-1]
-    if name.startswith(NET_LOOPS + "/"):
+    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")):
         return int(m[1]) if (m := re.search(r"(?<!\d)(\d{2,3})\s*BPM", stem, re.I)) else None
     if not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS)) or re.search("Beat|Bass|Drum", stem):
         return None
@@ -796,9 +805,9 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     heard, pair, out, end, good = loops(), _pair(info), [], info["bars"] * 16, {}
     for word, name in zip(("loop", "switch, вторая петля"), pair):
         tempo, m = loop_bpm(name), heard.get(name)
-        if not (name.startswith((LOOPS + "/", NET_LOOPS + "/")) and tempo and name in known()):
-            out.append(f"{word}: «{name}» — не из разрешённых петель: {LOOPS} (виды {', '.join(LOOP_KINDS)}) "
-                       f"и {NET_LOOPS}, с темпом в имени — точное имя бери из data/beat_sounds.json")
+        if not (name.startswith((LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/")) and tempo and name in known()):
+            out.append(f"{word}: «{name}» — не из разрешённых петель: {LOOPS} (виды {', '.join(LOOP_KINDS)}), "
+                       f"{NET_LOOPS} и {GLORY_LOOPS}, с темпом в имени — точное имя бери из data/beat_sounds.json")
         elif not m:
             out.append(f"{word}: «{name}» не замерена по звуку (не в 1, 2, 4 или 8 тактов или не скачана из iCloud) — "
                        "бери петлю из замера: python3 -m src.noty --loop СЛОВО")
@@ -2044,6 +2053,17 @@ def selftest() -> None:
     assert "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0" in credit and "Shpitz" not in about(base) and "VocalSet" not in credit \
         and "VocalSet by Julia Wilkins" in about(base | {"sounds": {"мелодия": f"{NET}/Vocals/VocalSet - f1 a A4.wav"}}), \
         "строка об авторе звуков CC BY — в записке, каждому источнику своя"
+    # Набор 12, банк Glorified: одиночный звук идёт в список только с нотой замера в скобках, петля — WAV (исходные MP3 мимо)
+    # с темпом перед «BPM», а автора банка записка называет сама: он просит об этом на странице товара
+    glory, shot = f"{GLORY_LOOPS}/Glorified - harlem 150 BPM.wav", f"{GLORY}/Oneshots/pno - low velocity (C5).wav"
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(LIBRARY, {"KITS": Path(tmp), "Serum": Path(tmp) / "нет"}):
+        for name in (glory, shot, f"{GLORY}/Oneshots/pd - portal into past.wav", f"{GLORY_LOOPS}/(Glory) harlem 150bpm @aye.shark .mp3"):
+            (Path(tmp) / name.partition("/")[2]).parent.mkdir(parents=True, exist_ok=True)
+            (Path(tmp) / name.partition("/")[2]).touch()
+        assert library() == [glory, shot], f"набор 12: в список — звук с нотой и петля WAV, а не {library()}"
+    assert loop_bpm(glory) == 150 and not loop_bpm(glory.replace("/Loops/", "/Oneshots/")), "темп петли набора 12"
+    assert "Glorified Zenology Bank by @aye.shark" in about(base | {"sounds": {"мелодия": shot}}) and "aye.shark" not in credit, \
+        "автор банка Glorified — строкой в записке"
     # Звук по адресу из сети (поле net): сборка смотрит форму и адрес без сети, записка говорит, что его никто не слышал
     wav = "https://freewavesamples.com/files/Kawai-K1r-Aah-C4.wav"
     assert problems(base | {"net": {"мелодия": wav}}, demo()) == [] and "из сети" not in about(base) \
@@ -2137,7 +2157,8 @@ def selftest() -> None:
           "808 — опора, а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, перк без панорамы — "
           "лево-право в партитуре, свои наборы владельца, "
           "петля набора 11 по числу перед BPM, заказ владельца вне очереди и скелет «Г» (хэт по мерке — после перелома, петля — брак и у заказа), "
-          "строка об авторе звуков CC BY в записке, свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
+          "строка об авторе звуков CC BY в записке, набор 12 — звук только с нотой замера в имени, петля по числу перед BPM, автор банка "
+          "в записке, свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
 
 
 def main() -> None:

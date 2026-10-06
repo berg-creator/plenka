@@ -41,6 +41,12 @@
 Отвергнуто: `chroma_cqt` как есть — три полосы CQT на полутон складываются окном, и громкая нота «звучит»
 в обоих соседних полутонах; берётся одна центральная полоса.
 
+Корень одиночного звука (`--root`, 06.10.2026: банк одиночных звуков, в именах которого нот нет). Сэмплеру нужна
+корневая нота канала — на какой ноте звук записан: партия от неверного корня фальшивит вся, и на слух её до владельца
+не проверяет никто. Поэтому замер либо уверен, либо молчит (`root`): pyin держит одну высоту, в хроме нет чужих нот,
+основной тон слышен в спектре — не сошлось хоть одно, ноты нет, и звук в список сборки не идёт.
+Отвергнуто: брать громчайший класс высот хромы — у аккорда и у колокола с негармоничными призвуками он тоже есть.
+
 Тяжёлое (demucs, librosa) есть только на Маке, как у src/quiz_ai.py, — запуск оттуда же:
 
     ~/.cache/whisper-venv/bin/python -m src.zamer --selftest             замер на синтетическом бите с известным рисунком
@@ -50,6 +56,7 @@
     ~/.cache/whisper-venv/bin/python -m src.zamer --table data/beats_zamer.json   сводка: медианы по группам
     ~/.cache/whisper-venv/bin/python -m src.zamer --loops                переписать замер петель в data/beat_sounds.json (только Мак)
     ~/.cache/whisper-venv/bin/python -m src.zamer --loops "11 - Сеть"    то же, но только петли с этим словом в имени: прочие не читаются
+    ~/.cache/whisper-venv/bin/python -m src.zamer --root ФАЙЛ…           корневая нота одиночных звуков; «неуверенно» — в список не идёт
 
 Чужой звук — только для замера: стемы пишутся во временную папку и удаляются сразу.
 """
@@ -77,6 +84,13 @@ LOOP_BARS = (1, 2, 4, 8)
 # Профили Крумхансла — Кесслера: насколько каждая ступень «своя» в мажоре и в миноре, от тоники
 KEYS = {"мажор": (6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88),
         "минор": (6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)}
+# Корень одиночного звука — когда замеру верить. Пороги сняты с 56 звуков банка Glorified (06.10.2026): у 37 сошлось всё,
+# у остальных высота плывёт или скачет на октаву, в хроме чужая нота (аккорд, колокол) или основного тона нет
+# ponytail: один банк синтезатора, все звуки в «до». На живых записях и других нотах пороги не проверены
+ROOT_SURE = .85                            # доля громких кадров, где pyin слышит высоту, и доля из них на одной ноте
+ROOT_CENTS = 25                            # дальше от ноты — звук между двумя нотами
+ROOT_ALIEN = .25                           # вес чужого класса высот от веса корня; квинта и большая терция — его обертоны
+ROOT_FUND = .1                             # доля основного тона в энергии первых десяти гармоник
 DATALESS = 0x40000000                      # st_flags заглушки iCloud (SF_DATALESS): чтение повисло бы на скачивании
 
 
@@ -392,6 +406,46 @@ def color(other: np.ndarray, bpm: float | None, bar0: float = 0.0) -> dict:
     return out
 
 
+def _cqt(y: np.ndarray, sr: int, tune: float) -> np.ndarray:
+    """Энергия по октавам от C1, нотам и кадрам: 36 полос на октаву, из трёх полос полутона — только центральная."""
+    import librosa
+    return np.abs(librosa.cqt(y, sr=sr, fmin=librosa.note_to_hz("C1"), n_bins=36 * 7, bins_per_octave=36,
+                              tuning=tune, hop_length=512))[0::3].reshape(7, 12, -1) ** 2
+
+
+def root(y: np.ndarray, sr: int) -> int | None:
+    """Корневая нота одиночного звука — номер, который ждёт канал FL (60 — C5). None — замер неуверенный.
+    Три признака, и нужны все. Высота: pyin слышит её почти во всех громких кадрах, и почти все они на одной ноте —
+    звук с вибрато в полтона, глиссандо и скачками на октаву отпадает. Хрома: громчайший класс высот — тот же, чужих нот
+    нет; квинта и большая терция чужими не считаются — это 3-я и 5-я гармоники самой ноты. Основной тон: на найденной
+    высоте есть энергия — у квинты и мажорного трезвучия pyin находит общий период двух нот, ниже обеих, и там пусто.
+
+    ponytail: октава — оценка. У слоёного звука (струнные в две октавы) корнем выйдет нижний слой, даже когда верхний
+    громче; ошибётся — партия зазвучит октавой выше или ниже, но не фальшиво. Понадобится точнее — сравнивать чётные
+    и нечётные гармоники."""
+    import librosa
+    y = librosa.effects.trim(librosa.resample(y, orig_sr=sr, target_sr=22050), top_db=45)[0]
+    y = np.pad(y, (0, max(8192 - len(y), 0)))                   # короткий плак: окну спектра нужна полная длина
+    f0, voiced, _ = librosa.pyin(y, fmin=32.7, fmax=2093, sr=22050, frame_length=4096, hop_length=512)
+    rms = librosa.feature.rms(y=y, frame_length=4096, hop_length=512)[0][:len(f0)]
+    loud = rms > rms.max() * .1
+    if not loud.any() or (voiced & loud).sum() < ROOT_SURE * loud.sum():
+        return None
+    midi = librosa.hz_to_midi(f0[voiced & loud])
+    mid = float(np.median(midi))
+    note = round(mid)
+    if abs(mid - note) * 100 > ROOT_CENTS or (np.abs(midi - mid) < .35).mean() < ROOT_SURE:
+        return None
+    pcs = _cqt(y, 22050, mid - note).sum((0, 2))
+    if pcs.argmax() != note % 12 or max(pcs[(note + k) % 12] for k in range(1, 12) if k not in (4, 7)) >= ROOT_ALIEN * pcs.max():
+        return None
+    power = (np.abs(librosa.stft(y, n_fft=8192, hop_length=1024)) ** 2).mean(1)
+    freqs, hz = librosa.fft_frequencies(sr=22050, n_fft=8192), librosa.midi_to_hz(mid)
+    parts = [float(power[slice(*np.searchsorted(freqs, (h * hz * .977, h * hz * 1.0235)) + (0, 1))].max(initial=0))
+             for h in range(1, 11)]                             # гармоника — пик в ±40 центов от кратной частоты
+    return note if parts[0] >= ROOT_FUND * sum(parts) else None
+
+
 def loop(y: np.ndarray, sr: int, bpm: float) -> dict | None:
     """Замер петли: такты, веса двенадцати нот, звучащие ноты, тоника и лад, строй, опора каждого такта.
     None — петля не в 1, 2, 4 или 8 тактов по темпу из имени: на сетку бита такая не ложится.
@@ -409,9 +463,7 @@ def loop(y: np.ndarray, sr: int, bpm: float) -> dict | None:
         return None
     bars = round(bars)
     tune = float(librosa.estimate_tuning(y=y, sr=sr))
-    # 36 полос на октаву от C1, семь октав; из трёх полос полутона — только центральная
-    c = np.abs(librosa.cqt(y, sr=sr, fmin=librosa.note_to_hz("C1"), n_bins=36 * 7, bins_per_octave=36,
-                           tuning=tune, hop_length=512))[0::3].reshape(7, 12, -1) ** 2
+    c = _cqt(y, sr, tune)
     weights = c.sum((0, 2)) / max(c.sum((0, 2)).max(), 1e-12)
     fit = sorted(((float(np.corrcoef(np.sqrt(weights), np.roll(profile, tonic))[0, 1]), tonic, mode)
                   for mode, profile in KEYS.items() for tonic in range(12)), reverse=True)
@@ -431,7 +483,8 @@ def loops(word: str = "") -> str:
     from . import config, noty
     data = json.loads(config.BEAT_SOUNDS.read_text("utf-8"))
     rows, old, skipped = {}, data.get("loops", {}), {"заглушка iCloud": 0, "не 1, 2, 4 или 8 тактов": 0}
-    for name in sorted(n for n in data["sounds"] if n.startswith((noty.LOOPS + "/", noty.NET_LOOPS + "/")) and noty.loop_bpm(n)):
+    for name in sorted(n for n in data["sounds"] if n.startswith((noty.LOOPS + "/", noty.NET_LOOPS + "/", noty.GLORY_LOOPS + "/"))
+                       and noty.loop_bpm(n)):
         path = noty.LIBRARY["KITS"] / name.partition("/")[2]
         if word.lower() not in name.lower() or not path.exists() or os.stat(path).st_flags & DATALESS:
             skipped["заглушка iCloud"] += word.lower() in name.lower()
@@ -633,7 +686,19 @@ def selftest() -> None:
     assert abs(m["tune"]) <= 10 and len(m["weights"]) == 12 and max(m["weights"]) == 1, m      # строй чистых синусов — до −6: оценка
     assert loop(two[:int(2.5 * SR)], SR, 120) is None and loop(np.tile(two, 3)[:10 * SR], SR, 120) is None, \
         "такт с четвертью и пять тактов — не петля"
-    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, части, цвет музыки и ноты петли на синтетике — в порядке")
+    # Корень одиночного звука: нота с обертонами — её номер; аккорд, квинта без основного тона и съезд высоты — замер молчит
+    one = np.arange(SR) / SR
+
+    def tone(hz):
+        return sum(np.sin(2 * np.pi * hz * h * one) / h for h in range(1, 6))
+
+    assert root(tone(220), SR) == 57 and root(tone(261.63), SR) == 60, "ля малой октавы — 57, до первой — 60 (C5 в FL)"
+    assert root(tone(220) + tone(261.63), SR) is None, "малая терция — две ноты, корня нет"
+    assert root(np.sin(2 * np.pi * 261.63 * one) + np.sin(2 * np.pi * 392 * one), SR) is None, \
+        "квинта: общий период — до октавой ниже, а звука там нет"
+    assert root(np.sin(2 * np.pi * np.cumsum(220 * 2 ** one) / SR), SR) is None, "высота съезжает на октаву — корня нет"
+    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, части, цвет музыки, ноты петли и корень одиночного звука "
+          "на синтетике — в порядке")
 
 
 def main() -> None:
@@ -647,6 +712,7 @@ def main() -> None:
     p.add_argument("--color", action="store_true", help="ещё и цвет музыки: яркость, регистр, плотность нот, смены аккорда, шум, верха")
     p.add_argument("--loops", nargs="?", const="", metavar="СЛОВО",
                    help="замерить разрешённые петли библиотеки в data/beat_sounds.json; со словом — только петли с ним в имени (только Мак)")
+    p.add_argument("--root", action="store_true", help="корневая нота одиночных звуков ФАЙЛ…: номер и имя ноты в FL или «неуверенно»")
     p.add_argument("--selftest", action="store_true", help="проверить замер на синтетическом бите, без demucs")
     a = p.parse_args()
     if a.selftest:
@@ -655,6 +721,13 @@ def main() -> None:
         return print(table(json.loads(a.table.read_text("utf-8"))))
     if a.loops is not None:
         return print(loops(a.loops))
+    if a.root:
+        import librosa
+        from .noty import NOTES
+        for path in a.files:
+            note = root(*librosa.load(path, sr=None))
+            print("неуверенно" if note is None else f"{note} ({NOTES[note % 12]}{note // 12})", path.name)
+        return
     for path in a.files:
         row = dict(group=a.group, **run(path, a.bpm, a.start, a.color))
         print(json.dumps(row, ensure_ascii=False))
