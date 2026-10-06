@@ -21,7 +21,7 @@
 Владелец о первом проекте, 06.10.2026: «бит в целом тихий. петля совсем плоха и не в тему, бас слабый как
 и бочка. саунд дизайна не увидел никакого». Отсюда три вещи. Уровни дорожек, ограничитель на мастере, перегруз
 и отсечка 808 — по шести чужим проектам FL под его рефы (data/private/биты/проекты-из-сети/разбор.md); числа
-и откуда они — у констант LEVEL, DRIVE, LIMIT. Эффект «местами» — звено `fx` с «в тактах …» на конце: клип
+и откуда они — у констант LEVEL, DRIVE. Эффект «местами» — звено `fx` с «в тактах …» на конце: клип
 автоматизации на mix слота, 100% в названных тактах и 0% в остальных, ступенями — так же mix слота Gross Beat
 ведёт демо-проект из поставки FL («Gross Beat - Mix level»). Канал клипа целиком берётся из шаблона FL
 (SFX transitions), меняются имя, номер и точки. Ячейка Gross Beat («Momentary: 1/2 Speed») — два числа в начале
@@ -81,9 +81,8 @@ LEVEL = {"808": 125, "музыка": 57}
 # Перегруз 808: Fruity Soft Clipper, порог 23 из 127 и post 111 из 160 — дорожка 808 проекта 02 (пересборка Stop Breathing),
 # слот 4 (перегруз на 808 — в 2 проектах из 6). Состояние плагина — эти два числа: в заводском Default.fst — 100 и 128.
 DRIVE = ("fruitysoftclipper", struct.pack("<II", 23, 111))
-# Ограничитель на мастере — в 4 проектах из 6; Fruity Limiter последним слотом — в 03 и 06, там он по умолчанию.
-# Владелец: «бит в целом тихий» — поэтому заводской пресет FL «Max loudness» (gain выше умолчания), а не умолчание.
-LIMIT = ("fruitylimiter", "Max loudness")
+# Ограничителя на мастер проект сам не ставит, хотя в чужих проектах он есть в 4 из 6: владелец 06.10.2026 о пробном
+# проекте с Fruity Limiter «Max loudness» — «Очень делает плоским звук. Не делай так».
 # «в тактах 23, 31–32 и 59.4» в конце звена fx: такт, такты подряд, доля такта (59.4 — четвёртая)
 BARS = re.compile(r"\bв тактах\s+((?:\d+(?:\.[1-4])?(?:\s*[–—-]\s*\d+(?:\.[1-4])?)?(?:\s*,\s*|\s+и\s+)?)+)$")
 # Чем параметры аудиоклипа (событие 215) отличаются от сэмплера — снято с аудиоклипов проекта владельца
@@ -531,10 +530,6 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             if st := bare(DRIVE[0]):
                 st["state"] = DRIVE[1]
                 own.append(f"{row}: Fruity Soft Clipper перегрузом (порог 23 из 127, post 111 из 160)")
-        if not i and LIMIT[0] in effects:
-            steps += [] if len(steps) > 9 or any("limit" in s["key"] or "maximus" in s["key"] for s in steps) else [blank(LIMIT[0])]
-            if st := bare(LIMIT[0]):
-                st["preset"] = LIMIT[1]
         loaded, clips = [], {}
         for st in steps:
             data, label = _bytes(st["file"]), st["file"].stem
@@ -701,8 +696,8 @@ def selftest() -> None:
             assert got["markers"] == [[1, "вступление"], [9, "игра"]], got["markers"]
             mix = got["inserts"]
             # мастер: цепочка автора и ограничитель с заводским пресетом последним; «местами: …, такты 1 и 7» — слова, клипа нет
-            assert mix[0] == {"name": None, "slots": {0: "Pro-Q 4", 1: "Fruity Soft Clipper", 2: "Fruity Limiter"}, "to": [], "level": 100}, mix[0]
-            assert b"limiter-loud" in data and b"limiter-default" not in data, "ограничитель — с пресетом, а не по умолчанию"
+            assert mix[0] == {"name": None, "slots": {0: "Pro-Q 4", 1: "Fruity Soft Clipper"}, "to": [], "level": 100}, mix[0]
+            assert b"limiter-loud" not in data and b"limiter-default" not in data, "ограничитель на мастер сам не встаёт"
             # 808: поднят, клиппер автор назвал без чисел — он с числами чужого проекта; мелодия и петля опущены, барабаны — 100
             assert mix[1] == {"name": "808", "slots": {0: "Fruity Soft Clipper"}, "to": [6], "level": 125} and DRIVE[1] in data, mix[1]
             assert mix[2] == {"name": "хэт", "slots": {}, "to": [6], "level": 100}, "808 и барабаны — в свою шину"
@@ -714,7 +709,7 @@ def selftest() -> None:
             assert half in data and b"gross-default" not in data, "в слоте — пресет с ячейкой «1/2 Speed»"
             assert got["links"] == [{"clip": 5, "mix": True, "insert": 4, "slot": 2}], got["links"]
             assert ch[5]["on"] == [(4, 8), (10, 12), (356, 404)], ch[5]["on"]
-            assert "каналов 5" in line and "808 — 27" in line and "Эффектов в слотах — 10" in line, line
+            assert "каналов 5" in line and "808 — 27" in line and "Эффектов в слотах — 9" in line, line
             assert "петля: Gross Beat — такт 2, такт 3 (доли 3–4), такты 90–200" in line and "пресета «Нет такого»" in line, line
         assert "нет FL Studio" in today(kits, serum, plan, Path(tmp) / "нет.flp", db)
         if PRESETS[1].is_dir():                                 # на Маке — настоящий банк FL: ячейка «1/2 Speed» в нём тридцатая
@@ -734,7 +729,7 @@ def selftest() -> None:
         assert all(c["sound"].startswith(f"{new}/") and (new / Path(c["sound"]).name).exists() for c in read(moved)["channels"] if c["sound"])
         assert repath(moved, new.name, kits.name) == data and (new / "битый.flp").read_bytes() == b"not FL", "кроме путей не тронуто ничего"
     print("проект FL: шаблон, каналы со звуком и пресетом, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
-          "перегруз и ограничитель по умолчанию; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
+          "перегруз по умолчанию, ограничитель на мастер сам не встаёт; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
           "сохранённая папка переезжает, пути звуков — за ней")
 
 
