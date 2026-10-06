@@ -1459,12 +1459,13 @@ def _sandboxed(folder: Path, tmp: Path) -> None:
                    env={"PATH": "/usr/bin:/bin", "HOME": str(tmp), "TMPDIR": str(tmp)}, capture_output=True, text=True)
 
 
-def _project(plan: Path, kits: Path, serum: Path) -> None:
+def _project(plan: Path, kits: Path, serum: Path, home: Path | None = None) -> None:
     """Готовый проект FL — в «Сегодня», когда звуки и пресеты уже лежат (`flp.today`); строка о нём — в записку.
-    Проект — добавка: его сбой не должен стоить владельцу папки с нотами, поэтому любая ошибка — строка, а не падение."""
+    Проект — добавка: его сбой не должен стоить владельцу папки с нотами, поэтому любая ошибка — строка, а не падение.
+    home — где папка будет лежать потом (`aside`): пути звуков проекта ведут туда."""
     try:
         from . import flp
-        line = flp.today(kits, serum, json.loads(plan.read_text("utf-8")))
+        line = flp.today(kits, serum, json.loads(plan.read_text("utf-8")), home=home)
     except Exception as e:
         line = f"Проект FL не собрался ({type(e).__name__}: {e}) — собери из партитур и звуков этой папки, как раньше."
     with (kits / "о бите.txt").open("a", encoding="utf-8") as f:
@@ -1481,10 +1482,41 @@ def _mark(mark: str, seen: str, missed: list[str]) -> str:
     return f"{mark} {tries + 1}" if tries < RETRY and any("iCloud" in m for m in missed) else mark
 
 
+def _fill(make: str, beat: str, tmp: Path, kits: Path, serum: Path, home: Path | None = None) -> list[str]:
+    """Текст make.py → папки kits и serum: сборка в песочнице, ноты, звуки, пресеты, дорожки петли и проект FL.
+    Возвращает, что не легло."""
+    (tmp / beat).mkdir()
+    (tmp / beat / "make.py").write_text(make, "utf-8")
+    _sandboxed(tmp / beat, tmp)
+    out = tmp / "out"
+    plan, own = out / f"{beat}.loop.json", out / f"{beat}.preset.json"
+    missed = lay(out / beat, json.loads((out / f"{beat}.sounds.json").read_text("utf-8")), kits, serum,
+                 plan=json.loads(plan.read_text("utf-8")) if plan.exists() else None,
+                 preset=json.loads(own.read_text("utf-8")) if own.exists() else None)
+    missed += _net(out / f"{beat}.net.json", kits)
+    _project(out / f"{beat}.flp.json", kits, serum, home)
+    return missed
+
+
+def aside(make: Path, out: Path) -> str:
+    """Проект бита из ПАПКА/make.py — в отдельную папку со своими звуками: пробная сборка, «Сегодня» и ветки не тронуты.
+    Собирается во временных папках «Сегодня» тем же путём, что утром (`_fill`), файлы копируются в out, а пути звуков
+    проекта с самого начала ведут туда. Файлы out с теми же именами переписываются, остальные остаются."""
+    with tempfile.TemporaryDirectory(prefix="noty-") as tmp:
+        tmp = Path(tmp).resolve()
+        kits, serum = tmp / "kits" / TODAY, tmp / "serum" / TODAY
+        missed = _fill((make / "make.py").read_text("utf-8"), make.resolve().name, tmp, kits, serum, out.resolve())
+        out.mkdir(parents=True, exist_ok=True)
+        for f in (*kits.iterdir(), *serum.iterdir()):
+            shutil.copyfile(f, out / f.name)
+    return f"{make.resolve().name}: проект, ноты и звуки — в {out}" + (f"; не легло звуков: {len(missed)}" if missed else "")
+
+
 def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     """Свежая ветка claude/beats-* → папки «Сегодня» в браузере FL и в пресетах Serum. Собранное второй
-    раз не трогается: помощник на Маке заходит сюда раз в десять минут. Спал Мак — соберёт, проснувшись."""
-    from . import config
+    раз не трогается: помощник на Маке заходит сюда раз в десять минут. Спал Мак — соберёт, проснувшись.
+    Проект, сохранённый владельцем в «Сегодня» после сборки, перед чисткой переезжает рядом со звуками (`flp.keep`)."""
+    from . import config, flp
 
     def git(*args: str) -> str:
         return subprocess.run(["git", "-C", str(config.ROOT), *args], capture_output=True, text=True,
@@ -1507,26 +1539,23 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     seen, missed = (kits / ".бит").read_text("utf-8") if (kits / ".бит").exists() else "", []
     if seen == mark:
         return f"{beat}: уже собрано"
+    make = git("show", f"origin/claude/beats-{beat}:content/beats/{beat}/make.py")
+    saved = flp.keep(kits)              # до первой чистки; не переехала (ошибка диска) — падаем, папку не стираем
     with tempfile.TemporaryDirectory(prefix="noty-") as tmp:
         tmp = Path(tmp).resolve()
-        (tmp / beat).mkdir()
-        (tmp / beat / "make.py").write_text(git("show", f"origin/claude/beats-{beat}:content/beats/{beat}/make.py"), "utf-8")
         try:
-            _sandboxed(tmp / beat, tmp)
-            plan, own = tmp / "out" / f"{beat}.loop.json", tmp / "out" / f"{beat}.preset.json"
-            missed = lay(tmp / "out" / beat, json.loads((tmp / "out" / f"{beat}.sounds.json").read_text("utf-8")), kits, serum,
-                         plan=json.loads(plan.read_text("utf-8")) if plan.exists() else None,
-                         preset=json.loads(own.read_text("utf-8")) if own.exists() else None)
-            missed += _net(tmp / "out" / f"{beat}.net.json", kits)
-            _project(tmp / "out" / f"{beat}.flp.json", kits, serum)
+            missed = _fill(make, beat, tmp, kits, serum)
             done = "ноты на месте" + (f", не легло звуков: {len(missed)}" if missed else "")
         except (subprocess.SubprocessError, OSError, ValueError) as e:      # не собрался — записка, а не падение
             lay(None, {}, kits, serum)
             why = (getattr(e, "stderr", "") or getattr(e, "stdout", "") or str(e)).strip()[-1500:]
             (kits / "о бите.txt").write_text(f"{beat}: ноты на Маке не собрались — возьми архив из Telegram.\n\n{why}", "utf-8")
             done = "ноты не собрались, в папке записка"
+    if saved:
+        with (kits / "о бите.txt").open("a", encoding="utf-8") as f:
+            f.write(f"\n\n{saved}")
     (kits / ".бит").write_text(_mark(mark, seen, missed), "utf-8")
-    return f"{beat}: {done}"
+    return f"{beat}: {done}" + (", вчерашний проект владельца сохранён рядом" if saved else "")
 
 
 def loop_card(word: str) -> str:
@@ -2104,6 +2133,8 @@ def main() -> None:
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
     p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
     p.add_argument("--gather", action="store_true", help="собрать папку «00 - Сегодня»: ноты свежего бита и его звуки (только Мак)")
+    p.add_argument("--project", metavar="ПАПКА", type=Path,
+                   help="пробная сборка: проект FL бита из ПАПКА/make.py со звуками — в папку --out, «Сегодня» не тронута (только Мак)")
     p.add_argument("--net", action="store_true", help="ночной шаг: следующий источник из data/net_sources.json — в набор 11 (только Мак)")
     p.add_argument("--dry-run", action="store_true", help="с --net: что взял бы шаг, без загрузки звука и записи")
     p.add_argument("--loop", metavar="СЛОВО", help="замер петель с этим словом в имени: ноты, опоры по тактам, вторая петля на перелом")
@@ -2126,6 +2157,13 @@ def main() -> None:
         print(f"{len(names)} имён → {config.BEAT_SOUNDS}")
     elif a.gather:
         print(gather())
+    elif a.project:
+        if not a.out:
+            raise SystemExit("куда класть проект — флагом --out ПАПКА")
+        try:
+            print(aside(a.project, a.out))
+        except subprocess.CalledProcessError as e:          # бит не прошёл сборку — показать, чем
+            raise SystemExit((e.stderr or e.stdout or str(e)).strip()[-3000:])
     elif a.net:
         from . import set11
         print(set11.run(a.dry_run))
