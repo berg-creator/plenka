@@ -34,6 +34,8 @@ import math
 import plistlib
 import re
 import struct
+import subprocess
+import time
 import unicodedata
 import wave
 from pathlib import Path
@@ -271,6 +273,22 @@ def _chain(text: str, effects: dict[str, Path], buses: list[str]) -> tuple[list[
     return plugins[:10], bus            # слотов на дорожке микшера FL 20 — десять
 
 
+def _bytes(f: Path) -> bytes | None:
+    """Файл базы плагинов. База лежит в «Документах», а они в iCloud: выгруженный файл фоновому процессу macOS
+    не отдаёт, зато `brctl download` оттуда работает и файл на месте через секунды (`noty.lay`) — просим и пробуем ещё раз."""
+    for last in (False, True):
+        try:
+            return f.read_bytes()
+        except OSError:
+            if last or not f.exists():
+                return None
+            try:
+                subprocess.run(["brctl", "download", str(f)], capture_output=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                return None
+            time.sleep(3)
+
+
 def _where(f: Path) -> str:
     """Путь звука, как его пишет сам FL: от папки данных пользователя."""
     home = LIBRARY["KITS"].parent
@@ -289,7 +307,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB)
     presets = sorted(serum.glob("*.fxp"), key=lambda f: nfc(f.name)) if serum.is_dir() else []
     fx = {nfc(k).strip().lower(): str(v) for k, v in plan["fx"].items()} if isinstance(plan.get("fx"), dict) else {}
     own = plan.get("preset") if isinstance(plan.get("preset"), dict) else {}
-    wrap = [x for x in events((db / SERUM).read_bytes()) if x[0] in PLUGIN] if (db / SERUM).exists() else None
+    wrap = [x for x in events(_bytes(db / SERUM) or pack([], 0)) if x[0] in PLUGIN]
     buses = [k for k in fx if k.startswith("шина")]
     rows = [p for p, _ in scores] + [k for k, file in CLIPS if (kits / file).exists()] + buses     # дорожки микшера, с первой
     number = {r.lower(): i for i, r in enumerate(rows, 1)}
@@ -323,13 +341,9 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB)
         plugins, bus = _chain(fx.get(row.lower(), ""), effects, buses)
         if row.lower() not in fx and any(row == p for p, _ in scores):      # у барабанов строки в fx нет: их шина — барабанная
             bus = drums
-        loaded = []
-        for f in plugins:
-            try:
-                loaded.append(f.read_bytes())
-            except OSError:                 # файл базы выгружен в iCloud: фоновому процессу macOS его не отдаст
-                lost += 1
-        inserts[i] = {"name": row if i else None, "plugins": loaded, "to": number.get(bus) if i and bus != row.lower() else None}
+        loaded = [b for b in map(_bytes, plugins) if b]
+        lost += len(plugins) - len(loaded)
+        inserts[i] ={"name": row if i else None, "plugins": loaded, "to": number.get(bus) if i and bus != row.lower() else None}
     flat = str(plan.get("parts") or "")
     for _ in range(3):                      # пояснения в скобках — не части: «(петля молчит в тактах 24–25)»
         flat = re.sub(r"\([^()]*\)", "", flat)
