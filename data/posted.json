@@ -1103,6 +1103,12 @@
       "file": "beat-3.json",
       "published_at": "2026-10-06T06:03:17+00:00",
       "rubric": "beat"
+    },
+    {
+      "chat": "channel",
+      "file": "20261006-062359-4741-release.json",
+      "published_at": "2026-10-06T06:37:30+00:00",
+      "rubric": "release"
     }
   ],
   "photos": [
@@ -1256,6 +1262,7 @@
     "044d33318a4e869c1d0e17173333b332b2b462e31e468b4e0d6c1a4952492d35",
     "70e14467434f03630553055b2366d1a659a699a699ae09ad057f07ff03ff03ff",
     "6c186600fdc28c9eed0ead26eb267ea69ac6d9e6d9e68de68e0e9796c8d1ab14",
-    "986e199e4cf328878c9794c39323db37cd23cb726a52eb31aa44ac6bb1309bd0"
+    "986e199e4cf328878c9794c39323db37cd23cb726a52eb31aa44ac6bb1309bd0",
+    "e24852aa325566554b824c1e682f9c2f1c9f2cbb587fa93b1c8b1d3b1cbb884f"
   ]
 }

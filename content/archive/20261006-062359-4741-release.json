@@ -2,6 +2,13 @@
   "artist": "BONES",
   "cover": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/b6/e8/40/b6e840ab-110f-d716-3d31-7714edb913e6/199316800579_cover.jpg/600x600bb.jpg",
   "created_at": "2026-10-06T06:23:59+00:00",
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 245
+  },
+  "photo": "e24852aa325566554b824c1e682f9c2f1c9f2cbb587fa93b1c8b1d3b1cbb884f",
   "preview": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/d1/2e/ea/d12eea97-9e8c-c708-79b2-ac0e4e7ad6bb/mzaf_11140293269471600255.plus.aac.p.m4a",
   "release": "PublicBroadcast",
   "released_at": "2026-10-05T07:00:00+00:00",
