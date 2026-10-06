@@ -105,6 +105,7 @@ WEEK_KICKER = "БИТ НЕДЕЛИ"
 # Отметка итога в content/archive по понедельнику недели: файл есть — итог вышел или снят (final).
 FINAL_FILE = "week-{week}.json"
 FIRE, FINE = 0, 1  # места «🔥» и «👍» в comments.OTBOR_POLL
+NO_VOTES = "нет голосов"  # отметка недели, где «🔥» не поставил никто: итога нет (final)
 
 URL = re.compile(r"https?://\S+")
 # Где найти артиста: страница ВКонтакте или свой канал в Telegram — читатель поста
@@ -149,6 +150,7 @@ BAD_FILE = "Файл не прочитался ({reason}). Пришли друг
 NOT_SUBSCRIBED = ('ОТБОР <b>бесплатный</b> — достаточно подписаться на <a href="https://t.me/{handle}">канал</a>.\n\n'
                   "Подпишись и пришли /otbor ещё раз.")
 WEEKLY = "Один трек в неделю от человека: следующий можно прислать {date}."
+WEEK_TWICE = "На бит этой недели твой трек уже принят — один от человека. Новый бит недели выйдет в понедельник."
 KNOWN_BASE = "{artist} канал уже знает — отбор для тех, о ком ещё не слышали."
 KNOWN_FANS = ("У {artist} уже {fans} фанатов на Deezer — отбор для тех, "
               "о ком ещё не слышали.")
@@ -509,7 +511,25 @@ def cancel(chat_id: str | int) -> None:
         save(data)
 
 
-def refusal(data: dict, chat_id: str, user_id: str, *, admin: bool) -> str:
+def _weekly(data: dict, chat_id: str, beat: str = "") -> str:
+    """Отказ «трек в неделю»; пусто — можно. beat — номер бита ПЛЁНКИ, с которым трек сведён.
+
+    У трека на бит недели (week_of) счёт свой: один трек на бит, а не «раз в семь суток». Иначе
+    сдавший трек в субботу попадал бы на следующий бит только к субботе, и первыми из недели
+    выпадали бы как раз постоянные участники."""
+    mine = [item for item in (*data["queue"], *data["done"]) if item.get("chat") == chat_id]
+    week = week_of({"beat": beat, "at": state.iso()}) if beat else ""
+    if week:
+        return WEEK_TWICE if any(week_of(item) == week for item in mine) else ""
+    sent = [moment for item in mine if (moment := state._parse(item.get("at", ""))) and state.now() - moment < WEEK]
+    if sent:
+        from .compose import MSK
+
+        return WEEKLY.format(date=(min(sent) + WEEK).astimezone(MSK).strftime("%d.%m"))
+    return ""
+
+
+def refusal(data: dict, chat_id: str, user_id: str, *, admin: bool, beat: str = "") -> str:
     """Подписка и неделя — проверки человека, а не трека. Пусто — можно."""
     if admin:
         return ""
@@ -517,14 +537,7 @@ def refusal(data: dict, chat_id: str, user_id: str, *, admin: bool) -> str:
     if channel and not telegram.is_member(channel, user_id):
         # Адрес из config, а не секрет: там может стоять числовой id канала.
         return NOT_SUBSCRIBED.format(handle=config.CHANNEL_HANDLE.lstrip("@"))
-    sent = [moment for item in (*data["queue"], *data["done"])
-            if item.get("chat") == chat_id and (moment := state._parse(item.get("at", "")))
-            and state.now() - moment < WEEK]
-    if sent:
-        from .compose import MSK
-
-        return WEEKLY.format(date=(min(sent) + WEEK).astimezone(MSK).strftime("%d.%m"))
-    return ""
+    return _weekly(data, chat_id, beat)
 
 
 def start(chat_id: str | int, user_id: str | int, *, admin: bool = False, skleyka: bool = False) -> None:
@@ -554,7 +567,12 @@ def mixed(chat_id: str, user_id: str, track_id: str = "", *, admin: bool = False
 
     data = load()
     denied = refusal(data, chat_id, user_id, admin=admin)
-    found = {} if denied else skleyka.song(chat_id, track_id)
+    # Отказ человеку — раньше трека, сведение не спрашиваем. Исключение — «трек в неделю»: у трека
+    # на бит недели это правило своё (_weekly), а узнать бит можно только из записи сведения.
+    weekly = bool(denied) and denied == _weekly(data, chat_id)
+    found = {} if denied and not weekly else skleyka.song(chat_id, track_id)
+    if weekly and found.get("beat"):
+        denied = _weekly(data, chat_id, found["beat"])
     if denied:
         pass
     elif not found and not track_id:
@@ -784,7 +802,7 @@ FIELDS = ("artist", "title", "url", "cover", "track_file_id", "seconds", "quote"
 
 def submit(data: dict, chat_id: str, user_id: str, *, reel: bool, admin: bool) -> None:
     draft = data["drafts"].pop(chat_id)
-    denied = refusal(data, chat_id, user_id, admin=admin)
+    denied = refusal(data, chat_id, user_id, admin=admin, beat=draft.get("beat", ""))
     if not denied:
         data["queue"].append({
             **{field: draft[field] for field in FIELDS if draft.get(field)},
@@ -931,8 +949,9 @@ def shift(target: str) -> None:
         application = _first(data, lanes)
         data["queue"].remove(application)
         state.write_json(path, post)
+        # beat — чтобы второй трек на тот же бит недели не прошёл и после выхода первого (refusal).
         data["done"].append({field: application[field] for field in ("chat", "at", "key", "reel")}
-                            | {"file": path.name})
+                            | {"file": path.name} | ({"beat": application["beat"]} if application.get("beat") else {}))
         save(data)
     publish.deliver(post, path, target)
     print(f"Выход отбора: {path.name} → {target}")
@@ -994,6 +1013,10 @@ def final() -> str:
 
     # sorted стабилен: при равном счёте остаётся порядок выхода.
     ranked = sorted(posts, key=lambda pair: (-votes(pair[1], FIRE), -votes(pair[1], FINE)))
+    if not votes(ranked[0][1], FIRE):
+        # Ни одного «🔥» за неделю: итог по голосам объявлять не из чего, а приз за ноль голосов не обещан.
+        state.write_json(mark, {"rubric": "week", "week": monday, "failed": NO_VOTES})
+        return ""
     handle = config.CHANNEL_HANDLE.lstrip("@")
     links = [f"https://t.me/{handle}/{post['message']['message_id']}" for _, post in ranked]
     rows = [FINAL_ROW.format(place=f"{number}." if number > 1 else "🥇", link=link, fire=votes(post, FIRE),
@@ -1256,11 +1279,13 @@ def _selftest() -> None:
                 assert last("7").startswith(start_of) and not active(7), (choice, last("7"))
             callback(7, 7, "mix:t7")
             assert "• Голос записан с перегрузом." in last("7") and "жми «🎙» под новым треком" in last("7")
-            # Отказы человека — раньше трека: без подписки и в ту же неделю сведение даже не спрашивают.
+            # Отказы человека — раньше трека: без подписки сведение даже не спрашивают; в ту же неделю —
+            # спрашивают только затем, чтобы узнать бит (у трека на бит недели правило недели своё).
             asked.clear()
             callback(5, 5, "mix:t6")
+            assert last("5").startswith("ОТБОР <b>бесплатный</b>") and not asked
             callback(1, 1, "mix:t6")
-            assert last("5").startswith("ОТБОР <b>бесплатный</b>") and last("1") == WEEKLY.format(date="24.09") and not asked
+            assert last("1") == WEEKLY.format(date="24.09") and asked == [("1", "t6")], asked
 
         # Пост сведённого трека: площадок нет — ни строки «Слушать», ни пустых строк, ни разделителей.
         post = build_post(sent)
@@ -1343,6 +1368,11 @@ def _selftest() -> None:
             post = build_post(entry)
             assert post["text"].startswith(f"🎚 БИТ НЕДЕЛИ · «Наждак»\n\n<b>ВАНЯ — «ГАРАЖ»</b>\n\n{WEEK_SENT}\n\n"), post["text"]
             assert post["week"] == "2026-09-14" and post["kicker"] == WEEK_KICKER and post["mixed"], post
+            # Бит недели — свой счёт: второй трек на тот же бит — отказ, а обычный трек на днях участию не мешает.
+            assert refusal(load(), "9", "9", admin=False, beat="3") == WEEK_TWICE
+            busy = {"queue": [{"chat": "77", "at": state.iso()}], "done": [], "drafts": {}}
+            assert _weekly(busy, "77") and not _weekly(busy, "77", "3")
+            assert _weekly(busy, "77", "1"), "чужой бит — обычное правило недели"
             # Чужой бит, заявка в воскресенье и заявка прошлой недели — обычный пост отбора, без метки.
             for other in ({**entry, "beat": "1"}, {**entry, "at": "2026-09-13T10:00:00+00:00"}):
                 assert not week_of(other) and "week" not in build_post(other) and "БИТ НЕДЕЛИ" not in build_post(other)["text"]
@@ -1427,6 +1457,14 @@ def _selftest() -> None:
                     "message": {"message_id": 800 + number}})
             assert final() and len(stops) == 4 and "🥇" in finals[1]["text"].split("\n\n")[1], finals[1]["text"]
             assert telegram.visible_len(finals[1]["text"]) <= telegram.MAX_CAPTION and "…и ещё " in finals[1]["text"]
+            # Ни одного «🔥» за неделю — итога нет: победителя по нулю голосов бот не объявляет.
+            was = {path: path.read_text() for path in [mark, *config.ARCHIVE.glob("*-otbor-*.json")]}
+            mark.unlink()
+            for path in config.ARCHIVE.glob("*-otbor-*.json"):
+                state.write_json(path, {**state.read_json(path, {}), "votes": [0, 2, 1]})
+            assert final() == "" and len(finals) == 2 and state.read_json(mark, {})["failed"] == NO_VOTES
+            for path, text in was.items():
+                path.write_text(text)
 
             # Опрос так и не закрылся: до последнего часа перед ночью — попытки, потом отметка без поста
             # и одна строка владельцу.
@@ -1452,7 +1490,7 @@ def _selftest() -> None:
     print("отбор: три способа прислать, трек из СВЕДЕНИЯ без площадки (брак записи и чужое имя — отказ, старая кнопка — "
           "последний готовый, «💿» — обычный отбор без метки), отказы, пост шаблоном и без площадок, выход раз в день, "
           "весть и вкладыш артисту; бит недели: метка у трека с битом недели, без неё — чужой бит, прошлая неделя "
-          "и заявка после субботы, трек недели раньше обычных — два в сутки и раз в три часа, итога нет при двух треках, "
+          "и заявка после субботы, трек недели раньше обычных — два в сутки и раз в три часа, один трек на бит от человека, итога нет при двух треках и без единого «🔥», "
           "голоса закрытием опроса и один раз, равенство — по «👍» и по выходу, победителю и владельцу весть, "
           "длинный итог в подписи к картинке, опросы не закрылись до ночи — строка владельцу")
 
