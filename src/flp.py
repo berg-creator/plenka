@@ -33,7 +33,7 @@
 по середине был до 100 герц». Отсюда Fruity Limiter компрессором на дорожке 808 с бочкой на входе сайдчейна (бочка
 послана туда с уровнем 0: звук идёт прежним путём, компрессор её слышит), дорожки 808 и бочки в моно и ручка канала 808
 до упора — константы DUCK, MONO, KNOB, у каждой — с какого файла снята. Запрет ограничителя на мастере это не трогает:
-этот стоит на дорожке 808.
+этот стоит на дорожке 808. Там же огибающая громкости канала 808 (HOLD): владелец включал её руками в каждом нашем проекте.
 
 Проект, сохранённый владельцем в «Сегодня», утром не стирается (`keep`): папка переезжает рядом, пути звуков
 в проекте переписываются, остальное — байт в байт.
@@ -46,7 +46,7 @@ Serum у владельца — Audio Unit; его состояние — plist,
 Звука сборка не слышит и FL не запускает: селфтест проверяет только, что файл читается обратно.
 
     python -m src.flp --selftest        проект читается обратно: темп, каналы, ноты партии, слоты, уровни и маршруты микшера,
-                                        сайдчейн бочки с 808 и их моно, пресет и ячейка Gross Beat, клип автоматизации;
+                                        сайдчейн бочки с 808 и их моно, огибающая 808, пресет и ячейка Gross Beat, клип автоматизации;
                                         сохранённая папка переезжает с путями
     python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, паттерны, клипы, дорожки микшера, сайдчейн и моно
 """
@@ -103,6 +103,12 @@ DUCK = ("fruitylimiter", struct.pack("<42i", 6, *_LIMIT, 613, 1000, 1000, *_REST
 MONO = 64
 # Ручка громкости канала 808, %: 100 в проектах 05 и 06 (в 06 — при фейдере 125%, как у нас), 86 в 02; умолчание FL — 78.
 KNOB = 100
+# Огибающая громкости канала 808 — стадии после задержки: атака 100 (ноль), hold 65536 (до упора), спад 100, sustain 0,
+# release 100. Так владелец ставит её сам: автосохранение FL открытого «Сквозняка» (06.10.2026, 13:33 — она же на его снимке
+# экрана 13:32), его проекты «сборная солянка» (05.10) и «untitled» (03.10) с тем же звуком и первый «Сквозняк»,
+# сохранённый им в 12:14; из файла сборщика канал выходил с выключенной. Остальное в записи — как в шаблоне, и у него тоже.
+# Сколько секунд длится hold «до упора», не мерил никто.
+HOLD = (100, 65536, 100, 0, 100)
 # Ограничителя на мастер проект сам не ставит, хотя в чужих проектах он есть в 4 из 6: владелец 06.10.2026 о пробном
 # проекте с Fruity Limiter «Max loudness» — «Очень делает плоским звук. Не делай так».
 # «в тактах 23, 31–32 и 59.4» в конце звена fx: такт, такты подряд, доля такта (59.4 — четвёртая)
@@ -181,7 +187,7 @@ def _serum(wrap: list[tuple[int, bytes]], fxp: Path) -> list[tuple[int, bytes]]:
 
 def _channel(proto: list[tuple[int, bytes]], i: int, ch: dict) -> list[tuple[int, bytes]]:
     """Канал стойки из шаблонного сэмплера: сэмплер со звуком, Serum с пресетом или аудиоклип."""
-    plug, clip, out = dict(ch.get("plugin") or ()), ch.get("clip"), []
+    plug, clip, out, env = dict(ch.get("plugin") or ()), ch.get("clip"), [], 0
     for e, v in proto:
         if e == 64:
             v = _int(i, 2)
@@ -197,6 +203,10 @@ def _channel(proto: list[tuple[int, bytes]], i: int, ch: dict) -> list[tuple[int
             v = _int(2, 4)
         elif e == 219 and ch.get("knob"):       # ручки канала: панорама, громкость (12800 — 100%), высота
             v = v[:4] + _int(128 * ch["knob"], 4) + v[8:]
+        elif e == 218:                          # огибающие канала по порядку: панорама, громкость, Mod X, Mod Y, высота
+            env += 1
+            if env == 2 and ch.get("hold") and len(v) >= 32:    # флаги, «включена», задержка, пять стадий
+                v = v[:4] + struct.pack("<i", -1) + v[8:12] + struct.pack("<5i", *HOLD) + v[32:]
         elif e == 132 and ch.get("cut"):        # группа отсечки «сам себя»: новая нота глушит хвост прошлой — в 4 проектах из 6
             v = struct.pack("<HH", i + 1, i + 1)
         elif e == 215 and clip and len(v) == 158:
@@ -238,7 +248,7 @@ def _curve(proto: bytes, spans: list[tuple[float, float]], total: float) -> byte
 def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, dict], markers=(), auto=None) -> bytes:
     """Проект из шаблона FL. channels — каналы стойки по порядку: name, insert (дорожка микшера), у партии — part
     и notes, у сэмплера — sound (путь), root и cut (отсечка «сам себя»), у Serum — plugin (события обёртки), у аудиоклипа —
-    sound и clip (длина в тиках), knob — ручка громкости канала, %. Партия — паттерн на весь бит на своей дорожке плейлиста;
+    sound и clip (длина в тиках), knob — ручка громкости канала, %, hold — огибающая громкости HOLD. Партия — паттерн на весь бит на своей дорожке плейлиста;
     каналы одной партии — слой.
     inserts — дорожки микшера: name, plugins (файлы .fst по слотам), to (куда вместо мастера), level (фейдер, %),
     mono (разведение стерео — «слито»), duck (дорожки, куда эта послана ещё и сайдчейном: уровень посыла 0),
@@ -318,7 +328,7 @@ def read(data: bytes) -> dict:
     out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": []}
     text = lambda v: v.decode("utf-16-le").rstrip("\0")
     ch = pat = plug = name = None
-    ins = -1
+    ins, env = -1, 0
     for e, v in events(data):
         n = int.from_bytes(v, "little") if e < 192 else 0
         if e == 156:
@@ -331,8 +341,9 @@ def read(data: bytes) -> dict:
         elif e == 193:
             pat["name"] = text(v)
         elif e == 64:
-            ch = {"name": "", "kind": "сэмплер", "sound": None, "insert": 0, "root": None, "state": b"", "cut": 0, "on": [], "knob": 78}
+            ch = {"name": "", "kind": "сэмплер", "sound": None, "insert": 0, "root": None, "state": b"", "cut": 0, "on": [], "knob": 78, "env": None}
             out["channels"].append(ch)
+            env = 0
         elif e == 99:
             ch = None
         elif ch is not None:
@@ -348,6 +359,10 @@ def read(data: bytes) -> dict:
                 ch["cut"] = int.from_bytes(v[:2], "little")
             elif e == 219 and len(v) >= 8:
                 ch["knob"] = round(int.from_bytes(v[4:8], "little") / 128)
+            elif e == 218:                      # вторая огибающая — громкость; включена — её стадии: атака, hold, спад, sustain, release
+                env += 1
+                if env == 2 and len(v) >= 32 and int.from_bytes(v[4:8], "little"):
+                    ch["env"] = struct.unpack_from("<5i", v, 12)
             elif e == 234:                      # отрезки, где клип держит 1, — в долях от начала
                 at, was = 0.0, (0.0, 0.0)
                 for k in range(int.from_bytes(v[17:21], "little")):
@@ -540,7 +555,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             rf"{re.escape(part)}\b.*?корневая нота канала\s*[—–-]?\s*(\d+)", nfc(t), re.I | re.S)) and int(m[1]) < 132), None)
         ch = {"part": part, "notes": notes, "insert": number[part.lower()], "name": part, "knob": KNOB if role(part) == "808" else None}
         if mine:
-            channels += [ch | {"name": f"{part} {k + 1}" if k else part, "sound": where(f), "root": root, "cut": role(part) == "808"}
+            channels += [ch | {"name": f"{part} {k + 1}" if k else part, "sound": where(f), "root": root, "cut": role(part) == "808", "hold": role(part) == "808"}
                          for k, f in enumerate(mine)]
             roots += [f"{part} — {root}"] if root is not None else []
         elif fxp and wrap:
@@ -618,7 +633,8 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
     return (f"Проект FL — «{name}» в этой же папке: каналов {len(channels)}, со звуками и нотами; партии — паттернами на весь бит "
             f"в плейлисте, части — маркерами; дорожки микшера подписаны и разведены по шинам. Фейдеры: {levels}, остальное 100% — "
             f"по чужим проектам под твои рефы; у канала 808 отсечка «сам себя» и ручка громкости {KNOB}%, дорожки 808 и бочки — в моно "
-            f"(разведение стерео «слито»). Эффектов в слотах — {slots}: числа из «Обработки» "
+            f"(разведение стерео «слито»). У канала 808 уже включена огибающая громкости с твоими числами — атака 0, hold до упора, "
+            f"спад и sustain 0, release как у тебя: руками её ставить не нужно. Эффектов в слотах — {slots}: числа из «Обработки» "
             "выстави сам, настроены только названные здесь."
             + (f" Готовыми настройками: {'; '.join(own)}." if own else "")
             + (f" Включаются сами, клипом автоматизации на mix слота (своя дорожка плейлиста, 100% в тактах, 0% в остальных): "
@@ -680,7 +696,9 @@ def _fake() -> bytes:
     """Шаблон в миниатюре — для машин без FL (Actions): события Empty.flp в том же порядке, но дорожек восемь."""
     ev = [(199, b"20.7.0.1702\0"), (156, _int(140000, 4)), (9, b"\0"), (146, FF), (226, bytes(20)),
           (64, bytes(2)), (21, b"\0"), (201, _text("")), (212, bytes(52)), (203, _text("Sampler")), (155, bytes(4)),
-          (128, bytes(4)), (0, b"\1"), (22, b"\1"), (219, struct.pack("<6i", 6400, 10000, 0, 256, 0, 0)), (215, bytes(158)), (132, bytes(4)), (143, _int(3, 4)), (20, b"\0"),
+          (128, bytes(4)), (0, b"\1"), (22, b"\1"), (219, struct.pack("<6i", 6400, 10000, 0, 256, 0, 0)), (215, bytes(158)), (132, bytes(4)),
+          *[(218, struct.pack("<17i", 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, -101))] * 5,
+          (143, _int(3, 4)), (20, b"\0"),
           (99, bytes(2)), (241, _text("Arrangement")), (233, b"")] + [(238, _int(i, 4) + bytes(62)) for i in range(1, 9)]
     for i in range(8):
         ev += [(236, bytes(12)), *((98, _int(s, 2)) for s in range(10)), (235, bytes([i > 0]) + bytes(126)), (154, FF), (147, FF)]
@@ -740,6 +758,7 @@ def selftest() -> None:
             assert [c["kind"] for c in ch] == ["сэмплер"] * 3 + ["плагин", "аудиоклип", "автоматизация"] and [c["insert"] for c in ch][:5] == [1, 2, 2, 3, 4]
             assert ch[0]["sound"].endswith("/808 — Тон D#1.wav") and ch[0]["root"] == 27 and ch[1]["root"] is None, ch[:2]
             assert [c["cut"] for c in ch[:3]] == [1, 0, 0], "отсечка «сам себя» — только у 808"
+            assert [c["env"] for c in ch[:4]] == [HOLD, None, None, None], "огибающая громкости с числами владельца — только у 808"
             assert b"CcnK-svoy" in ch[3]["state"] and b"osnova" not in ch[3]["state"], "в Serum — свой пресет бита, а не основа"
             same = sorted(notes)                                    # ноты партии — те же: место, длина, высота, сила, панорама, слайд
             assert got["patterns"][1] == {"name": "808", "notes": {0: same}} and got["patterns"][2]["notes"] == {1: same, 2: same}
@@ -780,6 +799,7 @@ def selftest() -> None:
             assert mix[3] == {"name": "бочка", "slots": {}, "to": [1, 4], "level": 100} and mix[2]["to"] == [4], mix[3]
             assert got["duck"] == [(3, 1)] and got["mono"] == [1, 3] and DUCK[1] in deep and DRIVE[1] in deep, (got["duck"], got["mono"])
             assert [c["knob"] for c in got["channels"]] == [KNOB, 78, 78] and 0 not in mix, "ручка — только у 808, мастер пуст"
+            assert [c["env"] for c in got["channels"]] == [HOLD, None, None], "огибающая — у 808, у бочки её нет"
             assert "сайдчейн от дорожки «бочка»" in line and "только сайдчейном" in line, line
         assert "нет FL Studio" in today(kits, serum, plan, Path(tmp) / "нет.flp", db)
         if PRESETS[1].is_dir():                                 # на Маке — настоящий банк FL: ячейка «1/2 Speed» в нём тридцатая
@@ -799,7 +819,7 @@ def selftest() -> None:
         assert all(c["sound"].startswith(f"{new}/") and (new / Path(c["sound"]).name).exists() for c in read(moved)["channels"] if c["sound"])
         assert repath(moved, new.name, kits.name) == data and (new / "битый.flp").read_bytes() == b"not FL", "кроме путей не тронуто ничего"
     print("проект FL: шаблон, каналы со звуком и пресетом, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
-          "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, 808 и бочка в моно, ручка 808; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
+          "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, 808 и бочка в моно, ручка и огибающая громкости 808; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
           "сохранённая папка переезжает, пути звуков — за ней")
 
 
@@ -817,6 +837,7 @@ def main() -> None:
             print(f"канал {i}: {c['name']} — {c['kind']}" + (f", дорожка микшера {c['insert']}" if c["kind"] != "автоматизация" else "")
                   + (f", звук {c['sound']}" if c["sound"] else "") + (f", корневая нота {c['root']}" if c["root"] is not None else "")
                   + (f", группа отсечки {c['cut']}" if c["cut"] else "") + (f", ручка громкости {c['knob']}%" if c["knob"] != 78 and c["kind"] != "автоматизация" else "")
+                  + (", огибающая громкости: атака {}, hold {}, спад {}, sustain {}, release {}".format(*c["env"]) if c["env"] else "")
                   + (f", состояние плагина {len(c['state'])} байт" if c["state"] else "")
                   + (", держит 1: " + (", ".join(_bars(a, b) for a, b in c["on"]) or "нигде") if c["kind"] == "автоматизация" else ""))
         for x in got["links"]:
