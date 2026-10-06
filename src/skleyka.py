@@ -1832,6 +1832,12 @@ TUNE = ("Не так? Подкрути — пересоберу{left}. Или п
 FILM_TERMS = (f"\n\n🎬 Покажем твоё ДО/ПОСЛЕ с твоим именем в канале ПЛЁНКИ ({config.CHANNEL_HANDLE}) и в роликах — "
               "если бит твой или куплен с правом на видео.")
 FILM_BUTTON = "🎬 Можно в канал и ролики ПЛЁНКИ"
+# Код новой кнопки. Под треками, выданными до правки, осталась прежняя («f») с прежними условиями,
+# где канала нет: человек, нажавший её, на канал не соглашался — ролик уходит только владельцу (_film).
+# Трек живёт TRACK_DAYS, так что после 13.10.2026 прежних кнопок не останется и ветку «f» можно убрать.
+FILM_CODE = "fk"
+FILM_OWNER_OLD = "🎬 Можно в ролик ПЛЁНКИ: {name}. Бит, по словам артиста, свой или куплен с правом на видео."
+FILM_THANKS_OLD = "🎬 Спасибо! Ролик у ПЛЁНКИ — выйдет с твоим именем."
 FILM_OWNER = "🎬 Можно в канал и ролики ПЛЁНКИ: {name}. Бит, по словам артиста, свой или куплен с правом на видео."
 FILM_THANKS = f"🎬 Спасибо! Ролик выйдет в канале ПЛЁНКИ ({config.CHANNEL_HANDLE}) с твоим именем — через несколько дней."
 FILM_WAIT = "Ролик ещё уходит — нажми «🎬» через минуту."
@@ -2620,7 +2626,7 @@ def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film
     if swap:
         rows.append([{"text": "↔ поменять вокал и бит", "callback_data": cb("sw")}])
     if film:
-        rows.append([{"text": FILM_BUTTON, "callback_data": cb("f")}])
+        rows.append([{"text": FILM_BUTTON, "callback_data": cb(FILM_CODE)}])
     rows += [[dict(key, callback_data=key["callback_data"].format(track=track))] for key in OTBOR_KEYS]
     rows.append([dict(HAND_BUTTON, callback_data=cb("u"))])
     return rows
@@ -2687,8 +2693,8 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         # Telegram сам открывает ответ на этот вопрос, а метка в нём ведёт ответ в talk.
         telegram.send_message(chat_id, TALK_ASK, ask="голос входит на дропе")
         return
-    if len(head) != 1 and code == "f":
-        _film(data, chat_id, head, who or {}, message_id, keyboard or [])
+    if len(head) != 1 and code in ("f", FILM_CODE):
+        _film(data, chat_id, head, who or {}, message_id, keyboard or [], channel=code == FILM_CODE)
         return
     if subject == "u" or len(head) != 1 and code == "u":
         _hand(data, chat_id, "" if subject == "u" else head, who or {})
@@ -2786,11 +2792,13 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     save(data)
 
 
-def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | None, keyboard: list) -> None:
-    """«🎬 Можно в ролик ПЛЁНКИ»: владельцу — уже отправленный ролик ДО/ПОСЛЕ по file_id с именем,
+def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | None, keyboard: list,
+          channel: bool = False) -> None:
+    """«🎬 Можно в канал и ролики ПЛЁНКИ»: владельцу — уже отправленный ролик ДО/ПОСЛЕ по file_id с именем,
     как артист назвал себя в Telegram. Файлов бот не хранит; согласие — в треке, второй раз
     ролик не уходит и кнопка под новыми сборками не появляется (_spawn, agreed); с нажатого
-    сообщения она снимается, остальные ручки остаются."""
+    сообщения она снимается, остальные ручки остаются. channel — нажата новая кнопка (FILM_CODE),
+    под условиями с каналом: только тогда ролик встаёт в очередь канала (_doposle_add)."""
     track = data["tracks"].get(track_id)
     if not track or track["chat"] != chat_id:
         telegram.send_message(chat_id, STALE)
@@ -2803,14 +2811,17 @@ def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | 
         name = " ".join(filter(None, (who.get("first_name"), who.get("last_name")))) or "без имени"
         if who.get("username"):
             name += f" @{who['username']}"
-        telegram.send_video_url(config.secret("TELEGRAM_ADMIN_ID"), track["film"], FILM_OWNER.format(name=html.escape(name)))
+        telegram.send_video_url(config.secret("TELEGRAM_ADMIN_ID"), track["film"],
+                                (FILM_OWNER if channel else FILM_OWNER_OLD).format(name=html.escape(name)))
         track["agreed"] = state.iso()
-        _doposle_add(track_id, track, who)
+        if channel:
+            _doposle_add(track_id, track, who)
         save(data)
-    telegram.send_message(chat_id, FILM_THANKS)
+    telegram.send_message(chat_id, FILM_THANKS if channel else FILM_THANKS_OLD)
     if message_id and keyboard:
         telegram.edit_markup(chat_id, message_id, [row for row in keyboard
-                                                   if all(b.get("callback_data") != f"{PREFIX}{track_id}:f" for b in row)])
+                                                   if all(b.get("callback_data") not in (f"{PREFIX}{track_id}:f", f"{PREFIX}{track_id}:{FILM_CODE}")
+                                                          for b in row)])
 
 
 # ДО И ПОСЛЕ в канале (владелец 06.10.2026): канал — сцена для тех, кто пришёл в бот. Выходит только ролик
@@ -2821,7 +2832,7 @@ def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | 
 DOPOSLE_EVERY = timedelta(days=3)
 DOPOSLE_LABEL = "doposle"  # метка ссылки ?start=skleyka_doposle (service.SOURCES)
 DOPOSLE_ASK = "Голос кого услышим следующим? Присылай запись — свожу в боте, без шагов."
-DOPOSLE_POST = ("<b>ДО И ПОСЛЕ</b>\n\n{name} записал голос — бот свёл его с битом.\n{facts}"
+DOPOSLE_POST = ("<b>ДО И ПОСЛЕ</b>\n\nГолос — {name}. С битом его свёл бот канала.\n{facts}"
                 "▸ Так же можно с твоей записью: <a href=\"https://t.me/{bot}?start=skleyka_doposle\">СВЕДЕНИЕ</a>")
 DOPOSLE_FACTS = "Что сделал бот: {what}.\n\n"
 
@@ -2834,7 +2845,8 @@ def _doposle_add(track_id: str, track: dict, who: dict) -> None:
     name = " ".join(filter(None, (who.get("first_name"), who.get("last_name"))))
     if not name or not track.get("film") or otbor.RUDE.search(name) or otbor.JUNK.search(name):
         return
-    facts = [*track.get("fixed", []), f"стиль «{track['knobs']['style']}» — {STYLES[track['knobs']['style']]['about']}"]
+    style = (track.get("knobs") or {}).get("style")
+    facts = [*track.get("fixed", []), *([f"стиль «{style}» — {STYLES[style]['about']}"] if style in STYLES else [])]
     queue = state.read_json(config.DOPOSLE_FILE, {"items": []})
     if all(item["track"] != track_id for item in queue["items"]):
         queue["items"].append({"track": track_id, "film": track["film"], "name": name[:60], "facts": facts,
@@ -5086,7 +5098,7 @@ def _selftest_doposle(tmp: Path, track: dict) -> None:
             and not (tmp / "arch" / "doposle-t1.json").exists(), "сбой: запись в очереди, отметки нет"
         assert doposle_air() == "t1" and len(out) == 1 and not state.read_json(config.DOPOSLE_FILE, {})["items"]
         text = out[0]["text"]
-        assert text.startswith("<b>ДО И ПОСЛЕ</b>\n\nЛил ") and "?start=skleyka_doposle" in text and out[0]["comment"] \
+        assert text.startswith("<b>ДО И ПОСЛЕ</b>\n\nГолос — Лил. ") and "?start=skleyka_doposle" in text and out[0]["comment"] \
             and telegram.visible_len(text) <= telegram.MAX_CAPTION and "Что сделал бот: " in text, text
         assert not any(word in text.casefold() for word in ("звуч", "слыш", "сочн", "мощн")), "о звуке ни слова"
         bare = doposle_post({"name": "Лил", "film": "F", "facts": []})["text"]
@@ -5105,7 +5117,7 @@ def _selftest() -> None:
     keys: list = []
     calls: list[tuple[str, dict]] = []
     real = (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
-            itunes.find_song, telegram._call)
+            itunes.find_song, telegram._call, config.DOPOSLE_FILE)
     marks: list = []
     telegram.send_message = lambda chat, text, buttons=None, markup=None, **_: sent.append(text) \
         or keys.append(buttons) or marks.append(markup) or {"message_id": len(sent)}
@@ -5114,6 +5126,7 @@ def _selftest() -> None:
     config.secret = lambda name, required=True: "1" if name == "TELEGRAM_ADMIN_ID" else ""
     tmp = Path(tempfile.mkdtemp(prefix="skleyka-test-"))
     config.SKLEYKA_FILE = tmp / "skleyka.json"
+    config.DOPOSLE_FILE = tmp / "doposle-main.json"  # согласие в проверке ниже пишет очередь канала — не в настоящую
     # Каталог примеров — тоже во временной папке: настоящий поставил бы кнопку под каждым предложением проверки.
     real_examples, config.SKLEYKA_HAND_EXAMPLES = config.SKLEYKA_HAND_EXAMPLES, tmp / "hand_examples.json"
     from . import service
@@ -5666,7 +5679,7 @@ def _selftest() -> None:
         # Согласие на ролик: кнопка — пока не согласился; владельцу ролик по file_id с именем
         # из Telegram, один раз.
         codes = [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False, film=True)]
-        assert codes[-4:] == [f"{PREFIX}t1:f", "s:otbor:mix:t1", "s:otbor", f"{PREFIX}t1:u"] and f"{PREFIX}t1:f" not in \
+        assert codes[-4:] == [f"{PREFIX}t1:fk", "s:otbor:mix:t1", "s:otbor", f"{PREFIX}t1:u"] and f"{PREFIX}t1:fk" not in \
             [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False)]
         calls.clear()
         callback(8, 8, "t1:f", who={"first_name": "Лил"})
@@ -5681,10 +5694,21 @@ def _selftest() -> None:
         edits: list = []
         telegram.edit_markup = lambda chat, message, markup: edits.append(markup)
         keyboard = buttons("t1", KNOBS, swap=False, film=True)
+        # Прежняя кнопка («f», условия без канала): ролик владельцу с прежними словами, в очередь канала — ничего.
+        data["tracks"]["old"] = dict(data["tracks"]["t1"])
+        save(data)
+        callback(7, 7, "old:f", who={"first_name": "Лил"})
+        assert sent[-1] == FILM_THANKS_OLD and "Можно в ролик ПЛЁНКИ: Лил" in calls[-1][1]["caption"] \
+            and load()["tracks"]["old"]["agreed"] and not config.DOPOSLE_FILE.exists(), "прежнее согласие — не на канал"
+        data = load()
+        del data["tracks"]["old"]
+        save(data)
+        calls.clear()
         for _ in range(2):
-            callback(7, 7, "t1:f", who={"first_name": "Лил", "last_name": "<Пи>", "username": "lilpi"},
+            callback(7, 7, "t1:fk", who={"first_name": "Лил", "last_name": "<Пи>", "username": "lilpi"},
                      message_id=5, keyboard=keyboard)
-        assert edits[0] == [row for row in keyboard if row[0]["callback_data"] != f"{PREFIX}t1:f"] \
+        assert [item["track"] for item in state.read_json(config.DOPOSLE_FILE, {})["items"]] == ["t1"], "новое — в очередь, раз"
+        assert edits[0] == [row for row in keyboard if row[0]["callback_data"] != f"{PREFIX}t1:fk"] \
             and len(edits[0]) == len(keyboard) - 1, "снята только кнопка согласия"
         assert [(method, payload["chat_id"], payload["video"]) for method, payload in calls] == [("sendVideo", "1", "FILM1")] \
             and "Лил &lt;Пи&gt; @lilpi" in calls[0][1]["caption"] and sent[-1] == FILM_THANKS, "владельцу — один раз"
@@ -6510,7 +6534,7 @@ def _selftest() -> None:
         assert loudness(faint)[0] == -70.0 and abs(_quiet(faint) - (_quiet(tone) - 60)) < 0.5, _quiet(faint)
     finally:
         (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
-         itunes.find_song, telegram._call) = real
+         itunes.find_song, telegram._call, config.DOPOSLE_FILE) = real
         service.SOURCES_FILE = real_sources
         config.SKLEYKA_HAND_EXAMPLES = real_examples
         shutil.rmtree(tmp, ignore_errors=True)
