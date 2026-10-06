@@ -16,3 +16,4 @@
 {"at": "2026-09-28T13:51:26+00:00", "kind": "taste", "query": "ну и где", "matched": false}
 {"at": "2026-10-03T09:27:13+00:00", "kind": "roots", "query": "а только бит ты можешь свести?", "matched": false}
 {"at": "2026-10-03T10:30:27+00:00", "kind": "roots", "query": "сделай звучание как у кишлака", "matched": true, "verdict": "ХОЧЕШЬ ЗВУЧАТЬ КАК КИШЛАК — ПРИДЁТСЯ СДУТЬ ПЫЛЬ С НУЛЕВЫХ"}
+{"at": "2026-10-06T11:08:58+00:00", "kind": "roots", "query": "Playboi Carti", "matched": true, "verdict": "PLAYBOI CARTI ВЫКИНУЛ СЛОВА ИЗ ТРЭПА"}
