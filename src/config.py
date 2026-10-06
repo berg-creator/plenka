@@ -139,6 +139,9 @@ BEAT_PHOTOS = DATA / "beat_photos.json"
 # Имена звуков и пресетов библиотеки владельца (наборы KITS, пресеты Serum): только имена и пути,
 # самих файлов в репозитории нет — наборы чужие. По списку noty сверяет поле sounds паспорта бита.
 BEAT_SOUNDS = DATA / "beat_sounds.json"
+# Python, в котором стоит pedalboard: им Мак открывает Serum без FL и собирает свой пресет бита (src/serum.py).
+# Окружение лежит вне git и есть только на Маке; нет его — шаг пропускается строкой в записке к нотам.
+SERUM_PYTHON = Path(os.environ.get("SERUM_PYTHON") or ROOT / ".cache" / "serum-spike" / "venv" / "bin" / "python")
 # Запасной кадр, когда фото кончились или не скачалось: две спины против света фар, имена артистов принтом.
 BEAT_BACK = ROOT / "assets" / "beats" / "back.jpg"
 

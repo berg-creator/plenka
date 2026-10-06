@@ -62,6 +62,13 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 Отвергнуто: четвёртый характер «заказ» — по характеру выбирается фото значка и мерка приторного, а автор следующего
 дня считает по нему круг; с полем круг просто пропускает такой бит.
 
+Свой пресет (владелец, 06.10.2026: «использует интернет и собственные пресеты», раньше — «пресеты уникальные
+для меня»). Автор нот звука не слышит и на Мак ничего не кладёт, поэтому пишет в паспорт только данные — поле preset:
+партия, имя, основа из списка звуков и ручки Serum долями. Здесь проверяется форма поля, а пресет собирает и проверяет
+звуком Мак, когда кладёт папку «Сегодня» (src/serum.py: плагин без FL, нота не тишина и не перегруз, файл открывается
+заново). Не собрался, нет плагина — строка в записке папки, бит от пресета не зависит.
+Отвергнуто: собирать пресет в Actions — Serum там нет; делать поле обязательным — на слух пресеты ещё никто не проверял.
+
 Скелет «Г» и перелом двух видов (владелец, 06.10.2026: о «Six Speed» — «современная драмка, её бы я вообще часто
 использовал»; о переломе по «Excuse Me» — «и то и то»). Рисунок «Six Speed» стал постоянным скелетом: бит, чей
 первый скелет в поле skeleton назван «Six Speed», до перелома держит хэт трека — ровные шестнадцатые с одной дробью, —
@@ -508,6 +515,12 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
     if info.get("fx"):
         out += [f"{name}: партии не названа обработка в fx" for name in tracks
                 if name in info.get("tonal", ()) and name not in info["fx"]]
+    if info.get("preset"):              # свой пресет Serum: здесь только форма поля, звук проверит Мак (`lay`)
+        from .serum import flaws
+        out += flaws(info["preset"], known())
+        out += [f"preset: «{part}» — не партия синтезатора из compose() и tonal" for part in info["preset"]
+                if isinstance(info["preset"], dict)
+                and (part not in tracks or part not in info.get("tonal", ()) or any(w in part for w in SAMPLED))]
     if info.get("mix"):
         out += _mix(info, free)
     if info.get("loop"):
@@ -1151,6 +1164,12 @@ def about(info: dict) -> str:
         *(["Звуки и пресеты — в папке «00 - Сегодня» в браузере FL и в меню Serum → User (нужно Rescan); "
            "их кладёт Мак, когда не спит:",
            *(f"• {part} — {n}" for part, names in _sounds(info).items() for n in _names(names)), ""] if _sounds(info) else []),
+        *(["Свой пресет Serum — основа из библиотеки и ручки под этот бит. Его собирает Мак: "
+           "файл ляжет в Serum → User → «00 - Сегодня» (нужно Rescan), итог проверки — в записке той же папки в браузере FL. "
+           "Плагином на Маке проверяется, что пресет открывается и нота звучит без тишины и перегруза; на слух его не проверял никто:",
+           *(f"• {part} — «{p.get('имя')}»: основа {p.get('основа')}; ручки: "
+             + ", ".join(f"{k} {v:g}" for k, v in (p.get("ручки") or {}).items())
+             for part, p in info["preset"].items() if isinstance(p, dict)), ""] if isinstance(info.get("preset"), dict) else []),
         *(line for mark, who in CREDIT if any(mark in n for names in _sounds(info).values() for n in _names(names))
           for line in (f"В описание ролика — строка об авторе звуков, её требует лицензия: {who}", "")),
         *_loop_note(info),
@@ -1224,6 +1243,8 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     archive.with_suffix(".sounds.json").write_text(json.dumps(_sounds(info), ensure_ascii=False), encoding="utf-8")
     if info.get("net"):                 # адреса звуков из сети: в Actions не качается ничего, файл ждёт Мака (`_net`)
         archive.with_suffix(".net.json").write_text(json.dumps(info["net"], ensure_ascii=False), encoding="utf-8")
+    if info.get("preset"):              # свой пресет Serum: его собирает и проверяет звуком Мак (`lay`), плагин только там
+        archive.with_suffix(".preset.json").write_text(json.dumps(info["preset"], ensure_ascii=False), encoding="utf-8")
     if info.get("loop"):                # план дорожки петли на весь бит: её собирает Мак (`loop_track`), звук лежит там
         archive.with_suffix(".loop.json").write_text(json.dumps(
             {"bpm": info["bpm"], "bars": info["bars"], "rests": info["rests"], "switch": info["switch"]["такт"]}), encoding="utf-8")
@@ -1338,12 +1359,16 @@ def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool
 
 
 def lay(built: Path | None, sounds: dict, kits: Path, serum: Path,
-        roots: dict[str, Path] | None = None, listed: set[str] | None = None, plan: dict | None = None) -> list[str]:
+        roots: dict[str, Path] | None = None, listed: set[str] | None = None, plan: dict | None = None,
+        preset: dict | None = None) -> list[str]:
     """Папки «Сегодня»: партитуры и записка собранного бита и копии названных звуков — сэмплы в kits,
     пресеты в serum, имя партии впереди. Прошлые файлы обеих папок убираются: там только копии.
     Оригиналы открываются лишь на чтение. sounds пришёл из make.py — это данные, а не доверенный путь:
     копируется только то, что есть в списке. plan — план дорожки петли на весь бит (`loop_track`): она собирается
-    из копии, уже лежащей в папке, сырая копия остаётся рядом. Возвращает, что не легло, — оно же дописано в записку."""
+    из копии, уже лежащей в папке, сырая копия остаётся рядом. preset — свои пресеты Serum (поле паспорта): собираются
+    и проверяются звуком самим плагином (`serum.tune`), итог — строкой в записке; в недостачу он не идёт: бит от своего
+    пресета не зависит. Возвращает, что не легло, — оно же дописано в записку."""
+    from .serum import tune
     roots, listed, missed, copied = roots or LIBRARY, known() if listed is None else listed, [], {}
     for folder in (kits, serum):
         assert folder.name == TODAY, f"{folder}: чистится только папка «{TODAY}»"
@@ -1385,9 +1410,14 @@ def lay(built: Path | None, sounds: dict, kits: Path, serum: Path,
             except (wave.Error, EOFError, OSError, ValueError, TypeError, KeyError, MemoryError) as e:
                 track.unlink(missing_ok=True)
                 missed.append(f"{part}: дорожка на весь бит не собралась ({e}) — в папке копия петли: расставь её по тактам")
+    try:
+        made = tune(preset, serum, roots.get("Serum", Path()), listed) if preset else []
+    except Exception as e:              # свой пресет — добавка: его сбой не должен стоить владельцу папки с нотами
+        made = [f"пресет не собрался: {type(e).__name__}: {e}"]
     note = (built / "о бите.txt").read_text("utf-8") if built and (built / "о бите.txt").exists() else ""
-    (kits / "о бите.txt").write_text(note + ("\n\nНе легло в папку:\n" + "\n".join(f"• {m}" for m in missed) if missed else ""),
-                                     encoding="utf-8")
+    (kits / "о бите.txt").write_text(
+        note + ("\n\nСвой пресет Serum — проверен плагином на Маке, на слух не проверен:\n" + "\n".join(f"• {m}" for m in made) if made else "")
+        + ("\n\nНе легло в папку:\n" + "\n".join(f"• {m}" for m in missed) if missed else ""), encoding="utf-8")
     return missed
 
 
@@ -1446,9 +1476,10 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
         (tmp / beat / "make.py").write_text(git("show", f"origin/claude/beats-{beat}:content/beats/{beat}/make.py"), "utf-8")
         try:
             _sandboxed(tmp / beat, tmp)
-            plan = tmp / "out" / f"{beat}.loop.json"
+            plan, own = tmp / "out" / f"{beat}.loop.json", tmp / "out" / f"{beat}.preset.json"
             missed = lay(tmp / "out" / beat, json.loads((tmp / "out" / f"{beat}.sounds.json").read_text("utf-8")), kits, serum,
-                         plan=json.loads(plan.read_text("utf-8")) if plan.exists() else None)
+                         plan=json.loads(plan.read_text("utf-8")) if plan.exists() else None,
+                         preset=json.loads(own.read_text("utf-8")) if own.exists() else None)
             missed += _net(tmp / "out" / f"{beat}.net.json", kits)
             done = "ноты на месте" + (f", не легло звуков: {len(missed)}" if missed else "")
         except (subprocess.SubprocessError, OSError, ValueError) as e:      # не собрался — записка, а не падение
@@ -1633,6 +1664,30 @@ def selftest() -> None:
         assert lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed) == [], "бит без поля звуков"
         assert sorted(f.suffix for f in kits.iterdir()) == [".fsc"] * 4 + [".txt"] and not list(serum.iterdir())
         assert json.loads((tmp / "out" / "beat.sounds.json").read_text("utf-8")) == base["sounds"]
+        # Свой пресет Serum: сборка кладёт задание Маку рядом с архивом, записка говорит, что на слух он не проверен
+        fxp = next(n for n in sorted(known()) if n.startswith("Serum/"))
+        mine = {"мелодия": {"имя": "PLENKA Dym 1006", "основа": fxp, "ручки": {"eq_enable": 1, "eq_typh": 1, "eq_frqh_hz": .7}}}
+        (tmp / "beat2").mkdir()
+        (tmp / "beat2" / "make.py").write_text(f"INFO = {base | {'preset': mine}!r}\n{code}", encoding="utf-8")
+        made = build(tmp / "beat2", tmp / "out")
+        assert json.loads(made.with_suffix(".preset.json").read_text("utf-8")) == mine and not (tmp / "out" / "beat.preset.json").exists()
+        assert "на слух его не проверял никто" in made.with_suffix(".txt").read_text("utf-8")
+        # Сбор папки без плагина не падает и недостачей пресет не считает: нет Serum, плагин не ответил, поле битое —
+        # каждый раз строка в записке. Сам звук проверяется только на Маке: `serum --check` и сбор с настоящим плагином
+        from . import config, serum as plug
+        mine = {"мелодия": {"имя": "PLENKA Test", "основа": "Serum/User/p/Lead.fxp", "ручки": {"eq_enable": 1, "eq_frqh_hz": .7}}}
+        real = (plug.VST3, config.SERUM_PYTHON)
+        try:
+            for vst, py, why in ((tmp / "нет.vst3", real[1], "нет Serum или Python с pedalboard"),
+                                 (tmp, Path("/usr/bin/false"), "плагин не ответил")):
+                plug.VST3, config.SERUM_PYTHON = vst, py
+                assert lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed, preset=mine) == []
+                assert why in (kits / "о бите.txt").read_text("utf-8") and not list(serum.iterdir()), why
+        finally:
+            plug.VST3, config.SERUM_PYTHON = real
+        lay(None, {}, kits, serum, {"KITS": lib, "Serum": pres}, listed, preset={"мелодия": mine["мелодия"] | {"ручки": {"lfo1_rate": .5}}})
+        assert "ручки «lfo1_rate» нет в списке" in (kits / "о бите.txt").read_text("utf-8"), "битое поле на Маке — строка, а не ручка плагина"
+        lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed)
         demo = runpy.run_path(str(tmp / "beat" / "make.py"))["compose"]
         # Дорожка петли на весь бит. Петля — два такта на 120 и ещё десять кадров сверху: отсчёт помнит своё место,
         # так что видно, что повторы стоят по сетке тактов, а не встык по длине файла. 8000 кадров в секунду — такт 16 000
@@ -1745,6 +1800,26 @@ def selftest() -> None:
     assert "нет в списке" not in "\n".join(problems(info | {"sounds": {"мелодия": own[0]}}, plain))
     named = "\n".join(problems(info | {"sounds": {"мелодия": "KITS/такого нет.wav"}}, plain))
     assert "нет в списке" in named and "хэт: партии не назван звук" in named, named
+    # Свой пресет Serum: сборка проверяет форму поля без звука — основа из списка, ручки из известных, доли в пределах
+    from .serum import _dec, _enc, flaws, pack, unpack
+    fxp = next(n for n in sorted(known()) if n.startswith("Serum/"))
+    mine = {"имя": "PLENKA Dym 1006", "основа": fxp, "ручки": {"eq_enable": 1, "eq_typh": 1, "eq_frqh_hz": .7}}
+    assert flaws({"мелодия": mine}, known()) == [] and "preset" not in "\n".join(problems(info | {"preset": {"мелодия": mine}}, plain)), \
+        "поле верной формы проходит"
+    for patch, why in (({"ручки": {"lfo1_rate": .5}}, "нет в списке serum.KNOBS"), ({"ручки": {"fil_reso": .9}}, "нужна доля от 0 до 0.6"),
+                       ({"ручки": {"fil_reso": "0.3"}}, "нужна доля"), ({"ручки": {"eq_enable": .5}}, "выключатель"),
+                       ({"ручки": {}}, "ни одной ручки"), ({"имя": "Дым"}, "имя — латиница"), ({"имя": "../x"}, "имя — латиница"),
+                       ({"основа": "Serum/User/такого нет.fxp"}, "нет среди пресетов"), ({"основа": own[0]}, "нет среди пресетов")):
+        assert why in "\n".join(flaws({"мелодия": mine | patch}, known())), (patch, why)
+    assert "три поля" in flaws({"мелодия": {"имя": "x"}}, known())[0] and "нужен словарь" in flaws(["x"], known())[0]
+    assert "нет в списке serum.KNOBS" in "\n".join(problems(info | {"preset": {"мелодия": mine | {"ручки": {"lfo1_rate": .5}}}}, plain)), \
+        "неизвестная ручка — брак сборки"
+    assert "нужна доля" in "\n".join(problems(info | {"preset": {"мелодия": mine | {"ручки": {"fil_reso": 2}}}}, plain)), "число вне пределов — брак"
+    assert "не партия синтезатора" in "\n".join(problems(info | {"preset": {"хэт": mine}}, plain)), "пресет — только партии Serum"
+    assert "на слух его не проверял никто" in about(info | {"preset": {"мелодия": mine}}) and "Свой пресет" not in about(info)
+    raw = bytes(range(256)) * 5
+    assert all(_dec(_enc(raw[:n])) == raw[:n] for n in (0, 1, 2, 3, 4, 1001)) and unpack(pack("PLENKA", raw)) == ("PLENKA", raw), \
+        "чанк пресета доезжает до .fxp и обратно"
     assert "Звуки и пресеты" in about(info | {"twist": "ложный вход", "form": "x", "sounds": {"хэт": ["KITS/a.wav"]}}) \
         and "неожиданный ход: ложный вход" in about(info | {"twist": "ложный вход", "form": "x"})
     # Цвет: сладкое бракуется, сухое проходит. Сладкий — «Фосфор» в четырёх тактах: круг из четырёх аккордов,
@@ -1965,7 +2040,7 @@ def selftest() -> None:
           "меняются), виды чередуются внутри характера, дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
           "808 — опора, а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, свои наборы владельца, "
           "петля набора 11 по числу перед BPM, заказ владельца вне очереди и скелет «Г» (хэт по мерке — после перелома), "
-          "строка об авторе звуков CC BY в записке — в порядке")
+          "строка об авторе звуков CC BY в записке, свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
 
 
 def main() -> None:
