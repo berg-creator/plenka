@@ -686,6 +686,14 @@ def publish_shift() -> None:
                 return
         except Exception as exc:  # noqa: BLE001 — бит не держит выход остальных постов
             log.error("Выход бита не удался: %s", exc)
+        try:  # СОВЕТ НЕДЕЛИ: по четвергам, после бита — второй звук в день ему не достаётся (publish.hushed)
+            from . import sovet
+
+            if flaw := sovet.air():
+                print(f"Выход совета недели: {flaw} → {target}")
+                return
+        except Exception as exc:  # noqa: BLE001 — совет не держит выход остальных постов
+            log.error("Выход совета недели не удался: %s", exc)
     try:
         otbor.shift(target)
     except Exception as exc:  # noqa: BLE001 — отбор не держит выход остальных постов

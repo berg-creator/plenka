@@ -148,7 +148,7 @@ def due(post: dict) -> bool:
             1 for item in items
             # Отбор (src/otbor.py), ролик (src/reels.py) и бит (src/bity.py) выходят мимо слотов
             # и обычному посту место не занимают.
-            if item.get("rubric") not in ("news", "otbor", "reel", "beat")
+            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "sovet")
             and (moment := state._parse(item.get("published_at", "")))
             and feed_day(moment) == feed_day(now)
         )
@@ -530,6 +530,16 @@ def send(post: dict, chat_id: str) -> dict | None:
             log.warning("Бит со значком не ушёл (%s), отправляю текстом", exc)
         return _where(telegram.send_message(chat_id, text, quiet=quiet), "text")
 
+    # Совет недели (src/sovet.py): кадр — карточка с названием брака; не нарисовалась — текстом.
+    if rubric == "sovet":
+        from . import sovet
+
+        try:
+            return _where(telegram.send_photo_file(chat_id, sovet.shot(post), text, quiet=quiet), "caption")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Совет недели с карточкой не ушёл (%s), отправляю текстом", exc)
+        return _where(telegram.send_message(chat_id, text, quiet=quiet), "text")
+
     cover = post.get("cover", "")
     text = view(text, post)
 
@@ -584,7 +594,7 @@ def crosspost_vk(post: dict) -> None:
     # Бит зовёт в бота Telegram — во ВКонтакте идти по такой ссылке некому. Трек из СВЕДЕНИЯ
     # (otbor.build_post, поле mixed) лежит только под постом в Telegram: площадок у него нет,
     # и запись во ВКонтакте звала бы слушать то, чего там не услышать.
-    if post.get("rubric") in ("poll", "reel", "beat") or post.get("mixed"):
+    if post.get("rubric") in ("poll", "reel", "beat", "sovet") or post.get("mixed"):
         return
 
     # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
