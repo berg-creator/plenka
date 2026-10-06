@@ -50,6 +50,16 @@
    "taken": "в очереди ночного шага: секция виолончелей, долгие ноты с вибрато, по нотам"
   },
   {
+   "id": "vsco2-upright",
+   "name": "VSCO2 Upright",
+   "page": "https://github.com/sgossner/VSCO-2-CE",
+   "terms": "CC0 1.0 Universal — без условий, автора называть не нужно",
+   "from": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/",
+   "list": "https://api.github.com/repos/sgossner/VSCO-2-CE/git/trees/master?recursive=1",
+   "take": [{"folder": "Piano", "match": "^Keys/Upright Nr1/UR1_C\\d_(f|mf)_RR\\d\\.wav$"}],
+   "taken": "в очереди ночного шага: акустическое пианино (VS Upright Nr. 1), ноты C каждой октавы, нажатия mf и f"
+  },
+  {
    "id": "freewavesamples",
    "name": "FreeWaveSamples",
    "page": "https://freewavesamples.com/about-us-license",
