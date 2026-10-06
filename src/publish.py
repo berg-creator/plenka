@@ -865,7 +865,11 @@ def _selftest() -> None:
         assert next_post(skip_sent=True) is None
 
         # Выход релиза — не чаще раза в час: интервал считает журнал публикаций,
-        # а не крон (его убрали из publish.yml, выпускает дежурство).
+        # а не крон (его убрали из publish.yml, выпускает дежурство). Интервал и счёт
+        # проверяются на двух в сутки, сколько бы ни стояло в config: при одном (с 06.10.2026)
+        # час между релизами закрывает сам лимит.
+        limit = mock.patch.object(config, "RELEASE_PER_DAY", 2)
+        limit.start()
         posted()
         assert release_due()
         posted(("release", ago(minutes=20)))
@@ -880,11 +884,14 @@ def _selftest() -> None:
         assert release_due()
         posted(("release", ago(hours=5)), ("verdict", ago(hours=4)))
         assert not release_due()
+        limit.stop()
+        posted(*[("release", ago(hours=4))] * config.RELEASE_PER_DAY)
+        assert not release_due(), "лимит суток — из config"
         # Ночные выходы (01:00–03:00 МСК) — хвост вчерашних суток: ни лимит релизов,
         # ни дневные слоты не съедают (26.09.2026 лента из-за них молчала весь день).
         posted(("release", ago(hours=17)), ("release", ago(hours=16)), ("verdict", ago(hours=15)))
         assert release_due() and due({"rubric": "meme"})
-        print("выходы релизов: сутки, окно на трек, два в день, звук в канале — у одного поста за сутки, обычный слот уступает")
+        print("выходы релизов: сутки, окно на трек, лимит в день, звук в канале — у одного поста за сутки, обычный слот уступает")
     finally:
         (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
          telegram.send_message, state.now, config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real
