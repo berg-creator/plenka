@@ -221,6 +221,13 @@ def copy_message(chat_id: str | int, from_chat_id: str | int, message_id: int, c
     return _call("copyMessage", payload)
 
 
+def forward_message(chat_id: str | int, from_chat_id: str | int, message_id: int) -> dict:
+    """Пересылка без звука. В ответе — само сообщение, а с ним file_id его файла:
+    copyMessage отдаёт только номер копии, а getMessage у Bot API нет."""
+    return _call("forwardMessage", {"chat_id": chat_id, "from_chat_id": from_chat_id, "message_id": message_id,
+                                    "disable_notification": True})
+
+
 def get_chat(chat_id: str) -> dict:
     """Карточка чата: описание, привязанный чат обсуждений, реакции."""
     return _call("getChat", {"chat_id": chat_id})

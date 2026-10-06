@@ -220,6 +220,11 @@ def cover(post: dict, seen=()) -> Path | None:
     post.pop("photo", None)
     source: str | Path = post.get("cover", "")
     artist, name = post.get("artist", ""), post.get("release") or post.get("track", "")
+    if post.get("mixed"):
+        # Трек из СВЕДЕНИЯ (otbor.build_post): обложки магазина у него нет, а фото по имени из Deezer
+        # было бы лицом тёзки — самого артиста там может не быть вовсе. Кадром идёт карточка разбора:
+        # та же бумага канала, на ней имя и название.
+        return save(f"{artist} — «{name}»", [], label="ОТБОР", name="cover")
     if not source:
         # Имя из текста важнее: подпись должна совпасть с тем, о ком пост.
         # Не назвал никого — лицом становится артист из данных поста.

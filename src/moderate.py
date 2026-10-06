@@ -614,7 +614,7 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                 print(f"  кнопка сервиса: {data}")
                 continue
             try:
-                # Кнопка другой функции, хоть «🎙 Выложил — в ОТБОР» под треком, — работа над треком
+                # Кнопка другой функции, хоть «🎙 Этот трек — в канал ПЛЁНКИ» под треком, — работа над треком
                 # кончилась. Свои кнопки СВЕДЕНИЯ снимают клавиатуру ответом сами (skleyka._tweak).
                 if not data.startswith(skleyka.PREFIX) and query.get("message"):
                     skleyka.unkey(query["message"])

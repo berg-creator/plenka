@@ -2,7 +2,8 @@
 
 Зачем. Артисту без денег свести трек негде: инженер берёт 3–10 тысяч, самому
 учиться годами. Две дорожки, выгруженные с одного начала, — вокал и бит — бот
-сводит в трек, который не стыдно выложить, а выложенный ведёт прямо в ОТБОР.
+сводит в трек, который не стыдно выложить, и он же идёт в канал прямо из-под
+готового трека — кнопкой «🎙», без площадок (otbor.mixed).
 Обещание честное: черновое сведение автоматом, не работа звукорежиссёра, — «как
 на студии» не обещаем. До 27.09.2026 функция звалась СКЛЕЙКОЙ, но люди читали её
 как «бот просто склеит дорожки», а не сведёт их. Имя СВЕДЕНИЕ до 22.09.2026 носили
@@ -1822,7 +1823,8 @@ GUESSED = "Вокал и бит пришли одним альбомом — г�
 TUNE = ("Не так? Подкрути — пересоберу{left}. Или просто напиши словами, что поменять, как другу: "
         "«слов не слышно», «погрязнее», «эха меньше», «голос на дропе», «как у Travis Scott», — "
         "или спроси, почему звучит так. Кнопки и слова работают {days} дней с первой сборки.\n\n"
-        "Выложишь трек на площадки — жми «В ОТБОР»: он выйдет в канале с твоим именем.")
+        "Трек можно выложить в канал ПЛЁНКИ с твоим именем — кнопка «🎙» ниже. "
+        "Есть трек, уже выпущенный на площадках? Выложим и его — «💿».")
 # Согласие на ролик ДО/ПОСЛЕ: одна строка условий под ручками, пока артист не согласился.
 # Бит — главный риск: чужой бит без права на видео в рекламе канала не покажешь.
 FILM_TERMS = "\n\n🎬 Покажем твоё ДО/ПОСЛЕ с твоим именем в роликах ПЛЁНКИ — если бит твой или куплен с правом на видео."
@@ -2598,7 +2600,7 @@ def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film
     """Ручки под готовым треком: просьба словами первой — 26.09 из семи треков ни одного
     не поправили словами, о подсказке в тексте не знали; голос с дропа, если он входит
     раньше (DROP_NOTE); стиль, голос, эхо, саунд-дизайн; «поменять» — когда вокал понят
-    по звуку; согласие на ролик ПЛЁНКИ, пока его не дали (FILM_TERMS); «В ОТБОР» — дорога дальше;
+    по звуку; согласие на ролик ПЛЁНКИ, пока его не дали (FILM_TERMS); две дороги в канал (OTBOR_KEYS);
     последним — «🎧 Отдать звукорежиссёру» (_hand), без строки о нём в самом сообщении."""
     def cb(code: str) -> str:
         return f"{PREFIX}{track}:{code}"
@@ -2615,10 +2617,18 @@ def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film
         rows.append([{"text": "↔ поменять вокал и бит", "callback_data": cb("sw")}])
     if film:
         rows.append([{"text": "🎬 Можно в ролик ПЛЁНКИ", "callback_data": cb("f")}])
-    # Метка skleyka доходит до поста отбора: под ним строка про СВЕДЕНИЕ (otbor.build_post).
-    rows.append([{"text": "🎙 Выложил — в ОТБОР", "callback_data": "s:otbor:skleyka"}])
+    rows += [[dict(key, callback_data=key["callback_data"].format(track=track))] for key in OTBOR_KEYS]
     rows.append([dict(HAND_BUTTON, callback_data=cb("u"))])
     return rows
+
+
+# Две дороги в канал под готовым треком (владелец, 06.10.2026). До этого кнопка была одна,
+# «🎙 Выложил — в ОТБОР», и вела в обычный отбор, где трек должен лежать на площадках: человек
+# получил трек минуту назад и ничего не выкладывал — из 33 треков 13 человек в отбор не дошёл никто.
+# «🎙» несёт номер трека: в канал идёт сама эта версия, без площадки (otbor.mixed). «💿» — обычный
+# /otbor и без метки сведения: выпущенный трек не обязательно сводил бот.
+OTBOR_KEYS = [{"text": "🎙 Этот трек — в канал ПЛЁНКИ", "callback_data": "s:otbor:mix:{track}"},
+              {"text": "💿 Уже выпущенный — тоже в канал", "callback_data": "s:otbor"}]
 
 
 def turn(knobs: dict, code: str) -> dict:
@@ -2810,8 +2820,7 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
     отказ HAND_NO без счёта, владельцу — строка, один раз (sifted). Замера нет или он не читается —
     заказ идёт как без него."""
     tracks = data["tracks"]
-    track_id = track_id or max((key for key, track in tracks.items() if track["chat"] == chat_id and track.get("done")),
-                               key=lambda key: tracks[key]["done"], default="")
+    track_id = track_id or _ready(data, chat_id)
     track = tracks.get(track_id)
     track = track if track and track["chat"] == chat_id else None
     bad, measured = _gauged(track)
@@ -2834,6 +2843,39 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
         telegram.send_message(chat_id, HAND_REFUSED)
     else:
         _bill(chat_id, track_id)
+
+
+def _ready(data: dict, chat_id: str) -> str:
+    """Последний готовый трек человека — когда кнопка трек не называет: «🎧» под лимитом (_hand)
+    и старая «🎙 Выложил — в ОТБОР» под треками, отправленными до 06.10.2026 (song)."""
+    tracks = data["tracks"]
+    return max((key for key, track in tracks.items() if track["chat"] == chat_id and track.get("done")),
+               key=lambda key: tracks[key]["done"], default="")
+
+
+def song(chat_id: str | int, track_id: str = "") -> dict:
+    """Готовый трек человека для ОТБОРА (otbor.mixed): file — MP3, который бот ему прислал, seconds —
+    длина бита из замера сведения (0 — не мерилась), flaws — советы по браку записи голоса: тот же
+    заслон, что у ручного заказа (_gauged), вместо «трек выложен» — площадка такой трек не слушала.
+    Трек не назван — последний готовый. Пусто — живого готового трека нет или его MP3 не достать.
+
+    file_id сведение кладёт в запись (_send, поле song). Записи до 06.10.2026 помнят только номер
+    сообщения с MP3 (mix): его пересылка человеку же отдаёт file_id в ответе — заодно видно, какой
+    трек взят. Сообщение стёрто — трека нет."""
+    chat_id, data = str(chat_id), load()
+    track = data["tracks"].get(track_id or _ready(data, chat_id))
+    if not track or track["chat"] != chat_id or not track.get("done"):
+        return {}
+    if not track.get("song") and track.get("mix"):
+        try:
+            track["song"] = (telegram.forward_message(chat_id, chat_id, track["mix"]).get("audio") or {}).get("file_id", "")
+            save(data)
+        except telegram.TelegramError as exc:
+            print(f"  отбор: MP3 трека не переслался: {str(exc)[:120]}")
+    if not track.get("song"):
+        return {}
+    return {"file": track["song"], "seconds": (track.get("timing") or {}).get("length") or 0,
+            "flaws": [TAKE_FLAWS[key][1] for key in _gauged(track)[0]]}
 
 
 def _gauged(track: dict | None) -> tuple[list[str], str]:
@@ -3958,7 +4000,8 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     if not track:
         return
     if result.get("ok"):
-        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix", "take") if result.get(key)}, done=state.iso())
+        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix", "song", "take") if result.get(key)},
+                     done=state.iso())
         if result.get("keyed"):
             data["keys"][track["chat"]] = state.iso()
         if not job.get("tweak"):
@@ -4894,7 +4937,8 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
     """MP3 плеером — его пересылают, WAV документом — его льют на площадки, ручки — отдельным
     сообщением: кнопки на плеере ушли бы вместе с пересылкой. Возвращает file_id ролика ДО/ПОСЛЕ —
     по нему ролик уйдёт владельцу, если артист согласится (_film); нет ролика — пусто, — и номер
-    сообщения с MP3: его копию получит звукорежиссёр, если человек попросит свести руками (_hand)."""
+    сообщения с MP3: его копию получит звукорежиссёр, если человек попросит свести руками (_hand), —
+    и file_id самого MP3: с ним трек идёт в канал кнопкой «🎙» (song)."""
     chat, knobs = spec["chat"], spec["knobs"]
     # Имя трека — с ведущего голоса: 01.10.2026 первой в архиве лежала «Back L», и трек ушёл под её именем.
     lead = next(name for roles in (("вокал",), VOCAL_SIDE) for name, _, part in parts if part in roles)
@@ -4920,7 +4964,7 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
     telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}",
                                             days=TRACK_DAYS)
                           + (FILM_TERMS if ask else ""), buttons=buttons(spec["track"], knobs, swap=swap, drop=drop, film=ask))
-    return {"film": film, "mix": mix.get("message_id")}
+    return {"film": film, "mix": mix.get("message_id"), "song": (mix.get("audio") or {}).get("file_id", "")}
 
 
 def _selftest() -> None:
@@ -5309,8 +5353,13 @@ def _selftest() -> None:
         for _ in range(config.SKLEYKA_TWEAKS):
             callback(7, 7, f"{track}:v-")
         assert sent[-1] == NO_TWEAKS and marks[-1] == REMOVE
-        assert [row[0]["callback_data"] for row in buttons(track, KNOBS, swap=True)][-3:] == [f"{PREFIX}{track}:sw", "s:otbor:skleyka",
-                                                                                   f"{PREFIX}{track}:u"]
+        # Под треком две дороги в канал, каждая своим рядом: «🎙» несёт номер трека, «💿» — обычный /otbor.
+        assert [row[0]["callback_data"] for row in buttons(track, KNOBS, swap=True)][-4:] == [
+            f"{PREFIX}{track}:sw", f"s:otbor:mix:{track}", "s:otbor", f"{PREFIX}{track}:u"]
+        assert [key["text"] for key in OTBOR_KEYS] == ["🎙 Этот трек — в канал ПЛЁНКИ", "💿 Уже выпущенный — тоже в канал"] \
+            and "кнопка «🎙» ниже" in TUNE and "«💿»" in TUNE and "В ОТБОР" not in TUNE
+        assert len(TUNE.format(left=f" — осталось {config.SKLEYKA_TWEAKS} из {config.SKLEYKA_TWEAKS}", days=TRACK_DAYS)
+                   + FILM_TERMS) <= telegram.MAX_CAPTION, "ручки с дорогами в канал — короче подписи, не то что сообщения"
         assert _roles([{"r": "вокал", "g": "a"}, {"r": "бит", "g": "a"}], [("take1.wav", low), ("take2.wav", mid)],
                       False) == ([("take1.wav", low, "бит"), ("take2.wav", mid, "вокал")], True), "альбом — по звуку"
 
@@ -5486,7 +5535,7 @@ def _selftest() -> None:
         # Согласие на ролик: кнопка — пока не согласился; владельцу ролик по file_id с именем
         # из Telegram, один раз.
         codes = [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False, film=True)]
-        assert codes[-3:] == [f"{PREFIX}t1:f", "s:otbor:skleyka", f"{PREFIX}t1:u"] and f"{PREFIX}t1:f" not in \
+        assert codes[-4:] == [f"{PREFIX}t1:f", "s:otbor:mix:t1", "s:otbor", f"{PREFIX}t1:u"] and f"{PREFIX}t1:f" not in \
             [row[0]["callback_data"] for row in buttons("t1", KNOBS, swap=False)]
         calls.clear()
         callback(8, 8, "t1:f", who={"first_name": "Лил"})
@@ -5653,6 +5702,33 @@ def _selftest() -> None:
             and "дорожек — 1; просьба словами — нет" in card and copied == [21, 97], card
         person, card, copied = order("t9")
         assert person == HAND_DEPOSIT and "Запись: не мерилась" in card and copied == [21, 97], "битый замер — заказ идёт как раньше"
+        # Трек в канал кнопкой «🎙» (song, для otbor.mixed): file_id MP3 — из записи; записи до 06.10.2026
+        # помнят только номер сообщения — пересылка человеку же отдаёт id, один раз; брак записи —
+        # теми же советами, что в отказе ручного заказа; трек не назван — последний готовый; чужой,
+        # неготовый и стёртый — пусто, как и сообщение, которого уже нет.
+        data, forwards = load(), []
+        data["tracks"].update({
+            key: {"chat": "66", "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(), "files": [], **extra}
+            for key, extra in (("s1", {"done": "2026-10-01T10:00:00+00:00", "mix": 61, "take": fine}),
+                               ("s2", {"done": "2026-10-02T10:00:00+00:00", "song": "MP3-S2", "timing": {"length": 153.0},
+                                       "take": dict(fine, noise=12.0, clip=0.03)}),
+                               ("s3", {"mix": 63}), ("s4", {"done": "2026-09-30T10:00:00+00:00", "mix": 12}))})
+        save(data)
+        real_forward = telegram.forward_message
+        telegram.forward_message = lambda chat, source, message: forwards.append((chat, source, message)) \
+            or real_forward(chat, source, message) or {"audio": {"file_id": f"MP3-{message}"}}
+        try:
+            assert song(66, "s1") == {"file": "MP3-61", "seconds": 0, "flaws": []} and forwards == [("66", "66", 61)]
+            assert song(66, "s1")["file"] == "MP3-61" and len(forwards) == 1 and load()["tracks"]["s1"]["song"] == "MP3-61"
+            assert song(66) == {"file": "MP3-S2", "seconds": 153.0, "flaws": [TAKE_FLAWS["noise"][1], TAKE_FLAWS["clip"][1]]}
+            assert song(8, "s1") == {} and song(66, "s3") == {} and song(66, "нет000") == {} and song(67) == {}
+            assert song(66, "s4") == {} and "song" not in load()["tracks"]["s4"], "сообщения с MP3 уже нет"
+        finally:
+            telegram.forward_message = real_forward
+        data = load()
+        for key in ("s1", "s2", "s3", "s4"):
+            del data["tracks"][key]
+        save(data)
         # Продажа ручного сведения: кусок → перевод → целый трек. Мак шлёт файлы и текст владельцу,
         # дальше всё по кнопкам: «📤» владельца, «Нравится» и «Я оплатил» клиента, «✅ Деньги пришли».
         # Номера файлов целого трека — только из записи трека; чужой чат и подделка кнопки — мимо.
@@ -6274,13 +6350,15 @@ def _selftest() -> None:
         # у заявки ссылками уходит по сообщению с MP3: файлов человека, чтобы узнать чат, у неё нет.
         shipped: list[tuple] = []
         real_send = (telegram.send_audio, telegram.send_document, telegram.send_big, telegram.MAX_UPLOAD)
-        telegram.send_audio = lambda chat, data, caption, **kw: shipped.append(("mp3", kw["title"])) or {"message_id": 77}
+        telegram.send_audio = lambda chat, data, caption, **kw: shipped.append(("mp3", kw["title"])) \
+            or {"message_id": 77, "audio": {"file_id": "MP3"}}
         telegram.send_document = lambda chat, path, *_: shipped.append(("wav", path.name))
         telegram.send_big = lambda client, chat, path, caption, via: shipped.append(("big", path.name, via))
         try:
             by_links = {"chat": "60", "track": "t9", "knobs": dict(KNOBS), "files": [], "left": 3}
             named = [("Back L.wav", sung, "бэк"), ("Основа.wav", sung, "вокал"), ("бит.wav", stems_sum, "бит")]
-            _send(by_links, Path(shutil.copy(sung, tmp / "ready.wav")), named, "", lambda: "вход", tmp, None)
+            went = _send(by_links, Path(shutil.copy(sung, tmp / "ready.wav")), named, "", lambda: "вход", tmp, None)
+            assert went == {"film": "", "mix": 77, "song": "MP3"}, "file_id MP3 — в запись трека: с ним трек идёт в канал"
             telegram.MAX_UPLOAD = 1
             _send(by_links, Path(shutil.copy(sung, tmp / "ready.wav")), named, "", lambda: "вход", tmp, None)
         finally:
@@ -6306,7 +6384,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме и к одной громкости, бэк из коротких выкриков — эдлибом, "
-          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется — ок")
+          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой — ок")
 
 
 def talk_check() -> list[str]:
