@@ -394,17 +394,35 @@ def _var(n: int) -> bytes:
     return bytes(reversed(out))
 
 
-def fsc(path: Path, notes: list[N]) -> None:
-    """Партитура FL: одна партия, ложится в открытый пианоролл."""
-    body = b"".join(struct.pack("<IHHIHHBBBBBBBB", round(n.pos * TICK), 0x4008 if n.slide else 0x4000, 0,
+def _rows(notes: list[N], ch: int = 0) -> bytes:
+    """Ноты записями FL по 24 байта. ch — канал стойки: в партитуре он один, в проекте (`flp`) — номер канала партии."""
+    return b"".join(struct.pack("<IHHIHHBBBBBBBB", round(n.pos * TICK), 0x4008 if n.slide else 0x4000, ch,
                                 max(1, round(n.ln * TICK)), n.key, 0, 120 + round(n.fine / 10), 0, 64, 0,
                                 64 + round(n.pan * .64), n.vel, 128, 128) for n in sorted(notes))
-    size, ln = len(body), b""
-    while True:                              # длина события FL: младшие семь бит первыми
+
+
+def _notes(body: bytes) -> list[tuple[int, N]]:
+    """Записи нот FL обратно: канал стойки и нота."""
+    out = []
+    for k in range(0, len(body), 24):
+        pos, flags, ch, ln, key, _, fine, _, _, _, pan, vel, _, _ = struct.unpack("<IHHIHHBBBBBBBB", body[k:k + 24])
+        out.append((ch, N(pos / TICK, ln / TICK, key, vel, round((pan - 64) / .64), (fine - 120) * 10, bool(flags & 8))))
+    return out
+
+
+def _size(size: int) -> bytes:
+    """Длина события FL: младшие семь бит первыми."""
+    ln = b""
+    while True:
         ln, size = ln + bytes([size & 0x7F | (0x80 if size > 0x7F else 0)]), size >> 7
         if not size:
-            break
-    data = b"\xc7\x0711.5.0\0" + b"\x1c\x03" + b"\x41\x00\x00" + b"\xe0" + ln + body
+            return ln
+
+
+def fsc(path: Path, notes: list[N]) -> None:
+    """Партитура FL: одна партия, ложится в открытый пианоролл."""
+    body = _rows(notes)
+    data = b"\xc7\x0711.5.0\0" + b"\x1c\x03" + b"\x41\x00\x00" + b"\xe0" + _size(len(body)) + body
     path.write_bytes(b"FLhd" + struct.pack("<IHHH", 6, 0x10, 1, 96) + b"FLdt" + struct.pack("<I", len(data)) + data)
 
 
@@ -419,11 +437,7 @@ def read_fsc(path: Path) -> list[N]:
         if data[i - 1] < 0x80:
             break
     assert i + size == len(data) and size % 24 == 0, path.name
-    out = []
-    for k in range(i, len(data), 24):
-        pos, flags, _, ln, key, _, fine, _, _, _, pan, vel, _, _ = struct.unpack("<IHHIHHBBBBBBBB", data[k:k + 24])
-        out.append(N(pos / TICK, ln / TICK, key, vel, round((pan - 64) / .64), (fine - 120) * 10, bool(flags & 8)))
-    return out
+    return [n for _, n in _notes(data[i:])]
 
 
 def _track(name: str, notes: list[N], ch: int = 0, prog: int | None = None, drum: int | None = None) -> bytes:
@@ -1248,6 +1262,9 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     if info.get("loop"):                # план дорожки петли на весь бит: её собирает Мак (`loop_track`), звук лежит там
         archive.with_suffix(".loop.json").write_text(json.dumps(
             {"bpm": info["bpm"], "bars": info["bars"], "rests": info["rests"], "switch": info["switch"]["такт"]}), encoding="utf-8")
+    # что нужно проекту FL сверх партитур и звуков: его собирает Мак (`flp.today`) — шаблон FL и плагины стоят там
+    archive.with_suffix(".flp.json").write_text(json.dumps(
+        {k: info.get(k) for k in ("title", "bpm", "parts", "tricks", "fx", "preset")}, ensure_ascii=False), encoding="utf-8")
     print(f"{info['bpm']} BPM, {info['bars']} тактов, {info['bars'] * 240 / info['bpm']:.0f} с → {archive}")
     return archive
 
@@ -1434,6 +1451,18 @@ def _sandboxed(folder: Path, tmp: Path) -> None:
                    env={"PATH": "/usr/bin:/bin", "HOME": str(tmp), "TMPDIR": str(tmp)}, capture_output=True, text=True)
 
 
+def _project(plan: Path, kits: Path, serum: Path) -> None:
+    """Готовый проект FL — в «Сегодня», когда звуки и пресеты уже лежат (`flp.today`); строка о нём — в записку.
+    Проект — добавка: его сбой не должен стоить владельцу папки с нотами, поэтому любая ошибка — строка, а не падение."""
+    try:
+        from . import flp
+        line = flp.today(kits, serum, json.loads(plan.read_text("utf-8")))
+    except Exception as e:
+        line = f"Проект FL не собрался ({type(e).__name__}: {e}) — собери из партитур и звуков этой папки, как раньше."
+    with (kits / "о бите.txt").open("a", encoding="utf-8") as f:
+        f.write(f"\n\n{line}")
+
+
 def _mark(mark: str, seen: str, missed: list[str]) -> str:
     """Метка собранной папки. Звук не лёг из-за iCloud — к метке дописан номер попытки, и следующий круг помощника
     соберёт папку заново: скачивание уже запрошено (`lay`). Не больше RETRY повторов: без сети папка не должна
@@ -1481,6 +1510,7 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
                          plan=json.loads(plan.read_text("utf-8")) if plan.exists() else None,
                          preset=json.loads(own.read_text("utf-8")) if own.exists() else None)
             missed += _net(tmp / "out" / f"{beat}.net.json", kits)
+            _project(tmp / "out" / f"{beat}.flp.json", kits, serum)
             done = "ноты на месте" + (f", не легло звуков: {len(missed)}" if missed else "")
         except (subprocess.SubprocessError, OSError, ValueError) as e:      # не собрался — записка, а не падение
             lay(None, {}, kits, serum)
@@ -2034,6 +2064,8 @@ def selftest() -> None:
     assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
     from . import set11
     set11.selftest()
+    from . import flp
+    flp.selftest()
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
           "сверка с прошлым битом, неожиданный ход, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), "
           "перелом «разом» (другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка "
