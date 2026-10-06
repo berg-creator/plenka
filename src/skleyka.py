@@ -125,7 +125,7 @@ import urllib.parse
 import urllib.request
 import wave
 import zipfile
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 
 from . import clips, config, llm, oblako, reels, state, telegram
@@ -1827,9 +1827,13 @@ TUNE = ("Не так? Подкрути — пересоберу{left}. Или п
         "Есть трек, уже выпущенный на площадках? Выложим и его — «💿».")
 # Согласие на ролик ДО/ПОСЛЕ: одна строка условий под ручками, пока артист не согласился.
 # Бит — главный риск: чужой бит без права на видео в рекламе канала не покажешь.
-FILM_TERMS = "\n\n🎬 Покажем твоё ДО/ПОСЛЕ с твоим именем в роликах ПЛЁНКИ — если бит твой или куплен с правом на видео."
-FILM_OWNER = "🎬 Можно в ролик ПЛЁНКИ: {name}. Бит, по словам артиста, свой или куплен с правом на видео."
-FILM_THANKS = "🎬 Спасибо! Ролик у ПЛЁНКИ — выйдет с твоим именем."
+# С 06.10.2026 условия называют канал (владелец: канал — сцена для тех, кто пришёл в бот): ролик выходит
+# в @plenka_fm. Согласие, данное до этого дня, было на «ролики» для владельца — в канал оно не идёт никогда.
+FILM_TERMS = (f"\n\n🎬 Покажем твоё ДО/ПОСЛЕ с твоим именем в канале ПЛЁНКИ ({config.CHANNEL_HANDLE}) и в роликах — "
+              "если бит твой или куплен с правом на видео.")
+FILM_BUTTON = "🎬 Можно в канал и ролики ПЛЁНКИ"
+FILM_OWNER = "🎬 Можно в канал и ролики ПЛЁНКИ: {name}. Бит, по словам артиста, свой или куплен с правом на видео."
+FILM_THANKS = f"🎬 Спасибо! Ролик выйдет в канале ПЛЁНКИ ({config.CHANNEL_HANDLE}) с твоим именем — через несколько дней."
 FILM_WAIT = "Ролик ещё уходит — нажми «🎬» через минуту."
 
 # Альбом в Telegram — до десяти файлов: хватает на вокал, даблы, бэки, эдлибы и бит по частям.
@@ -2616,7 +2620,7 @@ def buttons(track: str, knobs: dict, swap: bool, drop: float | None = None, film
     if swap:
         rows.append([{"text": "↔ поменять вокал и бит", "callback_data": cb("sw")}])
     if film:
-        rows.append([{"text": "🎬 Можно в ролик ПЛЁНКИ", "callback_data": cb("f")}])
+        rows.append([{"text": FILM_BUTTON, "callback_data": cb("f")}])
     rows += [[dict(key, callback_data=key["callback_data"].format(track=track))] for key in OTBOR_KEYS]
     rows.append([dict(HAND_BUTTON, callback_data=cb("u"))])
     return rows
@@ -2801,11 +2805,84 @@ def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | 
             name += f" @{who['username']}"
         telegram.send_video_url(config.secret("TELEGRAM_ADMIN_ID"), track["film"], FILM_OWNER.format(name=html.escape(name)))
         track["agreed"] = state.iso()
+        _doposle_add(track_id, track, who)
         save(data)
     telegram.send_message(chat_id, FILM_THANKS)
     if message_id and keyboard:
         telegram.edit_markup(chat_id, message_id, [row for row in keyboard
                                                    if all(b.get("callback_data") != f"{PREFIX}{track_id}:f" for b in row)])
+
+
+# ДО И ПОСЛЕ в канале (владелец 06.10.2026): канал — сцена для тех, кто пришёл в бот. Выходит только ролик
+# того, кто согласился на канал по новым условиям: в записи очереди стоит отметка channel, её ставит одна
+# эта функция. Трек чистится по сроку, а пост выйдет позже, поэтому очередь — своим файлом в приватном
+# хранилище (имени человека в открытом репозитории до выхода нет, как у отбора). Согласие без отметки —
+# старое, на «ролики» для владельца: в очередь оно не попало и не попадёт, в сомнении — не публиковать.
+DOPOSLE_EVERY = timedelta(days=3)
+DOPOSLE_LABEL = "doposle"  # метка ссылки ?start=skleyka_doposle (service.SOURCES)
+DOPOSLE_ASK = "Голос кого услышим следующим? Присылай запись — свожу в боте, без шагов."
+DOPOSLE_POST = ("<b>ДО И ПОСЛЕ</b>\n\n{name} записал голос — бот свёл его с битом.\n{facts}"
+                "▸ Так же можно с твоей записью: <a href=\"https://t.me/{bot}?start=skleyka_doposle\">СВЕДЕНИЕ</a>")
+DOPOSLE_FACTS = "Что сделал бот: {what}.\n\n"
+
+
+def _doposle_add(track_id: str, track: dict, who: dict) -> None:
+    """Согласие на канал — в очередь выхода. Имя — как человек назвал себя в Telegram, без @ника;
+    брань и ссылки в имени — не публикуем, ролик остаётся владельцу."""
+    from . import otbor  # otbor импортирует этот модуль
+
+    name = " ".join(filter(None, (who.get("first_name"), who.get("last_name"))))
+    if not name or not track.get("film") or otbor.RUDE.search(name) or otbor.JUNK.search(name):
+        return
+    facts = [*track.get("fixed", []), f"стиль «{track['knobs']['style']}» — {STYLES[track['knobs']['style']]['about']}"]
+    queue = state.read_json(config.DOPOSLE_FILE, {"items": []})
+    if all(item["track"] != track_id for item in queue["items"]):
+        queue["items"].append({"track": track_id, "film": track["film"], "name": name[:60], "facts": facts,
+                               "channel": state.iso()})
+        state.write_json(config.DOPOSLE_FILE, queue)
+
+
+def doposle_post(item: dict) -> dict:
+    """Пост ролика: подпись шаблоном без модели, факты — только записанные в треке. Как звучит —
+    ни слова: бот не слушал, а мерил."""
+    from . import publish
+
+    facts = "; ".join(item.get("facts") or [])
+    text = DOPOSLE_POST.format(name=html.escape(item["name"]), bot=config.BOT_HANDLE.lstrip("@"),
+                               facts=DOPOSLE_FACTS.format(what=html.escape(facts)) if facts else "")
+    return {"rubric": "doposle", "text": text, "video": item["film"], "width": 1080, "height": 1920,
+            "comment": DOPOSLE_ASK}
+
+
+def doposle_air() -> str:
+    """Следующий ролик очереди — в канал: не чаще раза в DOPOSLE_EVERY, не ночью, по одному, старое
+    согласие первым. Возвращает номер трека вышедшего или пустую строку. Выходят только записи с отметкой
+    channel; отметка выхода — файл content/archive/doposle-<трек>.json (он же не даёт выйти дважды).
+    Не вышло — отметка снимается, запись остаётся, следующий заход пробует снова. Во ВКонтакте не дублируется
+    (publish.crosspost_vk пропускает рубрики без обложки — проверено селфтестом)."""
+    from . import publish
+
+    posted = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
+    last = max((item.get("published_at", "") for item in posted if item.get("rubric") == "doposle"), default="")
+    if publish.night(state.now()) or _age(last) < DOPOSLE_EVERY.total_seconds():
+        return ""
+    queue = state.read_json(config.DOPOSLE_FILE, {"items": []})
+    for item in sorted(queue["items"], key=lambda item: item.get("channel", "")):
+        path = config.ARCHIVE / f"doposle-{item['track']}.json"
+        if not item.get("channel") or path.exists():
+            continue
+        post = doposle_post(item)
+        config.ARCHIVE.mkdir(parents=True, exist_ok=True)
+        state.write_json(path, post)
+        try:
+            publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        queue["items"] = [other for other in queue["items"] if other["track"] != item["track"]]
+        state.write_json(config.DOPOSLE_FILE, queue)
+        return item["track"]
+    return ""
 
 
 def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
@@ -4000,7 +4077,7 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     if not track:
         return
     if result.get("ok"):
-        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix", "song", "take") if result.get(key)},
+        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix", "song", "take", "fixed") if result.get(key)},
                      done=state.iso())
         if result.get("keyed"):
             data["keys"][track["chat"]] = state.iso()
@@ -4645,6 +4722,7 @@ def run_job(spec_path: Path) -> int:
                 mixed = work / "out" / "work"
                 fixed, wrong = control(master, vocal, mixed / VOICES, beat, mixed / TOTAL)
                 note += FIXED.format(what=", ".join(fixed)) if fixed else ""
+                result["fixed"] = fixed  # факты для подписи ДО И ПОСЛЕ в канале (doposle_post)
                 if wrong:
                     print(f"  сведение {spec['job']}: контроль — {'; '.join(wrong)}")
                     telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"),
@@ -4965,6 +5043,59 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
                                             days=TRACK_DAYS)
                           + (FILM_TERMS if ask else ""), buttons=buttons(spec["track"], knobs, swap=swap, drop=drop, film=ask))
     return {"film": film, "mix": mix.get("message_id"), "song": (mix.get("audio") or {}).get("file_id", "")}
+
+
+def _selftest_doposle(tmp: Path, track: dict) -> None:
+    """ДО И ПОСЛЕ в канале: старое согласие не выходит никогда, новое — один раз и не чаще раза в три дня,
+    сбой отправки оставляет запись, подпись без фактов ничего не выдумывает, до выхода имени в content/ нет."""
+    from unittest import mock
+
+    from . import publish
+
+    out, clock = [], [datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc)]  # 12:00 МСК
+
+    def to_channel(post, path, chat):
+        out.append(post)
+        assert path.exists() and post["rubric"] == "doposle" and post["video"] == "FILM1"
+        publish.record(post, path, "channel")
+
+    with mock.patch.object(config, "DOPOSLE_FILE", tmp / "doposle.json"), mock.patch.object(config, "ARCHIVE", tmp / "arch"), \
+            mock.patch.object(config, "POSTED_FILE", tmp / "posted.json"), mock.patch.object(state, "now", lambda: clock[0]), \
+            mock.patch.object(publish, "to_channel", to_channel):
+        old = dict(track, knobs=dict(KNOBS))
+        # Старое согласие: agreed без очереди — в канал ничего не идёт, сколько ни жди.
+        assert doposle_air() == "" and not config.DOPOSLE_FILE.exists(), "старое согласие в канал не идёт"
+        _doposle_add("t1", old, {"first_name": "Лил", "username": "lilpi"})
+        _doposle_add("t1", old, {"first_name": "Лил"})
+        _doposle_add("tx", old, {"first_name": "Ты мудак"})
+        _doposle_add("ty", old, {})
+        queue = state.read_json(config.DOPOSLE_FILE, {})["items"]
+        assert [item["track"] for item in queue] == ["t1"] and queue[0]["name"] == "Лил" and queue[0]["channel"], \
+            "один раз, без @ника; брань и пустое имя не в очереди"
+        assert not (tmp / "arch").exists(), "до выхода имени в content/ нет"
+        clock[0] = datetime(2026, 10, 7, 0, 0, tzinfo=timezone.utc)  # 03:00 МСК
+        assert doposle_air() == "" and not out, "ночью не выходит"
+        clock[0] = datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc)
+        with mock.patch.object(publish, "to_channel", side_effect=telegram.TelegramError("сбой")):
+            try:
+                doposle_air()
+                raise AssertionError("сбой должен подняться")
+            except telegram.TelegramError:
+                pass
+        assert [item["track"] for item in state.read_json(config.DOPOSLE_FILE, {})["items"]] == ["t1"] \
+            and not (tmp / "arch" / "doposle-t1.json").exists(), "сбой: запись в очереди, отметки нет"
+        assert doposle_air() == "t1" and len(out) == 1 and not state.read_json(config.DOPOSLE_FILE, {})["items"]
+        text = out[0]["text"]
+        assert text.startswith("<b>ДО И ПОСЛЕ</b>\n\nЛил ") and "?start=skleyka_doposle" in text and out[0]["comment"] \
+            and telegram.visible_len(text) <= telegram.MAX_CAPTION and "Что сделал бот: " in text, text
+        assert not any(word in text.casefold() for word in ("звуч", "слыш", "сочн", "мощн")), "о звуке ни слова"
+        bare = doposle_post({"name": "Лил", "film": "F", "facts": []})["text"]
+        assert "Что сделал бот" not in bare and "Лил" in bare, "нет фактов — нет строки"
+        _doposle_add("t2", dict(old, fixed=["обрезал 2 с тишины в начале"]), {"first_name": "Ян"})
+        clock[0] += timedelta(days=2)
+        assert doposle_air() == "" and len(out) == 1, "чаще раза в три дня не выходит"
+        clock[0] += timedelta(days=1)
+        assert doposle_air() == "t2" and "обрезал 2 с тишины" in out[1]["text"] and doposle_air() == "", "по одному, дважды — нет"
 
 
 def _selftest() -> None:
@@ -5559,6 +5690,7 @@ def _selftest() -> None:
             and "Лил &lt;Пи&gt; @lilpi" in calls[0][1]["caption"] and sent[-1] == FILM_THANKS, "владельцу — один раз"
         data = load()
         assert data["tracks"]["t1"]["agreed"]
+        _selftest_doposle(tmp, data["tracks"]["t1"])
         # Молчит — кнопку снимает дежурство, когда звук протух: беззвучно и без следа.
         data["tracks"]["t9"] = {"chat": "9", "files": [], "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(),
                                 "done": "2026-09-27T12:00:00+00:00"}
@@ -6384,7 +6516,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме и к одной громкости, бэк из коротких выкриков — эдлибом, "
-          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой — ок")
+          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой — ок")
 
 
 def talk_check() -> list[str]:

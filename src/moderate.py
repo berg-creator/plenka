@@ -694,6 +694,13 @@ def publish_shift() -> None:
                 return
         except Exception as exc:  # noqa: BLE001 — совет не держит выход остальных постов
             log.error("Выход совета недели не удался: %s", exc)
+    if target == "channel":
+        try:
+            if track := skleyka.doposle_air():
+                print(f"Выход ДО И ПОСЛЕ: трек {track} → {target}")
+                return
+        except Exception as exc:  # noqa: BLE001 — ролик не держит выход остальных постов
+            log.error("Выход ДО И ПОСЛЕ не удался: %s", exc)
     try:
         otbor.shift(target)
     except Exception as exc:  # noqa: BLE001 — отбор не держит выход остальных постов

@@ -148,7 +148,7 @@ def due(post: dict) -> bool:
             1 for item in items
             # Отбор (src/otbor.py), ролик (src/reels.py) и бит (src/bity.py) выходят мимо слотов
             # и обычному посту место не занимают.
-            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "sovet")
+            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "sovet", "doposle")
             and (moment := state._parse(item.get("published_at", "")))
             and feed_day(moment) == feed_day(now)
         )
@@ -511,7 +511,7 @@ def send(post: dict, chat_id: str) -> dict | None:
         text = card.meme_text(post)
 
     # Ролик владельца (src/reels.py) — тем же файлом, что ушёл ему в личку, по file_id.
-    if rubric == "reel":
+    if rubric in ("reel", "doposle"):  # ДО И ПОСЛЕ — ролик артиста по file_id (skleyka.doposle_post)
         return _where(telegram.send_video_url(chat_id, post["video"], text, width=post.get("width", 0),
                                               height=post.get("height", 0), quiet=quiet), "caption")
 
@@ -594,7 +594,7 @@ def crosspost_vk(post: dict) -> None:
     # Бит зовёт в бота Telegram — во ВКонтакте идти по такой ссылке некому. Трек из СВЕДЕНИЯ
     # (otbor.build_post, поле mixed) лежит только под постом в Telegram: площадок у него нет,
     # и запись во ВКонтакте звала бы слушать то, чего там не услышать.
-    if post.get("rubric") in ("poll", "reel", "beat", "sovet") or post.get("mixed"):
+    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "doposle") or post.get("mixed"):
         return
 
     # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
