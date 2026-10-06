@@ -295,6 +295,16 @@ def ping(notes: list[N], width: int = 60) -> list[N]:
     return [n._replace(pan=width if i % 2 else -width) for i, n in enumerate(notes)]
 
 
+def ears(tracks: dict[str, list[N]], width: int = 50) -> dict[str, list[N]]:
+    """Перк по ушам — владелец 06.10.2026: «перки хочется раскидать по ушам». Партия перка, где автор панораму не трогал
+    (все ноты по центру), ложится лево-право через удар, по порядку во времени: правило, а не случай — пересборка даёт
+    те же ноты. Хоть одна нота не по центру — партия авторская, не трогаем. width — половина хода: удар слышен в обоих
+    ушах, а свои хэты владелец раскидывал до ±56 (`spread`). Зовёт `build` после проверок: брак считается по нотам
+    автора, а партитура, MIDI и проект FL (он читает партитуры) получают одни и те же ноты."""
+    return {name: ping(sorted(notes), width) if "перк" in name.lower() and not any(n.pan for n in notes) else notes
+            for name, notes in tracks.items()}
+
+
 def human(notes: list[N], vel: int = 8, seed: int = 0) -> list[N]:
     """Сила вразброс: одинаковые удары подряд звучат машиной."""
     r = random.Random(seed)
@@ -1232,6 +1242,7 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     bad += _turn(info, olds)
     if bad:
         raise SystemExit("Бит не годен:\n" + "\n".join(bad))
+    tracks = ears(tracks)
     root = out / folder.name
     (root / "fl").mkdir(parents=True, exist_ok=True)
     (root / "midi").mkdir(exist_ok=True)
@@ -1614,6 +1625,9 @@ def selftest() -> None:
     assert [n.pos for n in over(hits(0, "x.x.x.x.x.x.x.x."), roll(12, 2, 4))] == [0, 2, 4, 6, 8, 10, 12, 12.5, 13, 13.5, 14], \
         "дробь убирает удары рисунка под собой"
     assert [n.pan for n in ping([N(i, 1) for i in range(4)])] == [-60, 60, -60, 60]
+    own = [N(0, 1), N(4, 1, pan=20)]                    # перк по ушам: по центру — лево-право по времени, авторская панорама и чужие партии целы
+    e = ears({"перк": [N(8, 1), N(0, 1), N(4, 1)], "Перк 2": own, "хэт": [N(0, 1)]})
+    assert [(n.pos, n.pan) for n in e["перк"]] == [(0, -50), (4, 50), (8, -50)] and e["Перк 2"] is own and e["хэт"] == [N(0, 1)], e
     assert spread([N(i, 1) for i in range(40)]) == spread([N(i, 1) for i in range(40)]), "разброс повторяем"
     assert len({n.pan for n in spread([N(i, 1) for i in range(40)])}) > 10
     assert all(92 <= n.vel <= 108 for n in human([N(i, 1) for i in range(40)]))
@@ -1660,6 +1674,7 @@ def selftest() -> None:
                 "    return {'808': [n for x in (0, 2, 4, 9, 11, 13) for n in glide(x * 16, 16, low, low + 12, at=12, over=4)],\n"
                 "            'хэт': spread(half('x.x.x.x.x.x.x.x.', 'x..x..x.x..x..x.')),\n"
                 "            'клэп': half('........x.......', '....x.......x...') + roll(108, 4, 16),\n"
+                "            'перк': half('......x.x.......', '..x...........x.'),\n"
                 "            'мелодия': [N(x * 16 + p, 2, keys[i]) for x in range(16) if x % 8 != 7\n"
                 "                        for p, i in (((0, 0), (6, 1)) if x < 8 or same else ((2, 2), (10, 3)))]}\n")
         base = dict(title="A x B — Тест", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=16, skeleton="сцена", like="x",
@@ -1667,10 +1682,12 @@ def selftest() -> None:
                      mood="злой", twist="ложный вход", color="ржавчина", fx={"808": "Fruity Fast Dist", "мелодия": "без обработки"},
                      switch={"такт": 9, "переход": "такт тишины, клэп уходит с третьей доли на вторую и четвёртую"},
                      mix={"основа": "Chief Keef", "чужое": "кино", "элемент": "оркестровый слой"},
-                     sounds=dict.fromkeys(("808", "хэт", "клэп", "мелодия"), one))
+                     sounds=dict.fromkeys(("808", "хэт", "клэп", "перк", "мелодия"), one))
         (tmp / "beat" / "make.py").write_text(f"INFO = {base!r}\n{code}", encoding="utf-8")
         archive = build(tmp / "beat", tmp / "out")
         names = zipfile.ZipFile(archive).namelist()
+        laid = [n.pan for n in sorted(read_fsc(tmp / "out" / "beat" / "fl" / "04 перк.fsc"))]
+        assert laid[:4] == [-50, 50, -50, 50] and len(laid) == 28, "перк автор оставил по центру — в партитуре он лево-право"
         assert "beat/fl/02 хэт.fsc" in names and "beat/midi/01 808.mid" in names and "beat/о бите.txt" in names
         note = archive.with_suffix(".txt").read_text("utf-8")
         assert "бит A x B — Тест, 140 Fm" in note and "Цвет: ржавчина" in note and "автор нот не слышал" in note, note
@@ -1721,7 +1738,7 @@ def selftest() -> None:
         assert (kits / "02 хэт.fsc").exists() and not (kits / "старое.wav").exists() and (lib / "k" / "Kick.wav").read_bytes() == b"k"
         assert [m.split(":")[0] for m in missed] == ["хэт", "клэп", "перк"] and "нет на диске" in missed[0] \
             and "не прочитался" in missed[1] and "нет в списке" in missed[2], missed
-        assert "Не легло в папку" in (kits / "о бите.txt").read_text("utf-8") and len(list(kits.iterdir())) == 6, list(kits.iterdir())
+        assert "Не легло в папку" in (kits / "о бите.txt").read_text("utf-8") and len(list(kits.iterdir())) == 7, list(kits.iterdir())
         asked, real = [], (shutil.copyfile, subprocess.run)      # заглушка iCloud у фонового процесса: errno 11
         shutil.copyfile = lambda *a: (_ for _ in ()).throw(OSError(errno.EDEADLK, "Resource deadlock avoided"))
         subprocess.run = lambda cmd, **kw: asked.append(cmd)
@@ -1735,7 +1752,7 @@ def selftest() -> None:
         assert _mark("b s", f"b s {RETRY}", cloud) == "b s" and _mark("b s", "b s 1", []) == "b s" \
             and _mark("b s", "", missed) == "b s" and _mark("b s", "a z 2", cloud) == "b s 1", "повторы кончаются, всё легло — метка чистая"
         assert lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed) == [], "бит без поля звуков"
-        assert sorted(f.suffix for f in kits.iterdir()) == [".fsc"] * 4 + [".txt"] and not list(serum.iterdir())
+        assert sorted(f.suffix for f in kits.iterdir()) == [".fsc"] * 5 + [".txt"] and not list(serum.iterdir())
         assert json.loads((tmp / "out" / "beat.sounds.json").read_text("utf-8")) == base["sounds"]
         # Свой пресет Serum: сборка кладёт задание Маку рядом с архивом, записка говорит, что на слух он не проверен
         fxp = next(n for n in sorted(known()) if n.startswith("Serum/"))
@@ -2117,7 +2134,8 @@ def selftest() -> None:
           "сверка с прошлым битом, неожиданный ход, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), "
           "перелом «разом» (другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка "
           "меняются), виды чередуются внутри характера, дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
-          "808 — опора, а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, свои наборы владельца, "
+          "808 — опора, а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, перк без панорамы — "
+          "лево-право в партитуре, свои наборы владельца, "
           "петля набора 11 по числу перед BPM, заказ владельца вне очереди и скелет «Г» (хэт по мерке — после перелома, петля — брак и у заказа), "
           "строка об авторе звуков CC BY в записке, свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
 

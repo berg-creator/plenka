@@ -29,6 +29,12 @@
 плагина в тех же демо (Time slot — 0, Time mix — 2, Volume mix — 3). Отвергнуто: автоматизировать ручки самих
 плагинов — номер ручки у каждого свой и снимается только с примера, а mix слота один на всех.
 
+Владелец о втором проекте, 06.10.2026: «сайдчейн я делаю лимитером», «низ у басса бы еще мощней сделать и чтоб четко
+по середине был до 100 герц». Отсюда Fruity Limiter компрессором на дорожке 808 с бочкой на входе сайдчейна (бочка
+послана туда с уровнем 0: звук идёт прежним путём, компрессор её слышит), дорожки 808 и бочки в моно и ручка канала 808
+до упора — константы DUCK, MONO, KNOB, у каждой — с какого файла снята. Запрет ограничителя на мастере это не трогает:
+этот стоит на дорожке 808.
+
 Проект, сохранённый владельцем в «Сегодня», утром не стирается (`keep`): папка переезжает рядом, пути звуков
 в проекте переписываются, остальное — байт в байт.
 Serum у владельца — Audio Unit; его состояние — plist, где поле vstdata — файл .fxp целиком (снято с его
@@ -40,8 +46,9 @@ Serum у владельца — Audio Unit; его состояние — plist,
 Звука сборка не слышит и FL не запускает: селфтест проверяет только, что файл читается обратно.
 
     python -m src.flp --selftest        проект читается обратно: темп, каналы, ноты партии, слоты, уровни и маршруты микшера,
-                                        пресет и ячейка Gross Beat, клип автоматизации; сохранённая папка переезжает с путями
-    python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, паттерны, клипы, дорожки микшера
+                                        сайдчейн бочки с 808 и их моно, пресет и ячейка Gross Beat, клип автоматизации;
+                                        сохранённая папка переезжает с путями
+    python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, паттерны, клипы, дорожки микшера, сайдчейн и моно
 """
 from __future__ import annotations
 
@@ -81,6 +88,21 @@ LEVEL = {"808": 125, "музыка": 57}
 # Перегруз 808: Fruity Soft Clipper, порог 23 из 127 и post 111 из 160 — дорожка 808 проекта 02 (пересборка Stop Breathing),
 # слот 4 (перегруз на 808 — в 2 проектах из 6). Состояние плагина — эти два числа: в заводском Default.fst — 100 и 128.
 DRIVE = ("fruitysoftclipper", struct.pack("<II", 23, 111))
+# Сайдчейн бочки с 808 — Fruity Limiter в режиме компрессора на дорожке 808, первым перед перегрузом, как в проекте 04
+# (пересборка M3tamorphosis: Limiter → Stereo Enhancer → Blood Overdrive). Состояние — та дорожка байт в байт (FL 20.6.1,
+# версия состояния 6 — та же, что в базе плагинов владельца): порог компрессора 613 из 1000, колено и ratio — 1000 из 1000,
+# вид COMP, вход сайдчейна — 1; остальное — умолчание. Последнее число — номер входа среди дорожек, посланных в эту:
+# в шаблоне «Trap» из поставки FL у «Sub ► Mix», куда идут дорожки 11 и 124, там 2. Маршрут — байт 1 в событии 235 бочки
+# на месте дорожки 808 и запись «параметр 64 + дорожка 808 = 0» в событии 225 сразу за её параметром 226 — одинаково
+# в проектах 04 и 06; в 06 вход сайдчейна 0 и ratio 0 — компрессор там бочку не слышит, оттуда взят только маршрут.
+# Бочка там вдвое тише нашей (фейдер 45%): глубину провала на нашем звуке не мерил никто.
+_LIMIT, _REST = (1000, 1000, 1000, 1115, 3, 5000, 3, 2882), (0, 6666, 1, 650, 1000, 0, 4187)
+DUCK = ("fruitylimiter", struct.pack("<42i", 6, *_LIMIT, 613, 1000, 1000, *_REST, *_LIMIT, 1000, 0, 0, *_REST, 50, 1, 0x01010101, 0, 1))
+# Низ по центру: разведение стерео дорожки (параметр 194 события 225) — 64, «слито». Так стоят Kick 1, Kick 2 и Sub ► Mix
+# в шаблонах «Trap» и «HipHop-Trap» из поставки FL; у 808 и бочки чужих проектов — 0 и −16, моно — слова владельца.
+MONO = 64
+# Ручка громкости канала 808, %: 100 в проектах 05 и 06 (в 06 — при фейдере 125%, как у нас), 86 в 02; умолчание FL — 78.
+KNOB = 100
 # Ограничителя на мастер проект сам не ставит, хотя в чужих проектах он есть в 4 из 6: владелец 06.10.2026 о пробном
 # проекте с Fruity Limiter «Max loudness» — «Очень делает плоским звук. Не делай так».
 # «в тактах 23, 31–32 и 59.4» в конце звена fx: такт, такты подряд, доля такта (59.4 — четвёртая)
@@ -173,6 +195,8 @@ def _channel(proto: list[tuple[int, bytes]], i: int, ch: dict) -> list[tuple[int
             v = plug[e]
         elif e == 143 and clip:
             v = _int(2, 4)
+        elif e == 219 and ch.get("knob"):       # ручки канала: панорама, громкость (12800 — 100%), высота
+            v = v[:4] + _int(128 * ch["knob"], 4) + v[8:]
         elif e == 132 and ch.get("cut"):        # группа отсечки «сам себя»: новая нота глушит хвост прошлой — в 4 проектах из 6
             v = struct.pack("<HH", i + 1, i + 1)
         elif e == 215 and clip and len(v) == 158:
@@ -214,8 +238,10 @@ def _curve(proto: bytes, spans: list[tuple[float, float]], total: float) -> byte
 def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, dict], markers=(), auto=None) -> bytes:
     """Проект из шаблона FL. channels — каналы стойки по порядку: name, insert (дорожка микшера), у партии — part
     и notes, у сэмплера — sound (путь), root и cut (отсечка «сам себя»), у Serum — plugin (события обёртки), у аудиоклипа —
-    sound и clip (длина в тиках). Партия — паттерн на весь бит на своей дорожке плейлиста; каналы одной партии — слой.
+    sound и clip (длина в тиках), knob — ручка громкости канала, %. Партия — паттерн на весь бит на своей дорожке плейлиста;
+    каналы одной партии — слой.
     inserts — дорожки микшера: name, plugins (файлы .fst по слотам), to (куда вместо мастера), level (фейдер, %),
+    mono (разведение стерео — «слито»), duck (дорожки, куда эта послана ещё и сайдчейном: уровень посыла 0),
     auto — {слот: (имя клипа, отрезки в долях от начала бита)}: клип автоматизации на mix слота, своя дорожка плейлиста.
     auto — события канала-клипа из шаблона FL; без него клипов нет. markers — (такт, имя)."""
     ev = events(base)
@@ -263,15 +289,22 @@ def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, di
             slot = int.from_bytes(v, "little")
             out += [(k, struct.pack("<II", ins, slot) + w[8:] if k == 212 else w)
                     for k, w in events(row["plugins"][slot]) if k in PLUGIN]
-        elif e == 235 and row.get("to"):
-            v = bytes(i == row["to"] for i in range(len(v)))
-        elif e == 225:                          # записи по 12 байт: параметр, 0x1F, дорожка × 64 + слот, значение; 192 — фейдер
-            v = bytearray(v)
+        elif e == 235 and (row.get("to") or row.get("duck")):
+            v = bytes((i == row["to"] if row.get("to") else b) or i in (row.get("duck") or ()) for i, b in enumerate(v))
+        elif e == 225:                          # записи по 12 байт: параметр, 0x1F, дорожка × 64 + слот, значение
+            recs = []
             for k in range(0, len(v) - 11, 12):
-                level = inserts.get(int.from_bytes(v[k + 6:k + 8], "little") >> 6 & 127, {}).get("level")
-                if v[k + 4] == 192 and level:
-                    v[k + 8:k + 12] = _int(round(128 * level), 4)       # 12800 — 100%
-            v = bytes(v)
+                what, at = v[k + 4], int.from_bytes(v[k + 6:k + 8], "little")
+                its = inserts.get(at >> 6 & 127, {})
+                if what == 192 and its.get("level"):                    # фейдер: 12800 — 100%
+                    recs.append(v[k:k + 8] + _int(round(128 * its["level"]), 4))
+                elif what == 194 and its.get("mono"):                   # разведение стерео: −64 … 64
+                    recs.append(v[k:k + 8] + _int(MONO, 4))
+                else:
+                    recs.append(v[k:k + 12])
+                if what == 226:                 # уровень посыла в дорожку N — параметр 64 + N, за эквалайзером дорожки
+                    recs += [struct.pack("<IBBHi", 0, 64 + to, 0x1F, at, 0) for to in sorted(its.get("duck") or ())]
+            v = b"".join(recs) + v[len(v) - len(v) % 12:]
         out.append((e, v))
         if e == 233:
             out += [x for bar, name in markers for x in ((148, _int((bar - 1) * BAR, 4)), (205, _text(name)))]
@@ -282,7 +315,7 @@ def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, di
 
 def read(data: bytes) -> dict:
     """Проект обратно — своим разбором: то, что сверяет селфтест и печатает --read."""
-    out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": []}
+    out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": []}
     text = lambda v: v.decode("utf-16-le").rstrip("\0")
     ch = pat = plug = name = None
     ins = -1
@@ -298,7 +331,7 @@ def read(data: bytes) -> dict:
         elif e == 193:
             pat["name"] = text(v)
         elif e == 64:
-            ch = {"name": "", "kind": "сэмплер", "sound": None, "insert": 0, "root": None, "state": b"", "cut": 0, "on": []}
+            ch = {"name": "", "kind": "сэмплер", "sound": None, "insert": 0, "root": None, "state": b"", "cut": 0, "on": [], "knob": 78}
             out["channels"].append(ch)
         elif e == 99:
             ch = None
@@ -313,6 +346,8 @@ def read(data: bytes) -> dict:
                 ch["state"] = v
             elif e == 132:
                 ch["cut"] = int.from_bytes(v[:2], "little")
+            elif e == 219 and len(v) >= 8:
+                ch["knob"] = round(int.from_bytes(v[4:8], "little") / 128)
             elif e == 234:                      # отрезки, где клип держит 1, — в долях от начала
                 at, was = 0.0, (0.0, 0.0)
                 for k in range(int.from_bytes(v[17:21], "little")):
@@ -341,9 +376,13 @@ def read(data: bytes) -> dict:
             out["inserts"][ins]["to"] = [i for i, b in enumerate(v) if b]
         elif e == 225:
             for k in range(0, len(v) - 11, 12):
-                i = int.from_bytes(v[k + 6:k + 8], "little") >> 6 & 127
-                if v[k + 4] == 192 and i in out["inserts"]:
-                    out["inserts"][i]["level"] = round(int.from_bytes(v[k + 8:k + 12], "little", signed=True) / 128)
+                what, i, n = v[k + 4], int.from_bytes(v[k + 6:k + 8], "little") >> 6 & 127, int.from_bytes(v[k + 8:k + 12], "little", signed=True)
+                if what == 192 and i in out["inserts"]:
+                    out["inserts"][i]["level"] = round(n / 128)
+                elif what == 194 and n == MONO:
+                    out["mono"].append(i)
+                elif not n and what - 64 in out["inserts"].get(i, {}).get("to", ()):
+                    out["duck"].append((i, what - 64))          # посыл с уровнем 0: звук не идёт, сайдчейн слышит
         elif e == 227 and len(v) == 20:         # привязка клипа автоматизации: канал клипа, параметр, цель
             _, clip, _, what, to, _, _ = struct.unpack("<HHIHHII", v)
             out["links"].append({"clip": clip, "mix": what == 0x1F01, "insert": to >> 6 & 127, "slot": to & 63} if to & 0x2000
@@ -499,7 +538,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
                      key=lambda f: nfc(f.name) != f"{tag}{(own.get(part) or {}).get('имя')}.fxp")
         root = next((int(m[1]) for t in plan.get("tricks") or () if (m := re.match(
             rf"{re.escape(part)}\b.*?корневая нота канала\s*[—–-]?\s*(\d+)", nfc(t), re.I | re.S)) and int(m[1]) < 132), None)
-        ch = {"part": part, "notes": notes, "insert": number[part.lower()], "name": part}
+        ch = {"part": part, "notes": notes, "insert": number[part.lower()], "name": part, "knob": KNOB if role(part) == "808" else None}
         if mine:
             channels += [ch | {"name": f"{part} {k + 1}" if k else part, "sound": where(f), "root": root, "cut": role(part) == "808"}
                          for k, f in enumerate(mine)]
@@ -515,7 +554,8 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
                 ticks = round(w.getnframes() / w.getframerate() * plan["bpm"] / 60 * 96)
             channels.append({"name": Path(file).stem, "insert": number[key], "sound": where(kits / file), "clip": ticks})
     effects, drums = _effects(db / "Effects"), next((b for b in buses if "барабан" in b), None)
-    proto, inserts, lost, own, timed, miss = _clip(auto), {}, 0, [], [], []
+    kick = next((p for p, _ in scores if "бочк" in p.lower()), None)       # вход сайдчейна один — первая бочка
+    proto, inserts, lost, own, timed, miss, ducked = _clip(auto), {}, 0, [], [], [], []
     for i, row in enumerate([MASTER] + rows):
         steps, bus = _chain(fx.get(row.lower(), ""), effects, buses)
         kind = role(row) if 0 < i <= len(rows) - len(buses) else None       # роль — у партий и дорожек петли, не у шин
@@ -530,6 +570,12 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             if st := bare(DRIVE[0]):
                 st["state"] = DRIVE[1]
                 own.append(f"{row}: Fruity Soft Clipper перегрузом (порог 23 из 127, post 111 из 160)")
+        # Сайдчейн: лимитер-компрессор первым на дорожке 808, перед перегрузом; свой Fruity Limiter автора без пресета — он и есть
+        if kind == "808" and kick and DUCK[0] in effects and (bare(DUCK[0]) or len(steps) < 10):
+            steps[:0] = [] if bare(DUCK[0]) else [blank(DUCK[0])]
+            bare(DUCK[0])["state"] = DUCK[1]
+            ducked.append(i)
+            own.append(f"{row}: Fruity Limiter компрессором — сайдчейн от дорожки «{kick}» (порог 613 из 1000, ratio и колено до упора)")
         loaded, clips = [], {}
         for st in steps:
             data, label = _bytes(st["file"]), st["file"].stem
@@ -552,7 +598,9 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
                 miss.append(f"клип автоматизации для {label} не поставлен: в этой поставке FL нет шаблона с таким клипом")
             loaded.append(data)
         inserts[i] = {"name": row if i else None, "plugins": loaded, "to": number.get(bus) if i and bus != row.lower() else None,
-                      "level": LEVEL.get(kind), "auto": clips}
+                      "level": LEVEL.get(kind), "auto": clips, "mono": kind == "808" or bool(kind) and "бочк" in row.lower()}
+    if kick:                                # бочка идёт своим путём и ещё в дорожку 808 — с уровнем 0, только для компрессора
+        inserts[number[kick.lower()]]["duck"] = ducked
     flat = str(plan.get("parts") or "")
     for _ in range(3):                      # пояснения в скобках — не части: «(петля молчит в тактах 24–25)»
         flat = re.sub(r"\([^()]*\)", "", flat)
@@ -569,7 +617,8 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
     levels = ", ".join(f"{k} — {v}%" for k, v in LEVEL.items())
     return (f"Проект FL — «{name}» в этой же папке: каналов {len(channels)}, со звуками и нотами; партии — паттернами на весь бит "
             f"в плейлисте, части — маркерами; дорожки микшера подписаны и разведены по шинам. Фейдеры: {levels}, остальное 100% — "
-            f"по чужим проектам под твои рефы; у канала 808 отсечка «сам себя». Эффектов в слотах — {slots}: числа из «Обработки» "
+            f"по чужим проектам под твои рефы; у канала 808 отсечка «сам себя» и ручка громкости {KNOB}%, дорожки 808 и бочки — в моно "
+            f"(разведение стерео «слито»). Эффектов в слотах — {slots}: числа из «Обработки» "
             "выстави сам, настроены только названные здесь."
             + (f" Готовыми настройками: {'; '.join(own)}." if own else "")
             + (f" Включаются сами, клипом автоматизации на mix слота (своя дорожка плейлиста, 100% в тактах, 0% в остальных): "
@@ -578,6 +627,8 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             + (f" Корневая нота канала выставлена: {', '.join(roots)}." if roots else "")
             + (f" Без звука, поставь сам: {', '.join(silent)}." if silent else "")
             + (f" Эффектов не встало (файл базы плагинов не прочитался): {lost}." if lost else "")
+            + (f" Бочка послана в дорожку 808 только сайдчейном (уровень посыла 0, её звук идёт прежним путём): числа компрессора — "
+               "чужого проекта, под бочку вдвое тише твоей; мало или много провала — ручки THRES и RATIO лимитера." if ducked else "")
             + " На слух проект не проверял никто. "
             + ("Папка пробная: утренняя сборка её не трогает." if home else
                "Сохранишь проект в этой папке — завтра она не сотрётся, а переедет рядом, в «00 - <дата> <бит>», со звуками; "
@@ -629,11 +680,12 @@ def _fake() -> bytes:
     """Шаблон в миниатюре — для машин без FL (Actions): события Empty.flp в том же порядке, но дорожек восемь."""
     ev = [(199, b"20.7.0.1702\0"), (156, _int(140000, 4)), (9, b"\0"), (146, FF), (226, bytes(20)),
           (64, bytes(2)), (21, b"\0"), (201, _text("")), (212, bytes(52)), (203, _text("Sampler")), (155, bytes(4)),
-          (128, bytes(4)), (0, b"\1"), (22, b"\1"), (215, bytes(158)), (132, bytes(4)), (143, _int(3, 4)), (20, b"\0"),
+          (128, bytes(4)), (0, b"\1"), (22, b"\1"), (219, struct.pack("<6i", 6400, 10000, 0, 256, 0, 0)), (215, bytes(158)), (132, bytes(4)), (143, _int(3, 4)), (20, b"\0"),
           (99, bytes(2)), (241, _text("Arrangement")), (233, b"")] + [(238, _int(i, 4) + bytes(62)) for i in range(1, 9)]
     for i in range(8):
         ev += [(236, bytes(12)), *((98, _int(s, 2)) for s in range(10)), (235, bytes([i > 0]) + bytes(126)), (154, FF), (147, FF)]
-    return pack(ev + [(225, b"".join(struct.pack("<IBBHi", 0, 192, 31, 0x2000 + i * 64, 12800) for i in range(8))), (133, bytes(4))], 1)
+    return pack(ev + [(225, b"".join(struct.pack("<IBBHi", 0, what, 31, 0x2000 + i * 64, 12800 * (what == 192))      # фейдер, стерео, конец эквалайзера
+                                      for i in range(8) for what in (192, 194, 226))), (133, bytes(4))], 1)
 
 
 def selftest() -> None:
@@ -711,6 +763,24 @@ def selftest() -> None:
             assert ch[5]["on"] == [(4, 8), (10, 12), (356, 404)], ch[5]["on"]
             assert "каналов 5" in line and "808 — 27" in line and "Эффектов в слотах — 9" in line, line
             assert "петля: Gross Beat — такт 2, такт 3 (доли 3–4), такты 90–200" in line and "пресета «Нет такого»" in line, line
+            assert got["duck"] == [] and got["mono"] == [1] and [c["knob"] for c in ch[:2]] == [KNOB, 78], "бочки нет — нет и сайдчейна"
+            # Низ: бочка послана в дорожку 808 сайдчейном (уровень 0) и идёт своим путём, в шину; на 808 лимитер-компрессор
+            # с числами чужого проекта — первым, перед перегрузом; 808 и бочка в моно, хэт — нет; ручка канала 808 до упора
+            low = Path(tmp) / "низ"
+            low.mkdir(exist_ok=True)
+            for i, part in enumerate(("808", "хэт", "бочка"), 1):
+                fsc(low / f"{i:02} {part}.fsc", notes)
+                shutil.copyfile(kits / "Хэт — а.wav", low / f"{part.capitalize()} — звук.wav")
+            line = today(low, serum, {"title": "Низ", "bpm": 120, "fx": {"шина барабанов": "Fruity Soft Clipper"}},
+                         Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp")
+            deep = (low / "Низ.flp").read_bytes()
+            got = read(deep)
+            mix = got["inserts"]
+            assert mix[1] == {"name": "808", "slots": {0: "Fruity Limiter", 1: "Fruity Soft Clipper"}, "to": [4], "level": 125}, mix[1]
+            assert mix[3] == {"name": "бочка", "slots": {}, "to": [1, 4], "level": 100} and mix[2]["to"] == [4], mix[3]
+            assert got["duck"] == [(3, 1)] and got["mono"] == [1, 3] and DUCK[1] in deep and DRIVE[1] in deep, (got["duck"], got["mono"])
+            assert [c["knob"] for c in got["channels"]] == [KNOB, 78, 78] and 0 not in mix, "ручка — только у 808, мастер пуст"
+            assert "сайдчейн от дорожки «бочка»" in line and "только сайдчейном" in line, line
         assert "нет FL Studio" in today(kits, serum, plan, Path(tmp) / "нет.flp", db)
         if PRESETS[1].is_dir():                                 # на Маке — настоящий банк FL: ячейка «1/2 Speed» в нём тридцатая
             assert _cell(_preset("grossbeat", "Momentary"), "1/2 Speed")[4:12] == _int(30, 4) + bytes(4), "заводской банк Momentary"
@@ -729,7 +799,7 @@ def selftest() -> None:
         assert all(c["sound"].startswith(f"{new}/") and (new / Path(c["sound"]).name).exists() for c in read(moved)["channels"] if c["sound"])
         assert repath(moved, new.name, kits.name) == data and (new / "битый.flp").read_bytes() == b"not FL", "кроме путей не тронуто ничего"
     print("проект FL: шаблон, каналы со звуком и пресетом, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
-          "перегруз по умолчанию, ограничитель на мастер сам не встаёт; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
+          "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, 808 и бочка в моно, ручка 808; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
           "сохранённая папка переезжает, пути звуков — за ней")
 
 
@@ -746,7 +816,8 @@ def main() -> None:
         for i, c in enumerate(got["channels"]):
             print(f"канал {i}: {c['name']} — {c['kind']}" + (f", дорожка микшера {c['insert']}" if c["kind"] != "автоматизация" else "")
                   + (f", звук {c['sound']}" if c["sound"] else "") + (f", корневая нота {c['root']}" if c["root"] is not None else "")
-                  + (f", группа отсечки {c['cut']}" if c["cut"] else "") + (f", состояние плагина {len(c['state'])} байт" if c["state"] else "")
+                  + (f", группа отсечки {c['cut']}" if c["cut"] else "") + (f", ручка громкости {c['knob']}%" if c["knob"] != 78 and c["kind"] != "автоматизация" else "")
+                  + (f", состояние плагина {len(c['state'])} байт" if c["state"] else "")
                   + (", держит 1: " + (", ".join(_bars(a, b) for a, b in c["on"]) or "нигде") if c["kind"] == "автоматизация" else ""))
         for x in got["links"]:
             print(f"привязка: канал {x['clip']} → " + (f"микшер {x['insert']}, слот {x['slot'] + 1}, {'mix' if x['mix'] else 'другой параметр'}"
@@ -758,7 +829,9 @@ def main() -> None:
         print("маркеры: " + ", ".join(f"{bar} {name}" for bar, name in got["markers"]))
         for i, x in got["inserts"].items():
             print(f"микшер {i}: {x['name'] or ('мастер' if not i else '—')} — фейдер {x['level']}%, слоты: "
-                  + (", ".join(f"{s + 1} {p}" for s, p in x["slots"].items()) or "пусто") + f"; идёт в {x['to']}")
+                  + (", ".join(f"{s + 1} {p}" for s, p in x["slots"].items()) or "пусто") + f"; идёт в {x['to']}"
+                  + (", моно" if i in got["mono"] else "")
+                  + "".join(f"; в {to} — сайдчейном (уровень посыла 0)" for at, to in got["duck"] if at == i))
     else:
         ap.print_help()
 
