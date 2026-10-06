@@ -1115,6 +1115,12 @@
       "file": "20261006-062425-3417-release.json",
       "published_at": "2026-10-06T08:29:47+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20261006-110754-4598-news.json",
+      "published_at": "2026-10-06T11:08:03+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1270,6 +1276,7 @@
     "6c186600fdc28c9eed0ead26eb267ea69ac6d9e6d9e68de68e0e9796c8d1ab14",
     "986e199e4cf328878c9794c39323db37cd23cb726a52eb31aa44ac6bb1309bd0",
     "e24852aa325566554b824c1e682f9c2f1c9f2cbb587fa93b1c8b1d3b1cbb884f",
-    "73de398f39121246d27692b692b698b68834803690b296340b2c4cc2e410be48"
+    "73de398f39121246d27692b692b698b68834803690b296340b2c4cc2e410be48",
+    "90009000200080004b6ab490e472c56ad66ab652b4964b280000000000000000"
   ]
 }
