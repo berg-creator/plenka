@@ -40,7 +40,7 @@ NAMES = {"noise": ("Шум в паузах", "слышен шум в пауза�
          "dull": ("Нет верха", "нет верхних частот"),
          "room": ("Гул комнаты", "звук не затихает после слов")}
 POST = ("<b>СОВЕТ НЕДЕЛИ: {title}</b>\n\n"
-        "За неделю бот замерил {total} записей голоса, в {hits} из них — {phrase}.\n\n"
+        "За неделю бот замерил {total} {records} голоса, в {hits} из них — {phrase}.\n\n"
         "Как убрать. {advice}\n\n"
         '▸ Проверить свой голос — <a href="https://t.me/{bot}?start=skleyka_sovet">в боте</a>')
 ASK = "С чем борешься при записи?"
@@ -78,11 +78,18 @@ def pick(total: int, hits: dict[str, int], last: str = "") -> str:
     return ""
 
 
+def _records(number: int) -> str:
+    """«21 запись», «22 записи», «25 записей»: за неделю набирается и два десятка, шаблон «N записей» соврал бы."""
+    if 10 < number % 100 < 20 or number % 10 in (0, 5, 6, 7, 8, 9):
+        return "записей"
+    return "запись" if number % 10 == 1 else "записи"
+
+
 def build(key: str, total: int, hits: int) -> dict:
     from . import skleyka
 
     title, phrase = NAMES[key]
-    text = POST.format(title=title.upper(), total=total, hits=hits, phrase=phrase,
+    text = POST.format(title=title.upper(), total=total, records=_records(total), hits=hits, phrase=phrase,
                        advice=html.escape(skleyka.TAKE_FLAWS[key][1]), bot=config.BOT_HANDLE.lstrip("@"))
     return {"rubric": "sovet", "flaw": key, "title": title, "text": text, "comment": ASK}
 
@@ -170,6 +177,7 @@ def _selftest() -> None:
             state.now = lambda: thursday
             post = make(data)
             assert post and post["flaw"] == "noise" and "замерил 6 записей голоса, в 3 из них — слышен шум в паузах" in post["text"]
+            assert [_records(n) for n in (5, 11, 21, 22, 25, 112)] == ["записей", "записей", "запись", "записи", "записей", "записей"]
             assert "?start=skleyka_sovet" in post["text"] and len(post["text"]) <= 1024 and "t0" not in post["text"]
             assert skleyka.TAKE_FLAWS["noise"][1] in post["text"], "совет — из TAKE_FLAWS"
             assert make({"tracks": {}}) is None, "замеров нет"
