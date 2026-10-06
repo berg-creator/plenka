@@ -23,16 +23,26 @@
 
 Отвергнуто: искать источники самому шагу (лицензию должен прочесть тот, кто за неё отвечает); разрешать узел целиком;
 перегонять mp3 и ogg в WAV (потерянного верха не вернуть); класть звуки в репозиторий (MusicRadar запрещает
-раздавать файлы дальше, в git идут только имена); отправлять имена с Мака самому — автоматической записи в main
-с Мака нет, и заводить её без владельца нельзя: шаг меняет `data/beat_sounds.json` в рабочей копии.
+раздавать файлы дальше, в git идут только имена).
+
+Имена в main несёт ночная задача (`--night`, launchd `fm.plenka.set11`, файл задачи — tools/set11/): в своей чистой
+копии `~/plenka-set11` она сбрасывается на origin/main, делает шаг, гоняет селфтест нот и отправляет коммит, только
+если селфтест прошёл, изменён один `data/beat_sounds.json` и имена в нём лишь добавились (`verdict`). Задача пишет
+в открытый репозиторий без людей — поэтому право у неё одно и узкое, а включает её владелец.
+Отвергнуто: звать шаг из помощника треков — незакоммиченная правка списка имён в `~/ПЛЕНКА` остановила бы обновление
+самого помощника; дать задаче отправлять что угодно из копии — ошибка шага ушла бы в main раньше, чем её увидят.
 
     python -m src.noty --net --dry-run   что взял бы ночной шаг, без загрузки звука и записи
     python -m src.noty --net             взять следующий источник в набор 11 (только Мак)
+    python -m src.set11 --night --dry-run   ночная задача вхолостую: копия, шаг без загрузки, селфтест, проба отправки
+    python -m src.set11 --night          то же по-настоящему: имена — коммитом «набор 11: звуки из сети» в main
 """
 from __future__ import annotations
 
+import argparse
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -52,6 +62,11 @@ SOURCES = config.DATA / "net_sources.json"
 STAGE = config.ROOT / ".cache" / "set11" / "net"        # распакованные кандидаты архива, вне git
 MARK = ".сеть.json"                 # отметка в самом наборе: что взято и по каким дням
 ZAMER = Path.home() / ".cache" / "whisper-venv" / "bin" / "python"      # питон с librosa: ноты петли
+# Ночная задача: своя чистая копия репозитория, единственный файл, который ей можно отправить в main, и её журнал
+COPY = Path(os.environ.get("PLENKA_SET11") or Path.home() / "plenka-set11")
+REPO = "https://github.com/berg-creator/plenka.git"
+NAMES = "data/beat_sounds.json"
+LOG, LOG_KB = Path.home() / "Library" / "Logs" / "plenka-set11.log", 256
 
 # Пределы ночного шага. Мерится то, что легло в набор; архив источника качается целиком во временную папку
 # и удаляется (по частям — вдесятеро медленнее, проба 06.10.2026), ему свой потолок
@@ -331,7 +346,7 @@ def night(dry: bool = False, kit: Path | None = None, srcs: list[dict] | None = 
 
 def run(dry: bool = False) -> str:
     """Ночной шаг целиком: источник в набор, потом список имён и замер петель в рабочей копии. В main их несёт
-    не шаг: автоматической записи в открытый репозиторий с Мака нет."""
+    не шаг, а ночная задача из своей копии (`shift`)."""
     said, took = night(dry)
     if took:
         subprocess.run([sys.executable, "-m", "src.noty", "--sounds"], cwd=config.ROOT, check=True, capture_output=True, timeout=600)
@@ -340,6 +355,79 @@ def run(dry: bool = False) -> str:
                            check=True, capture_output=True, timeout=3600)
         said += f"\nсписок имён переписан: {config.BEAT_SOUNDS} — в main его несёт коммит, не этот шаг"
     return said
+
+
+def verdict(changed: list[str], old: dict, new: dict, tested: bool) -> str:
+    """Почему ночная задача не вправе отправить правку в main; пусто — вправе. Только добавленные имена в одном
+    файле и только после селфтеста: список усох — значит, библиотека на Маке прочлась не вся, и утренний автор
+    остался бы без звуков, которые у владельца лежат."""
+    if not tested:
+        return "селфтест нот не прошёл"
+    if changed != [NAMES]:
+        return f"изменён не только {NAMES}: " + ", ".join(changed)[:300]
+    lost = [k for k in ("sounds", "loops", "serum") if set(old.get(k) or ()) - set(new.get(k) or ())]
+    return f"из списка пропали имена ({', '.join(lost)})" if lost else ""
+
+
+def shift(dry: bool = False) -> str:
+    """Ночная задача: шаг набора 11 в своей чистой копии и имена — коммитом в main. Копию заводит сама, каждый раз
+    сбрасывает её на origin/main: вчерашняя неотправленная правка не копится, имена всё равно переписываются
+    с диска. Питон — тот же, которым запущена: окружение помощника из ~/ПЛЕНКА. dry — без загрузки звука,
+    без коммита и отправки, с пробой прав (`git push --dry-run`)."""
+    def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(COPY), "-c", "core.quotepath=off", *args], capture_output=True, text=True,
+                              check=check, timeout=1800)
+
+    def noty(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, "-m", "src.noty", *args], cwd=COPY, capture_output=True, text=True, timeout=3 * 3600)
+
+    assert COPY.resolve() != config.ROOT.resolve(), "копия ночной задачи — та же папка, из которой она запущена: сброс стёр бы работу"
+    if not (COPY / ".git").exists():
+        subprocess.run(["git", "clone", "-q", "--depth", "1", REPO, str(COPY)], check=True, capture_output=True, text=True, timeout=1800)
+    git("fetch", "-q", "origin", "main")
+    git("reset", "-q", "--hard", "FETCH_HEAD")
+    step = noty("--net", *(["--dry-run"] if dry else []))
+    said = [step.stdout.strip() or step.stderr.strip()[-500:] or "шаг промолчал"]
+    tested = noty("--selftest").returncode == 0
+    changed = [line[3:] for line in git("status", "--porcelain").stdout.splitlines()]
+    if changed or not tested:
+        same = changed == [NAMES]
+        why = verdict(changed, json.loads(git("show", f"HEAD:{NAMES}").stdout) if same else {},
+                      json.loads((COPY / NAMES).read_text("utf-8")) if same else {}, tested)
+        if why:
+            said.append(f"в main не отправлено: {why}")
+        elif not dry:
+            git("-c", "user.name=plenka-bot", "-c", "user.email=bot@users.noreply.github.com", "commit", "-q",
+                "-m", "набор 11: звуки из сети", "--", NAMES)
+            for _ in range(2):          # между сбросом и отправкой в main мог прийти чужой коммит: одна повторная попытка
+                sent = git("pull", "-q", "--rebase", "origin", "main", check=False).returncode == 0 \
+                    and git("push", "-q", "origin", "HEAD:main", check=False).returncode == 0
+                if sent:
+                    break
+                git("rebase", "--abort", check=False)
+            said.append("имена отправлены в main" if sent else "в main не отправлено: git отказал при отправке — имена уйдут следующей ночью")
+    else:
+        said.append("селфтест нот прошёл, новых имён нет")
+    if dry:
+        probe = git("push", "--dry-run", "origin", "HEAD:main", check=False)
+        said.append("проба отправки в main: " + ("проходит" if probe.returncode == 0 else f"не проходит — {probe.stderr.strip()[-300:]}"))
+    return "\n".join(said)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Набор 11 из сети: ночная задача со своей копией репозитория")
+    p.add_argument("--night", action="store_true", help="шаг набора 11 в копии ~/plenka-set11 и имена коммитом в main (только Мак, launchd)")
+    p.add_argument("--dry-run", action="store_true", help="с --night: без загрузки звука, без коммита и отправки")
+    a = p.parse_args()
+    if not a.night:
+        return p.print_help()
+    if LOG.exists() and LOG.stat().st_size > LOG_KB * 1024:     # журнал launchd дописывается вечно: остаётся хвост
+        LOG.write_bytes(LOG.read_bytes()[-LOG_KB * 512:])
+    try:
+        said = shift(a.dry_run)
+    except (subprocess.SubprocessError, OSError, ValueError, AssertionError) as e:
+        said = f"не вышло: {(getattr(e, 'stderr', '') or '').strip()[-300:] or e}"
+    print(f"{time.strftime('%Y-%m-%d %H:%M')} {said}", flush=True)
 
 
 def selftest() -> None:
@@ -389,6 +477,12 @@ def selftest() -> None:
             assert "CC BY" not in s["terms"] or (any(mark == f"/{s['name']} - " for mark, _ in noty.CREDIT) and not s.get("from")), \
                 f"{s['id']}: CC BY — автора в noty.CREDIT; по адресу из паспорта такой источник не берётся, пока записка не умеет назвать автора"
 
+        was, now = {"sounds": ["a", "b"], "loops": {"a": "1"}, "serum": {}}, {"sounds": ["a", "b", "c"], "loops": {"a": "1", "c": "2"}}
+        assert verdict([NAMES], was, now, True) == "" and "селфтест" in verdict([NAMES], was, now, False) \
+            and "не только" in verdict([NAMES, "src/noty.py"], was, now, True) and "не только" in verdict(["src/noty.py"], {}, {}, True) \
+            and "пропали имена (sounds)" in verdict([NAMES], was, now | {"sounds": ["a", "c"]}, True) \
+            and "пропали имена (loops)" in verdict([NAMES], was, now | {"loops": {}}, True), \
+            "ночная задача отправляет в main только добавленные имена одного файла и только после селфтеста"
         real, calls = (_download, _get, _notes, STAGE), []
         fake = {ok: good, ok.replace("Kawai", "Clip"): tmp / "срез.wav"}
         def _download(url, dest, cap, seconds=120):         # noqa: F811 — подмена на время проверки
@@ -450,4 +544,9 @@ def selftest() -> None:
         finally:
             _download, _get, _notes, STAGE = real
     print("сеть: отбор бракует тишину, перегруз, шум в паузе, не WAV и петлю не в тактах; адрес с чужого узла — пропуск строкой, "
-          "с разрешённого — принят; пределы ночи и набора держатся, второй раз за сутки шаг молчит — в порядке")
+          "с разрешённого — принят; пределы ночи и набора держатся, второй раз за сутки шаг молчит; ночная задача отправляет только добавленные имена "
+          "одного файла — в порядке")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+Ночная задача набора 11 на Маке владельца (src/set11.py, shift): раз в сутки в 04:30 по часам Мака; проспал —
+launchd запустит при пробуждении. В репозитории лежит образец: задача не работает, пока файл не скопирован
+в ~/Library/LaunchAgents и не загружен, а это делается только со слова владельца — она пишет в main без людей.
+
+  включить:   cp ~/ПЛЕНКА/tools/set11/fm.plenka.set11.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/fm.plenka.set11.plist
+  выключить:  launchctl bootout gui/$(id -u)/fm.plenka.set11; rm ~/Library/LaunchAgents/fm.plenka.set11.plist
+  вхолостую:  команда с флагами — в блоке команд CLAUDE.md (в комментарии XML два дефиса подряд писать нельзя)
+
+zsh здесь только ради «~»: launchd путей не раскрывает, а имя пользователя в открытый репозиторий не идёт. exec —
+чтобы процессом задачи был тот же питон, что у помощника треков: ему macOS уже открыла папку FL в «Документах».
+Журнал — ~/Library/Logs/plenka-set11.log, задача сама держит его не длиннее 256 КБ.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>fm.plenka.set11</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-c</string>
+		<string>cd ~/ПЛЕНКА &amp;&amp; exec .venv/bin/python -m src.set11 --night &gt;&gt; ~/Library/Logs/plenka-set11.log 2&gt;&amp;1</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>4</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+</dict>
+</plist>
