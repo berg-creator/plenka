@@ -18,6 +18,11 @@
 и закрытое, выдуманная ручка хуже нетронутой. Настройка берётся только готовой — пресетом FL по имени
 (Plugin presets/Effects, «Плагин «Пресет»»): состояние плагина целиком, как его сохранил сам FL.
 
+Исключение — эквалайзер. Владелец 06.10.2026: «вообще не забывай про эквализацию всех инструментов и чистку
+не нужных частот». На каждой дорожке с инструментом первым слотом стоит Pro-Q 4 со срезом по роли, и число в нём
+не выдумано: состояние пишет сам плагин, открытый без FL, и сам читает обратно (src/proq.py — там же, почему не
+Fruity Parametric EQ 2). В проект оно ложится записью 53 обёртки VST2, как её пишет FL в проектах владельца (`_vst2`).
+
 Владелец о первом проекте, 06.10.2026: «бит в целом тихий. петля совсем плоха и не в тему, бас слабый как
 и бочка. саунд дизайна не увидел никакого». Отсюда три вещи. Уровни дорожек, ограничитель на мастере, перегруз
 и отсечка 808 — по шести чужим проектам FL под его рефы (data/private/биты/проекты-из-сети/разбор.md); числа
@@ -46,9 +51,9 @@ Serum у владельца — Audio Unit; его состояние — plist,
 Звука сборка не слышит и FL не запускает: селфтест проверяет только, что файл читается обратно.
 
     python -m src.flp --selftest        проект читается обратно: темп, каналы, ноты партии, слоты, уровни и маршруты микшера,
-                                        сайдчейн бочки с 808 и их моно, огибающая 808, пресет и ячейка Gross Beat, клип автоматизации;
-                                        сохранённая папка переезжает с путями
-    python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, паттерны, клипы, дорожки микшера, сайдчейн и моно
+                                        сайдчейн бочки с 808 и их моно, огибающая 808, эквалайзер первым слотом и его срезы,
+                                        пресет и ячейка Gross Beat, клип автоматизации; сохранённая папка переезжает с путями
+    python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, паттерны, клипы, дорожки микшера, сайдчейн и моно, срезы эквалайзера
 """
 from __future__ import annotations
 
@@ -64,6 +69,7 @@ import unicodedata
 import wave
 from pathlib import Path
 
+from . import proq
 from .noty import GM_DRUM, LIBRARY, N, SAMPLED, _notes, _rows, _size, fsc, read_fsc
 
 BASE = Path("/Applications/FL Studio 20.app/Contents/Resources/FL/Data/Templates/Minimal/Empty/Empty.flp")
@@ -183,6 +189,15 @@ def _serum(wrap: list[tuple[int, bytes]], fxp: Path) -> list[tuple[int, bytes]]:
                                 "name": fxp.stem.split(" — ", 1)[-1]}, fmt=plistlib.FMT_BINARY, sort_keys=False)
         ev[213] += struct.pack("<IQIQ", 53, len(state) + 12, 0, len(state)) + state
     return [(e, ev[e]) for e in (201, 212, 213) if e in ev]
+
+
+def _vst2(wrap: bytes, chunk: bytes) -> bytes | None:
+    """Обёртка плагина VST2 из базы FL с куском состояния внутри — эквалайзер дорожки (`proq.states`). Запись состояния —
+    номер 53, последней; перед куском −9, байт 13, −2, длина куска и восемь нулей: так сам FL записал все 165 состояний
+    VST2 в 40 последних проектах владельца, 56 из них — Pro-Q 4. Обёртка не VST2 этого плагина — None."""
+    if struct.pack("<IQ", 51, 4) + proq.ID not in wrap:
+        return None
+    return wrap + struct.pack("<IQiBiI8x", 53, len(chunk) + 21, -9, 13, -2, len(chunk)) + chunk
 
 
 def _channel(proto: list[tuple[int, bytes]], i: int, ch: dict) -> list[tuple[int, bytes]]:
@@ -325,9 +340,11 @@ def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, di
 
 def read(data: bytes) -> dict:
     """Проект обратно — своим разбором: то, что сверяет селфтест и печатает --read."""
-    out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": []}
+    out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": [],
+           "eq": {}}
     text = lambda v: v.decode("utf-16-le").rstrip("\0")
     ch = pat = plug = name = None
+    state = b""
     ins, env = -1, 0
     for e, v in events(data):
         n = int.from_bytes(v, "little") if e < 192 else 0
@@ -385,8 +402,13 @@ def read(data: bytes) -> dict:
             out["inserts"][ins], name = {"name": name, "slots": {}, "to": [], "level": 100}, None
         elif ins >= 0 and e in (201, 203):
             plug = text(v) or plug
+        elif ins >= 0 and e == 213:
+            state = v
         elif ins >= 0 and e == 98 and plug:
             out["inserts"][ins]["slots"][n], plug = plug, None
+            if cut := proq.read(state[state.find(b"FFBS"):]):       # эквалайзер: полосы из куска состояния в обёртке
+                out["eq"][(ins, n)] = cut
+            state = b""
         elif ins >= 0 and e == 235:
             out["inserts"][ins]["to"] = [i for i, b in enumerate(v) if b]
         elif e == 225:
@@ -454,7 +476,7 @@ def _chain(text: str, effects: dict[str, Path], buses: list[str]) -> tuple[list[
         elif key := next((n for n in sorted(effects, key=len, reverse=True) if _norm(raw).startswith(n)), None):
             m = re.match(r"([^«»]*)«([^«»]+)»", raw)
             preset, _, cell = m[2].partition(":") if m and _norm(m[1]) == key else ("", "", "")
-            steps.append({"key": key, "file": effects[key], "preset": preset.strip(), "cell": cell.strip(), "spans": _spans(raw)})
+            steps.append({"key": key, "file": effects[key], "preset": preset.strip(), "cell": cell.strip(), "spans": _spans(raw), "text": raw})
     return steps[:10], bus              # слотов на дорожке микшера FL 20 — десять
 
 
@@ -524,10 +546,11 @@ def _where(f: Path) -> str:
 
 
 def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB, home: Path | None = None,
-          banks=PRESETS, auto: Path = AUTO) -> str:
+          banks=PRESETS, auto: Path = AUTO, eq=proq.states) -> str:
     """Проект бита — в папку «Сегодня», из того, что в ней уже лежит: партитуры, звуки с именем партии впереди,
     дорожки петли и пресеты. plan — поля паспорта (`noty.build`): title, bpm, parts, tricks, fx, preset.
     home — где папка будет лежать, если не здесь (пробная сборка в сторону): пути звуков ведут туда.
+    eq — кто пишет состояния эквалайзеров по спискам полос: сам плагин (`proq.states`), в селфтесте — подмена без него.
     Возвращает строку для записки: что в проекте есть и что осталось рукам."""
     if not base.exists():
         return "Проект FL не собран: на этой машине нет FL Studio 20."
@@ -570,7 +593,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             channels.append({"name": Path(file).stem, "insert": number[key], "sound": where(kits / file), "clip": ticks})
     effects, drums = _effects(db / "Effects"), next((b for b in buses if "барабан" in b), None)
     kick = next((p for p, _ in scores if "бочк" in p.lower()), None)       # вход сайдчейна один — первая бочка
-    proto, inserts, lost, own, timed, miss, ducked = _clip(auto), {}, 0, [], [], [], []
+    proto, inserts, lost, own, timed, miss, ducked, cuts = _clip(auto), {}, 0, [], [], [], [], []
     for i, row in enumerate([MASTER] + rows):
         steps, bus = _chain(fx.get(row.lower(), ""), effects, buses)
         kind = role(row) if 0 < i <= len(rows) - len(buses) else None       # роль — у партий и дорожек петли, не у шин
@@ -585,12 +608,24 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             if st := bare(DRIVE[0]):
                 st["state"] = DRIVE[1]
                 own.append(f"{row}: Fruity Soft Clipper перегрузом (порог 23 из 127, post 111 из 160)")
-        # Сайдчейн: лимитер-компрессор первым на дорожке 808, перед перегрузом; свой Fruity Limiter автора без пресета — он и есть
+        # Сайдчейн: лимитер-компрессор в начало цепочки 808, перед перегрузом (эквалайзер ниже встанет перед ним);
+        # свой Fruity Limiter автора без пресета — он и есть
         if kind == "808" and kick and DUCK[0] in effects and (bare(DUCK[0]) or len(steps) < 10):
             steps[:0] = [] if bare(DUCK[0]) else [blank(DUCK[0])]
             bare(DUCK[0])["state"] = DUCK[1]
             ducked.append(i)
             own.append(f"{row}: Fruity Limiter компрессором — сайдчейн от дорожки «{kick}» (порог 613 из 1000, ratio и колено до упора)")
+        # Эквалайзер — первым слотом каждой дорожки с инструментом: срез ненужного по роли (владелец 06.10.2026: «не забывай
+        # про эквализацию всех инструментов и чистку не нужных частот»; числа — `proq.bands`). Постоянный эквалайзер автора —
+        # он же, с числом из его слов вместо числа роли: двух подряд на дорожке не бывает. Эквалайзер «в тактах …» — эффект
+        # местами, срезу не замена. У шин и мастера роли нет — там только числа из слов автора. Блок стоит после перегруза
+        # и сайдчейна: на 808 выходит эквалайзер → Fruity Limiter → Fruity Soft Clipper, и компрессор слышит уже чистый низ.
+        mine = next((s for s in steps if not s["spans"] and any(w in s["key"] for w in proq.EQS)), None)
+        cut = proq.bands(row, kind, mine["text"] if mine else "")
+        if cut and proq.KEY in effects and ("proq" in mine["key"] if mine else len(steps) < 10):
+            if mine is None:
+                steps.insert(0, mine := blank(proq.KEY))
+            mine.update(key=proq.KEY, file=effects[proq.KEY], eq=cut)
         loaded, clips = [], {}
         for st in steps:
             data, label = _bytes(st["file"]), st["file"].stem
@@ -611,11 +646,24 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
                 timed.append(f"{row}: {label} — " + ", ".join(_bars(a, b) for a, b in st["spans"]))
             elif st["spans"]:
                 miss.append(f"клип автоматизации для {label} не поставлен: в этой поставке FL нет шаблона с таким клипом")
+            cuts += [(i, len(loaded), row, st["eq"])] if st.get("eq") else []
             loaded.append(data)
         inserts[i] = {"name": row if i else None, "plugins": loaded, "to": number.get(bus) if i and bus != row.lower() else None,
                       "level": LEVEL.get(kind), "auto": clips, "mono": kind == "808" or bool(kind) and "бочк" in row.lower()}
     if kick:                                # бочка идёт своим путём и ещё в дорожку 808 — с уровнем 0, только для компрессора
         inserts[number[kick.lower()]]["duck"] = ducked
+    # Состояния эквалайзеров — одним заходом в плагин на весь бит. Не ответил — Pro-Q 4 стоит в слоте без настроек
+    hand = []
+    for (i, slot, row, cut), chunk in zip(cuts, eq([c[3] for c in cuts])):
+        ev = events(inserts[i]["plugins"][slot])
+        if state := chunk and _vst2(dict(ev).get(213, b""), chunk):
+            inserts[i]["plugins"][slot] = pack([(e, state if e == 213 else v) for e, v in ev], 0, 0x30)
+            own.append(f"{row}: Pro-Q 4 — {proq.say(cut)}")
+        else:
+            hand.append(f"{row} ({proq.say(cut)})")
+    miss += [f"срезы Pro-Q 4 не выставились (плагин без FL не ответил или в базе FL он не VST2) — выстави сам: {', '.join(hand)}"] if hand else []
+    if proq.KEY not in effects:
+        miss.append("эквалайзер на дорожки не встал: в базе плагинов FL нет «FabFilter Pro-Q 4»")
     flat = str(plan.get("parts") or "")
     for _ in range(3):                      # пояснения в скобках — не части: «(петля молчит в тактах 24–25)»
         flat = re.sub(r"\([^()]*\)", "", flat)
@@ -636,6 +684,8 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             f"(разведение стерео «слито»). У канала 808 уже включена огибающая громкости с твоими числами — атака 0, hold до упора, "
             f"спад и sustain 0, release как у тебя: руками её ставить не нужно. Эффектов в слотах — {slots}: числа из «Обработки» "
             "выстави сам, настроены только названные здесь."
+            + (" Pro-Q 4 — на каждой дорожке с инструментом, первым слотом, если автор нот не поставил его сам: срез ненужного "
+               "по роли, на шинах и мастере его нет; частоту записал и прочитал обратно сам плагин." if cuts and not hand else "")
             + (f" Готовыми настройками: {'; '.join(own)}." if own else "")
             + (f" Включаются сами, клипом автоматизации на mix слота (своя дорожка плейлиста, 100% в тактах, 0% в остальных): "
                f"{'; '.join(timed)}." if timed else " Эффектов «местами» в проекте нет: автор нот не назвал их с тактами.")
@@ -731,6 +781,23 @@ def selftest() -> None:
         wrapper = lambda name, state: pack([(199, b"11.5.5\0"), (28, b"\3"), (201, _text("Fruity Wrapper")), (212, bytes(52)),
                                             (203, _text(name)), (213, state)], 2, 0x30)
         (db / "Effects" / "Pro-Q 4.fst").write_bytes(wrapper("Pro-Q 4", _int(8, 4)))
+        # Pro-Q 4 видом VST2 — эквалайзер дорожек; кусок его состояния в миниатюре — для машин без плагина: числа полос
+        # на своих местах, остальные ручки нулями (`proq.read`)
+        (db / "Effects" / "Dynamics" / "FabFilter Pro-Q 4.fst").write_bytes(
+            wrapper("FabFilter Pro-Q 4", _int(8, 4) + struct.pack("<IQ", 51, 4) + proq.ID))
+        mini = lambda job: (b"FFBS" + struct.pack("<II", 1, proq.COUNT) + b"".join(
+            struct.pack(f"<{proq.BAND}f", 1, 1, math.log2(hz), db, .5, proq.SHAPES.index(s), *[0] * 17) for s, hz, db in job)
+            ).ljust(12 + 4 * proq.COUNT, b"\0")
+        plug = lambda jobs: proq.states(jobs, lambda js: [mini(j) for j in js])
+        hat = proq.bands("хэт", "барабаны")
+        assert proq.say(proq.bands("808", "808")) == "срез низа 25 Гц, полка низа 155 Гц +2.5 дБ" and proq.say(hat) == "срез низа 350 Гц"
+        assert [proq.bands(r, "барабаны")[0][1] for r in ("бочка", "клэп 2", "снейр", "перк")] == [30, 120, 120, 200], "срез по роли"
+        assert proq.bands("шина музыки", None) == [] and proq.bands("весь бит", None, "Pro-Q 4, −3 дБ на 300 Гц") == [], "у шин и мастера своего нет"
+        assert proq.say(proq.bands("пэд", "музыка", "Pro-Q 4: срез низа до 120 Гц, срез верха от 6,5 кГц")) == "срез низа 120 Гц, срез верха 6500 Гц"
+        # кусок сверяется до проекта: не то, что просили, плагин упал или молчит — None, а не чужие числа в слоте
+        assert plug([hat])[0].endswith(proq.TAIL) and proq.states([hat], lambda js: [mini(proq.bands("808", "808"))]) == [None]
+        assert proq.states([hat], lambda js: [(Path(tmp) / "нет").read_bytes()]) == [None] == proq.states([hat], lambda js: []) and proq.states([]) == []
+        assert _vst2(_int(8, 4) + SERUM_AU, b"FFBS") is None, "обёртка не VST2 — состояние в неё не кладём"
         (db / "Effects" / "Dynamics" / "Fruity Soft Clipper.fst").write_bytes(pack(
             [(199, b"11.5.5\0"), (201, _text("Fruity Soft Clipper")), (212, bytes(52)), (213, bytes(8))], 2, 0x30))
         (db / SERUM).write_bytes(wrapper("Serum", _int(8, 4) + SERUM_AU))
@@ -750,7 +817,12 @@ def selftest() -> None:
         for base, auto in [(_fake(), clip)] + [(BASE.read_bytes(), AUTO.read_bytes())] * (BASE.exists() and AUTO.exists()):   # на Маке — и шаблоны FL
             (Path(tmp) / "Empty.flp").write_bytes(base)
             (Path(tmp) / "Auto.flp").write_bytes(auto)
-            line = today(kits, serum, plan, Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp")
+            # плагин эквалайзера молчит: Pro-Q 4 в слоте без настроек, числа — в записке
+            line = today(kits, serum, plan, Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp", lambda jobs: [None] * len(jobs))
+            got = read((kits / "А x Б — Проба.flp").read_bytes())
+            assert got["inserts"][2]["slots"] == {0: "FabFilter Pro-Q 4"} and not got["eq"], got["inserts"][2]
+            assert "выстави сам: 808 (срез низа 25 Гц, полка низа 155 Гц +2.5 дБ), хэт (срез низа 350 Гц)" in line, line
+            line = today(kits, serum, plan, Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp", plug)
             data = (kits / "А x Б — Проба.flp").read_bytes()
             got = read(data)
             ch = got["channels"]
@@ -770,33 +842,44 @@ def selftest() -> None:
             assert mix[0] == {"name": None, "slots": {0: "Pro-Q 4", 1: "Fruity Soft Clipper"}, "to": [], "level": 100}, mix[0]
             assert b"limiter-loud" not in data and b"limiter-default" not in data, "ограничитель на мастер сам не встаёт"
             # 808: поднят, клиппер автор назвал без чисел — он с числами чужого проекта; мелодия и петля опущены, барабаны — 100
-            assert mix[1] == {"name": "808", "slots": {0: "Fruity Soft Clipper"}, "to": [6], "level": 125} and DRIVE[1] in data, mix[1]
-            assert mix[2] == {"name": "хэт", "slots": {}, "to": [6], "level": 100}, "808 и барабаны — в свою шину"
-            assert mix[3] == {"name": "мелодия", "slots": {0: "Pro-Q 4"}, "to": [5], "level": 57}, mix[3]
-            assert mix[4] == {"name": "петля", "slots": {0: "Fruity Soft Clipper", 1: "Pro-Q 4", 2: "Gross Beat"}, "to": [0], "level": 57}, mix[4]
-            assert mix[5]["slots"] == {0: "Pro-Q 4"} and mix[6] == {"name": "шина барабанов и 808", "slots": {0: "Fruity Soft Clipper"},
-                                                                    "to": [0], "level": 100}
+            assert mix[1] == {"name": "808", "slots": {0: "FabFilter Pro-Q 4", 1: "Fruity Soft Clipper"}, "to": [6], "level": 125} and DRIVE[1] in data, mix[1]
+            assert mix[2] == {"name": "хэт", "slots": {0: "FabFilter Pro-Q 4"}, "to": [6], "level": 100}, "808 и барабаны — в свою шину"
+            assert mix[3] == {"name": "мелодия", "slots": {0: "FabFilter Pro-Q 4"}, "to": [5], "level": 57}, mix[3]
+            assert mix[4] == {"name": "петля", "slots": {0: "Fruity Soft Clipper", 1: "FabFilter Pro-Q 4", 2: "Gross Beat"}, "to": [0], "level": 57}, mix[4]
+            assert mix[5]["slots"] == {0: "FabFilter Pro-Q 4"} and mix[6] == {"name": "шина барабанов и 808", "slots": {0: "Fruity Soft Clipper"},
+                                                                              "to": [0], "level": 100}
+            # эквалайзер: первым слотом у дорожки с инструментом, срез по роли; постоянный Pro-Q 4 автора — он же, на своём
+            # месте и с числом из его слов (150 вместо 180); у шины — только слова автора, на мастере и барабанной шине
+            # своего нет; в файле — запись 53 обёртки VST2, как её пишет сам FL
+            assert {k: proq.say(v) for k, v in got["eq"].items()} == {
+                (1, 0): "срез низа 25 Гц, полка низа 155 Гц +2.5 дБ", (2, 0): "срез низа 350 Гц", (3, 0): "срез низа 150 Гц",
+                (4, 1): "срез низа 180 Гц", (5, 0): "срез верха 6000 Гц"}, got["eq"]
+            assert struct.pack("<IQiBiI8x", 53, len(plug([hat])[0]) + 21, -9, 13, -2, len(plug([hat])[0])) + plug([hat])[0] in data
+            assert "хэт: Pro-Q 4 — срез низа 350 Гц" in line and "мелодия: Pro-Q 4 — срез низа 150 Гц" in line and "выстави сам: 808" not in line, line
             # Gross Beat — банк пресета с выбранной ячейкой; клип ведёт mix его слота: 1 в названных тактах, конец — по концу бита
             assert half in data and b"gross-default" not in data, "в слоте — пресет с ячейкой «1/2 Speed»"
             assert got["links"] == [{"clip": 5, "mix": True, "insert": 4, "slot": 2}], got["links"]
             assert ch[5]["on"] == [(4, 8), (10, 12), (356, 404)], ch[5]["on"]
-            assert "каналов 5" in line and "808 — 27" in line and "Эффектов в слотах — 9" in line, line
+            assert "каналов 5" in line and "808 — 27" in line and "Эффектов в слотах — 11" in line, line
             assert "петля: Gross Beat — такт 2, такт 3 (доли 3–4), такты 90–200" in line and "пресета «Нет такого»" in line, line
             assert got["duck"] == [] and got["mono"] == [1] and [c["knob"] for c in ch[:2]] == [KNOB, 78], "бочки нет — нет и сайдчейна"
             # Низ: бочка послана в дорожку 808 сайдчейном (уровень 0) и идёт своим путём, в шину; на 808 лимитер-компрессор
-            # с числами чужого проекта — первым, перед перегрузом; 808 и бочка в моно, хэт — нет; ручка канала 808 до упора
+            # с числами чужого проекта — перед перегрузом, сразу за эквалайзером: тот на дорожке первый; 808 и бочка в моно,
+            # хэт — нет; ручка канала 808 до упора
             low = Path(tmp) / "низ"
             low.mkdir(exist_ok=True)
             for i, part in enumerate(("808", "хэт", "бочка"), 1):
                 fsc(low / f"{i:02} {part}.fsc", notes)
                 shutil.copyfile(kits / "Хэт — а.wav", low / f"{part.capitalize()} — звук.wav")
             line = today(low, serum, {"title": "Низ", "bpm": 120, "fx": {"шина барабанов": "Fruity Soft Clipper"}},
-                         Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp")
+                         Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp", plug)
             deep = (low / "Низ.flp").read_bytes()
             got = read(deep)
             mix = got["inserts"]
-            assert mix[1] == {"name": "808", "slots": {0: "Fruity Limiter", 1: "Fruity Soft Clipper"}, "to": [4], "level": 125}, mix[1]
-            assert mix[3] == {"name": "бочка", "slots": {}, "to": [1, 4], "level": 100} and mix[2]["to"] == [4], mix[3]
+            assert mix[1] == {"name": "808", "slots": {0: "FabFilter Pro-Q 4", 1: "Fruity Limiter", 2: "Fruity Soft Clipper"},
+                              "to": [4], "level": 125}, mix[1]
+            assert mix[3] == {"name": "бочка", "slots": {0: "FabFilter Pro-Q 4"}, "to": [1, 4], "level": 100} and mix[2]["to"] == [4], mix[3]
+            assert proq.say(got["eq"][3, 0]) == "срез низа 30 Гц" and proq.say(got["eq"][1, 0]).startswith("срез низа 25 Гц, полка низа"), got["eq"]
             assert got["duck"] == [(3, 1)] and got["mono"] == [1, 3] and DUCK[1] in deep and DRIVE[1] in deep, (got["duck"], got["mono"])
             assert [c["knob"] for c in got["channels"]] == [KNOB, 78, 78] and 0 not in mix, "ручка — только у 808, мастер пуст"
             assert [c["env"] for c in got["channels"]] == [HOLD, None, None], "огибающая — у 808, у бочки её нет"
@@ -819,7 +902,9 @@ def selftest() -> None:
         assert all(c["sound"].startswith(f"{new}/") and (new / Path(c["sound"]).name).exists() for c in read(moved)["channels"] if c["sound"])
         assert repath(moved, new.name, kits.name) == data and (new / "битый.flp").read_bytes() == b"not FL", "кроме путей не тронуто ничего"
     print("проект FL: шаблон, каналы со звуком и пресетом, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
-          "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, 808 и бочка в моно, ручка и огибающая громкости 808; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
+          "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, 808 и бочка в моно, ручка и огибающая громкости 808; "
+          "эквалайзер первым слотом дорожки с инструментом, срез по роли и по словам автора, на шинах и мастере своего нет, плагин молчит — "
+          "числа в записке; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
           "сохранённая папка переезжает, пути звуков — за ней")
 
 
@@ -850,7 +935,8 @@ def main() -> None:
         print("маркеры: " + ", ".join(f"{bar} {name}" for bar, name in got["markers"]))
         for i, x in got["inserts"].items():
             print(f"микшер {i}: {x['name'] or ('мастер' if not i else '—')} — фейдер {x['level']}%, слоты: "
-                  + (", ".join(f"{s + 1} {p}" for s, p in x["slots"].items()) or "пусто") + f"; идёт в {x['to']}"
+                  + (", ".join(f"{s + 1} {p}" + (f" ({proq.say(got['eq'][i, s])})" if (i, s) in got["eq"] else "")
+                               for s, p in x["slots"].items()) or "пусто") + f"; идёт в {x['to']}"
                   + (", моно" if i in got["mono"] else "")
                   + "".join(f"; в {to} — сайдчейном (уровень посыла 0)" for at, to in got["duck"] if at == i))
     else:
