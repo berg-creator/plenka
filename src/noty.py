@@ -237,6 +237,12 @@ OWN = {"KITS/01 - ASAP Rocky Kit": ("808-909", "MusicRadar 808"), "KITS/03 - Spa
 LISTED += tuple((kit, f"{role}/{source} - *.wav") for kit, sources in OWN.items() for source in sources for role in ROLES)
 LISTED += tuple(("KITS/Maxeyy Stash V5", f"{role}/*.wav")
                 for role in ("Kicks", "808s", "Hihats", "Openhats", "Claps", "Snares", "Percs", "FX", "Risers & Crashes"))
+# Наборы 13 «Afterlife» и 14 «300 Subs» (blvckmorphine, из загрузок владельца 07.10.2026): барабаны и 808 условий не несут
+# («Enjoy the sounds»), одиночные звуки — по правилу набора 12, только с нотой замера в скобках. Петли обоих (Loops,
+# Percussion Loops) — 50/50 с доходов, тег @blvckmorphine и «prod. имя x blvckmorphine» (TERMS.txt рядом): в бит на раздачу
+# не идут, в LISTED их нет намеренно
+LISTED += tuple((kit, f"{role}/*.wav") for kit in ("KITS/13 - Afterlife Kit", "KITS/14 - 300 Subs Kit") for role in ROLES)
+LISTED += (("KITS/13 - Afterlife Kit", "Oneshots/* (*).wav"),)
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 TODAY = "00 - Сегодня"      # папка копий на сегодня — в KITS и в User пресетов Serum; чистится только она
 
