@@ -41,6 +41,11 @@ Fruity Parametric EQ 2). В проект оно ложится записью 53
 дорожки, а срез на Side в его Pro-Q 4 (`proq.BASS`) — так делает сам владелец, а ручку он с 808 в нашем проекте снял.
 Запрет ограничителя на мастере это не трогает: этот стоит на дорожке 808. Там же огибающая громкости канала 808 (HOLD): владелец включал её руками в каждом нашем проекте.
 
+Владелец об утреннем «Заело», 07.10.2026: бит «пустовато звучит» — и сам поставил на дорожку «пэд» Fruity Stereo Enhancer.
+Он же стоит на одном слое музыки в каждом из пяти его битов, а у нас музыка шла вся по центру. Теперь проект ставит его
+сам, последним слотом опоры, с числами владельца — константа WIDE. Отвергнуто: ставить на шину музыки — у него он
+на шине не стоит ни разу, и в «Заело», где шина была, он выбрал дорожку.
+
 Проект, сохранённый владельцем в «Сегодня», утром не стирается (`keep`): папка переезжает рядом, пути звуков
 в проекте переписываются, остальное — байт в байт.
 Serum у владельца — Audio Unit; его состояние — plist, где поле vstdata — файл .fxp целиком (снято с его
@@ -53,8 +58,10 @@ Serum у владельца — Audio Unit; его состояние — plist,
 
     python -m src.flp --selftest        проект читается обратно: темп, каналы, ноты партии, слоты, уровни и маршруты микшера,
                                         сайдчейн бочки с 808 и их моно, огибающая 808, эквалайзер первым слотом и его срезы,
-                                        пресет и ячейка Gross Beat, клип автоматизации; сохранённая папка переезжает с путями
-    python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, паттерны, клипы, дорожки микшера, сайдчейн и моно, срезы эквалайзера
+                                        расширитель стерео на опоре, пресет и ячейка Gross Beat, клип автоматизации;
+                                        сохранённая папка переезжает с путями
+    python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, паттерны, клипы, дорожки микшера, сайдчейн и моно, срезы эквалайзера,
+                                        числа расширителя стерео
 """
 from __future__ import annotations
 
@@ -125,6 +132,18 @@ KNOB = 100
 # сохранённый им в 12:14; из файла сборщика канал выходил с выключенной. Остальное в записи — как в шаблоне, и у него тоже.
 # Сколько секунд длится hold «до упора», не мерил никто.
 HOLD = (100, 65536, 100, 0, 100)
+# Ширина музыки — Fruity Stereo Enhancer на одном слое музыки, последним слотом. Состояние — шесть чисел по порядку ручек
+# (Tag в форме плагина, Fruity Stereo Enhancer_x64.dylib; умолчание — 0, 256, 0, 0, 1, 0): панорама −18 из ±128, громкость
+# 256, разведение стерео −54 из ±96 (значок «плюс» у ручки слева: минус — шире; у ручки дорожки так же, MONO), сдвиг фазы
+# −248 из ±512 (к букве «L»), место сдвига 1 и инверсия 0. Это заводской пресет «For strings» байт в байт, и у владельца он
+# один во всех девяти слотах шести проектов — «Заело» 07.10.2026 (дорожка «пэд», слот 2: поставил сам в нашем проекте)
+# и пять битов Beats 4 PLENKA; от бита к биту не меняется ни одно число. Стоит он на одном слое музыки в каждом проекте
+# и ни разу на шине: в пяти из шести это опора — аккорды или редкие долгие ноты (BEAT 1, 2, 3, 5, «Заело»), в BEAT 4 —
+# мелодия; в BEAT 3 ещё на тарелке и на бочке-эффекте, их не повторяем. Опора у нас — партия музыки с самой долгой нотой
+# в среднем: этой меркой его слой находится в четырёх его битах из пяти и в «Заело» среди партий нашей сборки.
+# ponytail: у бита с одной партией нот (мелодия поверх петли) расширитель встанет на неё — дорожек петли у владельца
+# с ним нет, это догадка; скажет «не туда» — ставить на дорожку петли или не ставить вовсе. На слух не проверял никто.
+WIDE = ("fruitystereoenhancer", struct.pack("<6i", -18, 256, -54, -248, 1, 0))
 # Ограничителя на мастер проект сам не ставит, хотя в чужих проектах он есть в 4 из 6: владелец 06.10.2026 о пробном
 # проекте с Fruity Limiter «Max loudness» — «Очень делает плоским звук. Не делай так».
 # «в тактах 23, 31–32 и 59.4» в конце звена fx: такт, такты подряд, доля такта (59.4 — четвёртая)
@@ -351,7 +370,7 @@ def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, di
 def read(data: bytes) -> dict:
     """Проект обратно — своим разбором: то, что сверяет селфтест и печатает --read."""
     out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": [],
-           "eq": {}}
+           "eq": {}, "wide": {}}
     text = lambda v: v.decode("utf-16-le").rstrip("\0")
     ch = pat = plug = name = None
     state = b""
@@ -415,6 +434,8 @@ def read(data: bytes) -> dict:
         elif ins >= 0 and e == 213:
             state = v
         elif ins >= 0 and e == 98 and plug:
+            if plug == "Fruity Stereo Enhancer" and len(state) == 24:   # расширитель: шесть ручек по порядку (WIDE)
+                out["wide"][(ins, n)] = struct.unpack("<6i", state)
             out["inserts"][ins]["slots"][n], plug = plug, None
             if cut := proq.read(state[state.find(b"FFBS"):]):       # эквалайзер: полосы из куска состояния в обёртке
                 out["eq"][(ins, n)] = cut
@@ -603,6 +624,8 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             channels.append({"name": Path(file).stem, "insert": number[key], "sound": where(kits / file), "clip": ticks})
     effects, drums = _effects(db / "Effects"), next((b for b in buses if "барабан" in b), None)
     kick = next((p for p, _ in scores if "бочк" in p.lower()), None)       # вход сайдчейна один — первая бочка
+    bed = max(((sum(n.ln for n in ns) / len(ns), p) for p, ns in scores if ns and role(p) == "музыка"),
+              key=lambda x: x[0], default=(0, None))[1]                     # опора — партия музыки с самой долгой нотой в среднем
     proto, inserts, lost, own, timed, miss, ducked, cuts = _clip(auto), {}, 0, [], [], [], [], []
     for i, row in enumerate([MASTER] + rows):
         steps, bus = _chain(fx.get(row.lower(), ""), effects, buses)
@@ -636,6 +659,13 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             if mine is None:
                 steps.insert(0, mine := blank(proq.KEY))
             mine.update(key=proq.KEY, file=effects[proq.KEY], eq=cut)
+        # Ширина: расширитель с числами владельца — последним слотом опоры, за эквалайзером и звеньями автора;
+        # свой Fruity Stereo Enhancer автора без пресета — он и есть
+        if row == bed and WIDE[0] in effects and (bare(WIDE[0]) or len(steps) < 10):
+            steps += [] if bare(WIDE[0]) else [blank(WIDE[0])]
+            bare(WIDE[0])["state"] = WIDE[1]
+            own.append(f"{row}: Fruity Stereo Enhancer — ширина опоры, как в твоих битах (пресет «For strings»: разведение −54 из 96, "
+                       "сдвиг фазы −248 из 512, панорама −18 из 128)")
         loaded, clips = [], {}
         for st in steps:
             data, label = _bytes(st["file"]), st["file"].stem
@@ -820,6 +850,7 @@ def selftest() -> None:
         native = lambda name, state: pack([(199, b"11.5.5\0"), (201, _text(name)), (212, bytes(52)), (213, state)], 2, 0x30)
         (db / "Effects" / "Gross Beat.fst").write_bytes(native("Gross Beat", b"gross-default"))
         (db / "Effects" / "Dynamics" / "Fruity Limiter.fst").write_bytes(native("Fruity Limiter", b"limiter-default"))
+        (db / "Effects" / "Fruity Stereo Enhancer.fst").write_bytes(native("Fruity Stereo Enhancer", struct.pack("<6i", 0, 256, 0, 0, 1, 0)))
         # банк Gross Beat в миниатюре: шапка и 72 ячейки — имя с байтом длины, 23 байта, число точек, точка, хвост
         cell = lambda name: bytes([len(name)]) + name.encode() + bytes(23) + _int(1, 4) + bytes(44)
         bank = _int(4, 4) + bytes(44) + b"".join(cell({0: "Empty", 30: "1/2 Speed", 36: "Empty", 41: "1/4 Bt Gate"}.get(k, "")) for k in range(72))
@@ -860,7 +891,7 @@ def selftest() -> None:
             # 808: поднят, клиппер автор назвал без чисел — он с числами чужого проекта; мелодия и петля опущены, барабаны — 100
             assert mix[1] == {"name": "808", "slots": {0: "FabFilter Pro-Q 4", 1: "Fruity Soft Clipper"}, "to": [6], "level": 125} and DRIVE[1] in data, mix[1]
             assert mix[2] == {"name": "хэт", "slots": {0: "FabFilter Pro-Q 4"}, "to": [6], "level": 100}, "808 и барабаны — в свою шину"
-            assert mix[3] == {"name": "мелодия", "slots": {0: "FabFilter Pro-Q 4"}, "to": [5], "level": 71}, mix[3]
+            assert mix[3] == {"name": "мелодия", "slots": {0: "FabFilter Pro-Q 4", 1: "Fruity Stereo Enhancer"}, "to": [5], "level": 71}, mix[3]
             assert mix[4] == {"name": "петля", "slots": {0: "Fruity Soft Clipper", 1: "FabFilter Pro-Q 4", 2: "Gross Beat"}, "to": [0], "level": 71}, mix[4]
             assert mix[5]["slots"] == {0: "FabFilter Pro-Q 4"} and mix[6] == {"name": "шина барабанов и 808", "slots": {0: "Fruity Soft Clipper"},
                                                                               "to": [0], "level": 100}
@@ -876,7 +907,7 @@ def selftest() -> None:
             assert half in data and b"gross-default" not in data, "в слоте — пресет с ячейкой «1/2 Speed»"
             assert got["links"] == [{"clip": 5, "mix": True, "insert": 4, "slot": 2}], got["links"]
             assert ch[5]["on"] == [(4, 8), (10, 12), (356, 404)], ch[5]["on"]
-            assert "каналов 5" in line and "808 — 27" in line and "Эффектов в слотах — 11" in line, line
+            assert "каналов 5" in line and "808 — 27" in line and "Эффектов в слотах — 12" in line, line
             assert "петля: Gross Beat — такт 2, такт 3 (доли 3–4), такты 90–200" in line and "пресета «Нет такого»" in line, line
             assert got["duck"] == [] and got["mono"] == [] and [c["knob"] for c in ch[:2]] == [KNOB, 78], "бочки нет — нет и сайдчейна"
             # Низ: бочка послана в дорожку 808 сайдчейном (уровень 0) и идёт своим путём, в шину; на 808 лимитер-компрессор
@@ -900,6 +931,15 @@ def selftest() -> None:
             assert [c["knob"] for c in got["channels"]] == [KNOB, 78, 78] and 0 not in mix, "ручка — только у 808, мастер пуст"
             assert [c["env"] for c in got["channels"]] == [HOLD, None, None], "огибающая — у 808, у бочки её нет"
             assert "сайдчейн от дорожки «бочка»" in line and "только сайдчейном" in line, line
+            # Ширина: расширитель с числами владельца — на опоре (из двух партий музыки — та, где ноты дольше), за эквалайзером;
+            # у мелодии его нет
+            air = Path(tmp) / "ширь"
+            air.mkdir(exist_ok=True)
+            fsc(air / "01 мелодия.fsc", notes), fsc(air / "02 пэд.fsc", [N(0, 32, 48), N(32, 32, 44)])
+            line = today(air, serum, {"title": "Ширь", "bpm": 120}, Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp", plug)
+            got = read((air / "Ширь.flp").read_bytes())
+            assert got["wide"] == {(2, 1): struct.unpack("<6i", WIDE[1])} and "пэд: Fruity Stereo Enhancer" in line, (got["wide"], line)
+            assert [x["slots"] for x in got["inserts"].values()] == [{0: "FabFilter Pro-Q 4"}, {0: "FabFilter Pro-Q 4", 1: "Fruity Stereo Enhancer"}]
         assert "нет FL Studio" in today(kits, serum, plan, Path(tmp) / "нет.flp", db)
         if PRESETS[1].is_dir():                                 # на Маке — настоящий банк FL: ячейка «1/2 Speed» в нём тридцатая
             assert _cell(_preset("grossbeat", "Momentary"), "1/2 Speed")[4:12] == _int(30, 4) + bytes(4), "заводской банк Momentary"
@@ -920,7 +960,7 @@ def selftest() -> None:
     print("проект FL: шаблон, каналы со звуком и пресетом, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
           "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, бочка в моно, низ 808 — срезом Side и полкой Mid в эквалайзере, ручка и огибающая громкости 808; "
           "эквалайзер первым слотом дорожки с инструментом, срез по роли и по словам автора, на шинах и мастере своего нет, плагин молчит — "
-          "числа в записке; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
+          "числа в записке; расширитель стерео с числами владельца — последним слотом опоры; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота; сбой — строка в записке; "
           "сохранённая папка переезжает, пути звуков — за ней")
 
 
@@ -952,6 +992,8 @@ def main() -> None:
         for i, x in got["inserts"].items():
             print(f"микшер {i}: {x['name'] or ('мастер' if not i else '—')} — фейдер {x['level']}%, слоты: "
                   + (", ".join(f"{s + 1} {p}" + (f" ({proq.say(got['eq'][i, s])})" if (i, s) in got["eq"] else "")
+                               + (" (разведение {2} из 96, сдвиг фазы {3} из 512, панорама {0} из 128)".format(*got["wide"][i, s])
+                                  if (i, s) in got["wide"] else "")
                                for s, p in x["slots"].items()) or "пусто") + f"; идёт в {x['to']}"
                   + (", моно" if i in got["mono"] else "")
                   + "".join(f"; в {to} — сайдчейном (уровень посыла 0)" for at, to in got["duck"] if at == i))
