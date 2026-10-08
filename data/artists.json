@@ -508,7 +508,8 @@
         "witch-house",
         "electronic"
       ],
-      "tier": "scene"
+      "tier": "scene",
+      "voice": "f"
     },
     {
       "deezer_id": 8669076,
@@ -842,7 +843,8 @@
       "tags": [
         "trip-hop"
       ],
-      "tier": "legend"
+      "tier": "legend",
+      "voice": "f"
     },
     {
       "deezer_id": 612,
@@ -1359,7 +1361,8 @@
         "ru-pop-rap",
         "drama"
       ],
-      "tier": "ru_pop"
+      "tier": "ru_pop",
+      "voice": "f"
     },
     {
       "deezer_id": 65517932,
@@ -1424,7 +1427,8 @@
       "tags": [
         "ru-pop"
       ],
-      "tier": "ru_pop"
+      "tier": "ru_pop",
+      "voice": "f"
     },
     {
       "deezer_id": 1582524,
