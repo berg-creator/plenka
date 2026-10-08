@@ -1,0 +1,566 @@
+{
+ "sounds": {
+  "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #11 (C3).wav": {
+   "kind": "арп",
+   "bright": 1166
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #17 (C4).wav": {
+   "kind": "арп",
+   "bright": 4701
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #19 (C5).wav": {
+   "kind": "арп",
+   "bright": 4136
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #20 (C5).wav": {
+   "kind": "арп",
+   "bright": 731
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #24 (C2).wav": {
+   "kind": "арп",
+   "bright": 2694
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #26 (C4).wav": {
+   "kind": "арп",
+   "bright": 4877
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #6 (C5).wav": {
+   "kind": "арп",
+   "bright": 1943
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #9 (C4).wav": {
+   "kind": "арп",
+   "bright": 3768
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #1 (G5).wav": {
+   "kind": "клавиши",
+   "bright": 609
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #11 (C6).wav": {
+   "kind": "клавиши",
+   "bright": 1311
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #12 (C5).wav": {
+   "kind": "клавиши",
+   "bright": 448
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #13 (C5).wav": {
+   "kind": "клавиши",
+   "bright": 940
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #14 (C4).wav": {
+   "kind": "клавиши",
+   "bright": 492
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #15 (C5).wav": {
+   "kind": "клавиши",
+   "bright": 1084
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #16 (C5).wav": {
+   "kind": "клавиши",
+   "bright": 972
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #17 (C4).wav": {
+   "kind": "клавиши",
+   "bright": 308
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #18 (C4).wav": {
+   "kind": "клавиши",
+   "bright": 1403
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #19 (C4).wav": {
+   "kind": "клавиши",
+   "bright": 205
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #2 (C5).wav": {
+   "kind": "клавиши",
+   "bright": 1316
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #20 (C6).wav": {
+   "kind": "клавиши",
+   "bright": 715
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #5 (C6).wav": {
+   "kind": "клавиши",
+   "bright": 1775
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #6 (C6).wav": {
+   "kind": "клавиши",
+   "bright": 1331
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #7 (C5).wav": {
+   "kind": "клавиши",
+   "bright": 692
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #8 (C6).wav": {
+   "kind": "клавиши",
+   "bright": 886
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Keys - KEY #9 (C6).wav": {
+   "kind": "клавиши",
+   "bright": 616
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #1 (C5).wav": {
+   "kind": "лид",
+   "bright": 1403
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #10 (C5).wav": {
+   "kind": "лид",
+   "bright": 941
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #11 (C6).wav": {
+   "kind": "лид",
+   "bright": 4115
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #12 (C5).wav": {
+   "kind": "лид",
+   "bright": 2611
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #13 (C5).wav": {
+   "kind": "лид",
+   "bright": 1500
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #14 (C5).wav": {
+   "kind": "лид",
+   "bright": 299
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #15 (C5).wav": {
+   "kind": "лид",
+   "bright": 4722
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #16 (C6).wav": {
+   "kind": "лид",
+   "bright": 3783
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #18 (C4).wav": {
+   "kind": "лид",
+   "bright": 499
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #19 (C5).wav": {
+   "kind": "лид",
+   "bright": 791
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #2 (C5).wav": {
+   "kind": "лид",
+   "bright": 5898
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #21 (C6).wav": {
+   "kind": "лид",
+   "bright": 1470
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #22 (C6).wav": {
+   "kind": "лид",
+   "bright": 530
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #23 (C6).wav": {
+   "kind": "лид",
+   "bright": 3141
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #24 (C5).wav": {
+   "kind": "лид",
+   "bright": 6901
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #25 (C5).wav": {
+   "kind": "лид",
+   "bright": 4830
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #26 (C5).wav": {
+   "kind": "лид",
+   "bright": 2404
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #28 (C6).wav": {
+   "kind": "лид",
+   "bright": 4136
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #29 (C5).wav": {
+   "kind": "лид",
+   "bright": 5284
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #3 (C6).wav": {
+   "kind": "лид",
+   "bright": 5715
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #30 (C6).wav": {
+   "kind": "лид",
+   "bright": 2905
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #4 (C5).wav": {
+   "kind": "лид",
+   "bright": 5191
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #5 (C6).wav": {
+   "kind": "лид",
+   "bright": 2059
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #6 (C3).wav": {
+   "kind": "лид",
+   "bright": 5230
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #7 (C5).wav": {
+   "kind": "лид",
+   "bright": 5347
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #8 (C5).wav": {
+   "kind": "лид",
+   "bright": 3497
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Leads - LEAD #9 (C5).wav": {
+   "kind": "лид",
+   "bright": 3982
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #10 (C5).wav": {
+   "kind": "пэд",
+   "bright": 767
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #11 (C5).wav": {
+   "kind": "пэд",
+   "bright": 791
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #12 (C4).wav": {
+   "kind": "пэд",
+   "bright": 1317
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #17 (C5).wav": {
+   "kind": "пэд",
+   "bright": 651
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #18 (C4).wav": {
+   "kind": "пэд",
+   "bright": 387
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #20 (C5).wav": {
+   "kind": "пэд",
+   "bright": 882
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #21 (C5).wav": {
+   "kind": "пэд",
+   "bright": 1177
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #22 (C6).wav": {
+   "kind": "пэд",
+   "bright": 1409
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #23 (C6).wav": {
+   "kind": "пэд",
+   "bright": 543
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #24 (C5).wav": {
+   "kind": "пэд",
+   "bright": 588
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #27 (F6).wav": {
+   "kind": "пэд",
+   "bright": 598
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #4 (C5).wav": {
+   "kind": "пэд",
+   "bright": 416
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #5 (C5).wav": {
+   "kind": "пэд",
+   "bright": 1206
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #6 (C5).wav": {
+   "kind": "пэд",
+   "bright": 647
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Pads - PAD #7 (C4).wav": {
+   "kind": "пэд",
+   "bright": 330
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #10 (C5).wav": {
+   "kind": "плак",
+   "bright": 668
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #11 (C5).wav": {
+   "kind": "плак",
+   "bright": 1053
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #12 (C5).wav": {
+   "kind": "плак",
+   "bright": 3101
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #13 (C6).wav": {
+   "kind": "плак",
+   "bright": 3365
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #14 (C5).wav": {
+   "kind": "плак",
+   "bright": 3537
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #15 (C6).wav": {
+   "kind": "плак",
+   "bright": 1287
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #16 (C5).wav": {
+   "kind": "плак",
+   "bright": 610
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #18 (C5).wav": {
+   "kind": "плак",
+   "bright": 743
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #19 (C5).wav": {
+   "kind": "плак",
+   "bright": 322
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #21 (C6).wav": {
+   "kind": "плак",
+   "bright": 805
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #22 (C6).wav": {
+   "kind": "плак",
+   "bright": 946
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #3 (C5).wav": {
+   "kind": "плак",
+   "bright": 2676
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #6 (C5).wav": {
+   "kind": "плак",
+   "bright": 410
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #7 (C5).wav": {
+   "kind": "плак",
+   "bright": 917
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Plucks - PLUCK #9 (C5).wav": {
+   "kind": "плак",
+   "bright": 2305
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #1 (C5).wav": {
+   "kind": "синт",
+   "bright": 3514
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #10 (C4).wav": {
+   "kind": "синт",
+   "bright": 2519
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #11 (C4).wav": {
+   "kind": "синт",
+   "bright": 3836
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #12 (C4).wav": {
+   "kind": "синт",
+   "bright": 4116
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #13 (C4).wav": {
+   "kind": "синт",
+   "bright": 1809
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #15 (C5).wav": {
+   "kind": "синт",
+   "bright": 5377
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #17 (C5).wav": {
+   "kind": "синт",
+   "bright": 3142
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #18 (C5).wav": {
+   "kind": "синт",
+   "bright": 1563
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #19 (C5).wav": {
+   "kind": "синт",
+   "bright": 6974
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #2 (C5).wav": {
+   "kind": "синт",
+   "bright": 4836
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #20 (C4).wav": {
+   "kind": "синт",
+   "bright": 4218
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #21 (G2).wav": {
+   "kind": "синт",
+   "bright": 4778
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #3 (C5).wav": {
+   "kind": "синт",
+   "bright": 3097
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #4 (C5).wav": {
+   "kind": "синт",
+   "bright": 5230
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #5 (C6).wav": {
+   "kind": "синт",
+   "bright": 5708
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #6 (C5).wav": {
+   "kind": "синт",
+   "bright": 2751
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #7 (C5).wav": {
+   "kind": "синт",
+   "bright": 5244
+  },
+  "KITS/13 - Afterlife Kit/Oneshots/Synths - SYNTH #9 (C5).wav": {
+   "kind": "синт",
+   "bright": 3179
+  },
+  "KITS/12 - Glorified Kit/Oneshots/bl - glory bells 3 (C6).wav": {
+   "kind": "плак",
+   "bright": 1664
+  },
+  "KITS/12 - Glorified Kit/Oneshots/brs - glory BG brass (C4).wav": {
+   "kind": "пэд",
+   "bright": 4879
+  },
+  "KITS/12 - Glorified Kit/Oneshots/ld - _bit lazer (C5).wav": {
+   "kind": "лид",
+   "bright": 8359
+  },
+  "KITS/12 - Glorified Kit/Oneshots/ld - dubstep vox (C6).wav": {
+   "kind": "лид",
+   "bright": 10270
+  },
+  "KITS/12 - Glorified Kit/Oneshots/ld - ftmn theramin (C6).wav": {
+   "kind": "лид",
+   "bright": 1249
+  },
+  "KITS/12 - Glorified Kit/Oneshots/ld - perfect square (C6).wav": {
+   "kind": "лид",
+   "bright": 1402
+  },
+  "KITS/12 - Glorified Kit/Oneshots/ld - sine n saw (C5).wav": {
+   "kind": "лид",
+   "bright": 346
+  },
+  "KITS/12 - Glorified Kit/Oneshots/ld - stretched square (C6).wav": {
+   "kind": "лид",
+   "bright": 4238
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pd - immortal 7 (C4).wav": {
+   "kind": "пэд",
+   "bright": 2476
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pd - post band noise (C5).wav": {
+   "kind": "пэд",
+   "bright": 2481
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pd - power pad (C5).wav": {
+   "kind": "пэд",
+   "bright": 444
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pd - real pain (C5).wav": {
+   "kind": "пэд",
+   "bright": 2835
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pl - i dont have bells (C6).wav": {
+   "kind": "плак",
+   "bright": 1428
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pl - quiet suffering (C5).wav": {
+   "kind": "плак",
+   "bright": 497
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pl - these def go fr (C6).wav": {
+   "kind": "плак",
+   "bright": 2566
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pl - these might go fr (C6).wav": {
+   "kind": "плак",
+   "bright": 2487
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - Zadecimal (C5).wav": {
+   "kind": "плак",
+   "bright": 1309
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - glory BG (C4).wav": {
+   "kind": "плак",
+   "bright": 7733
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - jumpingforU (C5).wav": {
+   "kind": "плак",
+   "bright": 4253
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - lazer beam (C3).wav": {
+   "kind": "плак",
+   "bright": 7410
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - low pulse 7 rage (C4).wav": {
+   "kind": "плак",
+   "bright": 3346
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - low pulse 8 rage (C4).wav": {
+   "kind": "плак",
+   "bright": 2547
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - melodynone (C3).wav": {
+   "kind": "плак",
+   "bright": 1875
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - prayingforU (C5).wav": {
+   "kind": "плак",
+   "bright": 4141
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - pulse cutoff (C4).wav": {
+   "kind": "плак",
+   "bright": 4438
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pls - synth organ (C5).wav": {
+   "kind": "плак",
+   "bright": 3406
+  },
+  "KITS/12 - Glorified Kit/Oneshots/pno - low velocity (C5).wav": {
+   "kind": "клавиши",
+   "bright": 3820
+  },
+  "KITS/12 - Glorified Kit/Oneshots/str - background (C5).wav": {
+   "kind": "пэд",
+   "bright": 2267
+  },
+  "KITS/12 - Glorified Kit/Oneshots/str - cheap crunchy (C4).wav": {
+   "kind": "пэд",
+   "bright": 1586
+  },
+  "KITS/12 - Glorified Kit/Oneshots/str - foreground (C5).wav": {
+   "kind": "пэд",
+   "bright": 5158
+  },
+  "KITS/12 - Glorified Kit/Oneshots/str - sad stroy (C6).wav": {
+   "kind": "пэд",
+   "bright": 4336
+  },
+  "KITS/12 - Glorified Kit/Oneshots/str - simple (C5).wav": {
+   "kind": "пэд",
+   "bright": 3472
+  },
+  "KITS/12 - Glorified Kit/Oneshots/str - the realest trapper (C4).wav": {
+   "kind": "пэд",
+   "bright": 1709
+  },
+  "KITS/12 - Glorified Kit/Oneshots/str - true pain (C4).wav": {
+   "kind": "пэд",
+   "bright": 1735
+  },
+  "KITS/12 - Glorified Kit/Oneshots/syn - 20 down (C5).wav": {
+   "kind": "синт",
+   "bright": 6449
+  },
+  "KITS/12 - Glorified Kit/Oneshots/syn - scrub (C4).wav": {
+   "kind": "синт",
+   "bright": 2290
+  },
+  "KITS/12 - Glorified Kit/Oneshots/syn - synth to string protal (C5).wav": {
+   "kind": "синт",
+   "bright": 2102
+  }
+ },
+ "loops": {
+  "KITS/12 - Glorified Kit/Loops/Glorified - harlem 150 BPM.wav": {
+   "bpm": 150
+  },
+  "KITS/12 - Glorified Kit/Loops/Glorified - hashtaggg 155 BPM.wav": {
+   "bpm": 155
+  },
+  "KITS/12 - Glorified Kit/Loops/Glorified - last minute 148 BPM.wav": {
+   "bpm": 148
+  },
+  "KITS/12 - Glorified Kit/Loops/Glorified - stick 149 BPM.wav": {
+   "bpm": 149
+  }
+ }
+}

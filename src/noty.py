@@ -5,6 +5,19 @@
 и compose() с партиями, — пушит в ветку claude/beats-<id>, а beats.yml собирает
 архив и шлёт владельцу в личку. Бриф автора — prompts/beats.md.
 
+Один бит — один образец (владелец, 08.10.2026: «давай сделаем 1 бит 1 образец»; о бите «Сырость»: «не клеится все
+вместе. я даже не понимаю что это за тайп по факту»). До этого дня бит собирался по таблицам чередования — форма,
+приём мелодии, цвет, смесь, характер по дате, скелет «не как вчера», — и в «Сырости» барабаны были сняты с двух
+type beat'ов, приём мелодии — с третьего артиста, цвет — с четвёртого, обработка — с пятого: бит ни под кого.
+Теперь паспорт называет один ролик полем sample (data/beat_samples.json: ролики type beat'ов с замером src/zamer.py),
+и `_sample` сверяет числом то, что видно в нотах: темп ровно, рисунок хэта, бочки и 808 — рядом с замером образца;
+образец прошлого бита — брак (`echoes`). Музыка — только звуками, которые владелец прослушал и одобрил
+(data/beat_music.json, `_palette`: «звуки все в целом норм»): пресет Serum и звук из сети на музыке — брак.
+Поля form, melody, twist, color, mix, mood, skeleton и switch больше не обязательны, сверки чередования и день
+свободной смеси убраны; перелом — только когда он есть у образца. Заказ (order) образца не требует.
+Отвергнуто: сверять с образцом ноты мелодии — в замере их нет, и чужую мелодию не повторяем.
+Отвергнуто: оставить таблицы «на выбор» — выбор по таблицам и дал бит без образца.
+
 Главный формат — родная партитура FL (.fsc), а не MIDI. 01.10.2026 владелец собрал
 первый бит из MIDI и руками дорисовал то, чего MIDI не несёт: раскидал хэты по
 панораме и разбросал силу 808. У ноты в MIDI нет ни своей панорамы, ни своей
@@ -45,22 +58,21 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 доля высокая у любого бита, сладкое от сухого она не отличает.
 
 Музыка петлёй (владелец, 02.10.2026: «да», через день). Разбор его проектов показал, что музыку он делает
-гитарными петлями набора 01 через Gross Beat и Love Philter, а Serum почти не трогает. Обычный бит с 05.10.2026
-называет петлю полем loop. Злой и кино остаются партиями — характер и так чередуется через день, своего расписания
-у петли нет. Темп петли берётся из имени файла, петля без темпа в имени в список не идёт.
+гитарными петлями набора 01 через Gross Beat и Love Philter, а Serum почти не трогает. С 05.10 по 08.10.2026 обычный
+бит шёл петлёй по расписанию; теперь петлю (поле loop) утренний бит берёт только из одобренных и только в темпе
+образца. Темп петли берётся из имени файла, петля без темпа в имени в список не идёт.
 Отвергнуто: брать любые петли набора — Lex Luger и прочее с archive.org лежат в той же папке без лицензии.
 
 Звуки из сети и заказ (владелец, 06.10.2026: брать свежие звуки из сети, а один бит сделать по его словам —
 барабаны как в треке Six Speed, гитара в духе Lil Peep, как в White lines). Набор 11 собирается только из того, что можно ставить
 в бит на раздачу, поэтому в список он идёт целиком, а его папка Loops — петли наравне с MusicRadar: тот же замер,
-то же поле loop, темп — число перед «BPM» в имени. Заказ — поле order, слова владельца: такой бит идёт вне очереди,
-и сверки очереди и скелета о нём молчат — характер по дате, петля только обычному биту, бочка под 808 по мерке
-лидеров, цвет прошлых битов, а хэт меряется его меркой только после перелома: до него стоит рисунок названного трека
+то же поле loop, темп — число перед «BPM» в имени. Заказ — поле order, слова владельца: такой бит образца не несёт,
+и сверки образца о нём молчат — темп и рисунок образца, звуки музыки только из одобренных, бочка под 808 по мерке
+лидеров, а хэт меряется его меркой только после перелома: до него стоит рисунок названного трека
 (в «Six Speed» — ровные шестнадцатые). Остальное бракуется как всегда: вкус владельца заказ не отменяет.
 Звуки драм-машины Boss DR-660 и голоса VocalSet в наборе 11 — CC BY: строку об авторе для описания ролика записка
 добавляет сама, каждому источнику свою.
-Отвергнуто: четвёртый характер «заказ» — по характеру выбирается фото значка и мерка приторного, а автор следующего
-дня считает по нему круг; с полем круг просто пропускает такой бит.
+Отвергнуто: четвёртый характер «заказ» — по характеру выбирается фото значка и мерка приторного.
 
 Свой пресет (владелец, 06.10.2026: «использует интернет и собственные пресеты», раньше — «пресеты уникальные
 для меня»). Автор нот звука не слышит и на Мак ничего не кладёт, поэтому пишет в паспорт только данные — поле preset:
@@ -80,10 +92,7 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 switch («вид»): «разом» — как с 05.10, после такта перелома другие каркас, хэт и музыка; «ступенями» — как в треке:
 до такта перелома две-три смены (поле «смены»), на каждой каркас и хэт держатся, а 808 и музыка меняются, и только
 концовка — с такта перелома — другой бит по тем же правилам, что у «разом». Без слова — «разом»: паспорта, писанные
-до этого дня, проходят как раньше. Виды чередуются внутри характера: `--prev` сверяет вид с ближайшим прошлым битом
-того же mood (`_turn`); у бита с order не сверяет.
-Отвергнуто: чередовать виды от утра к утру — обычный бит выходит через день, и один вид навсегда достался бы ему,
-а другой — злому и кино.
+до этого дня, проходят как раньше. Вид — тот, что у образца: чередование видов снято 08.10.2026.
 Отвергнуто: такт перелома у «ступенями» — первая смена: вторая петля, замер нот до и после и хэт по мерке владельца
 привязаны к такту, с которого бит другой, а это концовка.
 
@@ -96,12 +105,11 @@ switch («вид»): «разом» — как с 05.10, после такта �
 по имени файла писать нельзя. Отсюда четыре правила, все числом:
 темп бита — ровно темп петли или вдвое выше, растяжки нет вовсе; ноты партий с высотой — из нот, которые в петле
 звучат (`zamer --loops` меряет петли на Маке, замер лежит в data/beat_sounds.json полем loops); поверх петли
-обязательна мелодия; в каждом бите, и петлёй, и партиями, есть перелом (поле switch, `_switch`). Дорожку петли
+обязательна мелодия; перелом (поле switch, `_switch`) до 08.10.2026 был в каждом бите, теперь — когда он есть
+у образца. Дорожку петли
 на весь бит — повторы по сетке тактов, паузы из поля rests, после перелома вторая петля — Мак собирает сам
 (`loop_track`): темп совпадает точно, поэтому хватает стандартной библиотеки.
 Отвергнуто: растягивать петлю к темпу бита — в ffmpeg на Маке нет rubberband, а atempo на гитаре слышно.
-Отвергнуто: «смена бита» последними 16 тактами как один из неожиданных ходов — перелом теперь у каждого бита,
-и два перелома на бит лаконичными не бывают: ход из списка убран.
 
 Бас, второй голос и свои звуки (владелец, 04.10.2026: «у баса мелодия и рисунок плохие», «контрмелодию не слышно
 совсем», «почему не используешь мои остальные киты»). 808 в тот день ходил по восьми ступеням, до шести высот в такте,
@@ -125,9 +133,9 @@ switch («вид»): «разом» — как с 05.10, после такта �
 и их порядок пишет автор make.py, сборка только считает. Отвергнут брак за отсутствие дыр (у трети его битов их нет)
 и брак по тому, что со звука — оценка: ход высоты и панорамы в дроби, второй звук хэта, ступени 808.
 
-    python -m src.noty --selftest          приёмы пианоролла, замер нот и запись партитуры FL и MIDI, без сети
+    python -m src.noty --selftest          приёмы пианоролла, замер нот, образец и запись партитуры FL и MIDI, без сети
     python -m src.noty --build ПАПКА       собрать и проверить бит из ПАПКА/make.py, без Telegram
-    python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py прошлых битов: та же форма, мелодия, цвет или смесь — отказ
+    python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py двух прошлых битов: тот же образец, петля или мелодия — отказ
     python -m src.noty --send АРХИВ        отправить собранный архив владельцу
     python -m src.noty --sounds            переписать data/beat_sounds.json: имена звуков и пресетов библиотеки (только Мак)
     python -m src.noty --gather            папка «00 - Сегодня»: ноты свежей ветки битов, её звуки и пресеты (только Мак)
@@ -152,7 +160,6 @@ import unicodedata
 import wave
 import zipfile
 from array import array
-from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -166,16 +173,16 @@ GM_DRUM = {"бочка": 36, "клэп": 39, "снейр": 38, "открыт": 4
 
 
 SAMPLED = ("808", "бас")    # партии с высотой, которые владелец играет сэмплером, а не синтезатором
-# Неожиданный ход (владелец, 02.10.2026: «удивлять слушателей»): один на бит, на стыке частей — prompts/beats.md
-TWISTS = ("ложный вход", "половинный темп", "сдвиг вниз", "чужой тембр", "задом наперёд")
+# Характер — необязательное слово паспорта: по нему записка подсказывает подпись, а подпись выбирает фото значка (bity.MOOD)
 MOODS = ("обычный", "злой", "кино")
-# Цвет музыки — гармония, мелодия, тембр — и референсы звука, с которых он снят (владелец, 02.10.2026;
-# признаки каждого — prompts/beats.md, «Цвет»). Имена — про звук, а не про название бита: пара в названии — по спросу
-COLORS = {"андер": ("андер",), "дым": ("A$AP Rocky",), "лёд": ("Yung Lean", "Black Kray"), "рифф": ("Lil Peep",),
-          "пустота": ("Kanye West", "Lil Wayne", "50 Cent"), "ржавчина": ("Chief Keef", "Playboi Carti")}
-SOUNDS = {name for names in COLORS.values() for name in names} | {"кино"}       # что можно смешивать
-ALIEN = ("тембр", "приём мелодии", "рисунок перка", "оркестровый слой", "обработка")   # что берётся от чужого звука
-FREE_DAY = 2                # среда: раз в неделю смесь свободная, день — по дате в id бита
+# Образец (владелец, 08.10.2026: «1 бит 1 образец»): что из замера ролика сверяется с нотами — число `shape`, поле
+# `zamer` той же мерки, допуск долей от числа образца и допуск не меньше стольких ударов. Число образца 0 или пусто
+# не сверяется: kick_per_bar = 0 значит «замер не отделил бочку от 808», а не «бочки нет». Доли тактов с дробью
+# и триолями в списке нет намеренно: слоёный клэп замер читает дробью хэта (NEXT.md, раздел 84) — число завышено.
+# ponytail: допуски — расчёт, а не опыт: ни одного бита по образцу владелец ещё не слышал. Хэт восьмыми (8 в такте)
+# от хэта шестнадцатыми (16) они отделяют, а дроби по мерке владельца (`_hat`) поверх сетки образца пропускают.
+# Начнут браковать бит, который на слух брат образца, — расширить допуск пары по первым трём таким битам, а не снимать её
+NEAR = (("хэт/такт", "hat_per_bar", .5, 2), ("бочка/такт", "kick_per_bar", .5, 1), ("808/такт", "b808_per_bar", .5, 1))
 # Сколько времени музыка молчит. У референсов она звучит 94% времени, у «Дифирамба» — 80%, у Lil Wayne
 # и 50 Cent — 54 и 71%, у «Фосфора» — 100% (замер 02.10.2026)
 QUIET = {"андер": .2, "пустота": .2}
@@ -207,7 +214,6 @@ CREDIT = (("/Boss DR-660 - ", "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0, ar
                            "zenodo.org/records/1193957"),
           (f"/{GLORY.partition('/')[2]}/", "The Glorified Zenology Bank by @aye.shark, "
                                            "audiovault.co/products/the-glorified-zenology-bank"))
-LOOP_FROM = "20261005"      # с этого дня обычный бит — петлёй: 03.10 и 04.10 — пробы злого и кино, они партиями
 NOTES = "C C# D D# E F F# G G# A A# B".split()
 # Петля под мелодию: звучащих нот в ней от трёх до восьми. Меньше — мотиву не из чего собраться, больше —
 # хрома не разобрала нот (шум, пласт), и сверять мелодию не с чем. Из 487 замеренных петель годятся 349 (05.10.2026)
@@ -510,17 +516,15 @@ def read_mid(path: Path) -> tuple[int, int]:
 
 # --- бит целиком -------------------------------------------------------------
 
-def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list[str]:
-    """Что не так с битом. Пусто — годен. free — день свободной смеси (`_free`)."""
+def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Что не так с битом. Пусто — годен."""
     out, end = [], info["bars"] * 16
-    # form … fx обязательны здесь, а не в сверке с прошлым битом: beats.yml собирает без --prev,
-    # и «Фосфор» 02.10.2026 ушёл владельцу без единого из этих полей
-    out += [f"в паспорте нет поля {k}" for k in ("title", "bpm", "key", "scale", "bars", "skeleton", "like", "parts", "tricks",
-                                                 "form", "melody", "mood", "twist", "switch", "color", "mix", "sounds", "fx")
-            if not info.get(k)]
-    out += [f"{word} «{info[k]}» — не из списка: {', '.join(names)}"
-            for k, word, names in (("twist", "неожиданный ход", TWISTS), ("mood", "характер", MOODS), ("color", "цвет", COLORS))
-            if info.get(k) and info[k] not in names]
+    # Образец и fx обязательны здесь, а не в сверке с прошлым битом: beats.yml собирает без --prev, и «Фосфор»
+    # 02.10.2026 ушёл владельцу без единого из тогдашних полей. Заказ (order) образца не несёт: его назвал владелец
+    out += [f"в паспорте нет поля {k}" for k in ("title", "bpm", "key", "scale", "bars", "like", "parts", "tricks", "sounds", "fx",
+                                                 *(() if info.get("order") else ("sample",))) if not info.get(k)]
+    if info.get("mood") and info["mood"] not in MOODS:
+        out.append(f"характер «{info['mood']}» — не из списка: {', '.join(MOODS)}")
     # Малая секунда и тритон к тонике — острые ноты, которых бит без сахара и ждёт: им длина разрешена
     scale = set(info["scale"]) | {(info["scale"][0] + 1) % 12, (info["scale"][0] + 6) % 12}
     for name, notes in tracks.items():
@@ -563,8 +567,8 @@ def problems(info: dict, tracks: dict[str, list[N]], free: bool = False) -> list
         out += [f"preset: «{part}» — не партия синтезатора из compose() и tonal" for part in info["preset"]
                 if isinstance(info["preset"], dict)
                 and (part not in tracks or part not in info.get("tonal", ()) or any(w in part for w in SAMPLED))]
-    if info.get("mix"):
-        out += _mix(info, free)
+    if not info.get("order"):
+        out += _sample(info, tracks) + _palette(info, tracks)
     if info.get("loop"):
         out += _loop(info, tracks)
     if info.get("switch"):
@@ -825,8 +829,6 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                        f"вдвое быстрее ({tempo} или {tempo * 2}): петлю не растягиваем")
         else:
             good[name] = m
-    if info.get("mood") != "обычный" and not info.get("order"):
-        out.append("loop: петлёй — только обычный бит; злой и кино — партиями")
     # Владелец, 06.10.2026, о гитарной петле под барабанами «Six Speed»: «петля совсем плоха и не в тему». В шести
     # чужих проектах под F1LTHY и Carti аудиопетли нет ни в одном — музыка нотами на синтезаторах; заказ не спасает
     if _six(info):
@@ -967,36 +969,6 @@ def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     return out
 
 
-def _free(name: str) -> bool:
-    """День свободной смеси — по дате, с которой начинается id бита: календарь автора и сборки один."""
-    try:
-        return datetime.strptime(name[:8], "%Y%m%d").weekday() == FREE_DAY
-    except ValueError:
-        return False
-
-
-def _mix(info: dict, free: bool) -> list[str]:
-    """Смешение «основа + одно чужое» (владелец, 02.10.2026: «мешать лучшие жанры друг с другом и немного
-    экспериментировать»). Основа — референс своего цвета, от другого звука — ровно один элемент: два чужих
-    разом — уже не type beat пары, а третий жанр. Раз в неделю, в свободный день, счёт не ведётся."""
-    mix = info["mix"] if isinstance(info["mix"], dict) else {}
-    base, alien, what = (_names(mix.get(k) or ()) for k in ("основа", "чужое", "элемент"))
-    if not (base and alien and what):
-        return ["mix: нужны «основа», «чужое» и «элемент»"]
-    out = [f"mix: «{n}» — не из списка звуков: {', '.join(sorted(SOUNDS))}" for n in base + alien if n not in SOUNDS]
-    out += [f"mix: элемент «{w}» — не из списка: {', '.join(ALIEN)}" for w in what if w not in ALIEN]
-    if free or out:
-        return out
-    mine = COLORS.get(info.get("color"), ())
-    if len(alien) > 1 or len(what) > 1:
-        out.append("mix: два чужих элемента разом — брак; свободная смесь — только в бите среды")
-    if len(base) > 1 or base[0] not in mine:
-        out.append(f"mix: основа — один референс своего цвета ({', '.join(mine)})")
-    if set(alien) & set(mine):
-        out.append("mix: чужое — звук другого цвета, а не своего")
-    return out
-
-
 def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     """Приторное в нотах и именах звуков. Пусто — сухо. Пороги сняты с двух битов, которые владелец 02.10.2026
     назвал попсовыми: «Фосфор» ими бракуется. Последние 16 тактов «смены бита» не в счёт: там другой бит."""
@@ -1058,8 +1030,8 @@ def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
 
 
 def shape(info: dict, tracks: dict[str, list[N]]) -> dict:
-    """Рисунок бита числами — теми же, какими src/zamer.py меряет чужие биты: автор сверяет свои ноты
-    со скелетом из prompts/beats.md, не слыша звука. Такты считаются только те, где играют барабаны."""
+    """Рисунок бита числами — теми же, какими src/zamer.py меряет чужие биты: автор и `_sample` сверяют ноты
+    с замером образца, не слыша звука. Такты считаются только те, где играют барабаны."""
     from statistics import median, pstdev
 
     def part(*words, skip=()):
@@ -1100,36 +1072,86 @@ def _lead(tracks: dict[str, list[N]]) -> list[N]:
     return sorted(n for name, notes in tracks.items() if "мелод" in name and "контр" not in name for n in flat(notes))
 
 
-def _turn(info: dict, olds: list[dict]) -> list[str]:
-    """Вид перелома чередуется внутри характера (владелец, 06.10.2026: «и то и то» — оба вида каждому характеру).
-    Обычный бит выходит через день, злой и кино — раз в четыре: чередование от утра к утру навсегда отдало бы
-    обычному один вид, а злому с кино другой. Сверка — с ближайшим прошлым битом того же mood: olds — паспорта
-    файлов --prev, от вчерашнего назад; такого среди них нет — сверять не с чем. Заказ не сверяется, но сам
-    в счёт своего характера идёт; бит без слова вида и бит, писанный до перелома, — «разом»."""
-    old = next((o for o in olds if o.get("mood") == info.get("mood")), None)
-    if info.get("order") or not old or _kind(info) != _kind(old):
-        return []
-    return [f"вид перелома «{_kind(info)}» — как в прошлом бите того же характера, «{old.get('title', 'прошлый бит')}»: "
-            f"у характера «{info.get('mood')}» виды чередуются, сегодня — «{next(k for k in SWITCHES if k != _kind(info))}»"]
+def samples() -> list[dict]:
+    """Образцы — ролики type beat'ов с замером `zamer`, в порядке использования (data/beat_samples.json, пополняет Мак)."""
+    from . import config, state
+    rows = state.read_json(config.BEAT_SAMPLES, [])
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def _picked(info: dict) -> dict | None:
+    return next((r for r in samples() if r.get("id") == info.get("sample")), None) if info.get("sample") else None
+
+
+def _sample(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Один бит — один образец (владелец, 08.10.2026: «давай сделаем 1 бит 1 образец»; о бите, собранном по таблицам
+    из пяти источников: «не клеится все вместе. я даже не понимаю что это за тайп по факту»). Образец — один ролик
+    type beat'а с замером; бит — его брат: темп ровно, а рисунок хэта, бочки и 808 — рядом с замером (`NEAR`), теми же
+    мерками, что считает `shape`. У бита с переломом сверяется часть до него: после перелома бит другой и у образца.
+    Сверяется только то, что видно в нотах. Форму, регистр и яркость музыки автор берёт из замера по брифу, а нот
+    мелодии в замере нет: чужую мелодию не повторяем."""
+    if not info.get("sample"):
+        return []                       # о поле уже сказал `problems`
+    row = _picked(info)
+    if not row:
+        return [f"sample: образца «{info['sample']}» нет в data/beat_samples.json"
+                + (": id — поле id одной из записей" if samples() else
+                   " — файл пуст или не найден: образцы кладёт Мак (NEXT.md, раздел 84)")]
+    out, z, bpm = [], row.get("zamer") or {}, row.get("bpm")
+    if info.get("bpm") != bpm:
+        out.append(f"sample: темп бита {info.get('bpm')}, а у образца «{row.get('title') or row['id']}» — {bpm}: "
+                   "темп ровно как у образца")
+    # Замер мог сесть на половинный или двойной темп (148 читается как 74): такт замера тогда — два такта автора
+    # ролика, и числа «на такт» пересчитываются. Темп замера не сходится и так — рисунок не сверяем
+    k = next((x for x in (.5, 1, 2) if bpm and abs((z.get("bpm") or bpm) / bpm - x) < .05), 0)
+    mine = shape(*_halves(info, tracks)[0][1:]) if info.get("bpm") else {}
+    for word, key, share, floor in NEAR:
+        his = (z.get(key) or 0) * k
+        gap = max(floor, his * share)
+        if his and word in mine and abs(mine[word] - his) > gap:
+            out.append(f"sample: {word} — {mine[word]:g}, а у образца {his:g}: бит — брат образца, "
+                       f"годится от {max(0, his - gap):g} до {his + gap:g}")
+    return out
+
+
+def approved() -> tuple[set[str], set[str]]:
+    """Звуки и петли музыки, которые владелец прослушал и одобрил (08.10.2026: «звуки все в целом норм»), —
+    data/beat_music.json: одиночные звуки наборов 12 и 13 и петли набора 12."""
+    from . import config, state
+    data = state.read_json(config.BEAT_MUSIC, {})
+    data = data if isinstance(data, dict) else {}
+    return {_nfc(n) for n in data.get("sounds") or ()}, {_nfc(n) for n in data.get("loops") or ()}
+
+
+def _palette(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Музыка утреннего бита — только одобренными звуками (владелец, 07.10.2026: «дело в самих звуках»; 08.10.2026,
+    прослушав 210 звуков: «звуки все в целом норм»). Звук партии с высотой, кроме 808 и баса, и петля — из
+    data/beat_music.json. Пресет Serum, свой пресет (поле preset) и звук по адресу из сети на такой партии — брак:
+    их владелец не слышал. Барабаны и 808 идут по общему списку, заказ (order) сюда не заходит."""
+    sounds, rings = approved()
+    if not (sounds or rings):
+        return ["data/beat_music.json пуст или не найден: звуки музыки, одобренные владельцем, кладёт Мак — "
+                "без списка утренний бит не собрать"]
+    music = [name for name in tracks if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED)]
+    named = info.get("sounds") or {}
+    out = [f"{part}: звук «{n}» — не из одобренных владельцем (data/beat_music.json): музыка утреннего бита — только из них"
+           for part in music for n in _names(named.get(part, ())) if _nfc(n) not in sounds]
+    out += [f"loop: петля «{n}» — не из одобренных владельцем (data/beat_music.json, loops): нет подходящей — музыка нотами"
+            for n in _pair(info) if n not in rings]
+    out += [f"{field}, {part}: {word} на музыке — только биту по заказу (order)"
+            for field, word in (("preset", "свой пресет Serum"), ("net", "звук из сети"))
+            for part in (info.get(field) if isinstance(info.get(field), dict) else ()) if part in music]
+    return out
 
 
 def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[str, list[N]]) -> list[str]:
-    """Чем бит повторяет прошлый. Пусто — не повторяет. 02.10.2026 второй бит подряд вышел с тем же порядком
-    частей и той же мелодией в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код."""
+    """Чем бит повторяет прошлый. Пусто — не повторяет. 02.10.2026 второй бит подряд вышел с той же мелодией
+    в другой тональности: запрет словами в брифе автор не удержал, поэтому сверяет код. Тот же образец два утра
+    подряд — тот же бит дважды; запас кончился — образец берётся тот, что выходил давнее всех, а не вчерашний."""
     was = f"«{old.get('title', 'прошлый бит')}»"
-    out = [f"{word} «{info[k]}» — как в {was}: возьми другое"
-           for k, word in (("form", "форма"), ("melody", "приём мелодии"), ("twist", "неожиданный ход"), ("color", "цвет"))
-           if info.get(k) and info[k] == old.get(k) and not (k == "color" and info.get("order"))]   # цвет заказа назвал владелец
+    out = [f"образец «{info['sample']}» — как в {was}: возьми следующий из data/beat_samples.json"] \
+        if info.get("sample") and info["sample"] == old.get("sample") else []
     out += [f"петля «{name}» — как в {was}: возьми другую" for name in _pair(info) if name in _pair(old)]
-    pair = [[_names(m.get(k) or ()) for k in ("основа", "чужое")] for m in (info.get("mix"), old.get("mix")) if isinstance(m, dict)]
-    if len(pair) == 2 and pair[0] == pair[1]:
-        out.append(f"смесь «{' + '.join(n for names in pair[0] for n in names)}» — как в {was}: возьми другую")
-
-    def order(i):                       # «вступление 1–4, припев 5–12» → вступление, припев
-        return re.findall(r"[а-яё]+(?=\s*\d)", str(i.get("parts", "")).lower())
-
-    if order(info) and order(info) == order(old):
-        out.append(f"части идут в том же порядке, что в {was}: {', '.join(order(info))}")
     a, b = _lead(tracks), _lead(old_tracks)
     if len(a) > 3 and len(b) > 3:
         def bars(notes):                # рисунок такта: места нот в нём
@@ -1194,15 +1216,12 @@ def about(info: dict) -> str:
     """Записка владельцу: она же подпись к архиву."""
     return "\n".join([
         f"🎹 {info['title']}", f"{info['bpm']} BPM, {info['key']}, {info['bars']} тактов", "",
+        *([f"Образец — поставь ролик рядом и сравни на слух: {s.get('title', '')} — {s.get('url', '')}"]
+          if (s := _picked(info)) else []),
         *([f"Заказ владельца: {info['order']}"] if info.get("order") else []),
-        f"Скелет: {info['skeleton']}",
-        *([f"Форма: {info.get('form', '—')}; мелодия: {info.get('melody') or ('петля' if info.get('loop') else '—')}; характер: {info.get('mood', '—')}"
-           + (f"; неожиданный ход: {info['twist']}" if info.get("twist") else "")]
-          if info.get("form") or info.get("melody") or info.get("mood") else []),
+        *([f"Скелет: {info['skeleton']}"] if info.get("skeleton") else []),
+        *([f"Характер: {info['mood']}"] if info.get("mood") else []),
         *([f"Цвет: {info['color']}"] if info.get("color") else []),
-        *([f"Смесь: основа — {', '.join(_names(m.get('основа') or ()))}; от чужого звука "
-           f"({', '.join(_names(m.get('чужое') or ()))}) — {', '.join(_names(m.get('элемент') or ()))}"]
-          if isinstance(m := info.get("mix"), dict) else []),
         f"С чего снято: {info['like']}", f"Части: {info['parts']}",
         *([f"Перелом: с такта {sw.get('такт')} бит другой — {sw.get('переход')}"
            + (f". До него, в тактах {', '.join(map(str, sw['смены']))}, меняются 808 и музыка, а барабаны те же"
@@ -1236,25 +1255,17 @@ def about(info: dict) -> str:
 
 def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     """Архив бита из ПАПКА/make.py; рядом — записка .txt, она же подпись при отправке.
-    prev — make.py прошлых битов, от вчерашнего назад: повтор формы или мелодии двух первых — тоже брак. Файлы после
-    второго нужны только виду перелома (`_turn`): злой и кино выходят раз в четыре дня, а сверять с битом
-    четырёхдневной давности форму и приём нельзя — приём «один аккорд» у злого бита всякий раз тот же."""
+    prev — make.py прошлых битов, от вчерашнего назад: тот же образец, та же петля или мелодия, что в двух первых, —
+    тоже брак. Дальше второго не сверяется: когда запас образцов кончится, они пойдут по второму кругу."""
     made = runpy.run_path(str(folder / "make.py"))
     info, tracks = made["INFO"], made["compose"]()
-    bad = problems(info, tracks, _free(folder.name))
-    if folder.name[:8].isdigit() and folder.name[:8] >= LOOP_FROM and info.get("mood") == "обычный" \
-            and not info.get("loop") and not info.get("order") and not _six(info):
-        bad.append("обычный бит — петлёй (поле loop): музыка через день петлёй, через день партиями")
-    olds = []
-    for i, path in enumerate(prev):
+    bad = problems(info, tracks)
+    for path in prev[:2]:
         try:
             old = runpy.run_path(str(path))
-            olds.append(old["INFO"])
-            if i < 2:
-                bad += echoes(info, tracks, old["INFO"], old["compose"]())
+            bad += echoes(info, tracks, old["INFO"], old["compose"]())
         except Exception as e:          # прошлый бит писан под старый noty — не повод остаться без сегодняшнего
             print(f"{path}: не прочитан ({e}) — сверка без него")
-    bad += _turn(info, olds)
     if bad:
         raise SystemExit("Бит не годен:\n" + "\n".join(bad))
     tracks = ears(tracks)
@@ -1279,7 +1290,7 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
                                    ("слайды", any(n.slide for n in notes)),
                                    ("дроби", any(n.ln < .5 for n in notes))) if yes]
         print(f"{i:02} {name:16} нот {len(notes):4}, сил {len({n.vel for n in notes}):2}  {', '.join(tricks)}")
-    for word, half, notes in _halves(info, tracks):         # до перелома и после — два бита: у каждого свой скелет
+    for word, half, notes in _halves(info, tracks):         # до перелома и после — два бита: у каждого свой рисунок
         print(f"замер нот{' ' + word if word else ''}: " + ", ".join(f"{k} {v:g}" for k, v in shape(half, notes).items()))
     mid(root / "00 всё вместе (черновик).mid", info["bpm"], *draft)
     (root / "о бите.txt").write_text(about(info), encoding="utf-8")
@@ -1295,7 +1306,8 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
         archive.with_suffix(".preset.json").write_text(json.dumps(info["preset"], ensure_ascii=False), encoding="utf-8")
     if info.get("loop"):                # план дорожки петли на весь бит: её собирает Мак (`loop_track`), звук лежит там
         archive.with_suffix(".loop.json").write_text(json.dumps(
-            {"bpm": info["bpm"], "bars": info["bars"], "rests": info["rests"], "switch": info["switch"]["такт"]}), encoding="utf-8")
+            {"bpm": info["bpm"], "bars": info["bars"], "rests": info["rests"],
+             "switch": (info.get("switch") or {}).get("такт")}), encoding="utf-8")       # перелома нет — петля одна на весь бит
     # что нужно проекту FL сверх партитур и звуков: его собирает Мак (`flp.today`) — шаблон FL и плагины стоят там
     archive.with_suffix(".flp.json").write_text(json.dumps(
         {k: info.get(k) for k in ("title", "bpm", "parts", "tricks", "fx", "preset")}, ensure_ascii=False), encoding="utf-8")
@@ -1627,7 +1639,7 @@ def send(archive: Path) -> None:
         telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), page)
 
 
-def selftest() -> None:
+def _checks() -> None:
     r = roll(0, 4, 16, vel=(40, 120), pan=(-80, 80), pitch=-12, curve=2)
     assert len(r) == 16 and r[0].vel == 40 and r[-1].vel == 120 and r[0].pan == -80 and r[-1].pan == 80
     assert r[0].key == 60 and r[-1].key == 48, "высота дроби съезжает на октаву"
@@ -1692,11 +1704,10 @@ def selftest() -> None:
                 "            'перк': half('......x.x.......', '..x...........x.'),\n"
                 "            'мелодия': [N(x * 16 + p, 2, keys[i]) for x in range(16) if x % 8 != 7\n"
                 "                        for p, i in (((0, 0), (6, 1)) if x < 8 or same else ((2, 2), (10, 3)))]}\n")
-        base = dict(title="A x B — Тест", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=16, skeleton="сцена", like="x",
-                     parts="игра 1–8, перелом 9–16", tricks=["x"], tonal=["808", "мелодия"], form="песня", melody="один аккорд",
-                     mood="злой", twist="ложный вход", color="ржавчина", fx={"808": "Fruity Fast Dist", "мелодия": "без обработки"},
+        base = dict(title="A x B — Тест", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=16, sample="s140", like="A x B",
+                     parts="игра 1–8, перелом 9–16", tricks=["x"], tonal=["808", "мелодия"], mood="злой",
+                     fx={"808": "Fruity Fast Dist", "мелодия": "без обработки"},
                      switch={"такт": 9, "переход": "такт тишины, клэп уходит с третьей доли на вторую и четвёртую"},
-                     mix={"основа": "Chief Keef", "чужое": "кино", "элемент": "оркестровый слой"},
                      sounds=dict.fromkeys(("808", "хэт", "клэп", "перк", "мелодия"), one))
         (tmp / "beat" / "make.py").write_text(f"INFO = {base!r}\n{code}", encoding="utf-8")
         archive = build(tmp / "beat", tmp / "out")
@@ -1705,38 +1716,24 @@ def selftest() -> None:
         assert laid[:4] == [-50, 50, -50, 50] and len(laid) == 28, "перк автор оставил по центру — в партитуре он лево-право"
         assert "beat/fl/02 хэт.fsc" in names and "beat/midi/01 808.mid" in names and "beat/о бите.txt" in names
         note = archive.with_suffix(".txt").read_text("utf-8")
-        assert "бит A x B — Тест, 140 Fm" in note and "Цвет: ржавчина" in note and "автор нот не слышал" in note, note
+        assert "бит A x B — Тест, 140 Fm" in note and "Характер: злой" in note and "автор нот не слышал" in note, note
         assert "Перелом: с такта 9 бит другой — такт тишины" in note and not archive.with_suffix(".loop.json").exists(), note
-        assert "основа — Chief Keef; от чужого звука (кино) — оркестровый слой" in note, note
-        try:                            # собранный бит против самого себя: та же форма, цвет и смесь — отказ
+        assert note.splitlines()[3] == "Образец — поставь ролик рядом и сравни на слух: (free) a x b type beat — 140 — https://youtu.be/s140", note
+        try:                            # собранный бит против самого себя: тот же образец и та же мелодия — отказ
             build(tmp / "beat", tmp / "out", prev=(tmp / "beat" / "make.py",))
             raise AssertionError("повтор прошлого бита должен браковаться")
         except SystemExit as e:
-            assert all(w in str(e) for w in ("форма «песня»", "цвет «ржавчина»", "смесь «Chief Keef + кино»", "в том же порядке")), e
-        (tmp / "kino.py").write_text((tmp / "beat" / "make.py").read_text("utf-8").replace("'mood': 'злой'", "'mood': 'кино'"), encoding="utf-8")
-        try:                            # третий файл --prev — бит того же характера: с ним сверяется только вид перелома
-            build(tmp / "beat", tmp / "out", prev=(tmp / "kino.py", tmp / "kino.py", tmp / "beat" / "make.py"))
-            raise AssertionError("тот же вид перелома, что у прошлого бита того же характера, должен браковаться")
-        except SystemExit as e:
-            assert str(e).count("форма «песня»") == 2 and "вид перелома «разом» — как в прошлом бите того же характера" in str(e), e
-        (tmp / "20261005-a-b-140-fm").mkdir()               # обычный бит с 05.10.2026 без петли — отказ
-        (tmp / "20261005-a-b-140-fm" / "make.py").write_text(
-            (tmp / "beat" / "make.py").read_text("utf-8").replace("'mood': 'злой'", "'mood': 'обычный'"), encoding="utf-8")
-        try:
-            build(tmp / "20261005-a-b-140-fm", tmp / "out")
-            raise AssertionError("обычный бит без петли должен браковаться")
-        except SystemExit as e:
-            assert "обычный бит — петлёй" in str(e), e
-        # Скелет «Г» — исключение: обычный бит по «Six Speed» пишется партиями, петли сборка от него не ждёт
-        plain = (tmp / "20261005-a-b-140-fm" / "make.py").read_text("utf-8")
-        (tmp / "20261005-a-b-140-fm" / "make.py").write_text(
-            plain.replace("'skeleton': 'сцена'", "'skeleton': 'Six Speed → сцена'"), encoding="utf-8")
-        build(tmp / "20261005-a-b-140-fm", tmp / "out")
-        (tmp / "20261005-a-b-140-fm" / "make.py").write_text(plain, encoding="utf-8")
-        # Заказ владельца (поле order) идёт вне очереди: тот же бит собирается, слова заказа — в записке
-        (tmp / "20261005-a-b-140-fm" / "make.py").write_text((tmp / "20261005-a-b-140-fm" / "make.py").read_text("utf-8").replace(
-            "'mood':", "'order': 'барабаны как в X', 'mood':"), encoding="utf-8")
-        assert "Заказ владельца: барабаны как в X" in build(tmp / "20261005-a-b-140-fm", tmp / "out").with_suffix(".txt").read_text("utf-8")
+            assert "образец «s140» — как в «A x B — Тест»" in str(e) and "мелодия повторяет" in str(e), e
+        # Дальше второго файла --prev не сверяется: запас образцов кончится, и они пойдут по второму кругу
+        (tmp / "old.py").write_text((tmp / "beat" / "make.py").read_text("utf-8").replace("'sample': 's140'", "'sample': 's85'")
+                                    .replace("'мелодия': [N(x * 16", "'пэд': [N(x * 16"), encoding="utf-8")
+        build(tmp / "beat", tmp / "out", prev=(tmp / "old.py", tmp / "old.py", tmp / "beat" / "make.py"))
+        # Заказ владельца (поле order) образца не несёт: тот же бит без поля sample собирается, слова заказа — в записке
+        (tmp / "zakaz").mkdir()
+        (tmp / "zakaz" / "make.py").write_text((tmp / "beat" / "make.py").read_text("utf-8").replace(
+            "'sample': 's140'", "'order': 'барабаны как в X'"), encoding="utf-8")
+        note = build(tmp / "zakaz", tmp / "out").with_suffix(".txt").read_text("utf-8")
+        assert "Заказ владельца: барабаны как в X" in note and "Образец" not in note, note
         # Папка «Сегодня» на временных папках: звук найден, не найден, не читается, чужой путь, старое убрано, оригинал цел
         lib, pres, kits, serum = tmp / "lib", tmp / "pres", tmp / "lib" / TODAY, tmp / "pres" / "User" / TODAY
         (lib / "k" / "Stub.wav").mkdir(parents=True)        # не читается, как заглушка iCloud без сети
@@ -1773,7 +1770,7 @@ def selftest() -> None:
         fxp = next(n for n in sorted(known()) if n.startswith("Serum/"))
         mine = {"мелодия": {"имя": "PLENKA Dym 1006", "основа": fxp, "ручки": {"eq_enable": 1, "eq_typh": 1, "eq_frqh_hz": .7}}}
         (tmp / "beat2").mkdir()
-        (tmp / "beat2" / "make.py").write_text(f"INFO = {base | {'preset': mine}!r}\n{code}", encoding="utf-8")
+        (tmp / "beat2" / "make.py").write_text(f"INFO = {base | {'preset': mine, 'order': 'свой пресет'}!r}\n{code}", encoding="utf-8")
         made = build(tmp / "beat2", tmp / "out")
         assert json.loads(made.with_suffix(".preset.json").read_text("utf-8")) == mine and not (tmp / "out" / "beat.preset.json").exists()
         assert "на слух его не проверял никто" in made.with_suffix(".txt").read_text("utf-8")
@@ -1846,22 +1843,21 @@ def selftest() -> None:
         assert lay(None, {"петля": net}, kits, serum, {"KITS": lib, "Serum": pres}, {net}, plan) == [] \
             and read(kits / "Петля — на весь бит.wav")[0][16000] == 16001, "петля набора 11 — та же дорожка на весь бит"
     tune = [N(b * 16 + p, 2, k) for b in range(4) for p, k in ((0, 67), (6, 63), (8, 65), (12, 67))]
-    song = dict(title="A — Б", form="песня", melody="линия", mood="обычный", twist="ложный вход", sounds={"мелодия": "x"},
-                parts="вступление 1–4, припев 5–12, конец 13–16", color="лёд")
+    song = dict(title="A — Б", sample="s140")
     rep = "\n".join(echoes(song, {"мелодия": tune}, song, {"мелодия": [n._replace(key=n.key + 6) for n in tune]}))
-    assert all(w in rep for w in ("форма «песня»", "приём мелодии «линия»", "неожиданный ход «ложный вход»", "цвет «лёд»",
-                                  "в том же порядке", "мелодия повторяет")), rep
-    other = song | dict(form="блоки по 16", melody="зов — ответ", twist="сдвиг вниз", parts="вступление 1–8, блок 9–24", color="дым")
-    assert not echoes(other, {"мелодия": [N(b * 16 + p, 1, k) for b in range(4) for p, k in ((2, 60), (3, 72), (10, 61))]},
-                      song, {"мелодия": tune}), "другая форма и другая мелодия — не повтор"
+    assert "образец «s140» — как в «A — Б»" in rep and "мелодия повторяет" in rep, rep
+    assert not echoes(song | {"sample": "s85"}, {"мелодия": [N(b * 16 + p, 1, k) for b in range(4) for p, k in ((2, 60), (3, 72), (10, 61))]},
+                      song, {"мелодия": tune}), "другой образец и другая мелодия — не повтор"
+    assert not echoes({"title": "заказ"}, {}, {"title": "до образцов"}, {}), "заказ и бит, писанный до образцов, поля не несут — не повтор"
     info = dict(title="t", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=1, like="x", parts="x", tricks=["x"], skeleton="x",
                 tonal=["мелодия"])
     plain = {"мелодия": [N(0, 4, 69)], "хэт": [N(i, 1) for i in range(16)], "бочка": [N(0, 1), N(20, 1)]}
     bad = "\n".join(problems(info, plain))
     assert "мимо тональности" in bad and "вне бита" in bad and "только в 0 партиях" in bad
-    assert all(f"нет поля {k}" in bad for k in ("form", "mood", "color", "mix", "fx")), "паспорт проверяется и без --prev"
+    assert all(f"нет поля {k}" in bad for k in ("sample", "sounds", "fx")), "паспорт проверяется и без --prev"
+    assert not any(f"нет поля {k}" in bad for k in ("form", "melody", "twist", "color", "mix", "mood", "skeleton", "switch")), \
+        "поля чередования сняты 08.10.2026: бит — брат образца, а не строка таблиц"
     assert "мимо тональности" not in "\n".join(problems(info, {"мелодия": [N(0, 4, 66), N(4, 4, 71)]})), "♭2 и ♭5 — можно долго"
-    assert "не из списка" in "\n".join(problems(info | {"twist": "сальто"}, plain)), "ход — только из списка"
     assert "характер «добрый» — не из списка" in "\n".join(problems(info | {"mood": "добрый"}, plain))
     assert "в синтезаторе не работают" in "\n".join(problems(info, {"мелодия": glide(0, 4, 65, 77)}))
     assert "синтезатор" not in "\n".join(problems(info | {"tonal": ["808"]}, {"808": glide(0, 4, 29, 41)}))
@@ -1909,7 +1905,7 @@ def selftest() -> None:
     from .serum import _dec, _enc, flaws, pack, unpack
     fxp = next(n for n in sorted(known()) if n.startswith("Serum/"))
     mine = {"имя": "PLENKA Dym 1006", "основа": fxp, "ручки": {"eq_enable": 1, "eq_typh": 1, "eq_frqh_hz": .7}}
-    assert flaws({"мелодия": mine}, known()) == [] and "preset" not in "\n".join(problems(info | {"preset": {"мелодия": mine}}, plain)), \
+    assert flaws({"мелодия": mine}, known()) == [] and "preset" not in "\n".join(problems(info | {"order": "x", "preset": {"мелодия": mine}}, plain)), \
         "поле верной формы проходит"
     for patch, why in (({"ручки": {"lfo1_rate": .5}}, "нет в списке serum.KNOBS"), ({"ручки": {"fil_reso": .9}}, "нужна доля от 0 до 0.6"),
                        ({"ручки": {"fil_reso": "0.3"}}, "нужна доля"), ({"ручки": {"eq_enable": .5}}, "выключатель"),
@@ -1925,8 +1921,8 @@ def selftest() -> None:
     raw = bytes(range(256)) * 5
     assert all(_dec(_enc(raw[:n])) == raw[:n] for n in (0, 1, 2, 3, 4, 1001)) and unpack(pack("PLENKA", raw)) == ("PLENKA", raw), \
         "чанк пресета доезжает до .fxp и обратно"
-    assert "Звуки и пресеты" in about(info | {"twist": "ложный вход", "form": "x", "sounds": {"хэт": ["KITS/a.wav"]}}) \
-        and "неожиданный ход: ложный вход" in about(info | {"twist": "ложный вход", "form": "x"})
+    assert "Звуки и пресеты" in about(info | {"sounds": {"хэт": ["KITS/a.wav"]}}) and "Скелет: x" in about(info) \
+        and "Образец" not in about(info) and "Скелет" not in about(base), "скелет и образец — в записке, только когда названы"
     # Цвет: сладкое бракуется, сухое проходит. Сладкий — «Фосфор» в четырёх тактах: круг из четырёх аккордов,
     # мелодия наверху в семь нот, второй голос в терцию, колокольчик, ни одной паузы
     paper = dict(bars=4, tonal=["аккорды", "мелодия", "контрмелодия", "808"], mood="обычный", color="лёд")
@@ -1954,14 +1950,8 @@ def selftest() -> None:
         "кино: остинато не молчит, в теме пять нот"
     assert "в мотиве 5" in "\n".join(sugar(paper | {"twist": "смена бита", "bars": 20},
                                              {"мелодия": [N(i * 12, 12, k) for i, k in enumerate((50, 53, 55, 57, 58))]}))
-    one = dict(color="лёд", mix={"основа": "Yung Lean", "чужое": "кино", "элемент": "оркестровый слой"})
-    two = one | {"mix": one["mix"] | {"чужое": ["кино", "Chief Keef"], "элемент": ["оркестровый слой", "тембр"]}}
-    assert _mix(one, False) == [] and _mix(two, True) == [] and "два чужих элемента" in _mix(two, False)[0]
-    assert "основа — один референс своего цвета" in _mix(one | {"color": "дым"}, False)[0]
-    assert "не из списка звуков" in _mix(one | {"mix": one["mix"] | {"чужое": "Boulevard Depo"}}, False)[0]
-    assert "чужое — звук другого цвета" in _mix(one | {"mix": one["mix"] | {"чужое": "Black Kray"}}, False)[0]
     # Музыка петлёй: петля замерена по звуку, темп бита — ровно её или вдвое, поверх мелодия нотами петли, паузы —
-    # полем rests, после перелома — вторая петля другого рифа; чужая папка, чужой темп, ноты мимо петли, злой бит — брак
+    # полем rests, после перелома — вторая петля другого рифа; чужая папка, чужой темп, ноты мимо петли — брак
     assert loop_bpm("Acoustic Gtr - AC_12Str120A-01.wav") == 120 and loop_bpm("Country Crunk - K01AcouMix84C-02.wav") == 84
     assert not loop_bpm("Western Gtr - WW_AcouG_Chord-Amin.wav") and not loop_bpm("Country Crunk - K02Beat110-01.wav") \
         and not loop_bpm("Lex Luger - Strings140.wav"), "без темпа, барабаны и чужой набор — не петли"
@@ -1978,12 +1968,14 @@ def selftest() -> None:
     off = next(k for k in range(12) if NOTES[k] not in heard[loop]["notes"] + heard[two]["notes"])
     keys = (60 + pcs[0], 60 + pcs[1], 60 + pcs[2], 60 + pcs[1])
     drums = demo(24 + pcs[0], keys)
-    looped = base | dict(bpm=170, scale=sorted({NOTES.index(x) for x in heard[loop]["notes"] + heard[two]["notes"]}),
-                          mood="обычный", color="рифф", melody="линия", loop=loop, rests=[(8, 9), (12.5, 13)],
+    looped = base | dict(bpm=170, sample="s170", scale=sorted({NOTES.index(x) for x in heard[loop]["notes"] + heard[two]["notes"]}),
+                          loop=loop, rests=[(8, 9), (12.5, 13)],
                           switch={"такт": 9, "петля": two, "переход": "такт тишины, вторая петля входит с первой доли"},
-                          mix={"основа": "Lil Peep", "чужое": "кино", "элемент": "обработка"}, sounds=dict.fromkeys(drums, loop),
+                          sounds=dict.fromkeys(drums, min(known())),
                           fx={"808": "Fruity Fast Dist", "мелодия": "без обработки", "петля": "Gross Beat", "петля 2": "Gross Beat"})
-    assert problems(looped, drums) == [] and problems(looped | {"bpm": 85}, drums) == [], problems(looped, drums)
+    assert problems(looped, drums) == [] and problems(looped | {"bpm": 85, "sample": "s85"}, drums) == [], problems(looped, drums)
+    solo = {k: v for k, v in looped.items() if k != "switch"}              # перелома у образца нет — петля одна на весь бит
+    assert problems(solo, drums) == [] and "Перелом" not in about(solo) and "Вторая петля" not in about(solo), problems(solo, drums)
     note = about(looped)
     assert "Петлю не растягивай: бит ровно в её темпе вдвое (85 → 170)" in note and f"• петля — {loop}" in note \
         and f"• петля 2 — {two}" in note and "Петля молчит: такт 8, с 12.5 до 13" in note and "Перелом: с такта 9" in note, note
@@ -2006,8 +1998,8 @@ def selftest() -> None:
     assert "мелодия, после перелома: 100% времени" in said and "мелодия: " not in said, said
     passing = {**drums, "мелодия": drums["мелодия"] + [N(x * 16 + 9, .5, 60 + off) for x in range(3)]}
     assert problems(looped, passing) == [], problems(looped, passing)      # проходящая нота мимо петли — не брак
-    said = "\n".join(problems(looped | {"mood": "злой", "fx": {"808": "x", "мелодия": "x", "петля": "x"}, "rests": [(0, 1)]}, drums))
-    assert all(w in said for w in ("только обычный бит", "нет строки «петля 2»", "rests: где петля молчит")), said
+    said = "\n".join(problems(looped | {"fx": {"808": "x", "мелодия": "x", "петля": "x"}, "rests": [(0, 1)]}, drums))
+    assert all(w in said for w in ("нет строки «петля 2»", "rests: где петля молчит")), said
     assert "rests:" in "\n".join(problems({k: v for k, v in looped.items() if k != "rests"}, drums)), "паузы петли обязательны"
     assert f"петля «{loop}»" in "\n".join(echoes(looped, drums, looped, drums)), "та же петля, что в прошлом бите, — повтор"
     assert f"петля «{two}»" in "\n".join(echoes(looped, drums, looped | {"loop": two, "switch": {}}, drums)), "и вторая петля тоже"
@@ -2023,15 +2015,38 @@ def selftest() -> None:
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
         config.BEAT_SOUNDS.write_text(json.dumps(data | {"sounds": data["sounds"] + [net, bare],
                                                          "loops": data["loops"] | {net: data["loops"][two]}}), encoding="utf-8")
-        netted = looped | {"switch": looped["switch"] | {"петля": net}}
+        netted = looped | {"order": "петля из сети", "switch": looped["switch"] | {"петля": net}}
         assert problems(netted, drums) == [], problems(netted, drums)
         assert f"{net} — 85 BPM" in loop_card("гитара Am 85") and "общих" in loop_card("гитара Am 85"), loop_card("гитара Am 85")
         assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": bare}, drums)), "петля без темпа в имени"
-    # Заказ владельца: петля при любом характере, цвет прошлого бита и бочка под каждой нотой 808 — не брак; прочее бракуется
-    ordered = looped | {"mood": "злой", "order": "барабаны как в X, гитара как в Y"}
-    assert problems(ordered, drums) == [], problems(ordered, drums)
-    said = "\n".join(echoes(ordered, drums, looped, drums))
-    assert "цвет" not in said and "форма «песня»" in said and f"петля «{loop}»" in said, said
+    # Один бит — один образец: брат образца проходит, и замер, севший на половинный темп, ему не помеха; чужой темп,
+    # неизвестный id, пустой список образцов, хэт вдвое гуще образца — брак
+    assert problems(base, demo()) == [] and problems(base | {"sample": "вдвое"}, demo()) == [], problems(base | {"sample": "вдвое"}, demo())
+    said = "\n".join(problems(base | {"bpm": 150}, demo()))
+    assert "sample: темп бита 150, а у образца «(free) a x b type beat — 140» — 140" in said, said
+    assert "образца «чужой» нет в data/beat_samples.json: id" in "\n".join(problems(base | {"sample": "чужой"}, demo()))
+    dense = {**demo(), "хэт": spread(hits(0, "x" * 256, ln=.5))}
+    said = "\n".join(problems(base, dense))
+    assert "sample: хэт/такт — 16, а у образца 8: бит — брат образца, годится от 4 до 12" in said, said
+    with mock.patch.object(config, "BEAT_SAMPLES", Path("нет такого файла.json")):
+        assert "файл пуст или не найден" in "\n".join(problems(base, demo())) and "Образец" not in about(base)
+    # Музыка — только звуками, которые одобрил владелец: чужой звук, пресет Serum звуком и своим пресетом, звук из сети
+    # и чужая петля на музыке — брак; барабанам и 808 этот список не указ; списка нет — понятный брак
+    for alien in (own[-1], fxp):
+        said = "\n".join(problems(base | {"sounds": base["sounds"] | {"мелодия": alien}}, demo()))
+        assert f"мелодия: звук «{alien}» — не из одобренных владельцем" in said, said
+    assert problems(base | {"sounds": dict.fromkeys(base["sounds"], own[-1]) | {"мелодия": min(known())}}, demo()) == [], \
+        "барабаны и 808 — по общему списку"
+    assert "preset, мелодия: свой пресет Serum на музыке — только биту по заказу" in "\n".join(problems(base | {"preset": {"мелодия": mine}}, demo()))
+    assert f"loop: петля «{unheard}» — не из одобренных владельцем" in "\n".join(problems(looped | {"loop": unheard}, drums))
+    with mock.patch.object(config, "BEAT_MUSIC", Path("нет такого файла.json")):
+        assert "data/beat_music.json пуст или не найден" in "\n".join(problems(base, demo()))
+    # Заказ владельца образца не несёт, а звук музыки, петлю и свой пресет берёт откуда назвал владелец; бочка под каждой
+    # нотой 808 — тоже не брак; прочее бракуется
+    ordered = {k: v for k, v in looped.items() if k != "sample"} | {"order": "барабаны как в X, гитара как в Y"}
+    assert "нет поля sample" in "\n".join(problems(ordered | {"order": ""}, drums)) and problems(ordered, drums) == [], problems(ordered, drums)
+    assert problems(ordered | {"sounds": looped["sounds"] | {"мелодия": fxp}, "preset": {"мелодия": mine}}, drums) == [], "заказу список не указ"
+    assert f"петля «{loop}»" in "\n".join(echoes(ordered, drums, looped, drums)), "а петля прошлого бита — повтор и у заказа"
     assert "петлю не растягиваем" in "\n".join(problems(ordered | {"bpm": 140}, drums)), "заказ остальных правил не отменяет"
     # Скелет «Г» — без петли, и заказ её не разрешает (владелец, 06.10.2026: «петля совсем плоха и не в тему»)
     assert "скелет «Г»" in "\n".join(problems(ordered | {"skeleton": "Six Speed → ровный"}, drums)) \
@@ -2072,24 +2087,29 @@ def selftest() -> None:
         "автор банка Glorified — строкой в записке"
     # Звук по адресу из сети (поле net): сборка смотрит форму и адрес без сети, записка говорит, что его никто не слышал
     wav = "https://freewavesamples.com/files/Kawai-K1r-Aah-C4.wav"
-    assert problems(base | {"net": {"мелодия": wav}}, demo()) == [] and "из сети" not in about(base) \
+    assert problems(base | {"net": {"перк": wav}}, demo()) == [] and "из сети" not in about(base) \
         and "На слух звук из сети не проверен" in about(base | {"net": {"мелодия": wav}}), "разрешённый адрес принят, записка честна"
     assert "net_sources" in "\n".join(problems(base | {"net": {"мелодия": "https://example.com/files/Aah.wav"}}, demo())) \
         and "такой партии" in "\n".join(problems(base | {"net": {"орган": wav}}, demo())), "чужой адрес и чужая партия — брак сборки"
+    assert "net, мелодия: звук из сети на музыке — только биту по заказу" in "\n".join(problems(base | {"net": {"мелодия": wav}}, demo()))
     with tempfile.TemporaryDirectory() as tmp:          # сборка бита петлёй отдаёт Маку план дорожки и обе петли
         tmp = Path(tmp)
         (tmp / "petlya").mkdir()
         (tmp / "petlya" / "make.py").write_text(
-            f"INFO = {looped | {'net': {'мелодия': wav}}!r}\n" + code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}"), encoding="utf-8")
+            f"INFO = {looped | {'net': {'перк': wav}}!r}\n" + code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}"), encoding="utf-8")
         archive = build(tmp / "petlya", tmp / "out")
         assert json.loads(archive.with_suffix(".loop.json").read_text("utf-8")) == {"bpm": 170, "bars": 16, "rests": [[8, 9], [12.5, 13]],
                                                                                     "switch": 9}
         assert json.loads(archive.with_suffix(".sounds.json").read_text("utf-8"))["петля 2"] == two
-        assert json.loads(archive.with_suffix(".net.json").read_text("utf-8")) == {"мелодия": wav} and _net(tmp / "нет.json", tmp) == [], \
+        assert json.loads(archive.with_suffix(".net.json").read_text("utf-8")) == {"перк": wav} and _net(tmp / "нет.json", tmp) == [], \
             "адреса звуков из сети — Маку отдельным файлом; нет файла — качать нечего"
-    # Перелом: обязателен, стоит на стыке частей во второй половине, после него другие каркас, хэт и музыка,
-    # а партии 808 и хэта те же. Бит без перелома бракуется понятной фразой
-    assert "нет поля switch" in "\n".join(problems({k: v for k, v in base.items() if k != "switch"}, demo()))
+        (tmp / "odna").mkdir()                       # бит петлёй без перелома: план дорожки — одна петля на весь бит
+        (tmp / "odna" / "make.py").write_text(
+            f"INFO = {solo!r}\n" + code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}"), encoding="utf-8")
+        assert json.loads(build(tmp / "odna", tmp / "out").with_suffix(".loop.json").read_text("utf-8"))["switch"] is None
+    # Перелом — только когда он есть у образца: бит без него проходит. Назван — стоит на стыке частей во второй половине,
+    # после него другие каркас, хэт и музыка, а партии 808 и хэта те же
+    assert problems({k: v for k, v in base.items() if k != "switch"}, demo(same=True)) == []
     assert problems(base, demo()) == [], problems(base, demo())
     said = "\n".join(problems(base, demo(same=True)))
     assert all(w in said for w in ("бочка и клэп — 100% тактов после перелома", "хэт — 100% тактов", "музыка — 100% тактов")), said
@@ -2109,8 +2129,6 @@ def selftest() -> None:
     mixed = f"{LOOPS}/Acoustic Gtr - AC_GuitarMix120B-04.wav"               # тот же риф, сведённый с другими гитарами
     assert "те же ноты и те же опоры" in "\n".join(problems(looped | {"bpm": 120, "loop": mixed.replace("GuitarMix120B-04", "SixStr120B-01"),
                                                                      "switch": looped["switch"] | {"петля": mixed}}, drums))
-    assert "смена бита" not in TWISTS and "не из списка" in "\n".join(problems(base | {"twist": "смена бита"}, demo())), \
-        "смена бита стала переломом, а не ходом на выбор"
     # Перелом «ступенями»: 16 тактов по четыре — три отрезка с одними барабанами, где 808 и мелодия всякий раз другие,
     # и концовка — другой бит. Те же 808 или мелодия на смене, другой клэп на смене, те же барабаны в концовке — брак
     def stairs(low=(29, 32, 36, 29), at=((0, 6), (2, 10), (4, 12), (8, 14)), clap=(8, 8, 8, 4)):
@@ -2133,17 +2151,6 @@ def selftest() -> None:
                     ({"смены": [5, 13]}, "поле «смены»"), ({"вид": "плавно"}, "не из списка: разом, ступенями")):
         assert why in "\n".join(problems(stepped | {"switch": stepped["switch"] | sw}, stairs())), (sw, why)
     assert problems(stepped | {"switch": stepped["switch"] | {"вид": "разом"}}, stairs()) == [], "«разом» смен не проверяет"
-    # Виды чередуются внутри характера: сверка — с ближайшим прошлым битом того же mood, сколько бы чужих ни стояло
-    # перед ним; заказ не сверяется, но сам в счёт идёт; бит, писанный до перелома, — «разом»
-    kino, was = base | {"mood": "кино"}, base | {"title": "Вчера"}
-    said = "\n".join(_turn(base, [kino, kino, was]))
-    assert "вид перелома «разом» — как в прошлом бите того же характера, «Вчера»" in said \
-        and "у характера «злой» виды чередуются, сегодня — «ступенями»" in said, said
-    assert "сегодня — «разом»" in "\n".join(_turn(stepped, [kino, stepped]))
-    assert _turn(base, [was | {"order": "x"}]) and _turn(stepped, [{"mood": "злой", "title": "до перелома"}]) == [] \
-        and _turn(base, [{"mood": "злой"}]), "заказ в счёт своего характера; бит без перелома — «разом»"
-    assert [_turn(base, olds) for olds in ([], [kino, kino], [stepped, was], [kino, stepped, was])] == [[]] * 4 \
-        and _turn(base | {"order": "x"}, [was]) == [], "нет бита того же характера, ближайший — другого вида, заказ — не повтор"
     card = loop_card("SixStr120B-01")
     assert "тактов 4" in card and "опоры по тактам" in card and "Вторая петля на перелом" in card and "общих" in card, card
     assert mixed.rsplit("/", 1)[-1] not in card and "12Str120E-01" in card, "подсказка не предлагает пару, которую сборка забракует"
@@ -2151,20 +2158,41 @@ def selftest() -> None:
     assert offered and not any(_twin(mixed.replace("GuitarMix120B-04", "SixStr120B-01"), name, heard) for name in offered), offered
     assert "scale=[9, 11, 1, 4, 6, 7, 8]" in card and "scale=[9, 10, 11, 1, 4, 6, 7, 8]" in card, "scale — с тоники, для пары — ноты обеих"
     assert _pages("а\n" * 3000) == ["а\n" * 2000, "а\n" * 1000] and _pages("коротко") == ["коротко"], "длинная записка — частями"
-    assert _free("20261007-a-b-140-fm") and not _free("20261003-a-b-140-fm") and not _free("beat"), "свободная смесь — по средам"
     from . import set11
     set11.selftest()
     from . import flp
     flp.selftest()
-    print("ноты: приёмы, партитура FL, MIDI, отбраковка, цвет (сладкое — брак, сухое проходит), смесь «основа + одно чужое», "
-          "сверка с прошлым битом, неожиданный ход, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), "
-          "перелом «разом» (другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка "
-          "меняются), виды чередуются внутри характера, дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
+    print("ноты: приёмы, партитура FL, MIDI, отбраковка, один бит — один образец (брат образца проходит; чужой темп, неизвестный id, "
+          "образец прошлого бита и хэт далеко от образца — брак; заказ без образца проходит), музыка только одобренными звуками "
+          "(чужой звук, пресет Serum и звук из сети на музыке — брак), сладкое — брак, сухое проходит, мелодия и петля прошлого бита — "
+          "повтор, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), перелом — когда он есть у образца: «разом» "
+          "(другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка меняются), "
+          "дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
           "808 — опора, а не гамма и не одна фигура, хэт не ровный и не по кругу, контрмелодию слышно, перк без панорамы — "
           "лево-право в партитуре, свои наборы владельца, "
-          "петля набора 11 по числу перед BPM, заказ владельца вне очереди и скелет «Г» (хэт по мерке — после перелома, петля — брак и у заказа), "
+          "петля набора 11 по числу перед BPM, скелет «Г» и заказ (хэт по мерке — после перелома, петля под «Six Speed» — брак и у заказа), "
           "строка об авторе звуков CC BY в записке, набор 12 — звук только с нотой замера в имени, петля по числу перед BPM, автор банка "
           "в записке, свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
+
+
+def selftest() -> None:
+    """Образцы и одобренные звуки у селфтеста свои, синтетические: настоящие файлы пополняет Мак, и проверка кода
+    от их содержимого зависеть не должна. Замер образцов — как у пробного бита: хэт восьмыми, бочку и 808 «замер
+    не разобрал» (0 — не сверяется); «вдвое» — тот же ролик, чей замер сел на половинный темп. Одобрены один звук
+    и все замеренные петли."""
+    from unittest import mock
+    from . import config
+    z = {"hat_per_bar": 8, "kick_per_bar": 0, "b808_per_bar": 0}
+    rows = [{"id": f"s{bpm}", "url": f"https://youtu.be/s{bpm}", "title": f"(free) a x b type beat — {bpm}", "like": ["A", "B"],
+             "views": None, "bpm": bpm, "key": None, "zamer": z | {"bpm": bpm}, "note": ""} for bpm in (140, 170, 85)]
+    rows.append(rows[0] | {"id": "вдвое", "zamer": {"bpm": 70, "hat_per_bar": 16}})
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SAMPLES", Path(tmp) / "samples.json"), \
+            mock.patch.object(config, "BEAT_MUSIC", Path(tmp) / "music.json"):
+        config.BEAT_SAMPLES.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        config.BEAT_MUSIC.write_text(json.dumps({"sounds": {min(known()): {"kind": "лид", "bright": 2400}},
+                                                 "loops": {name: {"bpm": loop_bpm(name)} for name in loops()}},
+                                                ensure_ascii=False), encoding="utf-8")
+        _checks()
 
 
 def main() -> None:
@@ -2172,8 +2200,8 @@ def main() -> None:
     p.add_argument("--selftest", action="store_true", help="проверить приёмы и запись файлов, без сети")
     p.add_argument("--build", metavar="ПАПКА", type=Path, help="собрать архив из ПАПКА/make.py")
     p.add_argument("--prev", metavar="ФАЙЛ", type=Path, nargs="+", default=(),
-                   help="make.py прошлых битов, от вчерашнего назад: та же форма, приём, цвет, смесь или мелодия, что в двух "
-                        "первых, или вид перелома, как у ближайшего бита того же характера, — бит не годен")
+                   help="make.py прошлых битов, от вчерашнего назад: тот же образец, петля или мелодия, что в двух первых, — "
+                        "бит не годен")
     p.add_argument("--out", metavar="КУДА", type=Path, help="куда положить архив (по умолчанию — временная папка)")
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
     p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
