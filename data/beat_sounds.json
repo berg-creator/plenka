@@ -1,5 +1,5 @@
 {
- "date": "2026-10-07",
+ "date": "2026-10-08",
  "sounds": [
   "KITS/01 - ASAP Rocky Kit/Claps/808-909 - TReImag_FuzzPedals_Clap_01.wav",
   "KITS/01 - ASAP Rocky Kit/Claps/808-909 - TReImag_HogRing_Clap_01.wav",
@@ -2966,6 +2966,8 @@
   "KITS/14 - 300 Subs Kit/Kicks/Kick #3.wav",
   "KITS/14 - 300 Subs Kit/Kicks/Kick #4.wav",
   "KITS/14 - 300 Subs Kit/Kicks/Kick #5.wav",
+  "KITS/14 - 300 Subs Kit/Loops/DECAY F# PHRY 160.wav",
+  "KITS/14 - 300 Subs Kit/Loops/call at night B MAJOR 135.wav",
   "KITS/14 - 300 Subs Kit/Open Hats/O-Hat #1.wav",
   "KITS/14 - 300 Subs Kit/Open Hats/O-Hat #10.wav",
   "KITS/14 - 300 Subs Kit/Open Hats/O-Hat #11.wav",
@@ -5605,6 +5607,8 @@
   "KITS/12 - Glorified Kit/Loops/Glorified - harlem 150 BPM.wav": "8 | C D D# F G G# A# | C минор 0.02 | +1 | C C G# A# C C G# A# | 100 2 54 75 7 51 4 58 44 7 77 3",
   "KITS/12 - Glorified Kit/Loops/Glorified - hashtaggg 155 BPM.wav": "8 | C D E F# G G# A B | E минор 0.18 | -3 | E E C C E E C C | 38 2 20 2 100 1 19 42 15 56 2 35",
   "KITS/12 - Glorified Kit/Loops/Glorified - last minute 148 BPM.wav": "8 | C D F G A A# | D минор 0.04 | +3 | D D D D D D D D | 22 1 64 1 2 100 4 10 0 29 12 1",
-  "KITS/12 - Glorified Kit/Loops/Glorified - stick 149 BPM.wav": "8 | C D E G G# A B | E минор 0.18 | -3 | E G E G E G G G | 26 4 17 3 97 1 7 100 12 31 1 54"
+  "KITS/12 - Glorified Kit/Loops/Glorified - stick 149 BPM.wav": "8 | C D E G G# A B | E минор 0.18 | -3 | E G E G E G G G | 26 4 17 3 97 1 7 100 12 31 1 54",
+  "KITS/14 - 300 Subs Kit/Loops/DECAY F# PHRY 160.wav": "4 | C# D F# G G# A A# | F# минор 0.12 | +1 | F# F# F# F# | 4 50 14 4 8 4 100 17 10 17 9 5",
+  "KITS/14 - 300 Subs Kit/Loops/call at night B MAJOR 135.wav": "4 | C# D# E F# G# A# B | G# минор 0.13 | +1 | B C# B C# | 6 65 4 53 68 7 28 4 100 4 29 92"
  }
 }

@@ -79,6 +79,15 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 добавляет сама, каждому источнику свою.
 Отвергнуто: четвёртый характер «заказ» — по характеру выбирается фото значка и мерка приторного.
 
+Петля на условиях автора (владелец, 08.10.2026: «берем луп, а так же делаем свою мелодию, чтобы научится этому» — о двух
+любимых петлях набора 14, с которых их автор, blvckmorphine, берёт половину дохода, подпись и отметку). В список идут
+только эти две (`SHARED`) и только биту по заказу: каждая — доля автору, и решает это владелец, а не утренний автор.
+Файл такой петли — раскладка: петля вместе с басом автора, её слои по отдельности и бас один; дорожка на весь бит
+собирается из петли минус бас — под чужой низ свой 808 не встал бы. Условия автора записка называет сама (`_shared`).
+Отвергнуто: вписать обе в одобренные петли (`data/beat_music.json`) — утренний бит стал бы брать их сам, всякий раз
+отдавая половину дохода без слова владельца. Отвергнуто: резать петлю в библиотеку отдельным файлом — библиотека
+владельца в iCloud, писать в неё сборке незачем, а исходный файл со слоями ему самому полезнее целым.
+
 Свой пресет (владелец, 06.10.2026: «использует интернет и собственные пресеты», раньше — «пресеты уникальные
 для меня»). Автор нот звука не слышит и на Мак ничего не кладёт, поэтому пишет в паспорт только данные — поле preset:
 партия, имя, основа из списка звуков и ручки Serum долями. Здесь проверяется форма поля, а пресет собирает и проверяет
@@ -251,9 +260,22 @@ LISTED += tuple(("KITS/Maxeyy Stash V5", f"{role}/*.wav")
 # Наборы 13 «Afterlife» и 14 «300 Subs» (blvckmorphine, из загрузок владельца 07.10.2026): барабаны и 808 условий не несут
 # («Enjoy the sounds»), одиночные звуки — по правилу набора 12, только с нотой замера в скобках. Петли обоих (Loops,
 # Percussion Loops) — 50/50 с доходов, тег @blvckmorphine и «prod. имя x blvckmorphine» (TERMS.txt рядом): в бит на раздачу
-# не идут, в LISTED их нет намеренно
+# не идут, в LISTED их нет намеренно — кроме двух, которые назвал владелец (`SHARED`)
 LISTED += tuple((kit, f"{role}/*.wav") for kit in ("KITS/13 - Afterlife Kit", "KITS/14 - 300 Subs Kit") for role in ROLES)
 LISTED += (("KITS/13 - Afterlife Kit", "Oneshots/* (*).wav"),)
+# Две петли набора 14 — на условиях автора (владелец, 08.10.2026: «там 2 моих любимых. выше весёлый, ниже злой»; об условиях:
+# «берем луп, а так же делаем свою мелодию, чтобы научится этому»). Только они и только биту по заказу: каждая — доля
+# автору с дохода, а это решает владелец, не утренний автор. Темп — последнее число имени, слова «BPM» в нём нет.
+# Файл — не петля, а раскладка (замер 08.10.2026, у обоих одна): такты 1–8 — петля в четыре такта дважды вместе с басом
+# автора, который громче музыки на 18–23 дБ; дальше семь слоёв по четыре такта, после каждого такт под хвост; такты 45–48 —
+# бас один. Петля минус бас сходится до кадра (ниже 120 Гц остаётся −61 и −56 дБ): так музыка отделяется от чужого
+# низа, под который наш 808 не встал бы. `SHARED_CUT` — сколько тактов в петле и с какого такта (счёт с нуля) бас один
+SHARED = ("KITS/14 - 300 Subs Kit/Loops/call at night B MAJOR 135.wav", "KITS/14 - 300 Subs Kit/Loops/DECAY F# PHRY 160.wav")
+SHARED_CUT = (4, 44)
+SHARED_BY = "blvckmorphine"
+SHARED_PEAK = .9            # пик дорожки петли после вычета баса: музыка в файле на −12 и −5 дБ, под барабанами её не слышно
+LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in SHARED)
+LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED)      # откуда петля вправе быть
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 TODAY = "00 - Сегодня"      # папка копий на сегодня — в KITS и в User пресетов Serum; чистится только она
 
@@ -732,8 +754,11 @@ def _counter(info: dict, tracks: dict[str, list[N]]) -> list[str]:
 def loop_bpm(name: str) -> int | None:
     """Темп петли из имени файла: «AC_NylStr85A-01» — 85, «K02Organ110E-03» — 110. None — петля не из разрешённых
     видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои. У петли наборов 11 и 12
-    (узнаётся по папке, поэтому имя нужно полное) темп — число перед «BPM»: «… Am 140 BPM» — 140, нет его — None."""
+    (узнаётся по папке, поэтому имя нужно полное) темп — число перед «BPM»: «… Am 140 BPM» — 140, нет его — None.
+    У двух петель набора 14 (`SHARED`) — последнее число имени."""
     stem = name.rsplit("/", 1)[-1]
+    if name in SHARED:
+        return int(re.findall(r"\d{2,3}", stem)[-1])
     if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")):
         return int(m[1]) if (m := re.search(r"(?<!\d)(\d{2,3})\s*BPM", stem, re.I)) else None
     if not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS)) or re.search("Beat|Bass|Drum", stem):
@@ -829,9 +854,12 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     heard, pair, out, end, good = loops(), _pair(info), [], info["bars"] * 16, {}
     for word, name in zip(("loop", "switch, вторая петля"), pair):
         tempo, m = loop_bpm(name), heard.get(name)
-        if not (name.startswith((LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/")) and tempo and name in known()):
+        if not (name.startswith(LOOP_HOMES) and tempo and name in known()):
             out.append(f"{word}: «{name}» — не из разрешённых петель: {LOOPS} (виды {', '.join(LOOP_KINDS)}), "
                        f"{NET_LOOPS} и {GLORY_LOOPS}, с темпом в имени — точное имя бери из data/beat_sounds.json")
+        elif name in SHARED and not info.get("order"):
+            out.append(f"{word}: «{name}» — петля на условиях автора (половина дохода, подпись «x {SHARED_BY}»): "
+                       "только биту по заказу владельца (order)")
         elif not m:
             out.append(f"{word}: «{name}» не замерена по звуку (не в 1, 2, 4 или 8 тактов или не скачана из iCloud) — "
                        "бери петлю из замера: python3 -m src.noty --loop СЛОВО")
@@ -967,7 +995,9 @@ def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         out.append(f"switch: вид перелома «{_kind(info)}» — не из списка: {', '.join(SWITCHES)}")
     elif _kind(info) == SWITCHES[1]:
         out += _steps(info, starts, frame, sum(hat.values(), []), sum(part(*SAMPLED).values(), []), music)
-    if loop:
+    # Заказ вправе не назвать вторую петлю (08.10.2026: у петли, которую назвал владелец, пары в её темпе и тональности
+    # нет): после перелома петля молчит, и музыку держат партии — их и сверяем, как у бита без петли
+    if loop and not (info.get("order") and len(_pair(info)) < 2):
         pair, heard = _pair(info), loops()
         if len(pair) < 2:
             out.append("switch: у бита петлёй после перелома играет вторая петля — поле «петля» в switch")
@@ -1206,6 +1236,18 @@ def _when(rests) -> str:
                      else f"с {a:g} до {b:g}" for a, b in rests)
 
 
+def _shared(info: dict) -> list[str]:
+    """Условия автора петли (`SHARED`, TERMS.txt набора) — строками записки: подпись, отметка, доля. Автор нот о них
+    забудет, а владелец читает записку перед тем, как выложить бит."""
+    if not any(name in SHARED for name in _pair(info)):
+        return []
+    from . import config
+    return [f"Петля — {SHARED_BY}, на его условиях. Подпись бита везде, где он выходит: {config.BEAT_CREDIT} x {SHARED_BY}",
+            f"В каждой публикации бита и трека на нём — отметка @{SHARED_BY}.",
+            "Половина любого дохода с бита и с трека на нём — автору петли; перед крупным релизом — написать ему.",
+            f"В каталог бота этот бит пока не отправляй: бот подписывает биты «{config.BEAT_CREDIT}», без автора петли.", ""]
+
+
 def _loop_note(info: dict) -> list[str]:
     """Что владельцу знать о петле: темп, готовая дорожка, ноты по замеру звука, паузы."""
     pair, heard = _pair(info), loops()
@@ -1215,7 +1257,10 @@ def _loop_note(info: dict) -> list[str]:
            + (f" вдвое ({loop_bpm(pair[0])} → {info['bpm']}): такт петли — два такта бита" if info.get("bpm") != loop_bpm(pair[0]) else "")
            + ". Дорожка «Петля — на весь бит.wav» в папке «Сегодня» уже расставлена по тактам, с паузами — поставь её с первого такта"
            + ("; «Петля 2 — на весь бит.wav» — вторая петля, она играет после перелома и ставится тоже с первого такта"
-              if len(pair) > 1 else "") + "."]
+              if len(pair) > 1 else f"; с такта {_cut(info) // 16 + 1}, после перелома, она молчит" if _cut(info) else "") + "."]
+    if pair[0] in SHARED:
+        out.append("В дорожке — музыка петли без баса её автора: он вычтен, низ ведёт твой 808. Сам файл петли лежит рядом: "
+                   f"после первых восьми тактов в нём семь слоёв петли по отдельности, такты {SHARED_CUT[1] + 1}–{SHARED_CUT[1] + SHARED_CUT[0]} — бас автора.")
     out += [f"{'Вторая петля' if i else 'Петля'}: звучат ноты {' '.join(m['notes'])}; опора по её тактам — {' '.join(m['roots'])}; "
             f"тоника, скорее всего, {m['key']}." for i, name in enumerate(pair) if (m := heard.get(name))]
     out.append("Ноты и опоры — замер звука петли, а не буква в имени файла; замер грубый: обертон громкой ноты он считает нотой.")
@@ -1262,6 +1307,7 @@ def about(info: dict) -> str:
              for part, p in info["preset"].items() if isinstance(p, dict)), ""] if isinstance(info.get("preset"), dict) else []),
         *(line for mark, who in CREDIT if any(mark in n for names in _sounds(info).values() for n in _names(names))
           for line in (f"В описание ролика — строка об авторе звуков, её требует лицензия: {who}", "")),
+        *_shared(info),
         *_loop_note(info),
         *_net_note(info),
         *(["Обработка — цепочки из интервью продюсеров и замера. Ни пресетов, ни эффектов автор нот не слышал: "
@@ -1272,8 +1318,9 @@ def about(info: dict) -> str:
         "они работают в сэмплере (барабаны, 808), синтезатору идут только ноты и сила.",
         "Папка midi — запасной путь: только высота, длина и сила; 808 со слайдами там — ноты внахлёст, "
         "включи на канале Mono и Porta.",
-        f"Готовый бит — боту с подписью: бит {info['title']}, {info['bpm']} {info['key']}"
-        + (f", {info['mood']}" if info.get("mood") else ""),  # настроение выбирает фото значка (bity.MOOD)
+        *([] if _shared(info) else [                           # бит на петле с долей автора бот пока подписал бы без него
+            f"Готовый бит — боту с подписью: бит {info['title']}, {info['bpm']} {info['key']}"
+            + (f", {info['mood']}" if info.get("mood") else "")]),  # настроение выбирает фото значка (bity.MOOD)
     ])
 
 
@@ -1391,13 +1438,16 @@ def _raw(pcm: array, width: int) -> bytes:
     return bytes(out)
 
 
-def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool = False) -> None:
+def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool = False,
+               split: tuple[int, int] | None = None) -> None:
     """Петля на весь бит одним файлом (владелец, 05.10.2026: «может, ты мне дашь дорожку петли на весь трек сразу»).
     Длина — весь бит; повторы стоят по сетке тактов, а не встык по длине файла; в паузах (rests) тишина; первая петля
     играет до перелома, вторая — после, и обе дорожки ставятся с первого такта. Затухание и возврат (`FADE`) — внутри
     самой паузы: атака первой ноты после неё цела. Темп бита равен темпу петли или вдвое выше — растяжки нет, поэтому
     хватает стандартной библиотеки, а формат файла остаётся прежним. plan пришёл из make.py — это числа, а не пути:
-    файлы называет вызывающий. Не PCM 16/24 или план негоден — исключение, в папке остаётся просто копия петли."""
+    файлы называет вызывающий. Не PCM 16/24 или план негоден — исключение, в папке остаётся просто копия петли.
+    split — файл-раскладка (`SHARED_CUT`): петля — первые такты файла минус бас автора, лежащий в нём отдельно; пик
+    остатка поднят до `SHARED_PEAK`, конец петли гаснет к шву повтора."""
     bpm, bars, cut = float(plan["bpm"]), int(plan["bars"]), plan.get("switch")
     rests = [(float(a), float(b)) for a, b in plan.get("rests") or ()]
     if not (tempo and bpm in (tempo, tempo * 2) and bars >= 1 and bars * 240 / bpm <= 600):
@@ -1407,6 +1457,19 @@ def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool
         if width not in (2, 3) or sys.byteorder != "little" or array("i").itemsize != 4:
             raise ValueError(f"{width * 8} бит: читаются только 16 и 24")
         one = _pcm(w.readframes(n), width)
+    if split:
+        size, low = (round(b * 240 / tempo * sr) * ch for b in split)
+        if len(one) < low + size:
+            raise ValueError("файл короче раскладки: баса автора в нём нет")
+        one = [a - b for a, b in zip(one[:size], one[low:low + size])]
+        # ponytail: первый проход петли кончается посреди хвостов её нот, и на шве повтора они обрываются — у DECAY скачком
+        # в пятую часть пика (замер 08.10.2026). Гасим последние `FADE` секунд: щелчка нет, хвост теряется. Услышит владелец
+        # сухой шов — хвосты слоёв лежат в файле по отдельности, в такте после каждого слоя: сложить и наложить на начало
+        fade = round(FADE * sr)
+        for i in range(min(fade * ch, len(one))):
+            one[-1 - i] = one[-1 - i] * (i // ch) // fade
+        gain = SHARED_PEAK * 2 ** 31 / max(1, max(map(abs, one)))
+        one, n = array("i", (max(-2 ** 31, min(2 ** 31 - 1, round(x * gain))) for x in one)), size // ch
     total = round(bars * 240 / bpm * sr)
 
     def at(bar: float) -> int:          # кадр, с которого начинается такт; дробный такт — доля такта
@@ -1493,7 +1556,8 @@ def lay(built: Path | None, sounds: dict, kits: Path, serum: Path,
         if isinstance(plan, dict) and part in copied:
             track = kits / f"{part.capitalize()} — на весь бит.wav"
             try:
-                loop_track(copied[part][0], track, loop_bpm(copied[part][1]), plan, second=bool(i))
+                loop_track(copied[part][0], track, loop_bpm(copied[part][1]), plan, second=bool(i),
+                           split=SHARED_CUT if copied[part][1] in SHARED else None)
             except (wave.Error, EOFError, OSError, ValueError, TypeError, KeyError, MemoryError) as e:
                 track.unlink(missing_ok=True)
                 missed.append(f"{part}: дорожка на весь бит не собралась ({e}) — в папке копия петли: расставь её по тактам")
@@ -1850,6 +1914,15 @@ def _checks() -> None:
                 raise AssertionError(f"негодный план должен отказать: {bad}")
             except (ValueError, TypeError, KeyError):
                 pass
+        # Петля-раскладка (`SHARED_CUT`): такт музыки вместе с басом автора, такт тишины, бас один — в дорожке музыка
+        # без баса, пик поднят до `SHARED_PEAK`, повтор — через такт петли, а не через длину файла
+        with wave.open(str(tmp / "parted.wav"), "wb") as w:
+            w.setnchannels(1), w.setsampwidth(2), w.setframerate(8000)
+            w.writeframes(b"".join(v.to_bytes(2, "little") for v in [i % 100 + 1000 for i in range(16000)] + [0] * 16000 + [1000] * 16000))
+        loop_track(tmp / "parted.wav", tmp / "e.wav", 120, {"bpm": 120, "bars": 8, "rests": []}, split=(1, 2))
+        e, _ = read(tmp / "e.wav")
+        assert e[0] == 0 and 0 < e[50] < e[99] == e[16099] == int(SHARED_PEAK * 32768), "бас автора вычтен, музыка поднята"
+        assert e[15999] == e[127999] == 0 < e[15980] < e[15899], "шов повтора: конец петли гаснет, а не щёлкает"
         # В папке «Сегодня»: сырая копия петли остаётся, рядом дорожка на весь бит в формате петли (24 бита, стерео);
         # петля, которая не читается, — только копия и строка в записке
         (lib / "k" / "Acoustic Gtr - AC_Test120A-01.wav").unlink(missing_ok=True)
@@ -2130,6 +2203,30 @@ def _checks() -> None:
     assert loop_bpm(glory) == 150 and not loop_bpm(glory.replace("/Loops/", "/Oneshots/")), "темп петли набора 12"
     assert "Glorified Zenology Bank by @aye.shark" in about(base | {"sounds": {"мелодия": shot}}) and "aye.shark" not in credit, \
         "автор банка Glorified — строкой в записке"
+    # Набор 14, две петли на условиях автора (владелец, 08.10.2026): в список идут только они — прочие петли наборов 13 и 14
+    # мимо, — темп — последнее число имени; берёт их только заказ, и второй петли он вправе не называть: после перелома
+    # музыку держат партии. Подпись, отметку и долю автора записка называет сама и к боту такой бит не зовёт
+    gay, evil = sorted(SHARED, key=loop_bpm)
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(LIBRARY, {"KITS": Path(tmp), "Serum": Path(tmp) / "нет"}):
+        for name in (*SHARED, "KITS/14 - 300 Subs Kit/Loops/abyss C MINOR 132.wav", "KITS/14 - 300 Subs Kit/Loops/TERMS.txt",
+                     "KITS/14 - 300 Subs Kit/Percussion Loops/perc 135.wav", "KITS/13 - Afterlife Kit/Loops/any A MINOR 140.wav"):
+            (Path(tmp) / name.partition("/")[2]).parent.mkdir(parents=True, exist_ok=True)
+            (Path(tmp) / name.partition("/")[2]).touch()
+        assert library() == sorted(SHARED), f"наборы 13 и 14: из петель в список — только две названные, а не {library()}"
+    assert (loop_bpm(gay), loop_bpm(evil)) == (135, 160) and not loop_bpm(gay.replace("call at night", "abyss")) \
+        and set(SHARED) <= known() and all(heard[n]["bars"] == SHARED_CUT[0] for n in SHARED), "темп и замер двух петель набора 14"
+    share = demo(35, (71, 75, 66, 68))
+    shared = {k: v for k, v in ordered.items() if k != "switch"} | dict(
+        bpm=135, loop=gay, scale=[11, 1, 3, 4, 6, 8, 10], switch={"такт": 9, "переход": "петля молчит, музыку ведёт своя мелодия"},
+        fx={"808": "Fruity Fast Dist", "мелодия": "без обработки", "петля": "Gross Beat"})
+    assert problems(shared, share) == [], problems(shared, share)
+    assert "только биту по заказу владельца" in "\n".join(problems(shared | {"order": "", "sample": "s140"}, share)), "утром её не берут"
+    assert "после перелома играет вторая петля" in "\n".join(problems(looped | {"switch": {"такт": 9, "переход": "x"}}, drums)), \
+        "без заказа перелом бита петлёй требует вторую"
+    said = about(shared)
+    assert f"{config.BEAT_CREDIT} x {SHARED_BY}" in said and f"отметка @{SHARED_BY}" in said and "Половина любого дохода" in said \
+        and "боту с подписью" not in said and "с такта 9, после перелома, она молчит" in said and "без баса её автора" in said, said
+    assert SHARED_BY not in about(looped) and "боту с подписью" in about(looped), "условия автора — только у бита на его петле"
     # Звук по адресу из сети (поле net): сборка смотрит форму и адрес без сети, записка говорит, что его никто не слышал
     wav = "https://freewavesamples.com/files/Kawai-K1r-Aah-C4.wav"
     assert problems(base | {"net": {"перк": wav}}, demo()) == [] and "из сети" not in about(base) \
@@ -2218,7 +2315,9 @@ def _checks() -> None:
           "лево-право в партитуре, свои наборы владельца, "
           "петля набора 11 по числу перед BPM, скелет «Г» и заказ (хэт по мерке — после перелома, петля под «Six Speed» — брак и у заказа), "
           "строка об авторе звуков CC BY в записке, набор 12 — звук только с нотой замера в имени, петля по числу перед BPM, автор банка "
-          "в записке, свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
+          "в записке, две петли набора 14 на условиях автора (в списке только они, темп — последнее число имени, только заказу, "
+          "перелом без второй петли, дорожка без баса автора, подпись, отметка и доля — в записке), "
+          "свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
 
 
 def selftest() -> None:

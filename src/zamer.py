@@ -41,6 +41,9 @@
 это 2 или 4 такта и хвост ревера, который пришлось бы накладывать на следующий повтор.
 Отвергнуто: `chroma_cqt` как есть — три полосы CQT на полутон складываются окном, и громкая нота «звучит»
 в обоих соседних полутонах; берётся одна центральная полоса.
+Две петли набора 14 (`noty.SHARED`, 08.10.2026) — не петли, а раскладки: петля вместе с басом автора, её слои
+по отдельности и бас один. Мерится музыка без баса (петля минус бас, `parted`), а опоры тактов — по самому басу
+через pyin: бас там громче музыки на 18–23 дБ, и хрома всей петли называла бы «нотами» его гармоники.
 
 Корень одиночного звука (`--root`, 06.10.2026: банк одиночных звуков, в именах которого нот нет). Сэмплеру нужна
 корневая нота канала — на какой ноте звук записан: партия от неверного корня фальшивит вся, и на слух её до владельца
@@ -488,6 +491,25 @@ def loop(y: np.ndarray, sr: int, bpm: float) -> dict | None:
             "roots": [NOTES[int(c[1:3, :, a:b].sum((0, 2)).argmax())] for a, b in zip(edges, edges[1:])]}
 
 
+def parted(y: np.ndarray, sr: int, bpm: float, cut: tuple[int, int]) -> tuple[np.ndarray, list[str]]:
+    """Файл-раскладка (`noty.SHARED`): музыка петли без баса её автора и опора каждого такта по самому басу.
+    В таком файле бас лежит ещё и отдельно, и петля минус бас сходится до кадра. Опора — нота, на которой бас стоит
+    в такте дольше всего, по pyin: хрома здесь врёт — у баса на си (31 Гц) в C2–B3 громче всех его третья гармоника,
+    фа-диез (замер 08.10.2026). cut — сколько тактов в петле и с какого такта, счёт с нуля, бас один.
+
+    ponytail: одна опора на такт, а бас автора меняет её и в середине такта — вторую половину замер не отдаёт;
+    понадобится — мерить по полтакта и завести полю роль в `noty.loops`."""
+    import librosa
+    from .noty import NOTES
+    size, at = (round(b * 240 / bpm * sr) for b in cut)
+    low = y[at:at + size]
+    f0 = librosa.pyin(low, fmin=25, fmax=130, sr=sr, frame_length=8192, hop_length=512)[0]
+    edges = np.linspace(0, len(f0), cut[0] + 1).astype(int)
+    roots = [NOTES[int(np.bincount(np.round(librosa.hz_to_midi(x[~np.isnan(x)])).astype(int) % 12, minlength=12).argmax())]
+             for x in (f0[a:b] for a, b in zip(edges, edges[1:]))]
+    return y[:size] - low, roots
+
+
 def loops(word: str = "") -> str:
     """Замер всех разрешённых петель библиотеки владельца → поле loops в data/beat_sounds.json, строкой на петлю,
     как лежит промер Serum: вложенные списки при записи с отступом дали бы тридцать строк на петлю.
@@ -497,18 +519,21 @@ def loops(word: str = "") -> str:
     from . import config, noty
     data = json.loads(config.BEAT_SOUNDS.read_text("utf-8"))
     rows, old, skipped = {}, data.get("loops", {}), {"заглушка iCloud": 0, "не 1, 2, 4 или 8 тактов": 0}
-    for name in sorted(n for n in data["sounds"] if n.startswith((noty.LOOPS + "/", noty.NET_LOOPS + "/", noty.GLORY_LOOPS + "/"))
-                       and noty.loop_bpm(n)):
+    for name in sorted(n for n in data["sounds"] if n.startswith(noty.LOOP_HOMES) and noty.loop_bpm(n)):
         path = noty.LIBRARY["KITS"] / name.partition("/")[2]
         if word.lower() not in name.lower() or not path.exists() or os.stat(path).st_flags & DATALESS:
             skipped["заглушка iCloud"] += word.lower() in name.lower()
             rows |= {name: old[name]} if name in old else {}
             continue
         y, sr = librosa.load(path, sr=None)
+        low = None
+        if name in noty.SHARED:             # раскладка: мерится музыка без баса автора, опоры — по басу
+            y, low = parted(y, sr, noty.loop_bpm(name), noty.SHARED_CUT)
         m = loop(y, sr, noty.loop_bpm(name))
         if not m:
             skipped["не 1, 2, 4 или 8 тактов"] += 1
             continue
+        m["roots"] = low or m["roots"]
         rows[name] = " | ".join((str(m["bars"]), " ".join(m["notes"]), f"{m['tonic']} {m['mode']} {m['sure']:.2f}", f"{m['tune']:+d}",
                                  " ".join(m["roots"]), " ".join(str(round(w * 100)) for w in m["weights"])))
     about = ("замер звука петли (zamer --loops), поля через « | »: такты по темпу из имени | звучащие ноты (энергия от "
@@ -710,6 +735,11 @@ def selftest() -> None:
     assert abs(m["tune"]) <= 10 and len(m["weights"]) == 12 and max(m["weights"]) == 1, m      # строй чистых синусов — до −6: оценка
     assert loop(two[:int(2.5 * SR)], SR, 120) is None and loop(np.tile(two, 3)[:10 * SR], SR, 120) is None, \
         "такт с четвертью и пять тактов — не петля"
+    # Раскладка: два такта музыки вместе с басом (си и ми ниже C2, громче музыки вдесятеро), два такта тишины и бас один —
+    # музыка мерится без баса, опоры — по басу, а не по его третьей гармонике в C2–B3
+    low = np.concatenate([10 * chord(30.87, 92.6), 10 * chord(41.2, 123.6)])
+    mel, low_roots = parted(np.concatenate([two + low, 0 * two, low]), SR, 120, (2, 4))
+    assert low_roots == ["B", "E"] and loop(mel, SR, 120)["notes"] == m["notes"], (low_roots, loop(mel, SR, 120))
     # Корень одиночного звука: нота с обертонами — её номер; аккорд, квинта без основного тона и съезд высоты — замер молчит
     one = np.arange(SR) / SR
 
@@ -721,7 +751,7 @@ def selftest() -> None:
     assert root(np.sin(2 * np.pi * 261.63 * one) + np.sin(2 * np.pi * 392 * one), SR) is None, \
         "квинта: общий период — до октавой ниже, а звука там нет"
     assert root(np.sin(2 * np.pi * np.cumsum(220 * 2 ** one) / SR), SR) is None, "высота съезжает на октаву — корня нет"
-    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, долгий суб нотой в такт, части, цвет музыки, ноты петли и корень одиночного звука "
+    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, долгий суб нотой в такт, части, цвет музыки, ноты петли, петля-раскладка без баса автора и корень одиночного звука "
           "на синтетике — в порядке")
 
 
