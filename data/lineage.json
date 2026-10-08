@@ -462,7 +462,89 @@
           "quote": "Всю музыку для коллектива писал битмейкер Влади и по звучанию он ориентировался на своего коллегу RZA из нью-йоркской рэп-группы Wu-Tang Clan"
         }
       ]
+    },
+    {
+      "id": "mf-doom--earl-sweatshirt",
+      "by": "auto",
+      "added_at": "2026-10-08T12:47:31+00:00",
+      "kind": "said",
+      "modern": "Earl Sweatshirt",
+      "ancestor": "MF Doom",
+      "connection": "признанное влияние: Earl Sweatshirt сам называет MF Doom среди тех, кто на него повлиял",
+      "facts": [
+        "Earl Sweatshirt называет MF Doom среди тех, кто на него повлиял",
+        "MF Doom выступал в металлической маске по образу злодея Marvel Доктора Дума — он же стоит на обложке его дебютного сольного альбома Operation: Doomsday 1999 года",
+        "После этого MF Doom редко появлялся на публике без маски"
+      ],
+      "artist": "Earl Sweatshirt",
+      "ends": [
+        {
+          "artist": "MF Doom",
+          "track": "Doomsday",
+          "url": "https://www.deezer.com/track/2046285867"
+        },
+        {
+          "artist": "Earl Sweatshirt",
+          "track": "Chum",
+          "url": "https://www.deezer.com/track/70018666"
+        }
+      ],
+      "sources": [
+        {
+          "fact": "Earl Sweatshirt называет MF Doom среди тех, кто на него повлиял",
+          "url": "https://en.wikipedia.org/wiki/Earl_Sweatshirt",
+          "quote": "Kgositsile has taken influence from MF Doom, Jay-Z, J Dilla, Madlib, RZA, Lupe Fiasco, and Clipse."
+        },
+        {
+          "fact": "MF Doom выступал в металлической маске по образу злодея Marvel Доктора Дума — он же стоит на обложке его дебютного сольного альбома Operation: Doomsday 1999 года",
+          "url": "https://en.wikipedia.org/wiki/MF_Doom",
+          "quote": "He began performing at open mic events while wearing a metal mask resembling that of the Marvel Comics supervillain Doctor Doom, who is depicted on the cover of his 1999 debut solo album Operation: Doomsday."
+        },
+        {
+          "fact": "После этого MF Doom редко появлялся на публике без маски",
+          "url": "https://en.wikipedia.org/wiki/MF_Doom",
+          "quote": "He adopted the MF Doom persona and rarely made unmasked public appearances thereafter."
+        }
+      ]
+    },
+    {
+      "id": "pharrell-williams--tyler-the-creator",
+      "by": "auto",
+      "added_at": "2026-10-08T12:47:32+00:00",
+      "kind": "said",
+      "modern": "Tyler, The Creator",
+      "ancestor": "Pharrell Williams",
+      "connection": "признанное влияние: Tyler, The Creator сам называет работы Pharrell Williams своим главным ориентиром",
+      "facts": [
+        "Pharrell Williams — один из главных источников вдохновения и ориентиров для Tyler, The Creator",
+        "Ранние продюсерские работы Tyler замечали за сходство с работами Pharrell Williams в N.E.R.D и The Neptunes, и сам Tyler называл их своими главными ориентирами"
+      ],
+      "artist": "Tyler, The Creator",
+      "ends": [
+        {
+          "artist": "Pharrell Williams",
+          "track": "Can I Have It Like That",
+          "url": "https://www.deezer.com/track/3119453"
+        },
+        {
+          "artist": "Tyler, The Creator",
+          "track": "Yonkers",
+          "url": "https://www.deezer.com/track/1094938382"
+        }
+      ],
+      "sources": [
+        {
+          "fact": "Pharrell Williams — один из главных источников вдохновения и ориентиров для Tyler, The Creator",
+          "url": "https://en.wikipedia.org/wiki/Tyler,_the_Creator",
+          "quote": "Pharrell Williams has been one of the greatest inspirations and references for Tyler."
+        },
+        {
+          "fact": "Ранние продюсерские работы Tyler замечали за сходство с работами Pharrell Williams в N.E.R.D и The Neptunes, и сам Tyler называл их своими главными ориентирами",
+          "url": "https://en.wikipedia.org/wiki/Tyler,_the_Creator",
+          "quote": "his musical productions instinctively became noted for resembling those of Pharrell Williams and his works in N.E.R.D and The Neptunes during the 2000s, which Tyler has referenced as his greatest inspirations and references."
+        }
+      ]
     }
   ],
-  "searched_at": "2026-10-01T10:52:33+00:00"
+  "searched_at": "2026-10-08T12:47:32+00:00"
 }
