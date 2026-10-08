@@ -9,6 +9,15 @@
 прослушивания. Токенов рубрика не тратит вовсе: все факты берутся из магазина,
 придумывать тут нечего.
 
+**Почему не свежее и не хит** (владелец, 08.10.2026: загадка была очевидной).
+До этого дня отрывок брался из трёх последних релизов случайного артиста базы —
+их подписчик и так слышал. Теперь загадывается русскоязычный артист, релиз —
+из старой половины его дискографии, альбом раньше сингла: голос и звук там
+ещё другие. Треки из самых слушаемых у него на Deezer мимо, как и фиты, ремиксы
+и скиты: в их отрывке мог звучать не он. Ложные варианты — на языке ответа,
+иначе лишних вычёркивает язык, а не слух. «Голос другой» кодом не измерить,
+а год релиза и место среди хитов — измерить, поэтому отбор стоит на них.
+
 Главная забота — не проговориться раньше времени. В аудио не уходит ни имя
 исполнителя, ни название трека, ни обложка: любое из этого превращает
 викторину в объявление ответа.
@@ -59,7 +68,7 @@ import time
 from pathlib import Path
 
 from . import config, quiz_ai, state, telegram
-from .sources import itunes
+from .sources import deezer, itunes
 
 log = logging.getLogger("quiz")
 
@@ -77,6 +86,20 @@ WINNERS = config.PRIVATE / "quiz"
 # своя пауза, и перебирать всю базу ради одного поста незачем.
 ATTEMPTS = 8
 OPTIONS = 4
+# Сколько релизов просить у магазина — предел его lookup: загадке нужна вся дискография.
+DEPTH = 200
+# Сколько релизов одного артиста перебрать, прежде чем взять другого.
+RELEASES = 3
+# Столько самых слушаемых треков артиста загадкой не идут.
+HITS = 25
+# Короче — скит или вступление: голоса в отрывке может не быть.
+MIN_SECONDS = 60
+# Гость, чужая обработка и трек без слов: в отрывке звучал бы не тот, кого загадали.
+UNFAIR = re.compile(
+    r"\b(feat|ft|skit|intro|outro|interlude|instrumental|remix|live"
+    r"|скит|интро|аутро|инструментал|ремикс)\b",
+    re.IGNORECASE,
+)
 # Сколько последних загадок помним, чтобы не повторяться.
 MEMORY = 60
 # Сколько ждём, пока дежурство повесит опрос под пересылкой. Обычно хватает
@@ -114,47 +137,79 @@ def _remember(mark: str | None) -> None:
     state.write_json(STATE_FILE, data)
 
 
+def _ru(artist: dict) -> bool:
+    """Русскоязычный: метка базы или кириллица в имени — у пришедших в базу самих меток нет."""
+    tags = artist.get("tags", [])
+    return any(t == "ru" or t.startswith("ru-") for t in tags) or bool(re.search("[а-яё]", artist["name"].casefold()))
+
+
+def _plain(title: str) -> str:
+    """Название без скобок и знаков: два магазина пишут один трек по-разному."""
+    return " ".join(re.sub(r"\(.*?\)|\[.*?\]|[^\w\s]", " ", title.casefold()).split())
+
+
+def deep(releases: list[dict], artist_id: int) -> list[dict]:
+    """Старая половина своих релизов артиста, альбомы раньше синглов.
+
+    Ранний альбом — тот же артист с другим голосом и звуком, а сингл и свежий
+    релиз у подписчика на слуху. Релизы, где артист гостем, мимо: в отрывке
+    звучал бы хозяин.
+    """
+    own = sorted((r for r in releases if r.get("artist_ids") == [artist_id]), key=lambda r: r["released_at"])
+    old = own[: (len(own) + 1) // 2]
+    random.shuffle(old)
+    return sorted(old, key=lambda r: (r.get("track_count") or 0) < 4)
+
+
+def _hits(artist: dict) -> set[str]:
+    """Самые слушаемые треки артиста по Deezer. Не ответил — загадка выйдет без этого отсева."""
+    try:
+        return {_plain(title) for title in deezer.top_tracks(artist["deezer_id"], HITS)}
+    except Exception:  # noqa: BLE001 — ни имени, ни адреса в лог: по ним читается ответ
+        log.info("Deezer не ответил: загадка без отсева хитов")
+        return set()
+
+
 def decoys(target: dict, artists: list[dict], count: int = OPTIONS - 1) -> list[str]:
-    """Ложные варианты — из соседних сцен, а не наугад.
+    """Ложные варианты — соседи по сцене на языке ответа, а не кто попало.
 
     Если подставить кого попало, викторина решается методом исключения:
-    среди мемфисского рэпа сразу видно случайную поп-звезду. Поэтому берём
-    тех, у кого есть общий тег с загаданным, и только если таких не хватило,
-    добираем случайными.
+    среди рэперов сразу видно рок-группу, а среди русских — того, кто читает
+    по-английски: язык отрывка вычёркивает лишних раньше, чем человек узнал голос.
+    Поэтому берём только тех, у кого с загаданным общая метка сцены и общий язык.
+    Не набралось трёх — вернётся меньше, и артист не загадывается (`pick`).
     """
     tags = set(target.get("tags", []))
-    name = target["name"]
-
-    kin = [a for a in artists if a["name"] != name and tags & set(a.get("tags", []))]
+    kin = [
+        a["name"] for a in artists
+        if a["name"] != target["name"] and _ru(a) == _ru(target) and tags & set(a.get("tags", []))
+    ]
     random.shuffle(kin)
-    picked = [a["name"] for a in kin[:count]]
-
-    if len(picked) < count:
-        rest = [a["name"] for a in artists if a["name"] != name and a["name"] not in picked]
-        random.shuffle(rest)
-        picked += rest[: count - len(picked)]
-
-    return picked[:count]
+    return kin[:count]
 
 
 def pick() -> dict | None:
     """Готовит загадку: отрывок, ответ и три ложных варианта."""
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
-    tracked = [a for a in artists if a.get("itunes_id")]
+    tracked = [a for a in artists if a.get("itunes_id") and len(decoys(a, artists)) == OPTIONS - 1]
     if not tracked:
         return None
 
     used = _used()
     random.shuffle(tracked)
+    # Русскоязычные первыми (владелец, 08.10.2026); остальные — когда у них отрывка не нашлось.
+    tracked.sort(key=lambda a: not _ru(a))
 
     for artist in tracked[:ATTEMPTS]:
         try:
-            releases = itunes.recent_releases(artist["itunes_id"], limit=3)
+            releases = itunes.recent_releases(artist["itunes_id"], limit=DEPTH)
         except Exception as exc:  # noqa: BLE001 — магазин мог не ответить
             log.info("Релизы «%s» не достались: %s", artist["name"], exc)
             continue
 
-        for release in releases:
+        old = deep(releases, artist["itunes_id"])[:RELEASES]
+        hits = _hits(artist) if old else set()
+        for release in old:
             album_id = itunes.album_id_from_url(release.get("url", ""))
             if not album_id:
                 continue
@@ -164,7 +219,11 @@ def pick() -> dict | None:
                 log.info("Треки «%s» не достались: %s", release.get("title", ""), exc)
                 continue
 
-            playable = [t for t in tracks if t.get("preview")]
+            playable = [
+                t for t in tracks
+                if t.get("preview") and t["seconds"] >= MIN_SECONDS
+                and not UNFAIR.search(t["title"]) and _plain(t["title"]) not in hits
+            ]
             random.shuffle(playable)
             for track in playable:
                 mark = state.fingerprint(artist["name"], track["title"])
@@ -592,6 +651,24 @@ def _selftest() -> int:
         assert "Секретный" not in line and "Тайна" not in line and "ИИ —" not in line, line
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
             assert "Хаски" not in describe(artist)
+    # Загадка не из свежего и не гостем: старая половина своих релизов, альбом раньше сингла.
+    rows = [
+        {"artist_ids": [1 if year else 2], "released_at": f"20{year:02d}-01-01", "track_count": count, "title": str(year)}
+        for year, count in ((24, 12), (22, 1), (18, 1), (16, 10), (14, 9), (0, 14))
+    ]
+    old = deep(rows, 1)
+    assert sorted(r["title"] for r in old) == ["14", "16", "18"] and old[-1]["title"] == "18", old
+    assert UNFAIR.search("Трек (feat. Гость)") and UNFAIR.search("Интро") and not UNFAIR.search("Интроверт")
+    assert _plain("Группа крови (Remastered 2019)") == _plain("группа крови!")
+    # Варианты — на языке ответа: иначе лишних вычёркивает язык отрывка, а не слух.
+    base = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
+    ru = {a["name"]: _ru(a) for a in base}
+    assert ru["Хаски"] and ru["Molchat Doma"] and not ru["Bones"]
+    for target in base:
+        assert all(ru[name] == ru[target["name"]] for name in decoys(target, base)), target["name"]
+    # Один в своей сцене — вариантов нет, и загадкой он не идёт: наугад подставленных видно сразу.
+    scene = [{"name": name, "tags": [tag]} for name, tag in zip("АБВГД", ["ru-rap"] * 4 + ["ru-indie"])]
+    assert len(decoys(scene[0], scene)) == OPTIONS - 1 and decoys(scene[4], scene) == []
     print("прослушка: все проверки прошли")
     return 0
 

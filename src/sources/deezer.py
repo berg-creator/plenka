@@ -136,6 +136,12 @@ def artist_covers(name: str) -> list[str]:
     return [url for url in urls if url and EMPTY_PICTURE not in url]
 
 
+def top_tracks(artist_id: int, limit: int = 25) -> list[str]:
+    """Названия самых слушаемых треков артиста, от главного хита вниз."""
+    data = get_json(f"{BASE}/artist/{artist_id}/top", params={"limit": limit}, min_interval=MIN_INTERVAL)
+    return [item.get("title", "") for item in (data or {}).get("data", [])]
+
+
 def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
     data = get_json(
         f"{BASE}/artist/{artist_id}/albums",
