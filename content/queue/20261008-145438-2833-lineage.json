@@ -1,0 +1,43 @@
+{
+  "artist": "Earl Sweatshirt",
+  "cover": "",
+  "created_at": "2026-10-08T14:54:38+00:00",
+  "link": "mf-doom--earl-sweatshirt",
+  "links": {
+    "Earl Sweatshirt": 4073450,
+    "MF Doom": 2857
+  },
+  "listen": [
+    {
+      "artist": "MF Doom",
+      "seconds": 298,
+      "track": "Doomsday",
+      "track_request": {
+        "message_id": 4661,
+        "sent_at": "2026-10-08T14:54:43+00:00",
+        "youtube": "https://www.youtube.com/watch?v=LMeluRz2wv4"
+      },
+      "url": "https://www.deezer.com/track/2046285867"
+    },
+    {
+      "artist": "Earl Sweatshirt",
+      "seconds": 243,
+      "track": "Chum",
+      "track_request": {
+        "message_id": 4662,
+        "sent_at": "2026-10-08T14:54:44+00:00",
+        "youtube": "https://www.youtube.com/watch?v=PY7CQgdjUsA"
+      },
+      "url": "https://www.deezer.com/track/70018666"
+    }
+  ],
+  "preview": "",
+  "release": "",
+  "released_at": "",
+  "rubric": "lineage",
+  "score": 0,
+  "seconds": 0,
+  "source_url": "",
+  "text": "<b>EARL SWEATSHIRT ВЫРОС ИЗ МАСКИ MF DOOM</b>\n\nСвою манеру прятаться за сложными рифмами Earl Sweatshirt перенял напрямую у MF Doom.\n\nТот в 1999 году надел маску и скрыл лицо до конца жизни. Наследник забрал главное: принцип строить карьеру так, будто тебя вообще нет.\n\n<blockquote>Паранойя как лучший метод продвижения.</blockquote>\n\n<code>MF Doom · Earl Sweatshirt</code>\n\nЗато не надо улыбаться на фотосессиях.",
+  "track": ""
+}

@@ -1,0 +1,47 @@
+{
+  "artist": "Tyler, The Creator",
+  "cover": "",
+  "created_at": "2026-10-08T14:53:51+00:00",
+  "link": "pharrell-williams--tyler-the-creator",
+  "links": {
+    "N.E.R.D": 240,
+    "Pharrell": 103,
+    "Pharrell Williams": 103,
+    "The Neptunes": 11415,
+    "Tyler, The Creator": 1194083,
+    "Тайлера": 1194083
+  },
+  "listen": [
+    {
+      "artist": "Pharrell Williams",
+      "seconds": 237,
+      "track": "Can I Have It Like That",
+      "track_request": {
+        "message_id": 4659,
+        "sent_at": "2026-10-08T14:54:41+00:00",
+        "youtube": "https://www.youtube.com/watch?v=vNxXAFMIeAY"
+      },
+      "url": "https://www.deezer.com/track/3119453"
+    },
+    {
+      "artist": "Tyler, The Creator",
+      "seconds": 249,
+      "track": "Yonkers",
+      "track_request": {
+        "message_id": 4660,
+        "sent_at": "2026-10-08T14:54:42+00:00",
+        "youtube": "https://www.youtube.com/watch?v=TRZIVkHkEpE"
+      },
+      "url": "https://www.deezer.com/track/1094938382"
+    }
+  ],
+  "preview": "",
+  "release": "",
+  "released_at": "",
+  "rubric": "lineage",
+  "score": 0,
+  "seconds": 0,
+  "source_url": "",
+  "text": "<b>TYLER, THE CREATOR СКОПИРОВАЛ PHARRELL WILLIAMS</b>\n\nTyler, The Creator не скрывает, откуда взял свой звук. Его главный ориентир — Pharrell Williams.\n\nРанние биты Тайлера — прямой косплей N.E.R.D и The Neptunes. Те же угловатые синтезаторы и сухие ударные из нулевых.\n\n<blockquote>Его работы — мой главный ориентир.</blockquote>\n\n<code>Pharrell Williams · Tyler, The Creator</code>\n\nЗато честно.",
+  "track": ""
+}
