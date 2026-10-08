@@ -365,6 +365,12 @@
       "published_at": "2026-10-07T07:38:16+00:00",
       "rubric": "lineage",
       "story_id": "456239076"
+    },
+    {
+      "key": "135b100ae5a0afa0",
+      "published_at": "2026-10-08T07:32:02+00:00",
+      "rubric": "poll",
+      "story_id": "456239077"
     }
   ]
 }
