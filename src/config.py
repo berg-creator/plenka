@@ -388,7 +388,7 @@ RUBRICS: tuple[Rubric, ...] = (
         title="ОПРОС",
         weight=6,
         feeds_on="poll",
-        description="Нативный опрос Telegram: кто круче, какой альбом лучше.",
+        description="Нативный опрос Telegram о русском рэпе: что случилось на сцене за неделю.",
     ),
     Rubric(
         key="otbor",

@@ -24,7 +24,7 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
-from . import card, collect, config, footage, llm, otbor, publish, quality, state, telegram, tracks
+from . import card, collect, config, footage, llm, newcomers, otbor, publish, quality, state, telegram, tracks
 from .quality import release_name
 from .sources import deezer, itunes, web_voice, youtube_comments
 
@@ -508,10 +508,15 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
 
     # ОПРОС — тоже из базы артистов. Доля от пачки ему не указ: сырья он не просит,
     # и когда разборы молчат, пачка состояла бы из одних опросов (polls_due).
+    # Спрашивает он о русском рэпе и о том, что случилось за неделю (poll_fresh):
+    # нет свежего — опроса нет, вечный вопрос «кто круче» аудитории не нужен.
     asked = poll_questions()
-    for _ in range(min(quota.get("poll", 0), polls_due())):
-        sample = random.sample(artists, min(10, len(artists)))
-        add("poll", {"artists": [a["name"] for a in sample], "asked": asked}, {})
+    fresh = poll_fresh(artists)
+    polls = min(quota.get("poll", 0), polls_due()) if fresh["news"] or fresh["releases"] else 0
+    for n in range(polls):
+        # Новости делятся между опросами пачки, иначе оба спросят об одном.
+        add("poll", {"artists": random.sample(fresh["artists"], min(12, len(fresh["artists"]))),
+                     "news": fresh["news"][n::polls][:6], "releases": fresh["releases"], "asked": asked}, {})
 
     return jobs[:needed]
 
@@ -538,6 +543,37 @@ def poll_questions() -> list[str]:
     texts = (state.read_json(path, {}).get("text", "") for folder in (config.ARCHIVE, config.QUEUE)
              for path in sorted(folder.glob("*-poll.json")))
     return [asked["question"] for asked in map(quality.poll, texts) if asked]
+
+
+POLL_FRESH_DAYS = 7
+
+
+def poll_fresh(artists: list[dict]) -> dict:
+    """Сырьё опроса: рэперы русской сцены из базы и что о них случилось за неделю.
+
+    Владелец, 08.10.2026: «голосования делать на ру рэп. у нас ру аудитория. и что-то
+    про реально актуальное сейчас» — опрос того дня писался по случайной десятке из всей
+    базы и спросил про MF DOOM. Новости — только рэп-пресса: «Интермедиа» цепляет
+    имя Басты к юбилею актёра. Читается весь inbox, а не остаток: новость, по которой
+    пост уже вышел, — как раз то, о чём сейчас говорят.
+    """
+    names = {a["name"] for a in artists if a.get("tier") in ("ru", "ru_pop")
+             and any("rap" in tag or "underground" in tag for tag in a.get("tags", []))}
+    now = state.now()
+    news: dict[str, dict] = {}
+    releases: dict[str, str] = {}
+    rows = [(state._parse(r.get("released_at") or r.get("collected_at") or ""), r)
+            for r in state.read_jsonl(config.INBOX_FILE)]
+    rows = [(stamp, r) for stamp, r in rows if stamp and now - timedelta(days=POLL_FRESH_DAYS) < stamp <= now]
+    for _, row in sorted(rows, key=lambda pair: (pair[1].get("score", 0), pair[0]), reverse=True):
+        if (row.get("kind") == "news" and row.get("lang") == "ru" and row.get("outlet") in newcomers.SCENE_OUTLETS
+                and names & set(row.get("artists", []))):
+            news.setdefault(row["title"], {"outlet": row["outlet"], "title": row["title"],
+                                           "summary": (row.get("summary") or "")[:300]})
+        elif row.get("kind") == "release" and row.get("tracked") in names:
+            title = row["title"].removesuffix(" - Single").removesuffix(" - EP")
+            releases.setdefault(title.lower(), f'{row.get("artist") or row["tracked"]} — {title}')
+    return {"artists": sorted(names), "news": list(news.values())[:12], "releases": list(releases.values())[:8]}
 
 
 def meme_openings() -> list[str]:
@@ -1532,10 +1568,28 @@ def _selftest() -> int:
     assert saved["release"] and news["release"] == "", (saved["release"], news["release"])
     # Опросов — не больше config.POLL_PER_WEEK в неделю, считая вышедшие и ждущие; новый знает прошлые вопросы.
     with tempfile.TemporaryDirectory() as tmp:
-        real_paths = config.ARCHIVE, config.QUEUE, config.POSTED_FILE
+        real_paths = config.ARCHIVE, config.QUEUE, config.POSTED_FILE, config.INBOX_FILE
         config.ARCHIVE, config.QUEUE, config.POSTED_FILE = Path(tmp) / "a", Path(tmp) / "q", Path(tmp) / "p.json"
+        config.INBOX_FILE = Path(tmp) / "inbox.jsonl"
         try:
             assert polls_due() == config.POLL_PER_WEEK and poll_questions() == []
+            # Опрос — о русском рэпе и о неделе: без свежего повода его нет, зарубежное,
+            # эстрадная пресса и старое в сырьё не идут.
+            assert not [job for job in plan(40) if job[1] == "poll"]
+            day = lambda ago: (state.now() - timedelta(days=ago)).isoformat()
+            wire = lambda n, artist, outlet, ago, **more: {
+                "kind": "news", "fingerprint": f"p{n}", "score": 100, "lang": "ru", "outlet": outlet, "artists": [artist],
+                "title": f"новость {n}", "summary": "текст", "url": "https://x", "collected_at": day(ago), **more}
+            state.append_jsonl(config.INBOX_FILE, [
+                wire(1, "Скриптонит", "The Flow", 1), wire(2, "MF DOOM", "The Flow", 1),
+                wire(3, "Баста", "Интермедиа", 1), wire(4, "Скриптонит", "RAP.RU", 9),
+                wire(5, "kizaru", "RAP.RU", 2, kind="release", tracked="kizaru", artist="kizaru",
+                     title="Тест - Single", released_at=day(2)),
+                wire(6, "Bones", "", 2, kind="release", tracked="Bones", artist="BONES", title="Чужой")])
+            base = state.read_json(config.ARTISTS_FILE, {})["artists"]
+            fresh = poll_fresh(base)
+            assert [row["title"] for row in fresh["news"]] == ["новость 1"] and fresh["releases"] == ["kizaru — Тест"], fresh
+            assert "Скриптонит" in fresh["artists"] and not {"MF DOOM", "Кино", "Bones"} & set(fresh["artists"])
             assert [job[2]["asked"] for job in plan(40) if job[1] == "poll"] == [[]] * config.POLL_PER_WEEK
             state.write_json(config.QUEUE / "1-poll.json", {"text": '{"question": "Кто?", "options": ["А", "Б"]}'})
             state.write_json(config.POSTED_FILE, {"items": [
@@ -1544,7 +1598,7 @@ def _selftest() -> int:
             assert polls_due() == config.POLL_PER_WEEK - 2 and poll_questions() == ["Кто?"]
             assert not [job for job in plan(40) if job[1] == "poll"]
         finally:
-            config.ARCHIVE, config.QUEUE, config.POSTED_FILE = real_paths
+            config.ARCHIVE, config.QUEUE, config.POSTED_FILE, config.INBOX_FILE = real_paths
 
     print("релиз: предзаказ, старше суток и дубль магазина не пишутся, на релиз один пост; "
           "разбор несёт треки концов связи")
