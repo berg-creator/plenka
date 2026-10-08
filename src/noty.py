@@ -15,6 +15,11 @@ type beat'ов, приём мелодии — с третьего артиста
 (data/beat_music.json, `_palette`: «звуки все в целом норм»): пресет Serum и звук из сети на музыке — брак.
 Поля form, melody, twist, color, mix, mood, skeleton и switch больше не обязательны, сверки чередования и день
 свободной смеси убраны; перелом — только когда он есть у образца. Заказ (order) образца не требует.
+Заказ «бит-брат трека» (владелец, 08.10.2026: «собери бит брата» — о треке Платины «НЕО — original mix») образец несёт:
+запись с полем order — только для заказа, утром её не берут. Темп и рисунок такого бита сверяются с образцом, а там,
+где образец сам проще мерок владельца (`_brother`: один такт музыки на весь бит без пауз, хэт ровной сеткой по кругу),
+мерка — образец: бит, заказанный братом трека, нельзя браковать за то, что заказано. Утренний бит и заказ без образца
+меряются как раньше.
 Отвергнуто: сверять с образцом ноты мелодии — в замере их нет, и чужую мелодию не повторяем.
 Отвергнуто: оставить таблицы «на выбор» — выбор по таблицам и дал бит без образца.
 
@@ -569,6 +574,11 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                 and (part not in tracks or part not in info.get("tonal", ()) or any(w in part for w in SAMPLED))]
     if not info.get("order"):
         out += _sample(info, tracks) + _palette(info, tracks)
+        if (_picked(info) or {}).get("order"):      # утром такой бит спорил бы со словами владельца о «Заело»: «пустовато»
+            out.append(f"sample: образец «{info['sample']}» — только для заказа владельца (поле order его записи): "
+                       "утренний бит берёт следующий из data/beat_samples.json")
+    elif info.get("sample"):            # заказ «бит-брат трека»: темп и рисунок — как у образца; список звуков ему не указ
+        out += _sample(info, tracks)
     if info.get("loop"):
         out += _loop(info, tracks)
     if info.get("switch"):
@@ -578,7 +588,11 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     # Заказ и скелет «Г»: до перелома хэт — рисунок названного трека (в «Six Speed» это ровные шестнадцатые с одной
     # дробью), мерка владельца — после перелома: без этого его же слова «драмку как в этом треке» сборка бракует
     mine = _halves(info, tracks)[-1][2] if info.get("order") or _six(info) else tracks
-    return (out + _hat(mine) + _bass(tracks) + _counter(info, tracks) + sweet)[:20]
+    # Заказ-брат трека с ровным хэтом: дробь и триоли у образца реже чем в трети тактов — остальное сетка по кругу,
+    # а мерка владельца ровных тактов больше трети не терпит. Такой хэт заказан — меряется образцом (`_sample`: ударов в такт)
+    z = _brother(info)
+    even = "hat_roll_bars" in z and z["hat_roll_bars"] + (z.get("hat_trip_bars") or 0) < 1 / 3
+    return (out + ([] if even else _hat(mine)) + _bass(tracks) + _counter(info, tracks) + sweet)[:20]
 
 
 def _bass(tracks: dict[str, list[N]]) -> list[str]:
@@ -1023,6 +1037,8 @@ def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     for a, b in sorted((n.pos, n.pos + n.ln + ring[name]) for name, notes in music.items() for n in notes) + [(end, end)]:
         quiet, till = quiet + (a - till if a - till >= 4 else 0), max(till, b)
     need = QUIET.get(info.get("color"), .1)
+    if (z := _brother(info)).get("dev_bars"):       # заказ-брат: музыка молчит не меньше, чем у его образца (тактов из всех)
+        need = min(need, round((z.get("dev_music_off") or 0) / z["dev_bars"], 2))
     if music and not kino and quiet / end < need:
         out.append(f"музыка молчит {quiet / end:.0%} времени — нужно не меньше {need:.0%}: такты и полтакта, где её нет вовсе"
                    + ("; нота считается с хвостом пресета — «звучит» в data/beat_sounds.json" if any(ring.values()) else ""))
@@ -1081,6 +1097,14 @@ def samples() -> list[dict]:
 
 def _picked(info: dict) -> dict | None:
     return next((r for r in samples() if r.get("id") == info.get("sample")), None) if info.get("sample") else None
+
+
+def _brother(info: dict) -> dict:
+    """Замер образца у бита по заказу — «бит-брат названного трека» (владелец, 08.10.2026: «собери бит брата»). Им меряется
+    то, в чём образец сам проще мерок владельца: сколько тактов молчит музыка (`sugar`) и ровный ли хэт (`problems`).
+    Утренний бит и заказ без образца сюда не заходят — пусто: послабление живёт только там, где так устроен сам
+    названный владельцем трек. Отвергнуто: общий признак «минимальный бит» в паспорте — автор ставил бы его себе сам."""
+    return (_picked(info) or {}).get("zamer") or {} if info.get("order") else {}
 
 
 def _sample(info: dict, tracks: dict[str, list[N]]) -> list[str]:
@@ -1216,7 +1240,7 @@ def about(info: dict) -> str:
     """Записка владельцу: она же подпись к архиву."""
     return "\n".join([
         f"🎹 {info['title']}", f"{info['bpm']} BPM, {info['key']}, {info['bars']} тактов", "",
-        *([f"Образец — поставь ролик рядом и сравни на слух: {s.get('title', '')} — {s.get('url', '')}"]
+        *([f"Образец — поставь ролик рядом и сравни на слух: {s.get('title', '')}" + (f" — {s['url']}" if s.get("url") else "")]
           if (s := _picked(info)) else []),
         *([f"Заказ владельца: {info['order']}"] if info.get("order") else []),
         *([f"Скелет: {info['skeleton']}"] if info.get("skeleton") else []),
@@ -1946,6 +1970,12 @@ def _checks() -> None:
     half = {**dry, "аккорды": dry["аккорды"] + [N(48, 8, 50)]}                           # тишины полтакта из четырёх
     assert not sugar(paper | {"color": "андер"}, dry) and not sugar(paper, half), "тишины хватает"
     assert "молчит 12% времени — нужно не меньше 20%" in "\n".join(sugar(paper | {"color": "андер"}, half)), "андеру тишины нужно больше"
+    # Заказ-брат: музыка молчит не меньше, чем у его образца (такт из шестнадцати — 6%). Образец, где музыки нет дольше,
+    # заказ без образца и утренний бит с тем же образцом меряются общей меркой
+    thin, twin = {**dry, "аккорды": dry["аккорды"] + [N(48, 12, 50)]}, paper | {"order": "собери бит брата", "sample": "брат"}
+    assert sugar(twin, thin) == [], sugar(twin, thin)
+    assert all("молчит 6% времени — нужно не меньше 10%" in "\n".join(sugar(x, thin)) for x in (
+        paper, paper | {"sample": "брат"}, paper | {"order": "x"}, twin | {"sample": "дробный"})), "послабление — только заказу-брату"
     assert not sugar(paper | {"mood": "кино"}, {"мелодия": [N(i * 12, 12, k) for i, k in enumerate((50, 53, 55, 57, 58))]}), \
         "кино: остинато не молчит, в теме пять нот"
     assert "в мотиве 5" in "\n".join(sugar(paper | {"twist": "смена бита", "bars": 20},
@@ -2048,6 +2078,13 @@ def _checks() -> None:
     assert problems(ordered | {"sounds": looped["sounds"] | {"мелодия": fxp}, "preset": {"мелодия": mine}}, drums) == [], "заказу список не указ"
     assert f"петля «{loop}»" in "\n".join(echoes(ordered, drums, looped, drums)), "а петля прошлого бита — повтор и у заказа"
     assert "петлю не растягиваем" in "\n".join(problems(ordered | {"bpm": 140}, drums)), "заказ остальных правил не отменяет"
+    # Заказ «бит-брат трека» образец несёт: темп и рисунок сверяются с ним; утреннему биту образец заказа — брак
+    twin = base | {"order": "собери бит брата", "sample": "брат"}
+    assert problems(twin, demo()) == [], problems(twin, demo())
+    assert "sample: темп бита 150" in "\n".join(problems(twin | {"bpm": 150}, demo())), "заказ с образцом сверяется с ним"
+    assert "образец «брат» — только для заказа владельца" in "\n".join(problems(base | {"sample": "брат"}, demo())), "утром его не берут"
+    assert "Заказ владельца: собери бит брата" in about(twin) and "Образец — поставь ролик рядом" in about(twin), about(twin)
+    assert about(twin | {"sample": "s140"}).splitlines()[3].endswith("https://youtu.be/s140"), "адрес образца — когда он есть"
     # Скелет «Г» — без петли, и заказ её не разрешает (владелец, 06.10.2026: «петля совсем плоха и не в тему»)
     assert "скелет «Г»" in "\n".join(problems(ordered | {"skeleton": "Six Speed → ровный"}, drums)) \
         and "скелет «Г»" in "\n".join(problems(looped | {"skeleton": "six speed"}, drums)) \
@@ -2062,6 +2099,14 @@ def _checks() -> None:
     assert "ровные четверти" in "\n".join(problems(long, both)) \
         and "хэт:" not in "\n".join(problems(long | {"order": "драмку как в X"}, both)), "хэт заказа меряется после перелома"
     assert "ровные четверти" in "\n".join(problems(long | {"order": "x"}, {"хэт": hits(0, "x" * 1024, ln=.5)})), "а после перелома — как у всех"
+    # Заказ-брат трека с ровным хэтом (дробь и триоли у образца реже чем в трети тактов): хэт одним тактом по кругу —
+    # то, что заказано, и без перелома. Образец с дробью в половине тактов, заказ без образца и утренний бит — по мерке
+    ring = {"хэт": hits(0, "x.x.x.x.x.x.x.x." * 32, ln=.5)}
+    twin = {k: v for k, v in base.items() if k != "switch"} | {"bars": 32, "order": "собери бит брата", "sample": "брат"}
+    assert "хэт:" not in "\n".join(problems(twin, ring)), problems(twin, ring)
+    assert all("ровные четверти" in "\n".join(problems(x, ring)) for x in (
+        twin | {"sample": "дробный"}, {k: v for k, v in twin.items() if k != "sample"},
+        {k: v for k, v in twin.items() if k != "order"})), "мерка владельца снята только с заказа-брата ровного образца"
     # Скелет «Г» — тот же рисунок без заказа: хэт трека до перелома проходит по имени первого скелета, после — мерка
     six = long | {"skeleton": "Six Speed → сцена"}
     assert _six(six) and _six(six | {"skeleton": "six speed"}) and not _six(long) and not _six(long | {"skeleton": "сцена → Six Speed"})
@@ -2163,7 +2208,8 @@ def _checks() -> None:
     from . import flp
     flp.selftest()
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, один бит — один образец (брат образца проходит; чужой темп, неизвестный id, "
-          "образец прошлого бита и хэт далеко от образца — брак; заказ без образца проходит), музыка только одобренными звуками "
+          "образец прошлого бита и хэт далеко от образца — брак; заказ без образца проходит; заказ-брат с образцом сверяется с ним, утром образец заказа — брак, "
+          "хэт по кругу и музыка без пауз проходят только у заказа, чей образец сам так устроен), музыка только одобренными звуками "
           "(чужой звук, пресет Serum и звук из сети на музыке — брак), сладкое — брак, сухое проходит, мелодия и петля прошлого бита — "
           "повтор, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), перелом — когда он есть у образца: «разом» "
           "(другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка меняются), "
@@ -2186,6 +2232,11 @@ def selftest() -> None:
     rows = [{"id": f"s{bpm}", "url": f"https://youtu.be/s{bpm}", "title": f"(free) a x b type beat — {bpm}", "like": ["A", "B"],
              "views": None, "bpm": bpm, "key": None, "zamer": z | {"bpm": bpm}, "note": ""} for bpm in (140, 170, 85)]
     rows.append(rows[0] | {"id": "вдвое", "zamer": {"bpm": 70, "hat_per_bar": 16}})
+    # Образцы заказа «бит-брат трека»: у «брата» хэт ровный (дробь и триоли в пятой части тактов) и музыка молчит такт
+    # из шестнадцати, у «дробного» дробь в половине тактов и музыки нет в четверти
+    rows += [rows[0] | {"id": name, "order": "только для заказа", "zamer": z | {"bpm": 140, "hat_roll_bars": rolls, "hat_trip_bars": .1,
+                                                                                 "dev_bars": 16, "dev_music_off": off}}
+             for name, rolls, off in (("брат", .1, 1), ("дробный", .5, 4))]
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SAMPLES", Path(tmp) / "samples.json"), \
             mock.patch.object(config, "BEAT_MUSIC", Path(tmp) / "music.json"):
         config.BEAT_SAMPLES.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
