@@ -1,6 +1,6 @@
 {
   "day": "2026-10-08",
-  "total": 0,
+  "total": 1,
   "users": {
     "01ed81265bb3fe5f": {
       "count": 1,
@@ -20,6 +20,11 @@
     "a9cb964e2de83e3c": {
       "count": 1,
       "day": "2026-10-03",
+      "total": 1
+    },
+    "aaa9fa1a6c9c11b7": {
+      "count": 1,
+      "day": "2026-10-08",
       "total": 1
     },
     "ab742d28d70a0b37": {
