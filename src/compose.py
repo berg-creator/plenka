@@ -1443,6 +1443,10 @@ def _selftest() -> int:
         before("twin", "Arsenal II", 0, source="deezer"),
         current,
     ]
+    # Мнение из сети и отзыв слушателя заглушены до первой сборки данных релиза:
+    # это сеть и квота, а YouTube с Мака не отвечает — селфтест висел минутами.
+    web_voice.find = lambda *_: {}
+    youtube_comments.top_comment = lambda *_: {}
     earlier = previous_releases(current, history, {})
     assert [r["title"] for r in earlier] == [
         "Duality - Single", "Snuff - Single", "Unsainted - Single", "We Are Not Your Kind", "Yen - Single",
@@ -1458,10 +1462,8 @@ def _selftest() -> int:
     print("история: последние 5 раньше релиза, дубль магазина один раз, чужой артист и предзаказ мимо")
 
     # Чужой голос: мнение издания ищется в новостях Telegram по любому написанию
-    # имени. Мнение из сети и отзыв слушателя тут заглушены — это сеть и квота.
-    web_voice.find = lambda *_: {}
-    youtube_comments.top_comment = lambda *_: {}
-    press = {"kind": "news", "source": "telegram", "outlet": "The Flow",
+    # имени. Мнение из сети и отзыв слушателя заглушены выше.
+    press ={"kind": "news", "source": "telegram", "outlet": "The Flow",
              "title": "Смоки Мо выпустил Sorry Mama",
              "summary": "Смоки Мо записал самый спокойный релиз за год.",
              "released_at": state.iso(now - timedelta(days=1))}
@@ -1577,8 +1579,8 @@ def _selftest() -> int:
             # эстрадная пресса и старое в сырьё не идут.
             assert not [job for job in plan(40) if job[1] == "poll"]
             day = lambda ago: (state.now() - timedelta(days=ago)).isoformat()
-            wire = lambda n, artist, outlet, ago, **more: {
-                "kind": "news", "fingerprint": f"p{n}", "score": 100, "lang": "ru", "outlet": outlet, "artists": [artist],
+            wire = lambda n, who, outlet, ago, **more: {
+                "kind": "news", "fingerprint": f"p{n}", "score": 100, "lang": "ru", "outlet": outlet, "artists": [who],
                 "title": f"новость {n}", "summary": "текст", "url": "https://x", "collected_at": day(ago), **more}
             state.append_jsonl(config.INBOX_FILE, [
                 wire(1, "Скриптонит", "The Flow", 1), wire(2, "MF DOOM", "The Flow", 1),

@@ -52,6 +52,7 @@ python -m src.newcomers --selftest     новенькие: два издания
 python -m src.urgent --dry-run         срочные новости за сегодня, без затрат
 python -m src.urgent --selftest        срочное: сниппет, свой артист и сцена первыми, отброшенная уступает место, сниппет без ролика не пишется, трек названного релиза едет в пост
 python -m src.compose --dry-run        план генерации без затрат
+python -m src.compose --selftest       подписи, данные релиза без длительностей, чужой голос, опросы только о русском рэпе и о неделе — без сети
 python -m src.compose --fresh --dry-run  о каких свежих релизах пост напишется сразу
 python -m src.publish --dry-run        что ушло бы в канал, со ссылками на площадки
 python -m src.publish --releases --dry-run  какой пост о релизе выйдет следующим выходом
