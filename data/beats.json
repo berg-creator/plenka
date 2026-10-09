@@ -9,6 +9,7 @@
     "bpm": 156,
     "file_id": "BQACAgIAAxkDAAINXWq-uP_vzLwhF3sfCslpCX7GWv85AAKargACw5P4Sf5Dz78qbiiHPQQ",
     "hits": {
+      "link": 1,
       "menu": 4
     },
     "key": "G#m",
@@ -73,8 +74,8 @@
     "bpm": 160,
     "file_id": "BQACAgIAAxkDAAISPWrHr6wxqANNouP3hl2xu74nw0FQAAIgrQACC3s4Su6xERrYlosePQQ",
     "hits": {
-      "link": 1,
-      "mix": 1
+      "link": 2,
+      "mix": 2
     },
     "key": "Cm",
     "kind": "document",
