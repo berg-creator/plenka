@@ -84,6 +84,10 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 только эти две (`SHARED`) и только биту по заказу: каждая — доля автору, и решает это владелец, а не утренний автор.
 Файл такой петли — раскладка: петля вместе с басом автора, её слои по отдельности и бас один; дорожка на весь бит
 собирается из петли минус бас — под чужой низ свой 808 не встал бы. Условия автора записка называет сама (`_shared`).
+Слои в таком файле замер снимает по одному — это склад петли (`zamer.stack`, седьмое поле её замера): после перелома
+петля молчит, и своя музыка обязана держать её склад (`_stack`; владелец 09.10.2026 о «Фонаре»: «мелодия своя
+в сегодняшнем бите совсем не похожа на ту, что была в лупе» — тема совпала с петлёй, а слоёв было три против семи
+и аккорд менялся раз в два такта против смены в каждом).
 Отвергнуто: вписать обе в одобренные петли (`data/beat_music.json`) — утренний бит стал бы брать их сам, всякий раз
 отдавая половину дохода без слова владельца. Отвергнуто: резать петлю в библиотеку отдельным файлом — библиотека
 владельца в iCloud, писать в неё сборке незачем, а исходный файл со слоями ему самому полезнее целым.
@@ -244,6 +248,12 @@ SWITCHES = ("разом", "ступенями")
 # ponytail: порог не калиброван — в «Excuse Me» клэп стоит в каждом такте, бочка в трёх из четырёх, хэт восьмыми,
 # а своих битов «ступенями» ещё нет. Начнёт браковать годное — снять с первых трёх таких битов
 SWITCH_KEEP = .5            # «ступенями»: столько тактов каркаса и хэта после смены повторяют такты до неё
+# Склад петли-раскладки (`_stack`). Обе доли — расчёт по одному биту, а не опыт: «Фонарь» (три слоя против семи, аккорд
+# меняется 0,46 раза в такт против 1,75) владелец назвал непохожим на петлю, а бита, принятого им по этой мерке, ещё нет.
+# ponytail: начнёт браковать годное на слух — снять пороги с первых трёх битов, которые владелец принял
+STACK_LAYERS = .5           # слоёв своей музыки после перелома — не меньше этой доли слоёв петли с нотами
+STACK_CHORDS = .5           # смен аккорда на такт — больше этой доли смен петли: «вдвое реже» уже брак
+STACK_DRY = .3              # секунд до −40 дБ после слоя: короче — «сухо»; слои двух петель гаснут за 0,01–0,09 с, наши звуки — от 1,8
 SIX = "six speed"           # первый скелет «Г»: хэт до перелома — рисунок трека, мерка владельца — после (`_six`)
 RETRY = 3                   # повторов сбора папки «Сегодня», пока iCloud докачивает звуки: круг помощника — десять минут
 FADE = .005                 # секунд затухания на краях паузы в дорожке петли: без него срез щёлкает
@@ -784,9 +794,28 @@ def loops() -> dict[str, dict]:
     data = json.loads(config.BEAT_SOUNDS.read_text("utf-8")).get("loops", {}) if config.BEAT_SOUNDS.exists() else {}
     out = {}
     for name, row in data.items():
-        bars, notes, key, _, roots, _ = (part.split() for part in row.split(" | "))
+        bars, notes, key, _, roots, _, *stack = (part.split() for part in row.split(" | "))
         out[name] = {"bars": int(bars[0]), "notes": notes, "key": " ".join(key[:2]), "sure": float(key[2]), "roots": roots}
+        if stack:               # петля-раскладка: склад — смены аккорда и верха всей музыки, дальше слой за слоем
+            (chords, air), *rows = (x.split() for x in " ".join(stack[0]).split(";"))
+            out[name]["stack"] = {"chords": float(chords), "air": float(air), "layers": [
+                {"span": tuple(map(int, r[0].split("-"))) if "-" in r[0] else None, "notes": float(r[1]), "chords": float(r[2]),
+                 "air": float(r[3]), "tail": float(r[4])} for r in rows]}
     return out
+
+
+def chord(weights) -> int:
+    """Корень ближайшего из 24 мажорных и минорных трезвучий по весам двенадцати нот от C; при равном счёте — то, чей
+    корень весомее. Одна мерка на звук петли (`zamer.stack`) и на ноты своей музыки (`_stack`): смена аккорда — другой
+    корень, а мажор и минор на одном корне сменой не считаются — у пустой квинты замер путал бы их через полтакта."""
+    return max(((r, third) for third in (4, 3) for r in range(12)),
+               key=lambda x: (weights[x[0]] + weights[(x[0] + x[1]) % 12] + weights[(x[0] + 7) % 12], weights[x[0]]))[0]
+
+
+def _stacked(info: dict) -> dict | None:
+    """Склад петли бита, если после перелома она молчит и музыку держат партии: одна петля-раскладка и такт перелома."""
+    pair = _pair(info)
+    return loops().get(pair[0], {}).get("stack") if len(pair) == 1 and pair[0] in SHARED and _cut(info) is not None else None
 
 
 def _pair(info: dict) -> list[str]:
@@ -888,9 +917,13 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         out.append("loop: скелет «Г» («Six Speed») — без петли: музыка нотами на синтезаторах, слоями; "
                    "и у бита по заказу тоже")
     music = [name for name in tracks if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED)]
-    if not 1 <= len(music) <= 3 or not any("мелод" in name and "контр" not in name for name in music):
+    # Петля-раскладка после перелома молчит, и слоёв там столько, сколько велит её склад (`_stack`): предел в три
+    # партии — про музыку поверх петли, то есть про партии, играющие до перелома
+    stacked = _stacked(info)
+    over = [name for name in music if not stacked or any(n.pos < _cut(info) for n in tracks[name])]
+    if not 1 <= len(over) <= 3 or not any("мелод" in name and "контр" not in name for name in music):
         out.append("loop: поверх петли нужна мелодия — партий музыки, кроме 808, от одной до трёх, и одна из них «мелодия» "
-                   f"(имя — в tonal); сейчас: {', '.join(music) or 'ни одной'}")
+                   f"(имя — в tonal); сейчас: {', '.join(over) or 'ни одной'}")
     out += [f"loop: в fx нет строки «{k}» — цепочки обработки петли" for k in ("петля", "петля 2")[:len(pair)]
             if k not in (info.get("fx") or {})]
     rests = info.get("rests")
@@ -959,6 +992,39 @@ def _steps(info: dict, starts: set[int], frame: list[N], hat: list[N], bass: lis
     return out
 
 
+def _stack(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Своя музыка после перелома держит склад петли-раскладки (владелец 09.10.2026 о «Фонаре»: «мелодия своя
+    в сегодняшнем бите совсем не похожа на ту, что была в лупе»). Замер того дня: тема с петлёй совпала — те же четыре
+    высоты в том же регистре, — а расходилось остальное: слоёв три против семи, аккорд менялся раз в два такта против
+    смены в каждом. Отсюда два брака: слоёв с нотами после перелома меньше половины слоёв петли и смена аккорда вдвое
+    реже, чем у петли. Регистр, верха и сухость слоёв сборка не судит: звука она не слышит, это правила брифа.
+    Аккорд полтакта — `chord` по длинам нот всех партий музыки без 808, как у петли он снят со звука без баса автора;
+    смены — на такт, по полтактам, где музыка звучит. Одноголосая партия без аккорда даёт смен больше, чем их есть, —
+    мерка в эту сторону мягкая. Петля, у которой замер смен не слышит («DECAY»: вся на фа-диезе), о сменах молчит.
+    Склада в замере нет — молчит всё."""
+    stack, cut = _stacked(info), _cut(info)
+    if not stack:
+        return []
+    music = {name: [n for n in flat(notes) if n.pos >= cut] for name, notes in tracks.items()
+             if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED)}
+    music = {name: notes for name, notes in music.items() if notes}
+    voiced, out, roots = sum(1 for layer in stack["layers"] if layer["span"]), [], []
+    if len(music) < voiced * STACK_LAYERS:
+        out.append(f"switch: после перелома партий музыки {len(music)} ({', '.join(music) or 'ни одной'}), а у петли слоёв "
+                   f"с нотами {voiced} — своя музыка держит её склад: не меньше {int(-(-voiced * STACK_LAYERS // 1))} партий, "
+                   f"лучше {max(voiced - 2, 1)}–{voiced}, каждая в регистре своего слоя (python3 -m src.noty --loop СЛОВО)")
+    for at in range(cut, info["bars"] * 16, 8):
+        weights = [0.0] * 12
+        for n in (n for notes in music.values() for n in notes):
+            weights[n.key % 12] += max(0, min(n.pos + n.ln, at + 8) - max(n.pos, at))
+        roots += [chord(weights)] if any(weights) else []
+    turns = sum(a != b for a, b in zip(roots, roots[1:])) / (len(roots) / 2) if roots else 0
+    if music and stack["chords"] and turns <= stack["chords"] * STACK_CHORDS:
+        out.append(f"switch: после перелома аккорд музыки меняется {turns:.2f} раза в такт, а у петли — {stack['chords']:g}: "
+                   f"вдвое реже — брак; меняй гармонию так же часто, как петля (больше {stack['chords'] * STACK_CHORDS:g} в такт)")
+    return out
+
+
 def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     """Перелом (владелец, 05.10.2026: «я очень люблю, когда бит меняется в ходе трека, так что превращается совсем
     в другой в какой-то момент, но звучит это лаконично»). Один на бит, на стыке частей во второй половине: после него
@@ -1021,6 +1087,7 @@ def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         elif same > SWITCH_SAME:
             out.append(f"switch: музыка — {same:.0%} тактов после перелома повторяют такты до него; не больше "
                        f"{SWITCH_SAME:.0%}: другие рисунки мелодии и гармонии, тональность та же")
+        out += _stack(info, tracks)
     return out
 
 
@@ -1757,7 +1824,8 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
 
 
 def loop_card(word: str) -> str:
-    """Что замер знает о петлях с этим словом в имени; петля одна — ещё и чем сменить её на переломе.
+    """Что замер знает о петлях с этим словом в имени; петля одна — ещё и чем сменить её на переломе, у петли-раскладки —
+    её склад по слоям.
     Автору нот: звука он не слышит, и ноты петли — единственное, по чему пишутся мелодия и 808."""
     heard = loops()
 
@@ -1768,8 +1836,22 @@ def loop_card(word: str) -> str:
                 + (f"бит на обеих петлях — scale={_scale(heard, first, name)}" if first else f"scale={_scale(heard, name)}")
                 + ("" if LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1] else f" — нот не {LOOP_NOTES[0]}–{LOOP_NOTES[1]}: в бит не идёт"))
 
+    def stack(name: str) -> list[str]:      # склад петли-раскладки: что держит своя музыка после перелома, слой — строка
+        s = heard[name].get("stack")
+        if not s:
+            return []
+        voiced = sum(1 for x in s["layers"] if x["span"])
+        return [f"  склад: слоёв {len(s['layers'])}, с нотами {voiced}, верха всей музыки {s['air']:g}%; аккорд меняется "
+                + (f"{s['chords']:g} раза в такт — у своей музыки после перелома чаще {s['chords'] * STACK_CHORDS:g}" if s["chords"]
+                   else "— замер смен не слышит, сборка о них молчит")
+                + f"; партий музыки после перелома — {max(voiced - 2, 1)}–{voiced}, меньше {int(-(-voiced * STACK_LAYERS // 1))} — брак"] + [
+            f"  слой {i}: " + (f"ноты {x['span'][0]}–{x['span'][1]} ({NOTES[x['span'][0] % 12]}{x['span'][0] // 12}–"
+                              f"{NOTES[x['span'][1] % 12]}{x['span'][1] // 12} в FL)" if x["span"] else "шум, нот нет")
+            + f", {x['notes']:g} в такт, смен аккорда {x['chords']:g} в такт, верха {x['air']:g}%, "
+            + ("сухо" if x["tail"] < STACK_DRY else f"хвост {x['tail']:g} с") for i, x in enumerate(s["layers"], 1)]
+
     fit = sorted(name for name in heard if word.lower() in name.lower())
-    out = [line(name) for name in fit[:40]]
+    out = [x for name in fit[:40] for x in (line(name), *stack(name))]
     if len(fit) == 1:
         a = fit[0]
         pairs = sorted(((len(set(heard[a]["notes"]) & set(m["notes"])), name) for name, m in heard.items()
@@ -2312,7 +2394,42 @@ def _checks() -> None:
     shared = {k: v for k, v in ordered.items() if k != "switch"} | dict(
         bpm=135, loop=gay, scale=[11, 1, 3, 4, 6, 8, 10], switch={"такт": 9, "переход": "петля молчит, музыку ведёт своя мелодия"},
         fx={"808": "Fruity Fast Dist", "мелодия": "без обработки", "петля": "Gross Beat"})
-    assert problems(shared, share) == [], problems(shared, share)
+    # Склад петли-раскладки (владелец 09.10.2026 о «Фонаре»: своя мелодия «совсем не похожа на ту, что была в лупе»): после
+    # перелома своих слоёв не меньше половины слоёв петли с нотами и аккорд меняется не вдвое реже, чем у неё. Замер подменён:
+    # склада нет — сборка о нём молчит; у подставного четыре слоя с нотами и шум, смены аккорда — число первым
+    def laid(chords=None):
+        row = " | ".join(data["loops"][gay].split(" | ")[:6])
+        config.BEAT_SOUNDS.write_text(json.dumps(data | {"loops": data["loops"] | {gay: row + (
+            f" | {chords} 5 ; 56-71 8 1 0 0 ; 56-68 16 1 2 0.1 ; 68-75 8 1 1 0 ; 70-80 12 1 10 0 ; шум 8 0 70 0" if chords is not None else "")}}),
+            encoding="utf-8")
+
+    def pad(*bars):             # слой долгих нот после перелома: аккорд такта — по кругу из названных
+        return [N(128 + b * 16, 16, k) for b in range(7) for k in bars[b % len(bars)]]
+
+    def more(*names):
+        return shared | {"tonal": shared["tonal"] + list(names), "sounds": shared["sounds"] | dict.fromkeys(names, min(known())),
+                         "fx": shared["fx"] | dict.fromkeys(names, "без обработки")}
+
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
+        laid()
+        assert problems(shared, share) == [] and "stack" not in loops()[gay], problems(shared, share)
+        four = share | {name: pad((59, 66), (64, 71)) for name in ("пэд", "остинато", "тень")}
+        assert "от одной до трёх" in "\n".join(problems(more("пэд", "остинато", "тень"), four)), "без склада партий музыки — до трёх"
+        laid(1)
+        assert [x["span"] for x in loops()[gay]["stack"]["layers"]] == [(56, 71), (56, 68), (68, 75), (70, 80), None] \
+            and loops()[gay]["stack"]["chords"] == 1, loops()[gay]
+        said = "\n".join(problems(shared, share))
+        assert "после перелома партий музыки 1 (мелодия), а у петли слоёв с нотами 4" in said and "не меньше 2 партий" in said, said
+        moving = share | {"пэд": pad((59, 66), (64, 71))}
+        assert problems(more("пэд"), moving) == [], problems(more("пэд"), moving)
+        assert problems(more("пэд", "остинато", "тень"), four) == [], "после перелома слоёв — по складу, предел в три — до него"
+        said = "\n".join(problems(more("пэд"), share | {"пэд": pad((59, 66))}))
+        assert "аккорд музыки меняется 0.00 раза в такт, а у петли — 1" in said and "партий музыки" not in said, said
+        laid(2)
+        assert "вдвое реже" in "\n".join(problems(more("пэд"), moving)), "петля меняет аккорд дважды в такт, своя музыка — раз"
+        laid(0)                 # замер смен не услышал (петля на одной опоре) — о сменах сборка молчит
+        assert problems(more("пэд"), share | {"пэд": pad((59, 66))}) == [], problems(more("пэд"), share | {"пэд": pad((59, 66))})
+        assert "склад:" in loop_card("call at night") and "шум" in loop_card("call at night"), loop_card("call at night")
     assert "только биту по заказу владельца" in "\n".join(problems(shared | {"order": "", "sample": "s140"}, share)), "утром её не берут"
     assert "после перелома играет вторая петля" in "\n".join(problems(looped | {"switch": {"такт": 9, "переход": "x"}}, drums)), \
         "без заказа перелом бита петлёй требует вторую"
@@ -2409,7 +2526,8 @@ def _checks() -> None:
           "петля набора 11 по числу перед BPM, скелет «Г» и заказ (хэт по мерке — после перелома, петля под «Six Speed» — брак и у заказа), "
           "строка об авторе звуков CC BY в записке, набор 12 — звук только с нотой замера в имени, петля по числу перед BPM, автор банка "
           "в записке, две петли набора 14 на условиях автора (в списке только они, темп — последнее число имени, только заказу, "
-          "перелом без второй петли, дорожка без баса автора, подпись, отметка и доля — в записке), "
+          "перелом без второй петли, дорожка без баса автора, подпись, отметка и доля — в записке; склад петли-раскладки: "
+          "после перелома слоёв музыки не меньше половины её слоёв, аккорд меняется не вдвое реже, без склада в замере — молчок), "
           "длинный звук на коротких нотах — строка в записке, а не брак, без длины в списке молчит, длины — по заголовку WAV, "
           "свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
 

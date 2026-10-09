@@ -44,6 +44,11 @@
 Две петли набора 14 (`noty.SHARED`, 08.10.2026) — не петли, а раскладки: петля вместе с басом автора, её слои
 по отдельности и бас один. Мерится музыка без баса (петля минус бас, `parted`), а опоры тактов — по самому басу
 через pyin: бас там громче музыки на 18–23 дБ, и хрома всей петли называла бы «нотами» его гармоники.
+Слои в таком файле лежат по одному, и с них снимается склад петли (`stack`, 09.10.2026) — седьмое поле её замера:
+сколько слоёв, где каждый стоит, сколько в нём нот, как часто меняется аккорд, сколько верхов и есть ли хвост. Владелец
+о бите «Фонарь»: «мелодия своя … совсем не похожа на ту, что была в лупе» — тема при этом совпала, расходился склад
+(три слоя против семи, аккорд раз в два такта против смены в каждом, хвосты от 1,8 с против сухой петли), а мерить
+его было нечем. Отвергнуто: класть склад отдельным полем верхнего уровня — он часть замера петли и без неё не читается.
 
 Корень одиночного звука (`--root`, 06.10.2026: банк одиночных звуков, в именах которого нот нет). Сэмплеру нужна
 корневая нота канала — на какой ноте звук записан: партия от неверного корня фальшивит вся, и на слух её до владельца
@@ -95,6 +100,10 @@ ROOT_SURE = .85                            # доля громких кадро�
 ROOT_CENTS = 25                            # дальше от ноты — звук между двумя нотами
 ROOT_ALIEN = .25                           # вес чужого класса высот от веса корня; квинта и большая терция — его обертоны
 ROOT_FUND = .1                             # доля основного тона в энергии первых десяти гармоник
+# Склад петли-раскладки (`stack`). Шум — по двум петлям набора 14: шумовой слой «DECAY» — 0,33, самый шумный слой
+# с нотами (подложка «call at night» под гейтом) — 0,21. ponytail: два слоя — не калибровка; третья раскладка поправит
+STACK_NOISE = .25                          # плоскостность спектра слоя в 100–8000 Гц: выше — шум, нот в слое нет
+STACK_TAIL = 40                            # хвост слоя — до стольких дБ ниже его уровня, в пустом такте после него
 DATALESS = 0x40000000                      # st_flags заглушки iCloud (SF_DATALESS): чтение повисло бы на скачивании
 
 
@@ -510,6 +519,68 @@ def parted(y: np.ndarray, sr: int, bpm: float, cut: tuple[int, int]) -> tuple[np
     return y[:size] - low, roots
 
 
+def stack(y: np.ndarray, sr: int, bpm: float, cut: tuple[int, int]) -> dict:
+    """Склад файла-раскладки (`noty.SHARED`): смены аккорда на такт и доля верхов у всей музыки без баса автора
+    и то же по слоям — с регистром, числом нот на такт и хвостом. Где слои, говорит сама раскладка: петля в cut[0] тактов
+    дважды вместе с басом, такт его хвоста, дальше слои по cut[0] тактов с пустым тактом после каждого — до такта cut[1],
+    где бас один. Пустой такт и есть мерка хвоста: сколько секунд после слоя звук держится выше −`STACK_TAIL` дБ.
+
+    Сверка с ручным разбором «call at night» 09.10.2026: верха сошлись до десятой процента у всех семи слоёв, регистр —
+    нота в ноту у четырёх (аккорды, перебор, пэд, тема), у триолей низ выше на тон, у подложки и колокольчика расходится
+    на кварту и больше; ноты в такт — у пяти (пэд — 2,8 против полутора, колокольчик — 6,5 против пяти); смены аккорда —
+    1,5 в такт у слоя аккордов, как в разборе, и 1,75 у всей музыки. Каждая мера грубая, и читать числа надо с этим:
+    регистр — ноты пианоролла от и до, где стоит самый слышный голос кадра (полутон с самой громкой суммой своих
+    гармоник; ноты реже 3% кадров не в счёт): у одного голоса сходится нота в ноту, у аккорда это ходящий верх или низ,
+    а не все его ноты, у колокола с призвуками верх завышен; слой с плоским спектром (`STACK_NOISE`) — шум, регистра нет;
+    ноты на такт — онсеты librosa, не больше одного на шестнадцатую: быстрее сетки замер не видит, а долгую ноту
+    с дрожанием дробит на две-три;
+    аккорд — `noty.chord` по хроме полтакта, смена — другой корень, по кругу петли: у одноголосого слоя это смена
+    самой ноты, а не гармонии, поэтому сборка сверяется с числом всей музыки;
+    верха — доля энергии 6–16 кГц, как у `color`."""
+    import librosa
+    from .noty import chord
+    n, at = cut
+    edge = [round(b * 240 / bpm * sr) for b in range(at + n + 1)]
+    music = y[:edge[n]] - y[edge[at]:edge[at] + edge[n]]
+    tune, f, k = float(librosa.estimate_tuning(y=music, sr=sr)), np.fft.rfftfreq(2048, 1 / sr), sr // 100
+
+    def rms(x):                                 # уровень по 10 мс
+        return np.sqrt((x[:len(x) // k * k].reshape(-1, k) ** 2).mean(1))
+
+    def one(x, rest=None):
+        c = _cqt(x, sr, tune)
+        halves = np.linspace(0, c.shape[2], 2 * n + 1).astype(int)
+        roots = [chord(c[:, :, a:b].sum((0, 2))) for a, b in zip(halves, halves[1:])]
+        spec = np.abs(librosa.stft(x, n_fft=2048, hop_length=512)) ** 2
+        out = {"chords": sum(a != b for a, b in zip(roots, roots[1:] + roots[:1])) / n,
+               "air": round(float(100 * spec[(f >= 6000) & (f < 16000)].sum() / max(spec[f < 16000].sum(), 1e-12)), 1)}
+        if rest is None:
+            return out
+        loud = c.sum((0, 1)) >= .0625 * np.percentile(c.sum((0, 1)), 90)
+        band = spec[(f >= 100) & (f < 8000)][:, loud]
+        noise = np.median(np.exp(np.log(band + 1e-10).mean(0)) / (band.mean(0) + 1e-10)) > STACK_NOISE
+        amp = np.sqrt(c.reshape(84, -1))
+        voice = amp.copy()
+        for up, weight in ((12, 1 / 2), (19, 1 / 3), (24, 1 / 4), (28, 1 / 5)):     # гармоники со второй по пятую
+            voice[:-up] += weight * amp[up:]
+        share = np.bincount(24 + voice[:, loud].argmax(0), minlength=128) / loud.sum()      # полоса 0 — C1, нота 24
+        keys = np.flatnonzero(share >= .03)
+        hits = librosa.onset.onset_detect(y=x, sr=sr, hop_length=512, units="time")
+        ring = np.flatnonzero(rms(rest) > np.percentile(rms(x), 90) * 10 ** (-STACK_TAIL / 20))
+        return {"span": None if noise else (int(keys.min()), int(keys.max())),
+                "notes": round(len({round(t * bpm / 15) for t in hits}) / n, 1), **out,
+                "tail": round(float(ring[-1] + 1) / 100, 2) if len(ring) else 0.0}
+
+    first, step = 2 * n + 1, n + 1
+    return one(music) | {"layers": [one(y[edge[b]:edge[b + n]], y[edge[b + n]:edge[b + step]]) for b in range(first, at - n, step)]}
+
+
+def stack_row(s: dict) -> str:
+    """Склад строкой — седьмое поле замера петли; обратно его читает `noty.loops`."""
+    return " ; ".join([f"{s['chords']:g} {s['air']:g}"] + [
+        f"{'шум' if not x['span'] else '%d-%d' % x['span']} {x['notes']:g} {x['chords']:g} {x['air']:g} {x['tail']:g}" for x in s["layers"]])
+
+
 def loops(word: str = "") -> str:
     """Замер всех разрешённых петель библиотеки владельца → поле loops в data/beat_sounds.json, строкой на петлю,
     как лежит промер Serum: вложенные списки при записи с отступом дали бы тридцать строк на петлю.
@@ -526,7 +597,7 @@ def loops(word: str = "") -> str:
             rows |= {name: old[name]} if name in old else {}
             continue
         y, sr = librosa.load(path, sr=None)
-        low = None
+        low, whole = None, y
         if name in noty.SHARED:             # раскладка: мерится музыка без баса автора, опоры — по басу
             y, low = parted(y, sr, noty.loop_bpm(name), noty.SHARED_CUT)
         m = loop(y, sr, noty.loop_bpm(name))
@@ -535,11 +606,16 @@ def loops(word: str = "") -> str:
             continue
         m["roots"] = low or m["roots"]
         rows[name] = " | ".join((str(m["bars"]), " ".join(m["notes"]), f"{m['tonic']} {m['mode']} {m['sure']:.2f}", f"{m['tune']:+d}",
-                                 " ".join(m["roots"]), " ".join(str(round(w * 100)) for w in m["weights"])))
+                                 " ".join(m["roots"]), " ".join(str(round(w * 100)) for w in m["weights"]),
+                                 *([stack_row(stack(whole, sr, noty.loop_bpm(name), noty.SHARED_CUT))] if low else [])))
     about = ("замер звука петли (zamer --loops), поля через « | »: такты по темпу из имени | звучащие ноты (энергия от "
              f"{LOOP_NOTE:.0%} самой громкой) | тоника, лад и уверенность (отрыв от второго по счёту профиля) | строй, центы | "
              "опора каждого такта петли (громчайшая нота в C2–B3) | веса нот от C до B, самая громкая — 100. "
-             "Обертоны громкой ноты считаются нотами, тоника и строй — оценка")
+             "Обертоны громкой ноты считаются нотами, тоника и строй — оценка. У петли-раскладки (noty.SHARED) седьмым полем — "
+             "склад (zamer.stack), части через « ; »: смен аккорда на такт и верха 6–16 кГц в % у всей музыки без баса автора; "
+             "дальше по слою — ноты пианоролла от и до, где стоит самый слышный голос (60 — C5 в FL; «шум» — слой без нот), "
+             "нот на такт (не больше одной на шестнадцатую), смен аккорда на такт, верха в %, хвост после слоя в секундах "
+             f"до −{STACK_TAIL} дБ. Меры грубые: у аккорда регистр — ходящий голос, у одноголосого слоя «аккорд» — сама нота")
     config.BEAT_SOUNDS.write_text(json.dumps(data | {"loops_about": about, "loops": rows}, ensure_ascii=False, indent=1) + "\n",
                                   encoding="utf-8")
     return f"петель замерено: {len(rows)}; мимо — " + ", ".join(f"{k}: {v}" for k, v in skipped.items())
@@ -740,6 +816,27 @@ def selftest() -> None:
     low = np.concatenate([10 * chord(30.87, 92.6), 10 * chord(41.2, 123.6)])
     mel, low_roots = parted(np.concatenate([two + low, 0 * two, low]), SR, 120, (2, 4))
     assert low_roots == ["B", "E"] and loop(mel, SR, 120)["notes"] == m["notes"], (low_roots, loop(mel, SR, 120))
+    # Склад раскладки: за петлёй с басом и тактом его хвоста — три слоя с пустым тактом после каждого. Аккорды обрываются
+    # сухо; щипок восьмыми на до и фа-диезе с призвуком на 7 кГц звенит ещё такт; шум восьмыми — слой без нот.
+    # Строкой склад уходит в замер петли, и сборка читает из неё те же числа
+    none, beat = np.zeros(2 * SR), tt % .25
+    pluck = np.concatenate([(np.sin(2 * np.pi * hz * tt) + .5 * np.sin(2 * np.pi * 7000 * tt)) * np.exp(-beat / .05)
+                            * np.minimum(1, beat / .005) for hz in (1046.5, 1480)])
+    hiss = rng.standard_normal(4 * SR) * np.tile(np.exp(-beat / .05), 2)
+    s = stack(np.concatenate([two + low, two + low, none, two, none, pluck, np.sin(2 * np.pi * 1480 * tt) * np.exp(-tt / .3),
+                              hiss, none, low]), SR, 120, (2, 14))
+    chords, plucks, noise = s["layers"]
+    assert (s["chords"], s["air"], len(s["layers"])) == (1, 0, 3), s
+    # Число нот у стоячего аккорда не сверяется: рябь чистых синусов онсеты librosa читают нотами — та же слабость, что у пэда
+    assert chords["span"] == (43, 45) and (chords["chords"], chords["air"], chords["tail"]) == (1, 0, 0), chords
+    assert plucks["span"] == (84, 90) and 7 <= plucks["notes"] <= 9 and plucks["chords"] == 1 and 15 <= plucks["air"] <= 25 \
+        and 1 < plucks["tail"] < 2, plucks
+    assert noise["span"] is None and noise["tail"] == 0 and noise["air"] > 25, noise
+    from unittest import mock
+    from . import config, noty
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
+        config.BEAT_SOUNDS.write_text(json.dumps({"loops": {"x": "2 | A | A минор 0.10 | +0 | A G | 100 | " + stack_row(s)}}), "utf-8")
+        assert noty.loops()["x"]["stack"] == s, (noty.loops()["x"], s)
     # Корень одиночного звука: нота с обертонами — её номер; аккорд, квинта без основного тона и съезд высоты — замер молчит
     one = np.arange(SR) / SR
 
@@ -751,7 +848,7 @@ def selftest() -> None:
     assert root(np.sin(2 * np.pi * 261.63 * one) + np.sin(2 * np.pi * 392 * one), SR) is None, \
         "квинта: общий период — до октавой ниже, а звука там нет"
     assert root(np.sin(2 * np.pi * np.cumsum(220 * 2 ** one) / SR), SR) is None, "высота съезжает на октаву — корня нет"
-    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, долгий суб нотой в такт, части, цвет музыки, ноты петли, петля-раскладка без баса автора и корень одиночного звука "
+    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, долгий суб нотой в такт, части, цвет музыки, ноты петли, петля-раскладка без баса автора, её склад по слоям и корень одиночного звука "
           "на синтетике — в порядке")
 
 
