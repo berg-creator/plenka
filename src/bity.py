@@ -787,6 +787,7 @@ def _selftest() -> None:
             mock.patch.object(config, "BEAT_PHOTOS", tmp / "photos.json"), \
             mock.patch.dict(globals(), {"_picture": lambda url: asked.append(url) or Image.new("RGB", (1600, 1200), (90, 60, 40))}), \
             mock.patch.object(config, "SKLEYKA_FILE", tmp / "skleyka.json"), \
+            mock.patch.object(config, "TOUCH_FILE", tmp / "touch.json"), \
             mock.patch.object(config, "INBOX_FILE", tmp / "inbox.jsonl"), \
             mock.patch.object(config, "secret", lambda name, required=True: owner if name == "TELEGRAM_ADMIN_ID" else ""), \
             mock.patch.object(collect, "load_artists", lambda: [{"name": "Kizaru"}, {"name": "Toxi$"}]), \

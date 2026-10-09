@@ -91,6 +91,9 @@ SVED_PER_DAY = 3
 # кнопками — сверх них, но не больше SKLEYKA_TWEAKS на трек.
 SKLEYKA_FILE = PRIVATE / "skleyka.json"
 DOPOSLE_FILE = PRIVATE / "doposle.json"  # очередь роликов ДО И ПОСЛЕ с согласием на канал (skleyka._doposle_add)
+# Последнее действие человека в личке бота и время его вступления в канал (moderate.touched, member_row):
+# по ним строка открытого журнала MEMBERS_FILE говорит, чем ушедший пользовался последним. Здесь id — только тут.
+TOUCH_FILE = PRIVATE / "touch.json"
 SKLEYKA_PER_DAY = 2
 SKLEYKA_TWEAKS = 3
 SKLEYKA_MAX_MB = 200

@@ -5285,7 +5285,7 @@ def _selftest() -> None:
     keys: list = []
     calls: list[tuple[str, dict]] = []
     real = (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
-            itunes.find_song, telegram._call, config.DOPOSLE_FILE)
+            itunes.find_song, telegram._call, config.DOPOSLE_FILE, config.TOUCH_FILE)
     marks: list = []
     telegram.send_message = lambda chat, text, buttons=None, markup=None, **_: sent.append(text) \
         or keys.append(buttons) or marks.append(markup) or {"message_id": len(sent)}
@@ -5295,6 +5295,7 @@ def _selftest() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="skleyka-test-"))
     config.SKLEYKA_FILE = tmp / "skleyka.json"
     config.DOPOSLE_FILE = tmp / "doposle-main.json"  # согласие в проверке ниже пишет очередь канала — не в настоящую
+    config.TOUCH_FILE = tmp / "touch.json"  # moderate.process ниже отмечает действие в боте — не в настоящее хранилище
     # Каталог примеров — тоже во временной папке: настоящий поставил бы кнопку под каждым предложением проверки.
     real_examples, config.SKLEYKA_HAND_EXAMPLES = config.SKLEYKA_HAND_EXAMPLES, tmp / "hand_examples.json"
     from . import service
@@ -6817,7 +6818,7 @@ def _selftest() -> None:
         assert loudness(faint)[0] == -70.0 and abs(_quiet(faint) - (_quiet(tone) - 60)) < 0.5, _quiet(faint)
     finally:
         (telegram.send_message, telegram.edit_markup, config.SKLEYKA_FILE, config.secret, llm.generate_skleyka,
-         itunes.find_song, telegram._call, config.DOPOSLE_FILE) = real
+         itunes.find_song, telegram._call, config.DOPOSLE_FILE, config.TOUCH_FILE) = real
         service.SOURCES_FILE = real_sources
         config.SKLEYKA_HAND_EXAMPLES = real_examples
         shutil.rmtree(tmp, ignore_errors=True)

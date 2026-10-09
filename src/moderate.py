@@ -333,9 +333,62 @@ def attach_track(message: dict, admin: str) -> str:
 
 
 INSIDE = ("member", "administrator", "creator")
+# Сколько дней живёт отметка о действии в боте (config.TOUCH_FILE): столько же, сколько трек СВЕДЕНИЯ.
+TOUCH_DAYS = 30
 
 
-def member_row(event: dict) -> dict | None:
+def touched(update: dict, admin: str) -> tuple[str, str] | None:
+    """(id человека, метка действия) для события из лички бота; чужое событие и владелец — None.
+
+    Журнал уходов знал только время: чем человек пользовался в боте перед тем, как уйти из канала,
+    не помнил никто (владелец, 09.10.2026). Метка потом идёт в открытый журнал (member_row), поэтому
+    личного в ней нет: команда — только известная сервису (service.parse_command), у /start — слово
+    до «_» из известных наперёд меток ссылок и команд (после «_» идут коды и номера), у кнопки — два
+    первых куска её данных, у остального — одно слово о виде сообщения. Текст сообщения в метку
+    не идёт никогда.
+    """
+    message, query = update.get("message") or {}, update.get("callback_query") or {}
+    user = (update.get("pre_checkout_query") or query or message).get("from", {}).get("id")
+    if not user or str(user) == str(admin):
+        return None
+    if update.get("pre_checkout_query"):  # счёт звёздами бот шлёт только в личку
+        return str(user), "оплата"
+    if ((query.get("message") or message).get("chat") or {}).get("type") != "private":
+        return None
+    if query:
+        data = ":".join(query.get("data", "").split(":")[:2])
+        return str(user), data if re.fullmatch(r"[a-z]{1,8}(:[a-z_]{1,16})?", data) else "кнопка"
+    text = message.get("text") or ""
+    kind, body = service.parse_command(text)
+    if message.get("successful_payment"):
+        what = "оплата"
+    elif message.get("web_app_data"):
+        what = "мини-приложение"
+    elif message.get("voice"):
+        what = "голос"
+    elif any(message.get(file) for file in ("document", "audio", "video", "photo", "animation", "video_note")):
+        what = "файл"
+    elif kind:  # имя команды — тем же шаблоном, что у parse_command: только буквы
+        what = "/" + re.match(r"/([a-zA-Zа-яА-ЯёЁ_]+)", text).group(1).lower()
+        tag = body.partition("_")[0]
+        known = tag in service.COMMANDS or any(tag == label.partition("_")[0] for label in service.SOURCES)
+        if kind == "menu" and known:
+            what += f" {tag}"
+    elif "://" in text or any(e.get("type") in ("url", "text_link") for e in message.get("entities") or []):
+        what = "ссылка"
+    else:
+        what = "текст" if text else "прочее"
+    return str(user), what
+
+
+def touch_save(touch: dict) -> None:
+    """Пишет отметки в приватное хранилище, выбросив те, что старше TOUCH_DAYS."""
+    fresh = {user: mark for user, mark in touch.items()
+             if min(skleyka._age(mark.get(key) or "") for key in ("at", "in")) < TOUCH_DAYS * 86400}
+    state.write_json(config.TOUCH_FILE, fresh)
+
+
+def member_row(event: dict, touch: dict | None = None) -> dict | None:
     """Строка журнала config.MEMBERS_FILE о вступлении в канал или уходе из него: время и направление.
 
     Историю действий Telegram показывает только админу в приложении и хранит двое суток, а бот
@@ -344,6 +397,11 @@ def member_row(event: dict) -> dict | None:
     часов прошло с его последнего готового трека (track_hours): так проверяется догадка «получил
     трек — отписался». Чат обсуждений шлёт те же события — в него попадают, оставив комментарий, —
     и в журнал они не идут.
+
+    touch — отметки действий в боте (touched, приватный config.TOUCH_FILE): и пришедшему, и ушедшему
+    строка называет последнее действие в боте (last) и сколько часов назад оно было (last_hours),
+    ушедшему — ещё сколько часов он пробыл в канале (stay_hours). Время вступления пишется в ту же
+    запись прямо здесь, уход его снимает.
     """
     if (event.get("chat") or {}).get("type") != "channel":
         return None
@@ -353,12 +411,22 @@ def member_row(event: dict) -> dict | None:
         return None
     moment = datetime.fromtimestamp(event["date"], timezone.utc) if event.get("date") else None
     row = {"at": state.iso(moment), "way": "in" if after else "out"}
+    user = str((now.get("user") or {}).get("id"))
     if not after:
-        user = str((now.get("user") or {}).get("id"))
         done = [track["done"] for track in skleyka.load()["tracks"].values()
                 if track.get("chat") == user and track.get("done")]
         if done:
             row["track_hours"] = round(skleyka._age(max(done)) / 3600, 1)
+    try:
+        mark = (touch or {}).get(user) or {}
+        if mark.get("at"):
+            row["last"], row["last_hours"] = mark.get("what", ""), round(skleyka._age(mark["at"]) / 3600, 1)
+        if after and touch is not None:
+            touch.setdefault(user, {})["in"] = row["at"]
+        elif mark.get("in"):
+            row["stay_hours"] = round(skleyka._age(mark.pop("in")) / 3600, 1)
+    except Exception as exc:  # noqa: BLE001 — битая отметка строку журнала не отнимает; в лог — без id
+        log.error("Действие в боте к строке журнала не приложено: %s", type(exc).__name__)
     return row
 
 
@@ -373,11 +441,25 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
     served = 0
     last_id = offset
     args = argparse.Namespace(dry_run=dry_run)
+    # Отметки действий в боте (touched): файл читается раз на пачку и пишется раз, после разбора.
+    # Не прочитался — пачка идёт без отметок: пустой словарь затёр бы прежние при записи.
+    try:
+        touch = state.read_json(config.TOUCH_FILE, {})
+        before = json.dumps(touch, sort_keys=True)
+    except Exception as exc:  # noqa: BLE001 — отметки не держат разбор событий; в лог — без id
+        log.error("Отметки действий не прочитаны: %s", type(exc).__name__)
+        touch = None
 
     # Оплату звёздами Telegram отменяет, если за 10 секунд не ответить «да», — такие
     # события вперёд пачки: разбор перед ними может идти дольше.
     for update in sorted(updates, key=lambda update: "pre_checkout_query" not in update):
         last_id = max(last_id, update.get("update_id", 0) + 1)
+        try:
+            who = touched(update, admin) if touch is not None else None
+            if who:
+                touch.setdefault(who[0], {}).update(at=state.iso(), what=who[1])
+        except Exception as exc:  # noqa: BLE001 — отметка не держит разбор событий; в лог — без id
+            log.error("Действие в боте не отмечено: %s", type(exc).__name__)
 
         # Оплата звёздами (src/skleyka.py): треки СВЕДЕНИЯ сверх лимита и задаток за ручное сведение.
         # «Нет» — только задатку по треку, где он уже внесён или от которого отказались (skleyka.checkout).
@@ -396,7 +478,7 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
         member = update.get("chat_member")
         if member:
             try:
-                row = member_row(member)
+                row = member_row(member, touch)
                 if row:
                     print(f"  канал: {'пришёл' if row['way'] == 'in' else 'ушёл'}")
                     if not args.dry_run:
@@ -655,6 +737,12 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
         print(f"  {post_id}: {result}")
         handled += 1
 
+    if touch is not None and not dry_run:
+        try:
+            if json.dumps(touch, sort_keys=True) != before:
+                touch_save(touch)
+        except Exception as exc:  # noqa: BLE001 — отметки не держат разбор событий; в лог — без id
+            log.error("Отметки действий не записаны: %s", type(exc).__name__)
     return handled, served, last_id
 
 
@@ -1207,6 +1295,7 @@ def _selftest() -> int:
                          "b": {"chat": "77", "done": "2026-10-03T12:00:00+00:00"}, "c": {"chat": "5"}}}
     with (tempfile.TemporaryDirectory() as folder,
           mock.patch.object(config, "MEMBERS_FILE", Path(folder) / "members.jsonl"),
+          mock.patch.object(config, "TOUCH_FILE", Path(folder) / "touch.json"),
           mock.patch.object(skleyka, "load", lambda: tracks),
           mock.patch.object(state, "now", lambda: datetime(2026, 10, 3, 13, 30, tzinfo=timezone.utc)),
           contextlib.redirect_stdout(io.StringIO())):
@@ -1222,11 +1311,62 @@ def _selftest() -> int:
         assert process(events, {}, "1", False, 0) == (0, 0, 7)
         written = config.MEMBERS_FILE.read_text()
         assert [row["way"] for row in state.read_jsonl(config.MEMBERS_FILE)] == ["in", "out"] and "77" not in written, written
+        assert state.read_json(config.TOUCH_FILE, None) == {}, "пришёл и ушёл в одной пачке — время вступления снято"
+
+        # Последнее действие в боте: метка без личного — ни текста, ни кодов, ни номеров; владелец и чат обсуждений мимо.
+        def wrote(text: str = "", user: int = 77, kind: str = "private", **body) -> dict:
+            return {"message": {"chat": {"id": user, "type": kind}, "from": {"id": user}, "text": text, **body}}
+
+        def pressed(data: str, user: int = 77) -> dict:
+            return {"callback_query": {"id": "q", "from": {"id": user}, "data": data,
+                                       "message": {"chat": {"id": user, "type": "private"}}}}
+
+        labels = [(touched(update, "1") or ("", ""))[1] for update in (
+            wrote("/start beat_ab12"), wrote("/start sv_ab12cd34"), wrote("/start 79161234567"), wrote("/otbor@plenka_bot"),
+            wrote("/vopros звёзды не дошли, мой ник @lilpi"), wrote("/lilpi"), wrote("Bones — Dirt"),
+            wrote("вот https://music.yandex.ru/album/1/track/2"), wrote(audio={"file_id": "F"}), wrote(voice={"file_id": "V"}),
+            wrote(web_app_data={"data": "12.5"}), wrote(successful_payment={"invoice_payload": "hand:t5"}),
+            pressed("s:beat:ab12"), pressed("s:sk:hg4070"), pressed("s:4070:x"), {"pre_checkout_query": {"from": {"id": 77}}},
+            wrote("/otbor", user=1), pressed("pub:post", user=1), wrote("привет", kind="supergroup"), {"poll_answer": {}})]
+        assert labels == ["/start beat", "/start sv", "/start", "/otbor", "/vopros", "текст", "текст", "ссылка", "файл", "голос",
+                          "мини-приложение", "оплата", "s:beat", "s:sk", "кнопка", "оплата", "", "", "", ""], labels
+        # Нажал кнопку и ушёл одной пачкой: отметка не теряется и время вступления не затирает; сухой прогон не пишет.
+        came = {"update_id": 1, "chat_member": moved("left", "member")}
+        left = [{"update_id": 2, **pressed("s:sk:u")}, {"update_id": 3, "chat_member": moved("member", "left")}]
+        assert process([came], {}, "1", False, 0) == (0, 0, 2)
+        assert state.read_json(config.TOUCH_FILE, {}) == {"77": {"in": "2026-10-03T13:00:00+00:00"}}
+        with (mock.patch.object(service, "handle_callback", lambda query, limits: None),
+              mock.patch.object(skleyka, "unkey", lambda message: None)):
+            assert process(left, {}, "1", True, 0)[2] == 4 and "at" not in state.read_json(config.TOUCH_FILE, {})["77"]
+            assert process(left, {}, "1", False, 0)[2] == 4
+        assert state.read_json(config.TOUCH_FILE, {}) == {"77": {"at": "2026-10-03T13:30:00+00:00", "what": "s:sk"}}
+        gone = list(state.read_jsonl(config.MEMBERS_FILE))[-1]
+        assert gone == {"at": "2026-10-03T13:00:00+00:00", "way": "out", "track_hours": 1.5,
+                        "last": "s:sk", "last_hours": 0.0, "stay_hours": 0.5}, gone
+        assert "77" not in config.MEMBERS_FILE.read_text(), "id человека — только в приватном файле"
+        # Вернувшемуся строка называет прежнее действие; отметка старше TOUCH_DAYS при записи уходит.
+        old = {"5": {"at": "2026-09-01T00:00:00+00:00", "what": "текст"}, "77": {"at": "2026-10-03T10:30:00+00:00", "what": "/bity"}}
+        assert member_row(moved("left", "member"), old) == {"at": "2026-10-03T13:00:00+00:00", "way": "in",
+                                                            "last": "/bity", "last_hours": 3.0}
+        touch_save(old)
+        assert list(state.read_json(config.TOUCH_FILE, {})) == ["77"]
+        # Сбой отметки разбор не роняет: события разобраны, строка журнала записана, в логе — ни id, ни текста.
+        failed = []
+        with mock.patch.object(log, "error", lambda *args: failed.append(args)):
+            with mock.patch.object(state, "read_json", lambda path, default: {}[str(path)]):
+                assert process([came], {}, "1", False, 0) == (0, 0, 2)
+            with mock.patch.dict(globals(), {"touched": lambda update, admin: {}[update["chat_member"]["from"]["id"]],
+                                             "touch_save": lambda touch: {}[next(iter(touch))]}):
+                assert process([{"update_id": 3, "chat_member": moved("member", "left")}], {}, "1", False, 0) == (0, 0, 4)
+            assert member_row(moved("member", "left", user=9), {"9": "битая"}) == {"at": "2026-10-03T13:00:00+00:00", "way": "out"}
+        assert [row["way"] for row in state.read_jsonl(config.MEMBERS_FILE)][-2:] == ["in", "out"]
+        assert [args[1] for args in failed] == ["KeyError"] * 3 + ["AttributeError"] and "77" not in str(failed), failed
     # Без строки в allowed_updates Telegram события не шлёт вовсе — прежние (платежи, опросы) на месте.
     with mock.patch.object(telegram, "_call", lambda method, payload: json.loads(payload["allowed_updates"])):
         asked = telegram.get_updates()
     assert set(asked) == {"message", "callback_query", "poll_answer", "pre_checkout_query", "chat_member"}, asked
-    print("журнал канала: пришёл и ушёл — время и направление без id, часы с готового трека, чат обсуждений мимо")
+    print("журнал канала: пришёл и ушёл — время и направление без id, часы с готового трека, чат обсуждений мимо; "
+          "последнее действие в боте — меткой без текста и кодов, сколько пробыл в канале, сбой отметки разбор не роняет")
 
     # Выход из дежурства: бит владельца первым и один; дальше релиз; обычный пост — только в канал и когда пора.
     delivered = []
