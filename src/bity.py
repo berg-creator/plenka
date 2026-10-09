@@ -1065,12 +1065,31 @@ def _selftest() -> None:
                 raise AssertionError("сбой выхода должен дойти до дежурства")
             save({**load(), "4": {"artists": ["Kizaru"], "title": "Сбой", "bpm": None, "key": ""}})
         assert shot("1", tmp).stat().st_size and Image.open(tmp / PREVIEW_NAME).size == PREVIEW_SIZE
+        # Ролик бита (поле clip — file_id) встаёт в пост вместо значка; нет его или не ушёл — значок.
+        went: list[str] = []
+
+        def film(chat, video, caption, **_) -> dict:
+            if video == "битый":
+                raise telegram.TelegramError("нет файла")
+            went.append(f"ролик {video}")
+            return {"message_id": 1, "chat": {"id": -100}}
+
+        def badge(*_, **__) -> dict:
+            went.append("значок")
+            return {"message_id": 2, "chat": {"id": -100}}
+
+        with mock.patch.object(telegram, "send_video_url", film), mock.patch.object(telegram, "send_photo_file", badge):
+            for clip in ("свой", "", "битый"):
+                save({**load(), "1": {**load()["1"], "clip": clip}})
+                assert publish.send({"rubric": "beat", "beat": "1", "text": "бит"}, "@канал")["kind"] == "caption"
+        assert went == ["ролик свой", "значок", "значок"], went
     print("bity: подпись и маршрут бита, каталог и тексты для YouTube, описание без ссылки, на подъёме, "
           "ссылка beat_ по file_id, «🎚 БИТЫ»: один бит — сразу файл, несколько — список, метка меню, "
           "кнопка — заявка с битом и его номером, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, счёт по номеру бита, "
           "значок — плёночный портрет со словом названия, без фото — спины, живой ролик в 50 МБ и превью, спрос по медиане без «ё», "
           "бит недели постом в канал: только в понедельник с 10:00 и не ночью, один на неделю, новый первым, запас кончился — "
-          "строка владельцу и повтор давнего, ручная отметка держит бит вне канала, сорванный выход возвращает отметку — ок")
+          "строка владельцу и повтор давнего, ручная отметка держит бит вне канала, сорванный выход возвращает отметку, "
+          "ролик бита (поле clip) в посте вместо значка, без ролика и при сбое — значок — ок")
 
 
 def main() -> int:

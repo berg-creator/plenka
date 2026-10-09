@@ -538,6 +538,15 @@ def send(post: dict, chat_id: str) -> dict | None:
 
         from . import bity  # тянет за собой сведение и ролики — нужен только этому посту
 
+        # У бита есть ролик (поле clip каталога — file_id ролика, залитого с Мака владельцу в личку;
+        # владелец 10.10.2026: «вместо фотки видео само») — в посте он вместо значка. Файл лежит
+        # в Telegram, поэтому Мак к выходу не нужен. Не ушёл — значок, как раньше.
+        if clip := bity.load().get(post["beat"], {}).get("clip"):
+            try:
+                return _where(telegram.send_video_url(chat_id, clip, text, width=1920, height=1080, quiet=quiet),
+                              "caption")
+            except telegram.TelegramError as exc:
+                log.warning("Бит с роликом не ушёл (%s), отправляю со значком", exc)
         try:
             with tempfile.TemporaryDirectory(prefix="beat-") as tmp:
                 shot = bity.shot(post["beat"], Path(tmp))
