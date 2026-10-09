@@ -50,6 +50,12 @@ Fruity Parametric EQ 2). В проект оно ложится записью 53
 сам, последним слотом опоры, с числами владельца — константа WIDE. Отвергнуто: ставить на шину музыки — у него он
 на шине не стоит ни разу, и в «Заело», где шина была, он выбрал дорожку.
 
+Владелец 09.10.2026 довёл утренний «Фонарь» руками и просил запомнить приёмы для следующих битов. Два из них — настройки
+плагинов, и в проект они ложатся его байтами: Fruity WaveShaper встаёт сам, последним слотом 808, за софт-клиппером,
+а Fruity Love Philter звена `fx` без названного пресета несёт настройки с его мелодии — константы SHAPE, PHILTER.
+Отвергнуто: разбирать их состояния на ручки — запись закрытая, у фильтра ещё и сжатая, а с пресетами FL не совпало
+ни одно; и ставить фильтр самим — где ему входить, решает автор нот словами «в тактах …».
+
 Проект, сохранённый владельцем в «Сегодня», утром не стирается (`keep`): папка переезжает рядом, пути звуков
 в проекте переписываются, остальное — байт в байт.
 Serum у владельца — Audio Unit; его состояние — plist, где поле vstdata — файл .fxp целиком (снято с его
@@ -70,6 +76,7 @@ Serum у владельца — Audio Unit; его состояние — plist,
 from __future__ import annotations
 
 import argparse
+import base64
 import math
 import plistlib
 import re
@@ -79,6 +86,7 @@ import subprocess
 import time
 import unicodedata
 import wave
+import zlib
 from pathlib import Path
 
 from . import proq
@@ -161,6 +169,28 @@ GATE = (100, 65536, 65536, 128, 100)
 # ponytail: у бита с одной партией нот (мелодия поверх петли) расширитель встанет на неё — дорожек петли у владельца
 # с ним нет, это догадка; скажет «не туда» — ставить на дорожку петли или не ставить вовсе. На слух не проверял никто.
 WIDE = ("fruitystereoenhancer", struct.pack("<6i", -18, 256, -54, -248, 1, 0))
+# Второй перегруз 808 — Fruity WaveShaper последним слотом дорожки, за софт-клиппером. Состояние — дорожка 808 «Фонаря»,
+# доведённого владельцем руками 09.10.2026 (FL 20.8.3; микшер 4, слот 4 по счёту `--read`): 180 байт, байт в байт, здесь
+# сжаты zlib. С заводскими пресетами FL не совпало (сверено 33) — кривая его. По виду записи: три числа ручек — 73, 128
+# и 128 — и кривая из пяти точек, выпуклая: вход 0,125 — выход 0,625, дальше (0,3; 0,91), (0,5; 0,98) и (1; 1); шаг
+# по входу записан от прошлой точки, как у клипа автоматизации. Какое число какая ручка, по форме плагина не сверено.
+# На слух не проверял никто: у него фейдер 808 — 101%, у нас 125%.
+SHAPE = ("fruitywaveshaper", zlib.decompress(base64.b85decode(b"c-muTU}5lNU|?u~Vg^P=Ai)g9tPEH|1A=+L9zs8X(hN)>BJcJwDF3Z}oya;{khvh<B$bmO@dg#o_x3UUhv4E23=g2{KiF@VYqf)k|3?E5H2|XfB9#")))
+# Фильтр — Fruity Love Philter звена `fx` без названного пресета. Состояние — дорожка мелодии того же «Фонаря» (микшер 1,
+# слот 3): 1200 байт, байт в байт. Внутри шапка и поток zlib на 70650 байт, второй раз он не жмётся — поэтому просто
+# base85. С пресетами FL не совпало и по распакованному (сверено 47); что это за фильтр, не разобрано. У владельца доля
+# обработки слота весь бит ноль и плавно входит за такты 16 и 32, перед провалом; где ему входить у нас, говорит автор.
+PHILTER = ("fruitylovephilter", base64.b85decode(
+    b"0{{#Fc%1FrKW`H;7{~GFLXqfzgy0Q?6)}LA(N#!n><EdaP*ghbpNg`edlgLGSQ&T&-8)ud?Z8IZx-tb{FYY<Mnlw+U)OqqXa^kyQK6QM}ulDuC7ZLe091bh@EZ1D^ixlqZr>m=V!<A>hKb7u~Vcjl{"
+    b"Yf%(ZzvBJ}c_Hs)+daOP=k9UCy?#^H<)dr&<*uvK{<|tW?s46Dwe{K64SC}pU%AKk@>X8TmiyY~aZhf!E^ND6Nn5I5J8ah-Uuhbb++$sPGN~Mu&GW!LuazT3hEb8C{qALd_vv0S`UXW3Y`+#lao=%p"
+    b"a&US|XKlChg8zK@ewE|f-agsii~YLf?lt35m2oz#cKoA+e>CQ|rHb~)uaA$9ok@P|oZYYAqksSPjw{m5<=lS8ahB7WPqv-yvmIwg?p`ovYyI6r<~=y39OgZGk2MjFWru9gd#N>1F6R~pXBLMwh2A3@"
+    b"a4b7ygWe+>a4b7ygWe+>a4b7ygWlVB`yRRaP1-S)QM(G-_eSl)Lvy@Wr2F^aLE^m*#@=gN4x;`3_;`QEkB&cozkZJ=10ei87$;wc>$-X`H3z#n(LXrVKc)1>kB|4q{f&>0_iOz)BmMEI?3~t*Gu3aW"
+    b"vUXa3(Z?tLIa#!ypSGXz@5a9HyAdZ(hc$@aYsYNA{QKlP*C%jHIn0~&Uh0}aF6R~pXBLNS(0i#hbuQ-?2WJ+CHHF?I8*nT;WP{!#8*nT;WP{!#8*nT;WP{#2bo+K(y(8_I%BWqP(!T5={$Cv&oD6d+"
+    b"kL#H8x-NR7<HtGJDHHDHn09~se&&5|i5<T_r~Z7`JFZLj_fT%1X`JPBm~-mAcFYdT+h6yX=i!)g=93LS5}&<+^0S=NJg+XS0ded(i@63&^>w~klUf7ja&B>OW^q_k=smIl$Ff5<=smIl$Ff5<=smIl"
+    b"$Ff5<=)KDAd+h2%SGT13KZPDhGp^O>g<*Te^V}PQgOg!S<?%O;d0iL1_<Lgx;_r9P_m(Wry*Kqa_2;|Z!M!m!xjM`_^&ay)9LvtdX2VHY;CWtM$OasH&SI_s^T?Xi8Zei0i-R+Z!<s_xkqtPO9kN01"
+    b"kqtPO9kN01kqtPO9kN01Rnm;1ufBxaVLKS(bXQVc<K7sYC3Y6`x@aCAa~K@U4s#g2$Gic@vctSV?~x5SmL0M|@3E%9vFxy>(0gP9j%9~z(0gP9j%9~z(0gP9j%9~z(0i3MW9X|d;da;##yH)TRM)uI"
+    b"0%wUGu8ZnD<}f&x9p*54k9h-*Wrul#-Xj}uEIVX_-eXOHW7%O%q4&rJ9Lo;bp!diI9Lo;bp!diI9Lo;bp!X_i#?V(^!tJmfjB&avsjhLa1<n#XTo=`Q%wcdWJIrD99`gnq%MSAfy+=0SSa!$;y~mmY"
+    b"$FjqkLhq3cIF=o<LGO_bIF=o<LGO_bIF=o<LGM-4jG?c-gxg^|7~^zTQeER-3!Ei(xGt*qn8V;$c9_HHJ?0HKmL28|dXH?tvFwlydXF^)j%9~6h2A3@a4b7ygWe+>a4b7ygWe+>a4b7ygWi*WT>+y*"))
 # Ограничителя на мастер проект сам не ставит, хотя в чужих проектах он есть в 4 из 6: владелец 06.10.2026 о пробном
 # проекте с Fruity Limiter «Max loudness» — «Очень делает плоским звук. Не делай так».
 # «в тактах 23, 31–32 и 59.4» в конце звена fx: такт, такты подряд, доля такта (59.4 — четвёртая)
@@ -393,7 +423,7 @@ def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, di
 def read(data: bytes) -> dict:
     """Проект обратно — своим разбором: то, что сверяет селфтест и печатает --read."""
     out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": [],
-           "eq": {}, "wide": {}}
+           "eq": {}, "wide": {}, "owner": []}
     text = lambda v: v.decode("utf-16-le").rstrip("\0")
     ch = pat = plug = name = None
     state = b""
@@ -460,6 +490,8 @@ def read(data: bytes) -> dict:
         elif ins >= 0 and e == 98 and plug:
             if plug == "Fruity Stereo Enhancer" and len(state) == 24:   # расширитель: шесть ручек по порядку (WIDE)
                 out["wide"][(ins, n)] = struct.unpack("<6i", state)
+            if state in (SHAPE[1], PHILTER[1]):                         # настройки владельца из «Фонаря» — байт в байт
+                out["owner"].append((ins, n))
             out["inserts"][ins]["slots"][n], plug = plug, None
             if cut := proq.read(state[state.find(b"FFBS"):]):       # эквалайзер: полосы из куска состояния в обёртке
                 out["eq"][(ins, n)] = cut
@@ -702,6 +734,17 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             if mine is None:
                 steps.insert(0, mine := blank(proq.KEY))
             mine.update(key=proq.KEY, file=effects[proq.KEY], eq=cut)
+        # Второй перегруз: WaveShaper с кривой владельца — последним слотом 808, за софт-клиппером и звеньями автора;
+        # свой Fruity WaveShaper автора без пресета — он и есть
+        if kind == "808" and SHAPE[0] in effects and (bare(SHAPE[0]) or len(steps) < 10):
+            steps += [] if bare(SHAPE[0]) else [blank(SHAPE[0])]
+            bare(SHAPE[0])["state"] = SHAPE[1]
+            own.append(f"{row}: Fruity WaveShaper последним слотом — твоя кривая из «Фонаря»")
+        # Фильтр автора без названного пресета — с настройками владельца, а не плагина по умолчанию; пресет по имени старше
+        for st in steps:
+            if st["key"] == PHILTER[0] and not st["preset"]:
+                st["state"] = PHILTER[1]
+                own.append(f"{row}: Fruity Love Philter — твои настройки с мелодии «Фонаря»")
         # Ширина: расширитель с числами владельца — последним слотом опоры, за эквалайзером и звеньями автора;
         # свой Fruity Stereo Enhancer автора без пресета — он и есть
         if row == bed and WIDE[0] in effects and (bare(WIDE[0]) or len(steps) < 10):
@@ -1023,6 +1066,27 @@ def selftest() -> None:
             assert env(song, 0) == env(deep, 0) and env(song, 5) == env(base, 0) != env(song, 1), "808 и барабаны — байт в байт прежние"
             (tune / "Остинато — звук.wav").write_bytes(b"not WAV")      # длина не прочлась — считаем, что звук ляжет сам на себя
             assert _piles(tune / "Остинато — звук.wav", notes, 120) and not _piles(tune / "Щипок — звук.wav", notes, 120)
+            # Настройки владельца из «Фонаря»: WaveShaper сам встаёт последним слотом 808, за софт-клиппером; Love Philter без
+            # пресета несёт его состояние, с названным пресетом — пресет, а клип ведёт слот как прежде. База плагинов своя:
+            # в сборках выше этих двух плагинов в базе нет — и слотов под них нет
+            assert len(SHAPE[1]) == 180 and len(PHILTER[1]) == 1200 and len(zlib.decompress(PHILTER[1][4:])) == 70650, "состояния целы"
+            his = Path(tmp) / "база с фонарём"
+            shutil.copytree(db, his, dirs_exist_ok=True)
+            (pre / "Fruity Love Philter").mkdir(exist_ok=True)
+            (pre / "Fruity Love Philter" / "Simple lowpass.fst").write_bytes(native("Fruity Love Philter", b"philter-lowpass"))
+            for name in ("Fruity WaveShaper", "Fruity Love Philter"):
+                (his / "Effects" / f"{name}.fst").write_bytes(native(name, b"default-" + name.encode()))
+            line = today(low, serum, {"title": "Свои", "bpm": 120, "fx": {
+                "хэт": "Fruity Love Philter, плавно входит в тактах 2 → Fruity Love Philter «Simple lowpass»"}},
+                         Path(tmp) / "Empty.flp", his, None, (pre,), Path(tmp) / "Auto.flp", plug)
+            mine = (low / "Свои.flp").read_bytes()
+            got = read(mine)
+            assert got["inserts"][1]["slots"] == {0: "FabFilter Pro-Q 4", 1: "Fruity Limiter", 2: "Fruity Soft Clipper", 3: "Fruity WaveShaper"}, got["inserts"][1]
+            assert got["inserts"][2]["slots"] == {0: "FabFilter Pro-Q 4", 1: "Fruity Love Philter", 2: "Fruity Love Philter"}, got["inserts"][2]
+            assert got["owner"] == [(1, 3), (2, 1)] and b"philter-lowpass" in mine and b"default-Fruity" not in mine, got["owner"]
+            assert got["links"] == [{"clip": 3, "mix": True, "insert": 2, "slot": 1}] and got["channels"][3]["fade"] == "входит", got["links"]
+            assert "808: Fruity WaveShaper последним слотом" in line and "хэт: Fruity Love Philter — твои настройки" in line, line
+            assert "хэт: Fruity Love Philter «Simple lowpass»" in line and not read(deep)["owner"], line
             # Ширина: расширитель с числами владельца — на опоре (из двух партий музыки — та, где ноты дольше), за эквалайзером;
             # у мелодии его нет
             air = Path(tmp) / "ширь"
@@ -1055,7 +1119,7 @@ def selftest() -> None:
           "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, бочка в моно, низ 808 — срезом Side и полкой Mid в эквалайзере, ручка и огибающая громкости 808; "
           "музыке на длинном звуке-файле под частыми нотами — огибающая «как нарисовано», короткому звуку, редким нотам и барабанам — нет, 808 рядом прежний; "
           "эквалайзер первым слотом дорожки с инструментом, срез по роли и по словам автора, на шинах и мастере своего нет, плагин молчит — "
-          "числа в записке; расширитель стерео с числами владельца — последним слотом опоры; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота ступенью и прямой («плавно уходит», «плавно входит»); сбой — строка в записке; "
+          "числа в записке; расширитель стерео с числами владельца — последним слотом опоры; WaveShaper с кривой владельца — последним слотом 808, Love Philter без пресета — с его настройками; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота ступенью и прямой («плавно уходит», «плавно входит»); сбой — строка в записке; "
           "сохранённая папка переезжает, пути звуков — за ней")
 
 
@@ -1090,6 +1154,7 @@ def main() -> None:
                   + (", ".join(f"{s + 1} {p}" + (f" ({proq.say(got['eq'][i, s])})" if (i, s) in got["eq"] else "")
                                + (" (разведение {2} из 96, сдвиг фазы {3} из 512, панорама {0} из 128)".format(*got["wide"][i, s])
                                   if (i, s) in got["wide"] else "")
+                               + (" (настройки владельца из «Фонаря»)" if (i, s) in got["owner"] else "")
                                for s, p in x["slots"].items()) or "пусто") + f"; идёт в {x['to']}"
                   + (", моно" if i in got["mono"] else "")
                   + "".join(f"; в {to} — сайдчейном (уровень посыла 0)" for at, to in got["duck"] if at == i))
