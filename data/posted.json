@@ -1151,6 +1151,12 @@
       "file": "20261009-061156-4298-release.json",
       "published_at": "2026-10-09T07:04:42+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "20261009-111147-8243-news.json",
+      "published_at": "2026-10-09T11:12:12+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1311,6 +1317,7 @@
     "10800250848825d9019a11301330016a116211c4084402d200ca058c021c004a",
     "0c1c4f1d5f189628b1a53396268627873d03914fca8fce975d2f632db15f9582",
     "646968d08092e2d2c1330131803982199b198e7d8a7dc979c8fc8a7c026c022f",
-    "99bf9936b936617c873d1e6c0ceec17ec176e0ffe0dcd0efd8ce58ec926ef09e"
+    "99bf9936b936617c873d1e6c0ceec17ec176e0ffe0dcd0efd8ce58ec926ef09e",
+    "990e2f5b59db99ca22dc669c347a7cfa4c326a1e4c0a561d761dfc3ba43b063f"
   ]
 }
