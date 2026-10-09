@@ -1028,6 +1028,12 @@ def _said(items: list[dict], parts: list[tuple[str, Path, str]], key: str = "") 
     return next((("имя файла", notes) for name, _, part in parts if part == "бит" and (notes := key_notes(name))), None)
 
 
+def _tune(notes: list[int], soft: str) -> str:
+    """Строка фильтра автотюна: ноты и мягкость (SOFT). Одна на сведение и на пробу плагина (tune_check)."""
+    return AUTOTUNE.format(notes="|".join(f"m{n:02d}={int(n in notes)}" for n in range(12)),
+                           **dict(zip(("corr", "filter", "bias"), SOFT[soft])))
+
+
 def _autotune(beat: Path, said: tuple[str, list[int]] | None = None, soft: str = "", loose: list[str] | None = None) -> str:
     """Автотюн к нотам тональности бита; пусто — ffmpeg этой сборки фильтр не принял.
 
@@ -1039,8 +1045,7 @@ def _autotune(beat: Path, said: tuple[str, list[int]] | None = None, soft: str =
     if len(notes) == 12:
         source = "не уверен — все полутона"
     soft = soft if soft in SOFT else next(iter(SOFT))
-    tune = AUTOTUNE.format(notes="|".join(f"m{n:02d}={int(n in notes)}" for n in range(12)),
-                           **dict(zip(("corr", "filter", "bias"), SOFT[soft])))
+    tune = _tune(notes, soft)
     # Проба — той же строкой с теми же ручками, что пойдёт в сведение: на Маке плагина нет,
     # а значение, которого плагин не принял, уронило бы сведение уже на голосе.
     probe = subprocess.run([clips.ffmpeg(), "-v", "error", "-f", "lavfi", "-i", f"anullsrc=r={RATE}:cl=stereo",
@@ -6836,6 +6841,33 @@ def talk_check() -> list[str]:
         ok = got == want or None not in (got, want) and abs(got - want) < 0.05
         print(f"  {'ок' if ok else 'ПРОМАХ'}: «{text}» → at {got} (ждали {want}); ответ: {words}")
         misses += [] if ok else [text]
+    # Ручки автотюна — тот же генератор: мягкость на одно положение, тональность — как назвал человек,
+    # а просьба не о тюне их не трогает. Тональность сверяется нотами: «ля минор» и «Am» — одно.
+    tuned = dict(KNOBS, style="мелодично", key="F#m", soft="средне")
+    for text, key, soft in (("тюн мягче", "F#m", "мягко"), ("тональность ля минор", "ля минор", "средне"),
+                            ("эха поменьше", "F#m", "средне")):
+        knobs, words = understood(dict(tuned), text, timing)
+        ok = key_notes(knobs["key"] or "") == key_notes(key) and knobs["soft"] == soft
+        print(f"  {'ок' if ok else 'ПРОМАХ'}: «{text}» → key {knobs['key']}, soft {knobs['soft']} (ждали {key}, {soft}); ответ: {words}")
+        misses += [] if ok else [text]
+    return misses
+
+
+def tune_check() -> list[str]:
+    """Проба автотюна настоящим плагином: синус через ту же строку фильтра, что собирает сведение
+    (_tune), по разу на каждое положение SOFT, ноты — ля минор. Плагин стоит только в Actions
+    (health.yml): на Маке ffmpeg собран без lv2, а селфтест пробу подменяет. Ручку с именем,
+    которого плагин не знает, ffmpeg 6.1 ошибкой не считает — предупреждает «Unknown option»
+    и сводит без неё (af_lv2.c), пределов чисел не сверяет вовсе; поэтому читаются и предупреждения.
+    Высоту на выходе проба не меряет. Итог — положения, которых плагин не принял."""
+    misses = []
+    for soft, knobs in SOFT.items():
+        run = subprocess.run([clips.ffmpeg(), "-v", "warning", "-f", "lavfi", "-i", f"sine=f=450:r={RATE}:d=2,pan=stereo|c0=c0|c1=c0",
+                              "-af", _tune(key_notes("Am"), soft), "-f", "null", "-"], capture_output=True, text=True, errors="replace")
+        ok = not run.returncode and "Unknown option" not in run.stderr
+        why = " | ".join(line.strip() for line in run.stderr.splitlines() if line.strip())[:300] or f"код {run.returncode}"
+        print(f"  автотюн «{soft}» (corr, filter, bias = {', '.join(map(str, knobs))}): " + ("принял" if ok else f"НЕ ПРИНЯЛ: {why}"))
+        misses += [] if ok else [soft]
     return misses
 
 
@@ -6880,7 +6912,9 @@ def main() -> int:
                         help="пример ручного сведения: один кусок у бота и у звукорежиссёра — владельцу в личку "
                              "и парой file_id в data/hand_examples.json (только Мак); --dry-run — без отправки и записи")
     parser.add_argument("--talk-check", action="store_true",
-                        help="просьбы о месте голоса — живому генератору: куда он ставит голос (только из Actions)")
+                        help="просьбы о месте голоса и об автотюне — живому генератору: куда он ставит голос, key и soft (только из Actions)")
+    parser.add_argument("--tune-check", action="store_true",
+                        help="принимает ли плагин автотюна строку фильтра сведения на каждом положении мягкости (плагин — только в Actions)")
     args = parser.parse_args()
     config.load_dotenv()
     if args.selftest:
@@ -6888,6 +6922,8 @@ def main() -> int:
         return 0
     if args.talk_check:
         return 1 if talk_check() else 0
+    if args.tune_check:
+        return 1 if tune_check() else 0
     if args.link_check:
         return link_check(args.link_check)
     if args.beats:

@@ -60,6 +60,40 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: python -m src.skleyka --talk-check
 
+      # Автотюн стиля «мелодично» — плагин x42 fat1, и он есть только в Actions: на Маке ffmpeg собран
+      # без lv2, а селфтест пробу плагина подменяет. Откажет плагин в дежурстве — трек молча выйдет без
+      # автотюна, в логе останется одна строка. Поэтому здесь: пакеты ставятся как в moderate.yml (тот же
+      # запас, только чтение — откладывает его дежурство; из запаса это секунд десять), и синус идёт через
+      # ту же строку фильтра, что собирает сведение, по разу на каждое положение мягкости. Отказ красит
+      # запуск, и сторож назавтра пишет о нём строку. От шагов выше не зависит.
+      - name: Узнать версию образа
+        id: image
+        if: ${{ !cancelled() }}
+        run: echo "version=${ImageVersion:-none}" >> "$GITHUB_OUTPUT"
+
+      - name: Достать запас пакетов
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/debs/*.deb
+          key: debs-${{ steps.image.outputs.version }}
+          restore-keys: debs-
+
+      - name: Поставить ffmpeg и плагин автотюна
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          mkdir -p ~/debs/partial
+          install="sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives=$HOME/debs"
+          $install --no-download ffmpeg x42-plugins && exit 0
+          sudo apt-get update -qq
+          $install ffmpeg x42-plugins
+
+      - name: Проверить, принимает ли плагин автотюна ручки сведения
+        if: ${{ !cancelled() }}
+        run: python -m src.skleyka --tune-check
+
       # Дорожки ссылкой на облако (src/oblako.py) качает дежурство с адресов GitHub, и отвечают ли
       # ему облака, видно только отсюда. Адреса заведомо пустые: ни чужих ссылок, ни имён в журнале.
       # Не зависит от шага выше: промах генератора не должен прятать ответ облаков.
