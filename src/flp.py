@@ -56,6 +56,16 @@ Fruity Parametric EQ 2). В проект оно ложится записью 53
 Отвергнуто: разбирать их состояния на ручки — запись закрытая, у фильтра ещё и сжатая, а с пресетами FL не совпало
 ни одно; и ставить фильтр самим — где ему входить, решает автор нот словами «в тактах …».
 
+Владелец 09.10.2026 довёл утренний «Фонарь» руками и просил запомнить приёмы; один — звук перехода в пустом такте
+аудиоклипом в плейлисте: удары в тактах 16, 32 и 48 и подъезд — звук задом наперёд, обрезанный границей такта 33. Теперь
+их ставит проект: партия без нот (`noty.MOVES`), канал-аудиоклип на её звук, куски в названных тактах, уровень канала
+и маршрут — в дорожку мелодии, под её эхо и фильтр, или в мастер — из её строки fx. Канал — тот же, что у дорожки петли,
+и с 09.10 его параметры совпадают с клипами самого FL байт в байт (AUDIO). Отвергнуто: партия сэмплера с нотой в нужном
+такте — у владельца это клипы, а клип режется границей такта и встаёт концом на неё без счёта длины звука в нотах.
+Отвергнуто: растягивать звук под темп, как делает сам FL при перетаскивании звука с темпом в файле (два его удара из трёх
+растянуты так), и повторять высоту его подъезда (+800 центов): режим растяжки FL выбирает сам, по двум примерам правило
+не снять — звук играет своей длиной и высотой.
+
 Проект, сохранённый владельцем в «Сегодня», утром не стирается (`keep`): папка переезжает рядом, пути звуков
 в проекте переписываются, остальное — байт в байт.
 Serum у владельца — Audio Unit; его состояние — plist, где поле vstdata — файл .fxp целиком (снято с его
@@ -72,10 +82,11 @@ Sytrus — родной генератор FL: владелец 09.10.2026 са�
 Звука сборка не слышит и FL не запускает: селфтест проверяет только, что файл читается обратно.
 
     python -m src.flp --selftest        проект читается обратно: темп, каналы, ноты партии, слоты, уровни и маршруты микшера,
+                                        переход аудиоклипом в названном такте, подъезд концом на границе такта,
                                         сайдчейн бочки с 808 и их моно, огибающая 808 и музыки на длинном звуке, эквалайзер первым слотом и его срезы,
                                         расширитель стерео на опоре, пресет и ячейка Gross Beat, клип автоматизации;
                                         сохранённая папка переезжает с путями
-    python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, паттерны, клипы, дорожки микшера, сайдчейн и моно, срезы эквалайзера,
+    python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, где стоят аудиоклипы, паттерны, клипы, дорожки микшера, сайдчейн и моно, срезы эквалайзера,
                                         числа расширителя стерео
 """
 from __future__ import annotations
@@ -95,7 +106,7 @@ import zlib
 from pathlib import Path
 
 from . import proq
-from .noty import GM_DRUM, LIBRARY, LONG, N, NATIVE, SAMPLED, _names, _notes, _rows, _size, fsc, read_fsc, seconds
+from .noty import GM_DRUM, LIBRARY, LONG, MOVES, N, NATIVE, SAMPLED, _names, _notes, _rows, _size, fsc, read_fsc, seconds
 
 BASE = Path("/Applications/FL Studio 20.app/Contents/Resources/FL/Data/Templates/Minimal/Empty/Empty.flp")
 DB = LIBRARY["KITS"].parent / "Presets" / "Plugin database"
@@ -208,8 +219,11 @@ PHILTER = ("fruitylovephilter", base64.b85decode(
 # проекте с Fruity Limiter «Max loudness» — «Очень делает плоским звук. Не делай так».
 # «в тактах 23, 31–32 и 59.4» в конце звена fx: такт, такты подряд, доля такта (59.4 — четвёртая)
 BARS = re.compile(r"\bв тактах\s+((?:\d+(?:\.[1-4])?(?:\s*[–—-]\s*\d+(?:\.[1-4])?)?(?:\s*,\s*|\s+и\s+)?)+)$")
-# Чем параметры аудиоклипа (событие 215) отличаются от сэмплера — снято с аудиоклипов проекта владельца
-AUDIO = {0: b"\x8c\0\0\0", 11: b"\0", 44: b"\3", 48: bytes(4), 83: b"\1"}
+# Чем параметры аудиоклипа (событие 215) отличаются от сэмплера — снято с аудиоклипов проекта владельца. Байты 8, 62 и 156
+# дописаны 09.10.2026: с ними запись совпадает байт в байт с каждым из 13 клипов, которые FL сделал сам в пяти его проектах
+# («Фонарь» и Beats 4 PLENKA, среди них «Петля — на весь бит», перетащенная им в BEAT 5), кроме полей растяжки [96:112].
+# Что эти три байта значат, не разобрано; без них клип петли открывался и играл
+AUDIO = {0: b"\x8c\0\0\0", 8: b"\1", 11: b"\0", 44: b"\3", 48: bytes(4), 62: b"\1", 83: b"\1", 156: b"\1"}
 FF = b"\xff" * 4
 
 
@@ -311,6 +325,8 @@ def _channel(proto: list[tuple[int, bytes]], i: int, ch: dict) -> list[tuple[int
             env += 1
             if env == 2 and ch.get("hold") and len(v) >= 32:    # флаги, «включена», задержка, пять стадий
                 v = v[:4] + struct.pack("<i", -1) + v[8:12] + struct.pack("<5i", *ch["hold"]) + v[32:]
+        elif e == 70 and ch.get("back"):        # готовые эффекты звука: 2 — задом наперёд (подъезд владельца в «Фонаре»)
+            v = _int(2, 2)
         elif e == 132 and ch.get("cut"):        # группа отсечки «сам себя»: новая нота глушит хвост прошлой — в 4 проектах из 6
             v = struct.pack("<HH", i + 1, i + 1)
         elif e == 215 and clip and len(v) == 158:
@@ -328,9 +344,9 @@ def _channel(proto: list[tuple[int, bytes]], i: int, ch: dict) -> list[tuple[int
     return out
 
 
-def _item(idx: int, ln: int, track: int, ends: bytes) -> bytes:
-    """Клип плейлиста с начала бита: паттерн (номер от 0x5000) или аудиоклип (номер канала)."""
-    return struct.pack("<IHHIHHHHI", 0, 0x5000, idx, ln, TRACKS - 1 - track, 0, 0x78, 0x40, 0x80806440) + ends
+def _item(idx: int, ln: int, track: int, ends: bytes, pos: int = 0) -> bytes:
+    """Клип плейлиста: паттерн (номер от 0x5000) или аудиоклип (номер канала); pos — место от начала бита, тики."""
+    return struct.pack("<IHHIHHHHI", pos, 0x5000, idx, ln, TRACKS - 1 - track, 0, 0x78, 0x40, 0x80806440) + ends
 
 
 def _curve(proto: bytes, spans: list[tuple[float, float]], total: float, fade: str = "") -> bytes:
@@ -356,7 +372,8 @@ def _curve(proto: bytes, spans: list[tuple[float, float]], total: float, fade: s
 def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, dict], markers=(), auto=None) -> bytes:
     """Проект из шаблона FL. channels — каналы стойки по порядку: name, insert (дорожка микшера), у партии — part
     и notes, у сэмплера — sound (путь), root и cut (отсечка «сам себя»), у Serum и Sytrus — plugin (события плагина) и тот же cut, у аудиоклипа —
-    sound и clip (длина в тиках), knob — ручка громкости канала, %, hold — стадии огибающей громкости (HOLD у 808, GATE
+    sound и clip (длина в тиках), spots — куски клипа в плейлисте (место и длина в тиках; без них — один с начала бита),
+    back — звук задом наперёд, knob — ручка громкости канала, %, hold — стадии огибающей громкости (HOLD у 808, GATE
     у музыки). Партия — паттерн на весь бит на своей дорожке плейлиста;
     каналы одной партии — слой.
     inserts — дорожки микшера: name, plugins (файлы .fst по слотам), to (куда вместо мастера), level (фейдер, %),
@@ -379,8 +396,11 @@ def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, di
         tracks.append(part)
     for i, c in enumerate(channels):
         if c.get("clip"):
-            ends.append(c["clip"])
-            items.append(_item(i, c["clip"], len(tracks), struct.pack("<ff", -1, -1)))
+            # Срезы куска — начало и конец в мс самого звука, −1 — звук целиком: так FL записал в «Фонаре» обрезанный
+            # владельцем «FX #23» (0 и 1849,67) и нетронутые «FX #9» и «FX #3»; тик — 625/темп мс
+            for pos, ln in c.get("spots") or [(0, c["clip"])]:
+                ends.append(pos + ln)
+                items.append(_item(i, ln, len(tracks), struct.pack("<ff", *((-1, -1) if ln == c["clip"] else (0, ln * 625 / bpm))), pos))
             tracks.append(c["name"])
     head = [(e, _int(round(bpm * 1000), 4) if e == 156 else b"\1" if e == 9 else v) for e, v in head]   # 9 — режим песни: Play играет плейлист
     at = next((i for i, (e, _) in enumerate(head) if e == 226), len(head))
@@ -400,8 +420,8 @@ def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, di
     out, ins = [], -1
     for e, v in tail:
         row = inserts.get(ins + (e == 236), {})
-        if e == 233:
-            v = b"".join(items)
+        if e == 233:                            # по месту, как пишет сам FL; у клипов с начала бита порядок прежний
+            v = b"".join(sorted(items, key=lambda x: x[3::-1]))
         elif e == 236:
             ins += 1
             out += [(204, _text(row["name"]))] if row.get("name") else []
@@ -469,6 +489,10 @@ def read(data: bytes) -> dict:
                 ch["state"] = v
             elif e == 132:
                 ch["cut"] = int.from_bytes(v[:2], "little")
+            elif e == 70 and n & 2:
+                ch["back"] = True
+            elif e == 215 and len(v) >= 112 and any(v[96:112]):     # растяжка FL: длина (768 — такт), высота в центах, множитель, режим
+                ch["stretch"] = struct.unpack_from("<4i", v, 96)
             elif e == 219 and len(v) >= 8:
                 ch["knob"] = round(int.from_bytes(v[4:8], "little") / 128)
             elif e == 218:                      # вторая огибающая — громкость; включена — её стадии: атака, hold, спад, sustain, release
@@ -485,8 +509,10 @@ def read(data: bytes) -> dict:
                     was = (at, y)
         elif e == 233:
             for k in range(0, len(v), 32):
-                _, base, idx, ln, track = struct.unpack("<IHHIH", v[k:k + 14])
+                pos, base, idx, ln, track = struct.unpack("<IHHIH", v[k:k + 14])
                 out["clips"].append(("паттерн" if idx > base else "канал", idx - base if idx > base else idx, ln, TRACKS - 1 - track))
+                if idx < len(out["channels"]):          # где стоит клип канала — в долях от начала бита
+                    out["channels"][idx].setdefault("at", []).append((pos / 96, (pos + ln) / 96))
         elif e == 148:
             out["markers"].append([n // BAR + 1, ""])
         elif e == 205:
@@ -647,6 +673,25 @@ def _bytes(f: Path) -> bytes | None:
             time.sleep(3)
 
 
+def _seconds(f: Path) -> float:
+    """Длина WAV в секундах — по кускам fmt и data. Не модулем wave: тот не открывает 32 бита с плавающей точкой, а «FX #3»
+    набора 13 и «Fx #3» набора 14, которыми владелец делал переходы в «Фонаре», записаны так. Не разобрался — 0."""
+    try:
+        with f.open("rb") as w:
+            rate = 0 if w.read(12)[:4] == b"RIFF" else None
+            while rate is not None and len(head := w.read(8)) == 8:
+                size = int.from_bytes(head[4:], "little")
+                if head[:4] == b"fmt ":
+                    rate = int.from_bytes(w.read(size + size % 2)[8:12], "little")      # байт в секунду
+                elif head[:4] == b"data":
+                    return size / rate if rate else 0.0
+                else:
+                    w.seek(size + size % 2, 1)
+    except OSError:
+        pass
+    return 0.0
+
+
 def _where(f: Path) -> str:
     """Путь звука, как его пишет сам FL: от папки данных пользователя."""
     home = LIBRARY["KITS"].parent
@@ -667,7 +712,7 @@ def _piles(wav: Path, notes: list[N], bpm: float) -> bool:
 def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB, home: Path | None = None,
           banks=PRESETS, auto: Path = AUTO, eq=proq.states) -> str:
     """Проект бита — в папку «Сегодня», из того, что в ней уже лежит: партитуры, звуки с именем партии впереди,
-    дорожки петли и пресеты. plan — поля паспорта (`noty.build`): title, bpm, parts, tricks, fx, preset, sounds (из него — только пресет Sytrus).
+    дорожки петли, звуки переходов и пресеты. plan — поля паспорта (`noty.build`): title, bpm, parts, tricks, fx, preset, sounds (из него — только пресет Sytrus).
     home — где папка будет лежать, если не здесь (пробная сборка в сторону): пути звуков ведут туда.
     eq — кто пишет состояния эквалайзеров по спискам полос: сам плагин (`proq.states`), в селфтесте — подмена без него.
     Возвращает строку для записки: что в проекте есть и что осталось рукам."""
@@ -725,6 +770,25 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             with wave.open(str(kits / file)) as w:
                 ticks = round(w.getnframes() / w.getframerate() * plan["bpm"] / 60 * 96)
             channels.append({"name": Path(file).stem, "insert": number[key], "sound": where(kits / file), "clip": ticks})
+    # Переход — звук в пустом такте аудиоклипом (`noty.MOVES`): партия без нот, звук — её файл в папке, такты, уровень канала
+    # и маршрут — её строка fx. Заведён в дорожку мелодии, под её эффекты, как три клипа из четырёх у владельца, «в мастер» —
+    # мимо них. Кусок начинается с началом отрезка и режется его концом; «подъезд» кончается с отрезком, а звук короче
+    # отрезка начинается позже. ponytail: длинный подъезд режется с конца, как у владельца, — пик звука не доигрывает;
+    # скажет «не доезжает» — резать с начала (срез клипа от длины звука минус отрезок)
+    lead, moves = next((number[p.lower()] for p, _ in scores if "мелод" in p.lower() and "контр" not in p.lower()), 0), []
+    for key, text in fx.items():
+        tag = re.sub(r"[/\\:\0]", " ", key)[:40] + " — "           # имя партии впереди файла — как кладёт `noty.lay`
+        f = next((f for f in wavs if nfc(f.name).lower().startswith(tag)), None) if key.startswith(MOVES) else None
+        full, spans, said = round(_seconds(f) * plan["bpm"] / 60 * 96) if f else 0, _spans(text), nfc(text).lower()
+        if not full or not spans or key in number:
+            continue
+        spots = [(round(b * 96) - ln if key.startswith("подъезд") else round(a * 96), ln)
+                 for a, b in spans for ln in [min(full, round((b - a) * 96))]]
+        level, back, top = re.search(r"(\d+)\s*%", said), "задом наперёд" in said, "в мастер" in said or not lead
+        channels.append({"name": nfc(f.stem).split(" — ", 1)[1], "insert": 0 if top else lead, "sound": where(f), "clip": full,
+                         "spots": spots, "knob": int(level[1]) if level else None, "back": back})
+        moves.append(f"{channels[-1]['name']} — " + ", ".join(_bars(a, b) for a, b in spans) + (f", канал {level[1]}%" if level else "")
+                     + (", задом наперёд" if back else "") + (", в мастер" if top else f", в дорожку «{rows[lead - 1]}»"))
     effects, drums = _effects(db / "Effects"), next((b for b in buses if "барабан" in b), None)
     kick = next((p for p, _ in scores if "бочк" in p.lower()), None)       # вход сайдчейна один — первая бочка
     bed = max(((sum(n.ln for n in ns) / len(ns), p) for p, ns in scores if ns and role(p) == "музыка"),
@@ -860,6 +924,8 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
                                          "от нуля к 100%: это доля «обработанный/сухой» слота, а не ручка самого плагина."
                                          if any("плавно " in t for t in timed) else "")
                if timed else " Эффектов «местами» в проекте нет: автор нот не назвал их с тактами.")
+            + (f" Переходы — аудиоклипами в плейлисте, у каждого звука своя дорожка: {'; '.join(moves)}. Звук играет своей длиной "
+               "и высотой: под темп, как делает FL при перетаскивании, он не растянут." if moves else "")
             + (f" Не вышло: {'; '.join(miss)}." if miss else "")
             + (f" Корневая нота канала выставлена: {', '.join(roots)}." if roots else "")
             + (f" Без звука, поставь сам: {', '.join(silent)}." if silent else "")
@@ -917,7 +983,7 @@ def _fake() -> bytes:
     """Шаблон в миниатюре — для машин без FL (Actions): события Empty.flp в том же порядке, но дорожек восемь."""
     ev = [(199, b"20.7.0.1702\0"), (156, _int(140000, 4)), (9, b"\0"), (146, FF), (226, bytes(20)),
           (64, bytes(2)), (21, b"\0"), (201, _text("")), (212, bytes(52)), (203, _text("Sampler")), (155, bytes(4)),
-          (128, bytes(4)), (0, b"\1"), (22, b"\1"), (219, struct.pack("<6i", 6400, 10000, 0, 256, 0, 0)), (215, bytes(158)), (132, bytes(4)),
+          (128, bytes(4)), (0, b"\1"), (70, bytes(2)), (22, b"\1"), (219, struct.pack("<6i", 6400, 10000, 0, 256, 0, 0)), (215, bytes(158)), (132, bytes(4)),
           *[(218, struct.pack("<17i", 0, 0, 100, 20000, 20000, 30000, 50, 20000, 0, 100, 20000, 0, 32950, 0, 0, 0, -101))] * 5,
           (143, _int(3, 4)), (20, b"\0"),
           (99, bytes(2)), (241, _text("Arrangement")), (233, b"")] + [(238, _int(i, 4) + bytes(62)) for i in range(1, 9)]
@@ -1027,6 +1093,35 @@ def selftest() -> None:
             assert got["clips"] == [("паттерн", 1, 101 * BAR, 0), ("паттерн", 2, 101 * BAR, 1), ("паттерн", 3, 101 * BAR, 2),
                                     ("канал", 4, BAR, 3), ("канал", 5, 101 * BAR, 4)], got["clips"]
             assert got["markers"] == [[1, "вступление"], [9, "игра"]], got["markers"]
+            assert ch[4]["at"] == [(0, 4)] and all([v for e, v in events(data) if e == 215][4][k:k + len(b)] == b for k, b in AUDIO.items()), \
+                "дорожка петли — с начала бита, параметры клипа — как у клипов самого FL"
+            # Переход: звук в пустом такте аудиоклипом. Удар встаёт с началом отрезка и режется его концом, подъезд кончается
+            # с отрезком: короче его — начинается позже; уровень канала, маршрут (дорожка мелодии или мастер) и «задом
+            # наперёд» — из строки fx. Звук 32 бита с плавающей точкой (такие «FX #3» владельца) модуль wave не открывает
+            hop = Path(tmp) / "переход"
+            hop.mkdir(exist_ok=True)
+            fsc(hop / "01 хэт.fsc", notes), fsc(hop / "02 мелодия.fsc", notes)
+            for name in ("Переход — Удар.wav", "Переход 2 — Удар.wav"):                 # две секунды: на 120 — такт
+                shutil.copyfile(kits / "Хэт — а.wav", hop / name)
+            (hop / "Переход 3 — Битый.wav").write_bytes(b"not wav")
+            (hop / "Подъезд — Свист.wav").write_bytes(                                  # три секунды — полтора такта
+                b"RIFF" + bytes(4) + b"WAVEJUNK" + _int(3, 4) + bytes(4) + b"fmt " + _int(16, 4)
+                + struct.pack("<HHIIHH", 3, 2, 44100, 352800, 8, 32) + b"data" + _int(3 * 352800, 4))
+            told = today(hop, serum, {"title": "Переход", "bpm": 120, "fx": {
+                "переход": "в тактах 2 и 4.3–4.4", "переход 2": "44%, в мастер, в тактах 3", "переход 3": "в тактах 2",
+                "переход 4": "звука нет, в тактах 2", "подъезд": "71%, задом наперёд, в тактах 7–8 и 10"}},
+                Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp", plug)
+            jump = (hop / "Переход.flp").read_bytes()
+            seen = read(jump)
+            assert [(c["name"], c["kind"], c["insert"], c["knob"], c.get("back", False), c["at"]) for c in seen["channels"][2:]] == [
+                ("Удар", "аудиоклип", 2, 78, False, [(4, 8), (14, 16)]), ("Удар", "аудиоклип", 0, 44, False, [(8, 12)]),
+                ("Свист", "аудиоклип", 2, 71, True, [(26, 32), (36, 40)])], seen["channels"][2:]
+            assert seen["channels"][4]["sound"].endswith("/Подъезд — Свист.wav") and seen["inserts"][2]["name"] == "мелодия"
+            # куски идут по месту, а не по каналам; обрезанный несёт срез в мс звука (полтакта и такт на 120 — секунда и две), целый — −1
+            cut = [(v[k + 6], *struct.unpack_from("<I", v, k), *struct.unpack_from("<ff", v, k + 24))
+                   for e, v in events(jump) if e == 233 for k in range(0, len(v), 32) if 2 <= v[k + 6] <= 4 and v[k + 7] == 0]
+            assert cut == [(2, 384, -1, -1), (3, 768, -1, -1), (2, 1344, 0, 1000), (4, 2496, -1, -1), (4, 3456, 0, 2000)], cut
+            assert "Свист — такты 7–8, такт 10, канал 71%, задом наперёд, в дорожку «мелодия»" in told and "канал 44%, в мастер" in told, told
             mix = got["inserts"]
             # мастер: цепочка автора и ограничитель с заводским пресетом последним; «местами: …, такты 1 и 7» — слова, клипа нет
             assert mix[0] == {"name": None, "slots": {0: "Pro-Q 4", 1: "Fruity Soft Clipper"}, "to": [], "level": 100}, mix[0]
@@ -1146,7 +1241,7 @@ def selftest() -> None:
         assert "нет FL Studio" in today(kits, serum, plan, Path(tmp) / "нет.flp", db)
         if PRESETS[1].is_dir():                                 # на Маке — настоящий банк FL: ячейка «1/2 Speed» в нём тридцатая
             assert _cell(_preset("grossbeat", "Momentary"), "1/2 Speed")[4:12] == _int(30, 4) + bytes(4), "заводской банк Momentary"
-            import zlib                                         # и настоящий пресет Sytrus: четыре байта шапки, дальше zlib с его именем
+            # и настоящий пресет Sytrus: четыре байта шапки, дальше zlib с его именем
             saw = _preset("sytrus", "Another fat saw", (PRESETS[1].with_name("Generators"),))
             assert b"Another fat saw" in zlib.decompress(saw[4:]) and _factory("Sytrus", saw) == "Another fat saw", "заводской пресет Sytrus"
         from .noty import _project
@@ -1166,6 +1261,7 @@ def selftest() -> None:
     print("проект FL: шаблон, каналы со звуком и пресетом (Serum, Sytrus заводским пресетом по имени), отсечка «сам себя» у синтезаторов музыки — каждому своя группа, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
           "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, бочка в моно, низ 808 — срезом Side и полкой Mid в эквалайзере, ручка и огибающая громкости 808; "
           "музыке на длинном звуке-файле под частыми нотами — огибающая «как нарисовано», короткому звуку, редким нотам и барабанам — нет, 808 рядом прежний; "
+          "переход аудиоклипом в названных тактах, с уровнем канала и маршрутом в дорожку мелодии или в мастер, подъезд концом на границе такта, звук задом наперёд; "
           "эквалайзер первым слотом дорожки с инструментом, срез по роли и по словам автора, на шинах и мастере своего нет, плагин молчит — "
           "числа в записке; расширитель стерео с числами владельца — последним слотом опоры; WaveShaper с кривой владельца — последним слотом 808, Love Philter без пресета — с его настройками; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота ступенью и прямой («плавно уходит», «плавно входит»); сбой — строка в записке; "
           "сохранённая папка переезжает, пути звуков — за ней")
@@ -1188,6 +1284,11 @@ def main() -> None:
                   + (f", группа отсечки {c['cut']}" if c["cut"] else "") + (f", ручка громкости {c['knob']}%" if c["knob"] != 78 and c["kind"] != "автоматизация" else "")
                   + (", огибающая громкости: атака {}, hold {}, спад {}, sustain {}, release {}".format(*c["env"]) if c["env"] else "")
                   + (f", состояние плагина {len(c['state'])} байт" if c["state"] else "")
+                  + (", стоит: " + ", ".join(_bars(a, b) if a == int(a) and b == int(b) else f"с {a / 4 + 1:.2f} до {b / 4 + 1:.2f}"
+                                             for a, b in c["at"]) if c["kind"] == "аудиоклип" and c.get("at") else "")
+                  + (", задом наперёд" if c.get("back") else "")
+                  + (", растяжка FL: длина {:g} такта, высота {:+d} центов, множитель {}, режим {}".format(c["stretch"][0] / 768, *c["stretch"][1:])
+                     if c.get("stretch") else "")
                   + ((f", плавно {c['fade']}: " if c["fade"] else ", держит 1: ") + (", ".join(_bars(a, b) for a, b in c["on"]) or "нигде")
                      if c["kind"] == "автоматизация" else ""))
         for x in got["links"]:

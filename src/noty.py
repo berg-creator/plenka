@@ -289,6 +289,10 @@ LISTED += tuple(("KITS/Maxeyy Stash V5", f"{role}/*.wav")
 # не идут, в LISTED их нет намеренно — кроме двух, которые назвал владелец (`SHARED`)
 LISTED += tuple((kit, f"{role}/*.wav") for kit in ("KITS/13 - Afterlife Kit", "KITS/14 - 300 Subs Kit") for role in ROLES)
 LISTED += (("KITS/13 - Afterlife Kit", "Oneshots/* (*).wav"),)
+# FX обоих наборов — звуки перехода (`MOVES`). Условия автора их не касаются: TERMS.txt лежит только в Loops и Percussion
+# Loops, зовётся «LOOP TERMS», и каждое обязательство в нём — про «these loops» («50/50 split … generated from songs using
+# these loops»); в папках FX и в корне наборов условий нет, как и у барабанов (прочитано 09.10.2026)
+LISTED += tuple((kit, "FX/*.wav") for kit in ("KITS/13 - Afterlife Kit", "KITS/14 - 300 Subs Kit"))
 # Две петли набора 14 — на условиях автора (владелец, 08.10.2026: «там 2 моих любимых. выше весёлый, ниже злой»; об условиях:
 # «берем луп, а так же делаем свою мелодию, чтобы научится этому»). Только они и только биту по заказу: каждая — доля
 # автору с дохода, а это решает владелец, не утренний автор. Темп — последнее число имени, слова «BPM» в нём нет.
@@ -303,6 +307,12 @@ SHARED_PEAK = .9            # пик дорожки петли после выч
 LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in SHARED)
 LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED)      # откуда петля вправе быть
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
+# Переход — звук в пустом такте, аудиоклипом в плейлисте. Владелец 09.10.2026 доделал так утренний «Фонарь»: удары набора 13
+# в тактах 16, 32 и 48, где петля молчит, и подъезд — звук набора 14 задом наперёд, обрезанный границей такта 33; три из
+# четырёх заведены в дорожку микшера мелодии, под её эхо и фильтр. Партия в sounds с таким началом имени идёт без нот:
+# звук — один файл, а такты, уровень канала и маршрут — её строка в fx («62%, в мастер, в тактах 32»); клипы ставит `flp.today`.
+# «Подъезд» кончается с концом своего отрезка, «переход» начинается с его началом
+MOVES = ("переход", "подъезд")
 TODAY = "00 - Сегодня"      # папка копий на сегодня — в KITS и в User пресетов Serum; чистится только она
 
 
@@ -610,6 +620,13 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                 for part, names in info["sounds"].items() for n in _names(names)
                 if _nfc(n) not in listed and not _nfc(n).startswith(NATIVE)]
         out += [f"{name}: партии не назван звук в sounds" for name in tracks if name not in info["sounds"]]
+        from .flp import _spans         # такты перехода — тем же разбором, каким проект ставит эффект «местами»
+        for part in (p for p in info["sounds"] if str(p).lower().startswith(MOVES) and p not in tracks):
+            names, spans = _names(info["sounds"][part]), _spans(str((info.get("fx") or {}).get(part, "")))
+            if len(names) != 1 or not names[0].lower().endswith(".wav"):
+                out.append(f"{part}: переходу нужен один звук .wav, а не слой и не пресет")
+            if not spans or spans[-1][1] > info["bars"] * 4:
+                out.append(f"{part}: переходу нужна строка в fx с тактами внутри бита — «в тактах 16 и 32»")
     if info.get("net"):                 # звук по адресу из сети: здесь — форма поля и адрес по списку, без сети; качает Мак
         from . import set11
         out += set11.form(info["net"], tracks)
@@ -2164,6 +2181,15 @@ def _checks() -> None:
     assert "нет в списке" not in "\n".join(problems(info | {"sounds": {"мелодия": own[0]}}, plain))
     named = "\n".join(problems(info | {"sounds": {"мелодия": "KITS/такого нет.wav"}}, plain))
     assert "нет в списке" in named and "хэт: партии не назван звук" in named, named
+    # Переход: партия без нот — один звук из списка и такты внутри бита строкой fx; неизвестный звук и такт за концом — брак
+    boom = sorted(n for n in known() if n.startswith(("KITS/13 - Afterlife Kit/FX/", "KITS/14 - 300 Subs Kit/FX/")))
+    hop = lambda sound, row: "\n".join(problems(info | {"sounds": {"мелодия": own[0], "подъезд": sound}, "fx": {"мелодия": "нет", "подъезд": row}}, plain))
+    assert boom and "подъезд" not in hop(boom[0], "71%, задом наперёд, в тактах 1"), "noty --sounds на Маке: FX наборов 13 и 14"
+    assert "подъезд: звука «KITS/13 - Afterlife Kit/FX/нет.wav» нет в списке" in hop("KITS/13 - Afterlife Kit/FX/нет.wav", "в тактах 1")
+    assert all("подъезд: переходу нужна строка в fx с тактами внутри бита" in hop(boom[0], row) for row in ("в тактах 2", "в тактах 1–2", "в такте 1", ""))
+    assert "подъезд: переходу нужен один звук .wav" in hop(boom[:2], "в тактах 1") and "подъезд: переходу" in hop("Serum/x.fxp", "в тактах 1")
+    assert "переходу" not in "\n".join(problems(info | {"sounds": {"мелодия": own[0], "переход": boom[0]}}, plain | {"переход": [N(0, 1)]})), \
+        "партия с нотами — обычная партия, как бы её ни звали"
     # Свой пресет Serum: сборка проверяет форму поля без звука — основа из списка, ручки из известных, доли в пределах
     from .serum import _dec, _enc, flaws, pack, unpack
     fxp = next(n for n in sorted(known()) if n.startswith("Serum/"))
@@ -2404,6 +2430,10 @@ def _checks() -> None:
             (Path(tmp) / name.partition("/")[2]).parent.mkdir(parents=True, exist_ok=True)
             (Path(tmp) / name.partition("/")[2]).touch()
         assert library() == sorted(SHARED), f"наборы 13 и 14: из петель в список — только две названные, а не {library()}"
+        for kit in ("13 - Afterlife Kit", "14 - 300 Subs Kit"):     # FX обоих — в списке: условия автора говорят о петлях
+            (Path(tmp) / kit / "FX").mkdir()
+            (Path(tmp) / kit / "FX" / "FX #1.wav").touch()
+        assert [n.split("/", 1)[1] for n in library() if n not in SHARED] == ["13 - Afterlife Kit/FX/FX #1.wav", "14 - 300 Subs Kit/FX/FX #1.wav"]
     assert (loop_bpm(gay), loop_bpm(evil)) == (135, 160) and not loop_bpm(gay.replace("call at night", "abyss")) \
         and set(SHARED) <= known() and all(heard[n]["bars"] == SHARED_CUT[0] for n in SHARED), "темп и замер двух петель набора 14"
     share = demo(35, (71, 75, 66, 68))
@@ -2545,6 +2575,7 @@ def _checks() -> None:
           "перелом без второй петли, дорожка без баса автора, подпись, отметка и доля — в записке; склад петли-раскладки: "
           "после перелома слоёв музыки не меньше половины её слоёв, аккорд меняется не вдвое реже, без склада в замере — молчок), "
           "длинный звук на коротких нотах — строка в записке, а не брак, без длины в списке молчит, длины — по заголовку WAV, "
+          "FX наборов 13 и 14 в списке, переход — партия без нот: неизвестный звук, слой и такт за концом бита — брак, "
           "свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
 
 
