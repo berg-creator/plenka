@@ -507,6 +507,9 @@ NOT_SUBSCRIBED = ("Всё в боте <b>бесплатно</b> — достат
                   "Подпишись и пришли ещё раз.")
 
 
+WALL = "ПОДПИСКА: упёрся"  # счётчик service --sources
+
+
 def _subscribed(chat_id: str, user_id: str, admin: bool, retry: str = "") -> bool:
     """Подписан ли человек на канал; нет — говорит, что делать, и возвращает False.
 
@@ -516,10 +519,15 @@ def _subscribed(chat_id: str, user_id: str, admin: bool, retry: str = "") -> boo
 
     `retry` — действие кнопки «Подписался»: пришедший по ссылке с меткой после
     подписки не знает, что «прислать ещё раз», а за рекламный переход заплачено.
+
+    Отказ считается по дню, без id человека (WALL): сколько раз упёрлись в подписку,
+    сравнивается со вступлениями в канал (data/members.jsonl). Это число отказов,
+    а не людей: «Подписался», нажатое без подписки, — ещё один.
     """
     channel = config.secret("TELEGRAM_CHANNEL_ID", required=False)
     if admin or not channel or telegram.is_member(channel, user_id):
         return True
+    count_source(WALL)
     again = [[{"text": "✅ Подписался", "callback_data": f"{CALLBACK_PREFIX}{retry}"}]] if retry else None
     telegram.send_message(chat_id, NOT_SUBSCRIBED, buttons=again)
     return False
@@ -1435,10 +1443,12 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
             skleyka.start(chat_id, user_id, admin=admin)
         return False
     if kind == "ocenka" or kind == "menu" and link == "ocenka":
-        # ОЦЕНКА (src/ocenka.py) — без подписки, как биты и вкладыш: замер ведёт в СВЕДЕНИЕ, подписку спросит оно.
+        # ОЦЕНКА (src/ocenka.py) — за подписку, как всё в боте (владелец, 09.10.2026). Вход считается до
+        # проверки; «Подписался» несёт хвост «:ok» — второй раз тот же вход не считается.
         # Файл после этого идёт в оценку, а не в отбор, — отметку ставит start, ловит дежурство.
         count_source(ocenka.OPENED)
-        ocenka.start(chat_id, admin=admin)
+        if _subscribed(chat_id, user_id, admin, retry="ocenka:ok"):
+            ocenka.start(chat_id, admin=admin)
         return False
     if kind == "menu" and (body == "gorod" or link in ("gorod", "slezhu") and slug):
         # Из ролика, который кончается решением боли (prompts/reels.md): артист зашит
@@ -1463,17 +1473,21 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
             svedenie.invite(chat_id, code)
         return False
     if kind == "menu" and link == "beat":
-        # Бит ПЛЁНКИ — сразу и без подписки: за битом и шли. Подписку спросит
-        # «🎚 Свести с этим битом» под ним, как всё СВЕДЕНИЕ.
+        # Бит ПЛЁНКИ — подписчику канала (владелец, 09.10.2026; до этого — сразу и без подписки).
+        # Переход считается до проверки: по ссылке шли за битом. «Подписался» несёт номер бита своим
+        # действием beatlink, а не кнопкой списка beat: бит остаётся в счёте «прямая ссылка».
         count_source("beat")
-        bity.give(chat_id, slug[:8])
+        if _subscribed(chat_id, user_id, admin, retry=f"beatlink:{slug[:8]}"):
+            bity.give(chat_id, slug[:8])
         return False
     if kind == "bity" or kind == "menu" and link == "bity":
-        # /bity — то же, что «🎚 БИТЫ» в меню: список битов, один — сразу он. Без подписки.
-        # ?start=bity_<место> — тот же список по ссылке: пост ПАМЯТКИ про бит «free» зовёт в биты.
+        # /bity — то же, что «🎚 БИТЫ» в меню: список битов, один — сразу он. За подписку, как сам бит.
+        # ?start=bity_<место> — тот же список по ссылке: пост ПАМЯТКИ про бит «free» зовёт в биты;
+        # переход считается до проверки.
         if kind == "menu" and body in SOURCES:
             count_source(body)
-        bity.listing(chat_id)
+        if _subscribed(chat_id, user_id, admin, retry="bity"):
+            bity.listing(chat_id)
         return False
     if kind == "pamyatka" or kind == "menu" and body == pamyatka.RUBRIC:
         # ПАМЯТКА — справочник без модели и без подписки: текст после команды не разбирается.
@@ -1722,13 +1736,19 @@ def handle_callback(query: dict, data: dict) -> None:
                            data, ask=False)
         return
 
-    if action in ("bity", "beat"):
-        # «🎚 БИТЫ» в меню — список битов ПЛЁНКИ, кнопка списка (bity.PICK) — сам бит. Без подписки,
-        # как по ссылке beat_: её спросит «🎚 Свести с этим битом» — действие bit ниже, не путать.
+    if action in ("bity", "beat", "beatlink"):
+        # «🎚 БИТЫ» в меню — список битов ПЛЁНКИ, кнопка списка (bity.PICK) — сам бит, beatlink — бит
+        # по прямой ссылке после «Подписался» (в счёт меню не идёт). Бит — подписчику канала (владелец,
+        # 09.10.2026); «Подписался» повторяет нажатое. «🎚 Свести с этим битом» — действие bit ниже, не путать.
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        if not _subscribed(chat_id, user_id, admin, retry=raw):
+            return
         if action == "bity":
             bity.listing(chat_id)
-        else:
+        elif action == "beat":
             bity.pick(chat_id, subject[:8])
+        else:
+            bity.give(chat_id, subject[:8])
         return
 
     if action == "pam":
@@ -1745,8 +1765,16 @@ def handle_callback(query: dict, data: dict) -> None:
         return
 
     if action == "ocenka":
-        count_source(ocenka.OPENED)
-        ocenka.start(chat_id, admin=user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False)))
+        # Меню (без хвоста) считает вход; «:ok» — «Подписался»: вход уже посчитан; «:hand» — кнопка
+        # звукорежиссёра под ответом оценки (ocenka.hand): человек ответ получил, подписку не спрашиваем.
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        if raw == ocenka.HAND_KEY.removeprefix(CALLBACK_PREFIX):
+            ocenka.hand(chat_id)
+            return
+        if not subject:
+            count_source(ocenka.OPENED)
+        if _subscribed(chat_id, user_id, admin, retry="ocenka:ok"):
+            ocenka.start(chat_id, admin=admin)
         return
 
     if action in ("skleyka", "sk"):
@@ -2294,7 +2322,6 @@ def _selftest() -> None:
             assert SOURCES[bity.MENU_LABEL] != SOURCES["beat"]
             # ПАМЯТКА (src/pamyatka.py): кнопка меню, /pamyatka и ссылка из поста — раздел без подписки и без
             # модели; страница и запись — кнопками s:pam:; счёт — вход и каждая запись, листание не считается.
-            # Ссылка поста про бит «free» — сразу список битов.
             unsub, asked_llm = globals()["_subscribed"], []
             globals()["_subscribed"] = lambda *a, **kw: 1 / 0
             real_llm, llm._generate = llm._generate, lambda *a, **kw: asked_llm.append(a)
@@ -2317,30 +2344,87 @@ def _selftest() -> None:
                 assert replies[-1] == pamyatka.screen(0)
                 press(f"{pamyatka.PICK}нет-такой")
                 assert replies[-1] == pamyatka.screen(0), "записи уже нет — список"
-                listed = len(replies)
-                say("/start bity_pamyatka", 13)
-                assert replies[listed][0] == bity.LIST.format(credit=config.BEAT_CREDIT) and len(replies) == listed + 1
                 day = state.read_json(SOURCES_FILE, {})[_today()]
-                assert (day[pamyatka.RUBRIC], day[pamyatka.OPENED], day[pamyatka.label(memo)], day["bity_pamyatka"]) == (1, 4, 1, 1), day
+                assert (day[pamyatka.RUBRIC], day[pamyatka.OPENED], day[pamyatka.label(memo)]) == (1, 4, 1), day
                 assert not asked_llm and pamyatka.PICK.startswith(CALLBACK_PREFIX) and COMMANDS["pamyatka"] == COMMANDS["памятка"]
                 assert "77701" not in SOURCES_FILE.read_text() and "55501" not in SOURCES_FILE.read_text()
             finally:
                 globals()["_subscribed"], llm._generate = unsub, real_llm
+            # Ссылка поста ПАМЯТКИ про бит «free» — сразу список битов (подписчику: проверка — ниже).
+            listed = len(replies)
+            say("/start bity_pamyatka", 13)
+            assert replies[listed][0] == bity.LIST.format(credit=config.BEAT_CREDIT) and len(replies) == listed + 1
+            assert state.read_json(SOURCES_FILE, {})[_today()]["bity_pamyatka"] == 1
             bity.save({})
             say("/bity", 7)
             assert replies[-1] == (bity.EMPTY, [[skleyka.BEAT_BUTTON]])
-            # ОЦЕНКА (src/ocenka.py): /ocenka, кнопка меню и ссылка ?start=ocenka ставят отметку «ждём трек» —
-            # без подписки и без модели; вход считается меткой, id человека в счёт не попадает.
+            # ОЦЕНКА (src/ocenka.py): /ocenka, кнопка меню и ссылка ?start=ocenka ставят отметку «ждём трек»,
+            # без модели; вход считается меткой, id человека в счёт не попадает.
             real_oc, ocenka.start, entered = ocenka.start, lambda chat, **kw: entered.append((str(chat), kw["admin"])), []
-            unsub, globals()["_subscribed"] = globals()["_subscribed"], lambda *a, **kw: 1 / 0
+            real_wall = (telegram.is_member, os.environ.get("TELEGRAM_CHANNEL_ID"), telegram.send_invoice, config.SKLEYKA_FILE,
+                         globals()["_subscribed"])
             try:
                 for n, text in enumerate(("/ocenka", "/оценка", "/start ocenka"), 30):
                     say(text, n)
                 press(f"{CALLBACK_PREFIX}ocenka")
                 assert entered == [("55501", False)] * 4, entered
                 assert state.read_json(SOURCES_FILE, {})[_today()][ocenka.OPENED] == 4 and "55501" not in SOURCES_FILE.read_text()
+                # Биты и ОЦЕНКА — подписчику канала (владелец, 09.10.2026). Без подписки на каждой двери —
+                # NOT_SUBSCRIBED с «✅ Подписался», и ни бита, ни отметки оценки; переход и вход считаются
+                # до проверки, отказ — меткой WALL. «Подписался» доводит до того же: бит по прямой ссылке
+                # остаётся в счёте ссылки (beatlink), а вход в оценку второй раз не считается («:ok»).
+                member: list[int] = []
+                telegram.is_member, os.environ["TELEGRAM_CHANNEL_ID"] = (lambda channel, user: bool(member)), "@канал"
+                globals()["_subscribed"] = real[4]
+                bity.save({"1": beat, "2": dict(beat, title="Полёт", artists=["Kizaru"], bpm=None, file_id="F2")})
+                got, was = len(files), state.read_json(SOURCES_FILE, {})[_today()]
+                walls = [("/start beat_1", "beatlink:1"), ("/bity", "bity"), ("/start bity_pamyatka", "bity"),
+                         ("/ocenka", "ocenka:ok"), ("/start ocenka", "ocenka:ok"), (f"{CALLBACK_PREFIX}bity", "bity"),
+                         (f"{bity.PICK}2", "beat:2"), (f"{CALLBACK_PREFIX}ocenka", "ocenka:ok"),
+                         (f"{CALLBACK_PREFIX}ocenka:ok", "ocenka:ok"), (f"{CALLBACK_PREFIX}beatlink:1", "beatlink:1")]
+                for n, (door, retry) in enumerate(walls, 40):
+                    if door.startswith(CALLBACK_PREFIX):
+                        press(door)
+                    else:
+                        say(door, n)
+                    assert replies[-1] == (NOT_SUBSCRIBED, [[{"text": "✅ Подписался",
+                                                              "callback_data": f"{CALLBACK_PREFIX}{retry}"}]]), door
+                day = state.read_json(SOURCES_FILE, {})[_today()]
+                assert len(files) == got and len(entered) == 4, "без подписки — ни бита, ни отметки оценки"
+                assert (day[WALL], day["beat"], day["bity_pamyatka"], day[ocenka.OPENED]) == (10, 2, 2, 7), day
+                assert day[bity.MENU_LABEL] == was[bity.MENU_LABEL] and day["БИТ ПЛЁНКИ: выдан"] == was["БИТ ПЛЁНКИ: выдан"]
+                member.append(1)
+                press(f"{CALLBACK_PREFIX}beatlink:1")
+                assert files[-1][0] == "F1" and bity.load()["1"]["hits"] == {"link": 1}, "после «Подписался» — тот же бит, счёт ссылки"
+                press(f"{CALLBACK_PREFIX}bity")
+                assert replies[-1][0] == bity.LIST.format(credit=config.BEAT_CREDIT)
+                press(f"{bity.PICK}2")
+                assert files[-1][0] == "F2" and len(files) == got + 2
+                press(f"{CALLBACK_PREFIX}ocenka:ok")
+                say("/start beat_2", 60)
+                assert files[-1][0] == "F2" and len(files) == got + 3 and len(entered) == 5
+                day = state.read_json(SOURCES_FILE, {})[_today()]
+                assert (day[WALL], day["beat"], day[ocenka.OPENED]) == (10, 3, 7), day
+                assert (day[bity.MENU_LABEL], day["БИТ ПЛЁНКИ: выдан"]) == (was[bity.MENU_LABEL] + 1, was["БИТ ПЛЁНКИ: выдан"] + 3), day
+                assert "77701" not in SOURCES_FILE.read_text() and "55501" not in SOURCES_FILE.read_text()
+                bity.save({})
+                # «🎧 Отдать звукорежиссёру» под ответом оценки (ocenka.KEYS): у человека есть готовый трек
+                # СВЕДЕНИЯ, и кнопка сведения выставила бы по нему счёт задатка. Эта — цена и «сначала сведи
+                # ботом», без счёта; нажатие считается.
+                bills: list = []
+                telegram.send_invoice = lambda *a, **kw: bills.append(a)
+                config.SKLEYKA_FILE = pathlib.Path(tmp.name) / "skleyka.json"
+                state.write_json(config.SKLEYKA_FILE, {"tracks": {"t1": {"chat": "55501", "at": state.iso(), "done": state.iso()}}})
+                assert skleyka._ready(skleyka.load(), "55501") == "t1"
+                press(ocenka.KEYS[1][0]["callback_data"])
+                assert replies[-1][0] == skleyka.HAND_FIRST and not bills, "счёт задатка по чужому треку"
+                assert replies[-1][1][-1] == ocenka.KEYS[0] and state.read_json(SOURCES_FILE, {})[_today()][ocenka.HANDED] == 1
             finally:
-                ocenka.start, globals()["_subscribed"] = real_oc, unsub
+                ocenka.start = real_oc
+                telegram.is_member, channel_was, telegram.send_invoice, config.SKLEYKA_FILE, globals()["_subscribed"] = real_wall
+                os.environ.pop("TELEGRAM_CHANNEL_ID", None)
+                if channel_was:
+                    os.environ["TELEGRAM_CHANNEL_ID"] = channel_was
             # Витрина бота знает о битах и влезает в лимиты Telegram: у setup своей самопроверки нет.
             from . import setup
             assert [name for name, _ in setup.BOT_COMMANDS][:4] == ["bity", "svedenie", "otbor", "ocenka"]
@@ -2356,7 +2440,9 @@ def _selftest() -> None:
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
         tmp.cleanup()
     print("метка /start: считается по дню без id и сразу открывает отбор; в меню восемь разделов, с битами — девять, «🎚 БИТЫ» первым; "
-          "ОЦЕНКА: /ocenka, кнопка и ссылка ставят отметку без подписки, вход считается; "
+          "ОЦЕНКА: /ocenka, кнопка и ссылка ставят отметку, вход считается; биты и ОЦЕНКА — подписчику канала: "
+          "без подписки — «Подписался» вместо бита и отметки, отказ считается, после подписки — тот же бит, по ссылке — в счёте ссылки; "
+          "«🎧 Отдать звукорежиссёру» под оценкой — цена и СВЕДЕНИЕ, счёта задатка нет; "
           "ПАМЯТКА: кнопка, /pamyatka и ссылка поста — раздел без подписки и модели, страницы и записи кнопками, счёт входа и записей; "
           "/bity и кнопка: один бит — сразу файл, несколько — список, метка beat_menu отдельно от ссылки beat; "
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ, одноимённый альбом — кнопкой «💿 Альбом»; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "

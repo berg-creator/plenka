@@ -366,8 +366,8 @@ def score() -> str:
 
 
 def give(chat_id: str | int, beat_id: str, via: str = "link") -> None:
-    """Переход ?start=beat_<id>: бит по file_id с условиями и кнопкой сведения. Без подписки —
-    за битом и шли; подписку, как всегда, спросит СВЕДЕНИЕ."""
+    """Переход ?start=beat_<id>: бит по file_id с условиями и кнопкой сведения. Бит — подписчику
+    канала (владелец, 09.10.2026; до этого отдавался без подписки): проверка — в service, до вызова."""
     beat = load().get(beat_id)
     if not beat:
         telegram.send_message(chat_id, MISSING, buttons=[[skleyka.BEAT_BUTTON]])
@@ -475,7 +475,7 @@ def _button(beat: dict) -> str:
 
 def listing(chat_id: str | int) -> None:
     """«🎚 БИТЫ» в меню и /bity: биты кнопками, новые первыми. Бит в каталоге один — сразу он:
-    список из одной кнопки — лишнее нажатие. Без подписки, как по ссылке beat_."""
+    список из одной кнопки — лишнее нажатие. Подписчику канала, как по ссылке beat_ (проверка — в service)."""
     catalog = newest()
     if len(catalog) == 1:
         pick(chat_id, catalog[0][0])
