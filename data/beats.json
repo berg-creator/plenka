@@ -10,7 +10,7 @@
     "file_id": "BQACAgIAAxkDAAINXWq-uP_vzLwhF3sfCslpCX7GWv85AAKargACw5P4Sf5Dz78qbiiHPQQ",
     "hits": {
       "link": 1,
-      "menu": 4
+      "menu": 5
     },
     "key": "G#m",
     "kind": "document",
@@ -75,6 +75,7 @@
     "file_id": "BQACAgIAAxkDAAISPWrHr6wxqANNouP3hl2xu74nw0FQAAIgrQACC3s4Su6xERrYlosePQQ",
     "hits": {
       "link": 2,
+      "menu": 1,
       "mix": 2
     },
     "key": "Cm",
