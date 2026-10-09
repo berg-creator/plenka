@@ -2406,13 +2406,15 @@ def _examples_keys() -> list[list[dict]] | None:
     return [[EXAMPLES_BUTTON]] if _examples() else None
 
 
-def _show(chat_id: str, message_id: int | None) -> None:
+def _show(chat_id: str, message_id: int | None, keyboard: list | None = None) -> None:
     """«🎧 Примеры: до и после»: по каждому примеру два аудио по file_id — ничего не качается и не
     заливается, состояние и лимиты не тронуты. Кнопка снимается с нажатого сообщения, как у ролика
     (_film), и до отправки: один показ на предложение, а новое «🎧 Отдать звукорежиссёру» вернёт её.
+    Соседние кнопки остаются: под ценой из ОЦЕНКИ рядом стоит «🎛 Свести ботом» (ocenka.hand).
     Последним — вкладыш альбома звукорежиссёра (config.SKLEYKA_HAND_ALBUM); не ушёл — пары уже у человека."""
     if message_id:
-        telegram.edit_markup(chat_id, message_id, None)
+        telegram.edit_markup(chat_id, message_id, [row for row in keyboard or [] if all(
+            b.get("callback_data") != EXAMPLES_BUTTON["callback_data"] for b in row)] or None)
     for n, pair in enumerate(_examples(), 1):
         for key, side in EXAMPLE_SIDES:
             telegram.send_by_id(chat_id, "audio", pair[key], EXAMPLE_CAPTION.format(n=n, side=side))
@@ -2844,7 +2846,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         _hand(data, chat_id, "" if subject == "u" else head, who or {})
         return
     if subject == "z":
-        _show(chat_id, message_id)
+        _show(chat_id, message_id, keyboard)
         return
     if len(head) != 1 and code.startswith("h"):
         _sale(data, chat_id, head, code, admin, message_id, text)
@@ -6410,7 +6412,9 @@ def _selftest() -> None:
             assert swept == [("8", 77, None)] and len(sent) == count and load() == was, "один показ на предложение, состояние то же"
             vkladysh.send = lambda *a, **k: 1 / 0
             calls[:] = []
-            callback(8, 8, "z")
+            neighbour = [{"text": "🎛 Свести ботом", "callback_data": "s:skleyka"}]
+            callback(8, 8, "z", message_id=78, keyboard=[[EXAMPLES_BUTTON], neighbour])
+            assert swept[-1] == ("8", 78, [neighbour]), "соседняя кнопка под ценой из ОЦЕНКИ остаётся"
             assert len(calls) == len(pairs_sent), "сбой карточки пар не отменяет и дежурство не роняет"
             real_album, config.SKLEYKA_HAND_ALBUM = config.SKLEYKA_HAND_ALBUM, {}
             callback(8, 8, "z")
