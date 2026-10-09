@@ -43,7 +43,7 @@ NAMES = {"noise": ("Шум в паузах", "слышен шум в пауза�
 POST = ("<b>СОВЕТ НЕДЕЛИ: {title}</b>\n\n"
         "За неделю бот замерил {total} {records} голоса, в {hits} из них — {phrase}.\n\n"
         "Как убрать. {advice}\n\n"
-        '▸ Проверить свой голос — <a href="https://t.me/{bot}?start=skleyka_sovet">в боте</a>')
+        '▸ Свести голос с битом — <a href="https://t.me/{bot}?start=skleyka_sovet">в боте</a>')
 ASK = "С чем борешься при записи?"
 
 
@@ -190,6 +190,8 @@ def _selftest() -> None:
             assert post and post["flaw"] == "noise" and "замерил 6 записей голоса, в 3 из них — слышен шум в паузах" in post["text"]
             assert [_records(n) for n in (5, 11, 21, 22, 25, 112)] == ["записей", "записей", "запись", "записи", "записей", "записей"]
             assert "?start=skleyka_sovet" in post["text"] and len(post["text"]) <= 1024 and "t0" not in post["text"]
+            # Отдельной проверки голоса в боте нет: замер идёт внутри сведения — туда строка и зовёт.
+            assert 'Свести голос с битом — <a href="https://t.me/' in post["text"] and "Проверить свой голос" not in post["text"]
             assert skleyka.TAKE_FLAWS["noise"][1] in post["text"], "совет — из TAKE_FLAWS"
             assert make({"tracks": {}}) is None, "замеров нет"
             last = Path(tmp) / f"sovet-{monday(thursday) - timedelta(days=7)}.json"

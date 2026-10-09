@@ -24,6 +24,7 @@ git diff --no-renames --diff-filter=AM --name-only "$base" HEAD \
   | while read -r f; do
       [ -f "$f" ] || continue
       case "$f" in content/archive/*) grep -q '"message": {' "$f" || continue ;; esac
+      grep -Eq '"rubric": "(pamyatka|sovet|beat|week|doposle|otbor)"' "$f" && continue
       echo "$f"
     done
 ```
@@ -50,7 +51,11 @@ git diff --no-renames --diff-filter=AM --name-only "$base" HEAD \
 в канал**: правка уходит прямо в сообщение канала, поэтому для них только
 `rewrite`, снять вышедший нельзя. Мем из архива не трогай вовсе — мем только
 снимают. Вышедшие без записанного сообщения (поле `message`) список отсеял
-сам: их поправить не с чем. `--no-renames` не убирай: без него переезд поста
+сам: их поправить не с чем. Так же отсеяны посты, собранные шаблоном без модели
+(`rubric`: `pamyatka`, `sovet`, `beat`, `week`, `doposle`, `otbor`): выдумать
+в них нечего, а в ПАМЯТКЕ цитаты закона стоят слово в слово, и правка их
+переписала бы. Такой пост не читай и не правь — `--check` правку не примет.
+`--no-renames` не убирай: без него переезд поста
 из очереди в архив git считает переименованием, и вышедший пост в список
 не попадёт.
 
@@ -66,6 +71,7 @@ git diff --no-renames --diff-filter=AM --name-only "$base" HEAD \
 | `subtext` | запись `items[]` в `data/subtext.json` | по артисту и треку; цитаты песен — только из `lines` |
 | `legend` | запись `events[]` в `data/calendar.json` | по имени; файл поста начинается с `0000-` |
 | `meme`, `poll` | только имена из `data/artists.json` | — |
+| `pamyatka`, `sovet`, `beat`, `week`, `doposle`, `otbor` | собраны шаблоном, модель их не писала | не проверяются и не правятся |
 
 **Строку inbox ищи по адресу, а не по имени.** В посте `artist` — подпись
 магазина («Smoky Mo», «nkeeei & Yanix»), в inbox — имя из базы («Смоки Мо»,

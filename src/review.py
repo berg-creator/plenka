@@ -96,6 +96,10 @@ ACTIONS = ("rewrite", "drop")
 # Мем держится на картинке, опрос — JSON: подпись мема без выдумки остаётся
 # шуткой ни о чём, а JSON опроса, переписанный руками, ломает опрос.
 DROP_ONLY = ("meme", "poll")
+# Посты, собранные шаблоном без модели, не правятся никогда: выдумать в них нечего, а испортить есть что —
+# в ПАМЯТКЕ (src/pamyatka.py) цитаты закона стоят слово в слово, в ОТБОРЕ имя и название написал сам артист.
+# Правка такого поста — пропуск, а не порок файла: годные правки рядом применяются (владелец 09.10.2026).
+TEMPLATE = ("pamyatka", "sovet", "beat", "week", "doposle", "otbor")
 
 ID_FORMAT = re.compile(r"\d{8}-\d{4}")
 # Путь приходит из ветки, то есть снаружи: только файл очереди или архива, без «../».
@@ -167,6 +171,8 @@ def _post(edit: dict) -> tuple[dict | None, str]:
         post = json.loads(path.read_text(encoding="utf-8"))
     except ValueError:
         return None, "пост — битый JSON"
+    if post.get("rubric") in TEMPLATE:
+        return None, f"{post['rubric']} собран шаблоном без модели — не правится"
     if path.parent == config.ARCHIVE:
         if edit["action"] == "drop":
             return None, "пост уже вышел — снять нельзя, только rewrite"
@@ -746,6 +752,21 @@ def _selftest() -> None:
                     assert apply({"edits": [out]}, name, dry_run=False) == code, error
                 assert post_of(config.ARCHIVE / "e-verdict.json")["text"] == text, error
 
+            # Пост, собранный шаблоном, не правится: в ПАМЯТКЕ цитата закона, и правка её переписала бы.
+            # Это пропуск — годная правка рядом применяется, канал не тронут, архив прежний.
+            state.write_json(config.ARCHIVE / "e-verdict.json", released)
+            for rubric in TEMPLATE:
+                memo = {"rubric": rubric, "text": old, "message": message}
+                state.write_json(config.ARCHIVE / f"{rubric}-free.json", memo)
+                law = {**fix, "file": f"content/archive/{rubric}-free.json"}
+                assert check({"edits": [law]}, name) == ([], {0: f"{rubric} собран шаблоном без модели — не правится"})
+            edited = []
+            with (mock.patch.object(publish, "release_title", lambda post: ""),
+                  mock.patch.object(telegram, "edit_caption", lambda *args, **kw: edited.append(args[1]))):
+                assert apply({"edits": [law, out]}, name, dry_run=False) == 0
+            assert edited == [5] and post_of(config.ARCHIVE / "e-verdict.json")["text"] == new, edited
+            assert all(post_of(config.ARCHIVE / f"{rubric}-free.json")["text"] == old for rubric in TEMPLATE)
+
             # Мнения о релизах — второй вид правки. Файл с одними voices годен,
             # битая форма — нет; правду цитаты --check не знает, её сверяет --apply.
             quote = "Ghost Mountain makes Winchester the heaviest thing he has made this year."
@@ -922,7 +943,7 @@ def main() -> int:
 
     if args.selftest:
         _selftest()
-        print("Правка, снятие, отказ на битом тексте, правка вышедшего поста в канале, "
+        print("Правка, снятие, отказ на битом тексте, правка вышедшего поста в канале, пост шаблоном (ПАМЯТКА) не правится, "
               "мнения о релизах — форма, список и сверка со страницей; новые связи — чужой сайт, "
               "число не из цитаты, цитаты нет на странице, повтор артиста, трек не тот: все проверки прошли.")
         return 0
