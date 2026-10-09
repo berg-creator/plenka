@@ -151,7 +151,8 @@ switch («вид»): «разом» — как с 05.10, после такта �
     python -m src.noty --build ПАПКА       собрать и проверить бит из ПАПКА/make.py, без Telegram
     python -m src.noty --build ПАПКА --prev ФАЙЛ…   то же и сверка с make.py двух прошлых битов: тот же образец, петля или мелодия — отказ
     python -m src.noty --send АРХИВ        отправить собранный архив владельцу
-    python -m src.noty --sounds            переписать data/beat_sounds.json: имена звуков и пресетов библиотеки (только Мак)
+    python -m src.noty --sounds            переписать data/beat_sounds.json: имена звуков и пресетов библиотеки и длины
+                                           одиночных звуков по заголовку WAV, заглушки iCloud не читаются (только Мак)
     python -m src.noty --gather            папка «00 - Сегодня»: ноты свежей ветки битов, её звуки и пресеты (только Мак)
     python -m src.noty --loop СЛОВО        что замер знает о петлях с этим словом в имени: ноты, опоры по тактам, чем сменить на переломе
 
@@ -162,6 +163,7 @@ from __future__ import annotations
 import argparse
 import errno
 import json
+import os
 import random
 import re
 import runpy
@@ -245,6 +247,13 @@ SWITCH_KEEP = .5            # «ступенями»: столько такто�
 SIX = "six speed"           # первый скелет «Г»: хэт до перелома — рисунок трека, мерка владельца — после (`_six`)
 RETRY = 3                   # повторов сбора папки «Сегодня», пока iCloud докачивает звуки: круг помощника — десять минут
 FADE = .005                 # секунд затухания на краях паузы в дорожке петли: без него срез щёлкает
+# Одиночный звук длиннее этого на нотах короче четверти — строка в записке (`_long`), а в проекте FL — огибающая
+# громкости каналу (`flp.GATE`): сэмплер FL доигрывает файл до конца, и частые ноты ложатся копиями друг на друга.
+# Замер «Фонаря» 09.10.2026: остинато шестнадцатыми на файле в 6,87 с — по расчёту 54 копии разом, стоячий аккорд
+# на 17 дБ громче мелодии. Две секунды — расчёт, а не опыт: звук, который гаснет сам (щипок, удар), обычно короче,
+# тянущийся (пэд, арпеджио, хор) — длиннее; на слух порог не проверял никто
+LONG = 2.0
+DATALESS = 0x40000000       # st_flags заглушки iCloud (SF_DATALESS): заголовок такого файла не читаем — чтение его скачает
 LISTED += ((LOOPS, "*.wav"), (NET, "**/*.wav"), (GLORY, "Oneshots/* (*).wav"), (GLORY, "Loops/*.wav"))
 # Барабаны и 808, которые владелец ставит сам (разбор его проектов 04.10.2026: до этого дня низ и барабаны каждое утро
 # шли из набора 09, которого никто не слушал). Источник — приставка имени файла, набор — тот, где он его брал: одни
@@ -252,6 +261,8 @@ LISTED += ((LOOPS, "*.wav"), (NET, "**/*.wav"), (GLORY, "Oneshots/* (*).wav"), (
 # Lex Luger, Cymatics и Trap по-прежнему мимо списка (лицензия, см. выше), хотя Lex Luger он ставит чаще всего:
 # снять запрет — решение владельца. Лицензии остальных источников не сверены: README наборов читать нельзя (iCloud)
 ROLES = ("Kicks", "808s", "Hats", "Open Hats", "Claps", "Snares", "Percs")
+# Папки, чьих длин в списке нет (`sized`): барабаны и 808 гаснут сами или отсечкой, петля идёт дорожкой, а не нотами
+BEATEN = {*ROLES, "Hihats", "Openhats", "Loops"}
 OWN = {"KITS/01 - ASAP Rocky Kit": ("808-909", "MusicRadar 808"), "KITS/03 - SpaceGhostPurrp Kit": ("Lo-Fi", "Horrorcore"),
        "KITS/05 - Black Kray x Goth Money Kit": ("Icedancer",), "KITS/07 - Crystal Castles Kit": ("Obscure DM", "Korg DDM")}
 LISTED += tuple((kit, f"{role}/{source} - *.wav") for kit, sources in OWN.items() for source in sources for role in ROLES)
@@ -1274,6 +1285,22 @@ def _net_note(info: dict) -> list[str]:
     return set11.note(info.get("net"))
 
 
+def _long(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Длинный звук на коротких нотах — строками записки, а не браком: звука сборка не слышит, и такой звук бывает
+    выбран намеренно (от пэда берётся одна атака). Меряются партии музыки — барабаны и 808 доигрывают по-своему;
+    длины нет в списке (заглушка iCloud, сборка до первого `--sounds`) — молчим: догадка хуже тишины."""
+    sizes, out = lengths(), []
+    for part, notes in tracks.items():
+        if not notes or any(w in part.lower() for w in (*SAMPLED, *GM_DRUM)) or sorted(n.ln for n in notes)[len(notes) // 2] >= 4:
+            continue
+        out += [f"• {part} — «{Path(name).stem}» длится {f'{sec:.1f}'.replace('.', ',')} с, а ноты партии короче четверти"
+                for name in _names((info.get("sounds") or {}).get(part, ())) if (sec := sizes.get(_nfc(name), 0)) > LONG]
+    return out and ["Длинный звук на коротких нотах — от него будет слышно одно начало:", *out,
+                    "Сэмплер FL доигрывает звук до конца файла, и частые ноты легли бы копиями друг на друга — поэтому проект "
+                    "сам гасит ноту такого канала с её концом (огибающая громкости; это расчёт, в FL не слушал никто). "
+                    "Нужен звук целиком — возьми его короче или ноты длиннее.", ""]
+
+
 def _net(plan: Path, kits: Path) -> list[str]:
     """Звуки по адресам паспорта (поле net) — в «Сегодня»: только с адресов списка и после отбора (`set11.today`).
     Возвращает, что не легло. Адресов в паспорте нет — пусто."""
@@ -1281,8 +1308,8 @@ def _net(plan: Path, kits: Path) -> list[str]:
     return set11.today(json.loads(plan.read_text("utf-8")), kits) if plan.exists() else []
 
 
-def about(info: dict) -> str:
-    """Записка владельцу: она же подпись к архиву."""
+def about(info: dict, tracks: dict[str, list[N]] | None = None) -> str:
+    """Записка владельцу: она же подпись к архиву. tracks — партии бита: по ним строки о длинных звуках (`_long`)."""
     return "\n".join([
         f"🎹 {info['title']}", f"{info['bpm']} BPM, {info['key']}, {info['bars']} тактов", "",
         *([f"Образец — поставь ролик рядом и сравни на слух: {s.get('title', '')}" + (f" — {s['url']}" if s.get("url") else "")]
@@ -1310,6 +1337,7 @@ def about(info: dict) -> str:
         *_shared(info),
         *_loop_note(info),
         *_net_note(info),
+        *(_long(info, tracks) if tracks else []),
         *(["Обработка — цепочки из интервью продюсеров и замера. Ни пресетов, ни эффектов автор нот не слышал: "
            "это с чего начать, а не как должно звучать:",
            *(f"• {part} — {chain}" for part, chain in info["fx"].items()), ""] if info.get("fx") else []),
@@ -1363,13 +1391,14 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
         print(f"{i:02} {name:16} нот {len(notes):4}, сил {len({n.vel for n in notes}):2}  {', '.join(tricks)}")
     for word, half, notes in _halves(info, tracks):         # до перелома и после — два бита: у каждого свой рисунок
         print(f"замер нот{' ' + word if word else ''}: " + ", ".join(f"{k} {v:g}" for k, v in shape(half, notes).items()))
+    print(*_long(info, tracks), sep="\n", end="")           # не брак: владельцу — в записку, автору нот — в журнал сборки
     mid(root / "00 всё вместе (черновик).mid", info["bpm"], *draft)
-    (root / "о бите.txt").write_text(about(info), encoding="utf-8")
+    (root / "о бите.txt").write_text(about(info, tracks), encoding="utf-8")
     archive = out / f"{folder.name}.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(root.rglob("*")):
             z.write(f, f.relative_to(out))
-    archive.with_suffix(".txt").write_text(about(info), encoding="utf-8")
+    archive.with_suffix(".txt").write_text(about(info, tracks), encoding="utf-8")
     archive.with_suffix(".sounds.json").write_text(json.dumps(_sounds(info), ensure_ascii=False), encoding="utf-8")
     if info.get("net"):                 # адреса звуков из сети: в Actions не качается ничего, файл ждёт Мака (`_net`)
         archive.with_suffix(".net.json").write_text(json.dumps(info["net"], ensure_ascii=False), encoding="utf-8")
@@ -1408,6 +1437,49 @@ def measured() -> dict[str, list[float]]:
     from . import config
     data = json.loads(config.BEAT_SOUNDS.read_text("utf-8")).get("serum", {}) if config.BEAT_SOUNDS.exists() else {}
     return {name: [float(x) for x in row.split()] for name, row in data.items()}
+
+
+def seconds(path: Path) -> float | None:
+    """Длина WAV по заголовку, секунды. Заглушку iCloud не открываем: чтение скачало бы файл, а две трети библиотеки —
+    заглушки. Куски файла разбираются сами, без модуля wave: тот не читает 32 бита с плавающей точкой, а так записаны
+    весь набор 12 и пятая часть одиночных звуков набора 13. Не WAV или не прочёлся — None, а не догадка."""
+    try:
+        if getattr(os.stat(path), "st_flags", 0) & DATALESS:
+            return None
+        with open(path, "rb") as f:
+            head, rate = f.read(12), 0
+            while head[:4] == b"RIFF" and head[8:] == b"WAVE" and len(chunk := f.read(8)) == 8:
+                size = int.from_bytes(chunk[4:], "little")
+                if chunk[:4] == b"fmt ":                    # байты в секунду — третье поле куска
+                    rate = int.from_bytes(f.read(size + size % 2)[8:12], "little")
+                elif chunk[:4] == b"data":                  # размер звука в байтах
+                    return round(size / rate, 2) if rate else None
+                else:
+                    f.seek(size + size % 2, 1)
+    except OSError:
+        pass
+    return None
+
+
+def lengths() -> dict[str, float]:
+    """Длины одиночных звуков, секунды: имя → длина (`sized`, пишет Мак в `--sounds`: в Actions звуков нет).
+    Имени здесь нет — длина неизвестна."""
+    from . import config
+    return json.loads(config.BEAT_SOUNDS.read_text("utf-8")).get("lengths", {}) if config.BEAT_SOUNDS.exists() else {}
+
+
+def sized(names: list[str], old: dict) -> dict[str, float]:
+    """Длины звуков списка, которые партия играет нотами: барабаны, 808 и петли мимо (`BEATEN`), пресеты тоже.
+    Файл не прочёлся (заглушка iCloud) — остаётся прежняя длина: звук тот же, просто на диске его сейчас нет."""
+    out = {}
+    for name in names:
+        path = LIBRARY["KITS"] / name.partition("/")[2]
+        if name.startswith("KITS/") and name.endswith(".wav") and path.parent.name not in BEATEN:
+            sec = seconds(path)
+            sec = old.get(name) if sec is None else sec
+            if sec is not None:
+                out[name] = sec
+    return out
 
 
 def library() -> list[str]:
@@ -2122,6 +2194,21 @@ def _checks() -> None:
         assert problems(netted, drums) == [], problems(netted, drums)
         assert f"{net} — 85 BPM" in loop_card("гитара Am 85") and "общих" in loop_card("гитара Am 85"), loop_card("гитара Am 85")
         assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": bare}, drums)), "петля без темпа в имени"
+    # Длинный звук на коротких нотах — строка в записке, а не брак: остинато шестнадцатыми на файле в 6,87 с («Фонарь»,
+    # 09.10.2026). Длины в списке нет, звук короче двух секунд, ноты длинные (пэд на такт), 808 и барабаны — молчим
+    drone, pluck = "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #6 (C5).wav", "KITS/щипок.wav"
+    tight, wide = [N(i, 1, 60) for i in range(16)], [N(0, 16, 60), N(16, 16, 62), N(32, .5, 64)]
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
+        config.BEAT_SOUNDS.write_text(json.dumps({"sounds": [], "lengths": {drone: 6.87, pluck: 1.2}}), encoding="utf-8")
+        parts = {"остинато": tight, "пэд": wide, "щипок": tight, "арп": tight, "808": tight, "хэт": tight}
+        named = {"sounds": dict.fromkeys(parts, drone) | {"щипок": pluck, "арп": ["KITS/длины нет.wav", "Serum/x.fxp"]}}
+        said = _long(named, parts)
+        assert len(said) == 4 and said[1] == "• остинато — «Arps - ARP #6 (C5)» длится 6,9 с, а ноты партии короче четверти", said
+        assert "в FL не слушал никто" in said[2] and said[1] in about(info | named, parts) and "Длинный звук" not in about(info | named), \
+            "строка — в записке, когда сборка знает партии"
+        assert _long(named, {"пэд": wide, "щипок": tight, "арп": tight, "808": tight, "хэт": tight}) == [] == _long({}, parts), "молчит"
+        assert not any("Длинный" in x or "длится" in x for x in problems(info | named, plain | {"остинато": tight})), "это не брак сборки"
+    assert isinstance(lengths(), dict), "настоящий список читается и с длинами, и без них"
     # Один бит — один образец: брат образца проходит, и замер, севший на половинный темп, ему не помеха; чужой темп,
     # неизвестный id, пустой список образцов, хэт вдвое гуще образца — брак
     assert problems(base, demo()) == [] and problems(base | {"sample": "вдвое"}, demo()) == [], problems(base | {"sample": "вдвое"}, demo())
@@ -2200,6 +2287,12 @@ def _checks() -> None:
             (Path(tmp) / name.partition("/")[2]).parent.mkdir(parents=True, exist_ok=True)
             (Path(tmp) / name.partition("/")[2]).touch()
         assert library() == [glory, shot], f"набор 12: в список — звук с нотой и петля WAV, а не {library()}"
+        # Длины — только одиночным звукам, по заголовку WAV; петля мимо, а файл, который не прочёлся (пустой, как
+        # заглушка iCloud), оставляет прежнюю длину — или остаётся без неё
+        assert sized([glory, shot, "Serum/x.fxp"], {shot: 3.3, glory: 9, "KITS/ушёл.wav": 1}) == {shot: 3.3} and sized([shot], {}) == {}
+        with wave.open(str(Path(tmp) / shot.partition("/")[2]), "wb") as w:
+            w.setnchannels(1), w.setsampwidth(2), w.setframerate(8000), w.writeframes(bytes(40000))
+        assert sized([glory, shot], {shot: 3.3}) == {shot: 2.5}, "длина — из заголовка, прежняя ей уступает"
     assert loop_bpm(glory) == 150 and not loop_bpm(glory.replace("/Loops/", "/Oneshots/")), "темп петли набора 12"
     assert "Glorified Zenology Bank by @aye.shark" in about(base | {"sounds": {"мелодия": shot}}) and "aye.shark" not in credit, \
         "автор банка Glorified — строкой в записке"
@@ -2317,6 +2410,7 @@ def _checks() -> None:
           "строка об авторе звуков CC BY в записке, набор 12 — звук только с нотой замера в имени, петля по числу перед BPM, автор банка "
           "в записке, две петли набора 14 на условиях автора (в списке только они, темп — последнее число имени, только заказу, "
           "перелом без второй петли, дорожка без баса автора, подпись, отметка и доля — в записке), "
+          "длинный звук на коротких нотах — строка в записке, а не брак, без длины в списке молчит, длины — по заголовку WAV, "
           "свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
 
 
@@ -2354,7 +2448,7 @@ def main() -> None:
                         "бит не годен")
     p.add_argument("--out", metavar="КУДА", type=Path, help="куда положить архив (по умолчанию — временная папка)")
     p.add_argument("--send", metavar="АРХИВ", type=Path, help="отправить собранный архив владельцу")
-    p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки (только Мак)")
+    p.add_argument("--sounds", action="store_true", help="переписать список имён звуков и пресетов библиотеки и длины одиночных звуков (только Мак)")
     p.add_argument("--gather", action="store_true", help="собрать папку «00 - Сегодня»: ноты свежего бита и его звуки (только Мак)")
     p.add_argument("--project", metavar="ПАПКА", type=Path,
                    help="пробная сборка: проект FL бита из ПАПКА/make.py со звуками — в папку --out, «Сегодня» не тронута (только Мак)")
@@ -2375,9 +2469,14 @@ def main() -> None:
             raise SystemExit("Библиотеки на этой машине нет — список не тронут.")
         old = json.loads(config.BEAT_SOUNDS.read_text("utf-8")) if config.BEAT_SOUNDS.exists() else {}
         # незнакомые поля файла остаются: рядом с именами лежит то, что о звуках намерено
-        config.BEAT_SOUNDS.write_text(json.dumps(old | {"date": state.now().strftime("%Y-%m-%d"), "sounds": names},
+        # и длины одиночных звуков: в Actions звука нет, а сборке надо знать, что звук длиннее нот (`_long`)
+        long = sized(names, old.get("lengths") or {})
+        note = ("длина одиночного звука, секунды (noty --sounds, заголовок WAV; барабанов, 808 и петель здесь нет). "
+                "Имени нет — файл был заглушкой iCloud или не прочёлся: длина неизвестна, а не мала")
+        config.BEAT_SOUNDS.write_text(json.dumps(old | {"date": state.now().strftime("%Y-%m-%d"), "sounds": names,
+                                                        "lengths_about": note, "lengths": long},
                                                  ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-        print(f"{len(names)} имён → {config.BEAT_SOUNDS}")
+        print(f"{len(names)} имён, длин — {len(long)} → {config.BEAT_SOUNDS}")
     elif a.gather:
         print(gather())
     elif a.project:
