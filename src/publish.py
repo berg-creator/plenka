@@ -45,7 +45,13 @@ def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = F
     при любом запуске, сухой прогон только пишет в лог. Даты выхода нет
     (посты до 11.09.2026) — считаем от created_at. Будущая дата не пускает:
     iTunes ставит выход на 07:00 UTC, поэтому сравниваются дни, а не часы.
+
+    Так же убирается пост о релизе, чей день отдан ПАМЯТКЕ (pamyatka.took): на следующее утро
+    он не переносится. Сутки ленты кончаются в 9:00 МСК, а пост с выходом в 10:00 МСК (iTunes)
+    годен до 10:00 следующего дня — без этого он час выходил вчерашним и забирал выход у свежего.
     """
+    from . import pamyatka
+
     now = state.now()
     max_age = timedelta(hours=config.RELEASE_MAX_AGE_HOURS)
     wait = timedelta(hours=config.RELEASE_TRACK_WAIT_HOURS)
@@ -60,8 +66,10 @@ def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = F
         released = state._parse(post.get("released_at") or post.get("created_at") or "")
         if released is None or released.date() > now.date():
             continue
-        if now - released > max_age:
-            log.warning("Релиз протух, %s: %s", "убрал бы" if dry_run else "убран из очереди", path.name)
+        stale = now - released > max_age
+        if stale or pamyatka.took(released, now):
+            log.warning("Релиз %s, %s: %s", "протух" if stale else "суток ПАМЯТКИ",
+                        "убрал бы" if dry_run else "убран из очереди", path.name)
             if not dry_run:
                 path.unlink()
             continue
@@ -175,10 +183,8 @@ def release_due() -> bool:
     отсчитывается по журналу публикаций — так же, как интервал обычных постов.
 
     В сутки ленты, отданные ПАМЯТКЕ (pamyatka.day, владелец 09.10.2026), релиз не выходит вовсе:
-    она идёт вместо него, а не вдобавок. Пропадает при этом не всякий релиз: пост живёт
-    config.RELEASE_MAX_AGE_HOURS от выхода в магазине, и релиз с выходом в 10:00 МСК (так ставит
-    iTunes) годен ещё час следующих суток ленты, с 9:00 до 10:00, — тогда он выходит наутро и
-    занимает выход того дня. Насовсем пропадает релиз с выходом в 00:00 UTC (NEXT.md, раздел 121).
+    она идёт вместо него, а не вдобавок. На следующее утро релиз этого дня не переносится:
+    пост о нём убирает из очереди next_post, а новый не пишет compose.do_fresh (pamyatka.took).
     """
     from . import pamyatka
 

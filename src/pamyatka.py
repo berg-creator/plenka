@@ -5,8 +5,9 @@
 голосовое вместо записи. Поэтому ПАМЯТКА выходит вместо поста о релизе, а не вдобавок (владелец
 09.10.2026): в её сутки ленты publish.release_due релиз не пускает, а слот обычного поста она
 занимает так же, как занял бы он (publish.due), — постов в день больше не становится. Релиз этого
-дня в свои сутки не выходит; с выходом в 10:00 МСК (iTunes) он годен ещё час следующего утра
-и выходит тогда — побочный эффект, а не решение (NEXT.md, раздел 121).
+дня не выходит вовсе и на утро не переносится (took): пост о нём убирается из очереди, новый
+не пишется. До 09.10.2026 релиз с выходом в 10:00 МСК (iTunes) жил ещё час следующего утра, выходил
+вчерашним и забирал единственный выход дня у свежего — а релизы у канала выходят свежими.
 
 В пост идёт только то, за чем стоит документ или правило самого бота: у каждой записи базы
 (data/pamyatka.json) обязательное поле sources — статьи ГК РФ или место в коде. Цитаты закона стоят
@@ -48,7 +49,7 @@ import html
 import re
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 
 from . import config, state
@@ -166,6 +167,20 @@ def day(moment: datetime | None = None) -> bool:
     return aired(moment) or publish.feed_day(moment).weekday() in config.PAMYATKA_DAYS and bool(pending())
 
 
+def took(released: datetime, moment: datetime | None = None) -> bool:
+    """Забрала ли ПАМЯТКА выход релиза насовсем: его день (дата выхода по Москве) отдан ей — в те сутки
+    ленты она вышла либо это день рубрики с невышедшей записью — и эти сутки уже начались. Такой пост
+    не выходит и не пишется (publish.next_post, compose.do_fresh). Ночью до 9:00 МСК своего дня релиз
+    выходить вправе: это хвост вчерашних суток ленты, памятке они не отданы."""
+    from . import publish
+    from .compose import MSK
+
+    born = released.astimezone(MSK).date()
+    if publish.feed_day(moment or state.now()) < born:
+        return False
+    return aired(datetime.combine(born, time(12), MSK)) or born.weekday() in config.PAMYATKA_DAYS and bool(pending())
+
+
 def air() -> str:
     """Выход из дежурства (moderate.publish_shift): id вышедшей записи или пустая строка.
     Не вышло — отметка снимается, и следующий заход пробует снова."""
@@ -201,7 +216,7 @@ def shot(post: dict) -> Path:
 def _selftest() -> None:
     import os
 
-    from . import publish, quality, skleyka, telegram
+    from . import compose, publish, quality, skleyka, telegram
 
     # Настоящая база: у каждой записи источник, подпись влезает в подпись к фото, сказанное о боте стоит на коде.
     base = load()
@@ -246,9 +261,31 @@ def _selftest() -> None:
         assert all(len(key["callback_data"].encode()) <= 64 and len(key["text"]) <= 40 for row in rows for key in row)
 
     at = lambda stamp: datetime.fromisoformat(f"2026-10-{stamp}:00+03:00")  # noqa: E731 — 07.10 среда, 10.10 суббота
-    real = state.now, config.ARCHIVE, config.POSTED_FILE, config.PAMYATKA_FILE, publish.to_channel, telegram.send_message
+    real = (state.now, config.ARCHIVE, config.POSTED_FILE, config.PAMYATKA_FILE, publish.to_channel, telegram.send_message,
+            config.QUEUE, config.INBOX_FILE, compose.USED_FILE, compose.release_jobs, compose.do_now)
     with tempfile.TemporaryDirectory() as tmp:
         config.ARCHIVE, config.POSTED_FILE, config.PAMYATKA_FILE = Path(tmp) / "archive", Path(tmp) / "posted.json", Path(tmp) / "base.json"
+        config.QUEUE, config.INBOX_FILE, compose.USED_FILE = Path(tmp) / "queue", Path(tmp) / "inbox.jsonl", Path(tmp) / "used.json"
+        # Релиз суток памятки на утро не переносится (took). Выход в 07:00 UTC — это 10:00 МСК, так ставит iTunes:
+        # пост годен ещё час следующих суток ленты, и без условия пост среды, более весомый, в четверг обошёл бы свежий.
+        out = "2026-10-{:02d}T07:00:00+00:00".format
+
+        def queued(date: int, score: int) -> Path:  # готовый к выходу пост о релизе этого числа
+            state.write_json(path := config.QUEUE / f"{date}.json",
+                             {"rubric": "release", "score": score, "full_track_file_id": "x", "released_at": out(date)})
+            return path
+
+        def found() -> list[str]:  # о каких находках сбор написал бы пост (compose.do_fresh), без модели
+            written.clear()
+            compose.do_fresh(False)
+            return written
+
+        written: list[str] = []
+        compose.release_jobs = lambda items, *_: [("", "release", {}, item) for item in items]
+        compose.do_now = lambda count, jobs: written.extend(source["fingerprint"] for *_, source in jobs) or 0
+        state.append_jsonl(config.INBOX_FILE, [
+            {"kind": "release", "fingerprint": f"день {date}", "score": 90, "artist": "Артист", "tracked": "Артист",
+             "title": f"Релиз {date}", "released_at": out(date)} for date in (7, 8, 14)])
         os.environ.setdefault("TELEGRAM_CHANNEL_ID", "-1")
         os.environ.setdefault("TELEGRAM_ADMIN_ID", "1")
         sent, lines = [], []
@@ -263,16 +300,31 @@ def _selftest() -> None:
             state.write_json(config.POSTED_FILE, {"items": [{"rubric": "release", "published_at": state.iso(at("06T10:00"))}]})
             assert not publish.release_due(), "в обычный день лимит релизов прежний"
             state.write_json(config.POSTED_FILE, {"items": []})
+            state.now = lambda: at("07T04:00")
+            wed = queued(7, 99)
+            assert publish.release_due() and publish.next_post(releases=True) == wed, "среда, 4:00 — хвост суток вторника, пост среды выходит"
+            assert found() == ["день 7"], "и находка среды ночью пишется"
             state.now = lambda: at("07T08:00")
             assert not day() and publish.release_due(), "среда до 9:00 — ещё сутки вторника, релиз выходит"
             state.now = lambda: at("07T09:30")
             assert day() and not publish.release_due() and air() == "", "сутки среды отданы памятке с начала, сама она — с 12:00"
+            assert publish.next_post(releases=True, dry_run=True) is None and wed.exists(), "сухой прогон очередь не трогает"
+            assert publish.next_post(releases=True) is None and not wed.exists(), "сутки среды начались — пост среды убран из очереди"
+            assert found() == [], "находка среды в её сутки не пишется — памятка ещё не вышла, но запись в базе есть"
+            assert not took(at("06T10:00")), "релиз вторника — обычного дня — памятка не забирает"
             state.now = lambda: at("07T12:30")
             assert air() == "a" and sent[0]["text"] == "<b>ПАМЯТКА: запись a</b>\n\nТекст." and not lines
             assert air() == "" and len(sent) == 1, "одна запись в сутки"
             assert day() and not publish.release_due(), "памятка вышла — релиз в эти сутки не выходит"
             state.now = lambda: at("08T02:00")
             assert not publish.release_due() and air() == "", "ночь четверга — хвост суток среды"
+            state.now = lambda: at("08T03:20")
+            assert found() == ["день 8"], "в сутки памятки находка среды не пишется, находка четверга — пишется"
+            state.now = lambda: at("08T09:20")
+            wed, thu = queued(7, 99), queued(8, 1)
+            assert publish.next_post(releases=True) == thu and not wed.exists(), "четверг, 9:20 — пост среды не выходит, пост четверга выходит"
+            assert found() == ["день 8"], "и сбор в 9:17 пост среды заново не пишет"
+            thu.unlink()
             state.now = lambda: at("08T09:30")
             assert not day() and publish.release_due(), "четверг — релиз выходит как раньше"
             state.now = lambda: at("10T23:30")
@@ -282,6 +334,8 @@ def _selftest() -> None:
             state.now = lambda: at("14T12:30")
             assert air() == "" and len(sent) == 2 and len(lines) == 1, "база кончилась — молчит, строка одна"
             assert not day() and publish.release_due(), "база кончилась — релизы в дни рубрики как раньше"
+            late = queued(14, 1)
+            assert publish.next_post(releases=True) == late and found() == ["день 14"], "и пост среды остаётся в очереди и пишется"
             state.write_json(config.PAMYATKA_FILE, items)
             publish.to_channel = lambda *a: 1 / 0
             try:
@@ -292,7 +346,8 @@ def _selftest() -> None:
             publish.to_channel = channel
             assert air() == "c" and [post["id"] for post in sent] == ["a", "b", "c"], "после сбоя — та же запись"
         finally:
-            state.now, config.ARCHIVE, config.POSTED_FILE, config.PAMYATKA_FILE, publish.to_channel, telegram.send_message = real
+            (state.now, config.ARCHIVE, config.POSTED_FILE, config.PAMYATKA_FILE, publish.to_channel, telegram.send_message,
+             config.QUEUE, config.INBOX_FILE, compose.USED_FILE, compose.release_jobs, compose.do_now) = real
     print("pamyatka: самопроверка пройдена")
 
 

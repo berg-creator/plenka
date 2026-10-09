@@ -969,14 +969,21 @@ def do_fresh(dry_run: bool) -> int:
     Путь тот же, что у --now, поэтому находки помечаются использованными
     и второй раз не пишутся. Полный трек просит следующий шаг, compose --ask-tracks:
     запрос трека живёт в одном месте.
+
+    Релиз, чей день отдан ПАМЯТКЕ (pamyatka.took), не пишется и использованным не помечается:
+    он не выйдет ни в свои сутки, ни наутро (publish.next_post), и генератор на него не тратится.
+    Релиз следующего дня, найденный ночью до 9:00 МСК, пишется как обычно.
     """
+    from . import pamyatka
+
     if dry_run:
         # Поиск мнений в сети тратит суточную квоту генератора и пишет data/web_voice.json.
         web_voice.ENABLED = False
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
     by_name = {a["name"]: a for a in artists}
     rows = list(state.read_jsonl(config.INBOX_FILE))
-    fresh = fresh_releases(rows, set(state.read_json(USED_FILE, [])))
+    fresh = [i for i in fresh_releases(rows, set(state.read_json(USED_FILE, [])))
+             if not pamyatka.took(state._parse(i["released_at"]))]
     jobs = release_jobs([i for i in fresh if store_checked(i, by_name)], rows, by_name)
     if dry_run:
         for _, rubric, payload, _ in jobs:
