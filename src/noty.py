@@ -215,6 +215,11 @@ LIBRARY = {"KITS": Path.home() / "Documents" / "Image-Line" / "FL Studio" / "KIT
 # В список идёт то, что можно ставить в бит на раздачу. Оркестровых сэмплов Lex Luger (KITS/01) в нём нет:
 # набор взят с archive.org без указанной лицензии — сборка откажет им, как любому неназванному звуку.
 LISTED = (("KITS/09 - Scene 2026 Kit", "**/*.wav"), ("KITS/10 - Кино Kit", "**/*.wav"), ("Serum", "**/*.fxp"))
+# Родной синтезатор FL заводским пресетом по имени: «Sytrus/Another fat saw» — им владелец 09.10.2026 сам заменил мелодию
+# «Фонаря». В список звуков такие имена не идут: копировать нечего, пресет Мак берёт из поставки FL (`flp.today`), а нет
+# его там — строка в записке. Отвергнуто: вписать имя в data/beat_sounds.json — `--sounds` переписывает список с диска
+# и стёр бы его, а ночная задача набора 11 пропадания имён не терпит (`set11.verdict`)
+NATIVE = "Sytrus/"
 # Музыка петлёй. Папка Loops плоская: вид петли — приставка имени. Только MusicRadar — royalty-free по README набора
 LOOPS = "KITS/01 - ASAP Rocky Kit/Loops"
 LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient")
@@ -587,6 +592,7 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         # Короткая нота мимо тональности — проходящая или подъезд; длинная — ошибка
         out += [f"{name}, такт {int(n.pos // 16) + 1}: длинная нота мимо тональности ({n.key})"
                 for n in flat(notes) if name in info.get("tonal", ()) and n.key % 12 not in scale and n.ln > 1]
+        # Sytrus — родной генератор FL и, может быть, панораму и слайд ноты слышит; без FL не проверить — правило то же
         if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED) \
                 and any(n.pan or n.fine or n.slide for n in notes):
             out.append(f"{name}: панорама, подстройка и слайд ноты в синтезаторе не работают — только в сэмплере")
@@ -601,7 +607,8 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     if info.get("sounds"):              # звук назван — он должен быть в списке библиотеки: иначе Маку нечего копировать
         listed = known()
         out += [f"{part}: звука «{n}» нет в списке data/beat_sounds.json"
-                for part, names in info["sounds"].items() for n in _names(names) if _nfc(n) not in listed]
+                for part, names in info["sounds"].items() for n in _names(names)
+                if _nfc(n) not in listed and not _nfc(n).startswith(NATIVE)]
         out += [f"{name}: партии не назван звук в sounds" for name in tracks if name not in info["sounds"]]
     if info.get("net"):                 # звук по адресу из сети: здесь — форма поля и адрес по списку, без сети; качает Мак
         from . import set11
@@ -1477,7 +1484,7 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
              "switch": (info.get("switch") or {}).get("такт")}), encoding="utf-8")       # перелома нет — петля одна на весь бит
     # что нужно проекту FL сверх партитур и звуков: его собирает Мак (`flp.today`) — шаблон FL и плагины стоят там
     archive.with_suffix(".flp.json").write_text(json.dumps(
-        {k: info.get(k) for k in ("title", "bpm", "parts", "tricks", "fx", "preset")}, ensure_ascii=False), encoding="utf-8")
+        {k: info.get(k) for k in ("title", "bpm", "parts", "tricks", "fx", "preset", "sounds")}, ensure_ascii=False), encoding="utf-8")
     print(f"{info['bpm']} BPM, {info['bars']} тактов, {info['bars'] * 240 / info['bpm']:.0f} с → {archive}")
     return archive
 
@@ -1670,6 +1677,8 @@ def lay(built: Path | None, sounds: dict, kits: Path, serum: Path,
     for part, names in (sounds.items() if isinstance(sounds, dict) else []):
         label = re.sub(r"[/\\:\0]", " ", str(part))[:40]
         for name in map(_nfc, _names(names)):
+            if name.startswith(NATIVE):         # пресет родного синтезатора FL: файла не кладём, он встаёт сразу в проект
+                continue
             key, _, rel = name.partition("/")
             if name not in listed or key not in roots:
                 missed.append(f"{label}: «{name}» — нет в списке библиотеки")
@@ -1986,7 +1995,8 @@ def _checks() -> None:
         (kits / "старое.wav").write_bytes(b"x")
         listed = {"KITS/k/Kick.wav", "KITS/k/Gone.wav", "KITS/k/Stub.wav", "Serum/User/p/Lead.fxp"}
         missed = lay(tmp / "out" / "beat", {"бочка": "KITS/k/Kick.wav", "мелодия": ["Serum/User/p/Lead.fxp"], "хэт": "KITS/k/Gone.wav",
-                                            "клэп": "KITS/k/Stub.wav", "перк": "KITS/../../etc/passwd"},
+                                            "клэп": "KITS/k/Stub.wav", "перк": "KITS/../../etc/passwd",
+                                            "пэд": NATIVE + "Another fat saw"},     # пресет Sytrus: класть нечего, и это не недостача
                      kits, serum, {"KITS": lib, "Serum": pres}, listed)
         assert (kits / "Бочка — Kick.wav").read_bytes() == b"k" and (serum / "Мелодия — Lead.fxp").read_bytes() == b"p"
         assert (kits / "02 хэт.fsc").exists() and not (kits / "старое.wav").exists() and (lib / "k" / "Kick.wav").read_bytes() == b"k"
@@ -2111,6 +2121,8 @@ def _checks() -> None:
     assert "мимо тональности" not in "\n".join(problems(info, {"мелодия": [N(0, 4, 66), N(4, 4, 71)]})), "♭2 и ♭5 — можно долго"
     assert "характер «добрый» — не из списка" in "\n".join(problems(info | {"mood": "добрый"}, plain))
     assert "в синтезаторе не работают" in "\n".join(problems(info, {"мелодия": glide(0, 4, 65, 77)}))
+    assert "в синтезаторе не работают" in "\n".join(problems(info | {"sounds": {"мелодия": NATIVE + "Another fat saw"}},
+                                                             {"мелодия": glide(0, 4, 65, 77)})), "у Sytrus правило то же"
     assert "синтезатор" not in "\n".join(problems(info | {"tonal": ["808"]}, {"808": glide(0, 4, 29, 41)}))
     doubled = {"808": [N(i * 4, 3, 29) for i in range(4)], "бочка": [N(i * 4, 1) for i in range(4)]}
     assert "под каждой нотой 808" in "\n".join(problems(info | {"tonal": ["808"]}, doubled))
@@ -2309,6 +2321,10 @@ def _checks() -> None:
         assert f"мелодия: звук «{alien}» — не из одобренных владельцем" in said, said
     assert problems(base | {"sounds": dict.fromkeys(base["sounds"], own[-1]) | {"мелодия": min(known())}}, demo()) == [], \
         "барабаны и 808 — по общему списку"
+    # Sytrus заводским пресетом: в списке библиотеки его нет и не должно быть, а одобрен владельцем один — остальные утром брак
+    for name, why in (("Another fat saw", ""), ("Чужой", "мелодия: звук «Sytrus/Чужой» — не из одобренных владельцем")):
+        said = "\n".join(problems(base | {"sounds": base["sounds"] | {"мелодия": NATIVE + name}}, demo()))
+        assert (why in said if why else not said) and "нет в списке data/beat_sounds.json" not in said, said
     assert "preset, мелодия: свой пресет Serum на музыке — только биту по заказу" in "\n".join(problems(base | {"preset": {"мелодия": mine}}, demo()))
     assert f"loop: петля «{unheard}» — не из одобренных владельцем" in "\n".join(problems(looped | {"loop": unheard}, drums))
     with mock.patch.object(config, "BEAT_MUSIC", Path("нет такого файла.json")):
@@ -2535,8 +2551,8 @@ def _checks() -> None:
 def selftest() -> None:
     """Образцы и одобренные звуки у селфтеста свои, синтетические: настоящие файлы пополняет Мак, и проверка кода
     от их содержимого зависеть не должна. Замер образцов — как у пробного бита: хэт восьмыми, бочку и 808 «замер
-    не разобрал» (0 — не сверяется); «вдвое» — тот же ролик, чей замер сел на половинный темп. Одобрены один звук
-    и все замеренные петли."""
+    не разобрал» (0 — не сверяется); «вдвое» — тот же ролик, чей замер сел на половинный темп. Одобрены один звук,
+    пресет Sytrus и все замеренные петли."""
     from unittest import mock
     from . import config
     z = {"hat_per_bar": 8, "kick_per_bar": 0, "b808_per_bar": 0}
@@ -2551,7 +2567,7 @@ def selftest() -> None:
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SAMPLES", Path(tmp) / "samples.json"), \
             mock.patch.object(config, "BEAT_MUSIC", Path(tmp) / "music.json"):
         config.BEAT_SAMPLES.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
-        config.BEAT_MUSIC.write_text(json.dumps({"sounds": {min(known()): {"kind": "лид", "bright": 2400}},
+        config.BEAT_MUSIC.write_text(json.dumps({"sounds": {min(known()): {"kind": "лид", "bright": 2400}, NATIVE + "Another fat saw": {"kind": "лид"}},
                                                  "loops": {name: {"bpm": loop_bpm(name)} for name in loops()}},
                                                 ensure_ascii=False), encoding="utf-8")
         _checks()

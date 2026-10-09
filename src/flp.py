@@ -60,6 +60,11 @@ Fruity Parametric EQ 2). В проект оно ложится записью 53
 в проекте переписываются, остальное — байт в байт.
 Serum у владельца — Audio Unit; его состояние — plist, где поле vstdata — файл .fxp целиком (снято с его
 проекта), поэтому пресет бита, и свой тоже, лежит в канале сразу.
+Sytrus — родной генератор FL: владелец 09.10.2026 сам перевёл на него мелодию «Фонаря» (пресет «Another fat saw»), а всем
+трём синтезаторам музыки поставил отсечку «сам себя», каждому свою группу. Канал Sytrus — плагин с состоянием заводского
+пресета по имени из паспорта (`noty.NATIVE`, SHUT); нет такого пресета в поставке FL — канал без звука и строка в записке.
+Отсечка стоит у каждого канала-синтезатора музыки, Serum тоже; группа — номер канала, как у 808. Отвергнуто: список
+пресетов Sytrus в репозитории — их 922, а назвать и проверить имя можно и без списка: его знает сам FL на Маке.
 
 Одна партия — один паттерн на весь бит и одна дорожка плейлиста, части подписаны маркерами. Отвергнуто: резать
 партию на паттерны по частям — долгие ноты 808 и слайды идут через стык частей, разрез оборвал бы их.
@@ -90,7 +95,7 @@ import zlib
 from pathlib import Path
 
 from . import proq
-from .noty import GM_DRUM, LIBRARY, LONG, N, SAMPLED, _notes, _rows, _size, fsc, read_fsc, seconds
+from .noty import GM_DRUM, LIBRARY, LONG, N, NATIVE, SAMPLED, _names, _notes, _rows, _size, fsc, read_fsc, seconds
 
 BASE = Path("/Applications/FL Studio 20.app/Contents/Resources/FL/Data/Templates/Minimal/Empty/Empty.flp")
 DB = LIBRARY["KITS"].parent / "Presets" / "Plugin database"
@@ -105,6 +110,14 @@ PLUGIN = (201, 212, 203, 155, 128, 213)     # события плагина в .
 AUTO = BASE.parents[2] / "Utility" / "SFX transitions" / "SFX transitions.flp"
 # Пресеты плагинов: свои владельца раньше заводских
 PRESETS = (LIBRARY["KITS"].parent / "Presets" / "Plugin presets" / "Effects", BASE.parents[3] / "Patches" / "Plugin presets" / "Effects")
+# Родной синтезатор FL в канале (`noty.NATIVE`): состояние — из заводского пресета по имени, тем же путём, что пресет эффекта
+# (`_preset`), только из соседней папки Generators. Запись окна (событие 212) — байт в байт канал Sytrus «Another fat saw»
+# в «Фонаре», как его сохранил владелец (09.10.2026, FL 20.8.3): признаки 0x150, окно закрыто. Из пресета и базы плагинов
+# её не взять: там записи FL 7 и FL 11 с признаками 0x51 (по описанию формата в PyFLP младший бит — «окно открыто»)
+# и именем плагина не в UTF-16. Состояние в его проекте с заводским байт в байт не совпадает и не может: его пересохранил
+# Sytrus из FL 20 в своей новой записи. После распаковки (4 байта шапки, дальше zlib) и выравнивания расходится только
+# сама запись — версия блоков, флажки точек огибающих по одному правилу, текст RTF → UTF-16: следов ручной правки нет.
+SHUT = struct.pack("<8xI4xI16xII8x", 2, 0x150, 194, 278)
 # Уровни дорожек микшера, % фейдера: 100 — 0 дБ, предел FL — 125. Сняты 06.10.2026 с шести чужих проектов FL под рефы
 # владельца (разбор.md, «Что общего», п. 4): 808 поднят в 5 из 6 — фейдер 111–125% (проекты 01, 03, 06), мелодия ниже
 # него в 3 из 6 — 50–71%, 57%, 75–100%. У 808 — число проекта 03 (пересборка New Tank): 125; музыка стояла на его же 57,
@@ -277,7 +290,7 @@ def _vst2(wrap: bytes, chunk: bytes) -> bytes | None:
 
 
 def _channel(proto: list[tuple[int, bytes]], i: int, ch: dict) -> list[tuple[int, bytes]]:
-    """Канал стойки из шаблонного сэмплера: сэмплер со звуком, Serum с пресетом или аудиоклип."""
+    """Канал стойки из шаблонного сэмплера: сэмплер со звуком, плагин с пресетом (Serum, Sytrus) или аудиоклип."""
     plug, clip, out, env = dict(ch.get("plugin") or ()), ch.get("clip"), [], 0
     for e, v in proto:
         if e == 64:
@@ -342,7 +355,7 @@ def _curve(proto: bytes, spans: list[tuple[float, float]], total: float, fade: s
 
 def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, dict], markers=(), auto=None) -> bytes:
     """Проект из шаблона FL. channels — каналы стойки по порядку: name, insert (дорожка микшера), у партии — part
-    и notes, у сэмплера — sound (путь), root и cut (отсечка «сам себя»), у Serum — plugin (события обёртки), у аудиоклипа —
+    и notes, у сэмплера — sound (путь), root и cut (отсечка «сам себя»), у Serum и Sytrus — plugin (события плагина) и тот же cut, у аудиоклипа —
     sound и clip (длина в тиках), knob — ручка громкости канала, %, hold — стадии огибающей громкости (HOLD у 808, GATE
     у музыки). Партия — паттерн на весь бит на своей дорожке плейлиста;
     каналы одной партии — слой.
@@ -440,7 +453,7 @@ def read(data: bytes) -> dict:
         elif e == 193:
             pat["name"] = text(v)
         elif e == 64:
-            ch = {"name": "", "kind": "сэмплер", "sound": None, "insert": 0, "root": None, "state": b"", "cut": 0, "on": [], "fade": "", "knob": 78, "env": None}
+            ch = {"name": "", "kind": "сэмплер", "sound": None, "insert": 0, "root": None, "plugin": "", "state": b"", "cut": 0, "on": [], "fade": "", "knob": 78, "env": None}
             out["channels"].append(ch)
             env = 0
         elif e == 99:
@@ -448,8 +461,8 @@ def read(data: bytes) -> dict:
         elif ch is not None:
             if e == 21:
                 ch["kind"] = {0: "сэмплер", 2: "плагин", 4: "аудиоклип", 5: "автоматизация"}.get(n, str(n))
-            elif e in (203, 196):
-                ch["name" if e == 203 else "sound"] = text(v)
+            elif e in (203, 196, 201):
+                ch[{203: "name", 196: "sound", 201: "plugin"}[e]] = text(v)
             elif e in (22, 135):
                 ch["insert" if e == 22 else "root"] = n
             elif e == 213:
@@ -580,6 +593,12 @@ def _preset(key: str, name: str, roots=PRESETS) -> bytes | None:
     return None
 
 
+def _factory(plugin: str, state: bytes, root: Path = PRESETS[1].with_name("Generators")) -> str:
+    """Заводской пресет генератора FL с этим состоянием байт в байт — для --read: каким пресетом собран канал.
+    Состояние, пересохранённое самим FL из проекта, так не опознать: запись у него уже другая (SHUT)."""
+    return next((f.stem for f in sorted((root / plugin).rglob("*.fst")) if state in f.read_bytes()), "") if plugin and state else ""
+
+
 def _cell(state: bytes, name: str) -> bytes | None:
     """Gross Beat: ячейка банка по имени — выбранной. После шапки в состоянии 72 ячейки, 36 времени и 36 громкости:
     имя с байтом длины, 23 байта, число точек, точки по 24 байта, хвост 20 — проход кончается ровно в конце состояния
@@ -648,7 +667,7 @@ def _piles(wav: Path, notes: list[N], bpm: float) -> bool:
 def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB, home: Path | None = None,
           banks=PRESETS, auto: Path = AUTO, eq=proq.states) -> str:
     """Проект бита — в папку «Сегодня», из того, что в ней уже лежит: партитуры, звуки с именем партии впереди,
-    дорожки петли и пресеты. plan — поля паспорта (`noty.build`): title, bpm, parts, tricks, fx, preset.
+    дорожки петли и пресеты. plan — поля паспорта (`noty.build`): title, bpm, parts, tricks, fx, preset, sounds (из него — только пресет Sytrus).
     home — где папка будет лежать, если не здесь (пробная сборка в сторону): пути звуков ведут туда.
     eq — кто пишет состояния эквалайзеров по спискам полос: сам плагин (`proq.states`), в селфтесте — подмена без него.
     Возвращает строку для записки: что в проекте есть и что осталось рукам."""
@@ -663,10 +682,11 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
     fx = {nfc(k).strip().lower(): str(v) for k, v in plan["fx"].items()} if isinstance(plan.get("fx"), dict) else {}
     own = plan.get("preset") if isinstance(plan.get("preset"), dict) else {}
     wrap = [x for x in events(_bytes(db / SERUM) or pack([], 0)) if x[0] in PLUGIN]
+    named = plan.get("sounds") if isinstance(plan.get("sounds"), dict) else {}
     buses = [k for k in fx if k.startswith("шина")]
     rows = [p for p, _ in scores] + [k for k, file in CLIPS if (kits / file).exists()] + buses     # дорожки микшера, с первой
     number = {r.lower(): i for i, r in enumerate(rows, 1)}
-    channels, silent, roots, gated = [], [], [], []
+    channels, silent, roots, gated, gens, lack = [], [], [], [], [], []
     for part, notes in scores:
         label = re.sub(r"[/\\:\0]", " ", part)[:40]             # имя партии впереди файла — как кладёт `noty.lay`
         tag = f"{label[:1].upper()}{label[1:]} — "
@@ -677,6 +697,10 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
         root = next((int(m[1]) for t in plan.get("tricks") or () if (m := re.match(
             rf"{re.escape(part)}\b.*?корневая нота канала\s*[—–-]?\s*(\d+)", nfc(t), re.I | re.S)) and int(m[1]) < 132), None)
         ch = {"part": part, "notes": notes, "insert": number[part.lower()], "name": part, "knob": KNOB if role(part) == "808" else None}
+        gen = next((n[len(NATIVE):] for n in map(nfc, _names(named.get(part, ()))) if n.startswith(NATIVE)), "")
+        # Отсечка «сам себя» — и синтезатору музыки, каждому каналу своя группа: в «Фонаре» владелец 09.10.2026 поставил её
+        # всем трём (Sytrus и два Serum) — хвост прошлой ноты не наезжает на новую. Сэмплеры музыки не тронуты (задача 122)
+        synth = ch | {"cut": role(part) == "музыка"}
         if mine:
             # 808 — отсечка и огибающая владельца; музыке — огибающая «как нарисовано», и только где звук лёг бы сам
             # на себя; барабаны доигрывают, как доигрывали
@@ -687,11 +711,15 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             channels += layer
             gated += [part] if music and any(c["hold"] for c in layer) else []
             roots += [f"{part} — {root}"] if root is not None else []
+        elif gen and (state := _preset(_norm(NATIVE), gen, tuple(r.with_name("Generators") for r in banks))):
+            channels.append(synth | {"plugin": [(201, _text(NATIVE[:-1])), (212, SHUT), (213, state)]})
+            gens.append(f"{part}: Sytrus «{gen}» — заводской пресет FL")
         elif fxp and wrap:
-            channels.append(ch | {"plugin": _serum(wrap, fxp[0])})
+            channels.append(synth | {"plugin": _serum(wrap, fxp[0])})
         else:
             channels.append(ch)
             silent.append(part)
+            lack += [f"пресета «{gen}» у Sytrus в поставке FL на этом Маке нет — канал «{part}» без звука"] if gen else []
     for key, file in CLIPS:
         if (kits / file).exists():
             with wave.open(str(kits / file)) as w:
@@ -702,6 +730,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
     bed = max(((sum(n.ln for n in ns) / len(ns), p) for p, ns in scores if ns and role(p) == "музыка"),
               key=lambda x: x[0], default=(0, None))[1]                     # опора — партия музыки с самой долгой нотой в среднем
     proto, inserts, lost, own, timed, miss, ducked, cuts = _clip(auto), {}, 0, [], [], [], [], []
+    own, miss = own + gens, miss + lack
     for i, row in enumerate([MASTER] + rows):
         steps, bus = _chain(fx.get(row.lower(), ""), effects, buses)
         kind = role(row) if 0 < i <= len(rows) - len(buses) else None       # роль — у партий и дорожек петли, не у шин
@@ -819,6 +848,8 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
                "звучит всю свою длину и гаснет с её концом (sustain до упора, release в нуле) — без неё FL доигрывает файл "
                "до конца, и частые ноты ложатся копиями друг на друга. Числа — расчёт, в FL их не слушал никто: суховато — "
                "потяни REL на канале. " if gated else "")
+            + ("У каналов-синтезаторов музыки своя группа отсечки у каждого (Cut itself): хвост прошлой ноты не наезжает "
+               "на новую — как ты поставил в «Фонаре». " if any(c.get("cut") and c.get("plugin") for c in channels) else "")
             + f"Эффектов в слотах — {slots}: числа из «Обработки» "
             "выстави сам, настроены только названные здесь."
             + (" Pro-Q 4 — на каждой дорожке с инструментом, первым слотом, если автор нот не поставил его сам: срез ненужного "
@@ -958,6 +989,9 @@ def selftest() -> None:
         assert _cell(bank, "Нет такой") is None and _cell(bank[:-1], "1/2 Speed") is None, "банк не разобрался — состояние не трогаем"
         (pre / "Gross Beat" / "Momentary.fst").write_bytes(pack([(201, b"Gross beat\0"), (213, bank)], 2, 0x30))   # имя не в UTF-16, как в старых
         (pre / "Fruity Limiter" / "Max loudness.fst").write_bytes(native("Fruity Limiter", b"limiter-loud"))
+        # заводской пресет Sytrus — в папке генераторов рядом с пресетами эффектов; имя плагина в нём не в UTF-16, как в настоящем
+        (pre.with_name("Generators") / "Sytrus" / "Short synth").mkdir(parents=True)
+        (pre.with_name("Generators") / "Sytrus" / "Short synth" / "Another fat saw.fst").write_bytes(pack([(201, b"Sytrus\0"), (213, b"fat-saw")], 2, 0x30))
         assert _spans("Gross Beat в тактах 1 и 1.3") == [(0, 4)] and _spans("прикрыт (такты 1–12) и открыт с такта 13") == [], "такты"
         # Прямая вместо ступени: «уходит» — скачок к 1 и спуск к 0, «входит» (и одно «плавно») — подъём и скачок вниз
         dots = lambda fade: [struct.unpack_from("<dd", c, 21 + 24 * k) for c in [_curve(bytes(17) + _int(0, 4), [(4, 12)], 16, fade)]
@@ -984,9 +1018,10 @@ def selftest() -> None:
             assert got["bpm"] == 120 and [c["name"] for c in ch] == ["808", "хэт", "хэт 2", "мелодия", "Петля — на весь бит", "петля: Gross Beat"], ch
             assert [c["kind"] for c in ch] == ["сэмплер"] * 3 + ["плагин", "аудиоклип", "автоматизация"] and [c["insert"] for c in ch][:5] == [1, 2, 2, 3, 4]
             assert ch[0]["sound"].endswith("/808 — Тон D#1.wav") and ch[0]["root"] == 27 and ch[1]["root"] is None, ch[:2]
-            assert [c["cut"] for c in ch[:3]] == [1, 0, 0], "отсечка «сам себя» — только у 808"
+            assert [c["cut"] for c in ch[:4]] == [1, 0, 0, 4], "отсечка «сам себя» — у 808 и у синтезатора музыки, группа у каждого своя"
             assert [c["env"] for c in ch[:4]] == [HOLD, None, None, None], "огибающая громкости с числами владельца — только у 808"
             assert b"CcnK-svoy" in ch[3]["state"] and b"osnova" not in ch[3]["state"], "в Serum — свой пресет бита, а не основа"
+            assert ch[3]["plugin"] == "Fruity Wrapper" and "своя группа отсечки у каждого" in line, line
             same = sorted(notes)                                    # ноты партии — те же: место, длина, высота, сила, панорама, слайд
             assert got["patterns"][1] == {"name": "808", "notes": {0: same}} and got["patterns"][2]["notes"] == {1: same, 2: same}
             assert got["clips"] == [("паттерн", 1, 101 * BAR, 0), ("паттерн", 2, 101 * BAR, 1), ("паттерн", 3, 101 * BAR, 2),
@@ -1098,9 +1133,22 @@ def selftest() -> None:
             assert not any(w in line for w in ("дорожка бочки", "отсечка «сам себя»", "огибающая громкости с твоими")), \
                 "нет бочки и 808 сэмплером — записка о них молчит"
             assert [x["slots"] for x in got["inserts"].values()] == [{0: "FabFilter Pro-Q 4"}, {0: "FabFilter Pro-Q 4", 1: "Fruity Stereo Enhancer"}]
+            # Sytrus: партии назван заводской пресет — канал-плагин с его состоянием и закрытым окном, как у владельца в «Фонаре»;
+            # отсечка — у обоих синтезаторов музыки, группы разные; пресета с таким именем нет — канал без звука и строка в записке
+            for sound, state in (("Another fat saw", b"fat-saw"), ("Нет такого", b"")):
+                line = today(air, serum, {"title": "Ширь", "bpm": 120, "sounds": {"пэд": ["Sytrus/" + sound]}},
+                             Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp", plug)
+                raw, got = events((air / "Ширь.flp").read_bytes()), read((air / "Ширь.flp").read_bytes())["channels"]
+                assert [(c["kind"], c["plugin"], c["cut"]) for c in got] == [("плагин", "Fruity Wrapper", 1), (
+                    "плагин", "Sytrus", 2) if state else ("сэмплер", "", 0)] and got[1]["state"] == state, got
+                assert ((212, SHUT) in raw) == bool(state) == ("пэд: Sytrus «Another fat saw»" in line), line
+                assert ("пресета «Нет такого» у Sytrus" in line and "Без звука, поставь сам: пэд" in line) != bool(state), line
         assert "нет FL Studio" in today(kits, serum, plan, Path(tmp) / "нет.flp", db)
         if PRESETS[1].is_dir():                                 # на Маке — настоящий банк FL: ячейка «1/2 Speed» в нём тридцатая
             assert _cell(_preset("grossbeat", "Momentary"), "1/2 Speed")[4:12] == _int(30, 4) + bytes(4), "заводской банк Momentary"
+            import zlib                                         # и настоящий пресет Sytrus: четыре байта шапки, дальше zlib с его именем
+            saw = _preset("sytrus", "Another fat saw", (PRESETS[1].with_name("Generators"),))
+            assert b"Another fat saw" in zlib.decompress(saw[4:]) and _factory("Sytrus", saw) == "Another fat saw", "заводской пресет Sytrus"
         from .noty import _project
         _project(Path(tmp) / "нет.json", kits, serum)           # сбой проекта — строка в записке, а не падение сбора папки
         assert "Проект FL не собрался" in (kits / "о бите.txt").read_text("utf-8")
@@ -1115,7 +1163,7 @@ def selftest() -> None:
         assert not kits.exists() and (new / "А x Б — Проба.flp.bak").read_bytes() == data and "битый.flp" in said, said
         assert all(c["sound"].startswith(f"{new}/") and (new / Path(c["sound"]).name).exists() for c in read(moved)["channels"] if c["sound"])
         assert repath(moved, new.name, kits.name) == data and (new / "битый.flp").read_bytes() == b"not FL", "кроме путей не тронуто ничего"
-    print("проект FL: шаблон, каналы со звуком и пресетом, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
+    print("проект FL: шаблон, каналы со звуком и пресетом (Serum, Sytrus заводским пресетом по имени), отсечка «сам себя» у синтезаторов музыки — каждому своя группа, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
           "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, бочка в моно, низ 808 — срезом Side и полкой Mid в эквалайзере, ручка и огибающая громкости 808; "
           "музыке на длинном звуке-файле под частыми нотами — огибающая «как нарисовано», короткому звуку, редким нотам и барабанам — нет, 808 рядом прежний; "
           "эквалайзер первым слотом дорожки с инструментом, срез по роли и по словам автора, на шинах и мастере своего нет, плагин молчит — "
@@ -1135,6 +1183,7 @@ def main() -> None:
         print(f"{got['bpm']:g} BPM")
         for i, c in enumerate(got["channels"]):
             print(f"канал {i}: {c['name']} — {c['kind']}" + (f", дорожка микшера {c['insert']}" if c["kind"] != "автоматизация" else "")
+                  + (f", {c['plugin']}" + (f" «{x}»" if (x := _factory(c["plugin"], c["state"])) else "") if c["plugin"] else "")
                   + (f", звук {c['sound']}" if c["sound"] else "") + (f", корневая нота {c['root']}" if c["root"] is not None else "")
                   + (f", группа отсечки {c['cut']}" if c["cut"] else "") + (f", ручка громкости {c['knob']}%" if c["knob"] != 78 and c["kind"] != "автоматизация" else "")
                   + (", огибающая громкости: атака {}, hold {}, спад {}, sustain {}, release {}".format(*c["env"]) if c["env"] else "")
