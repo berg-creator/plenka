@@ -397,9 +397,9 @@ NOTES = "до до# ре ре# ми фа фа# соль соль# ля ля# с�
 # двух нот мгновенно перескакивает туда и обратно. filter (0,02–0,5 с) — сглаживание внутри
 # ноты; переход между нотами у плагина всегда мгновенный. corr — доля исправления. «мягко» —
 # filter 0,1 и bias 0,5, значения плагина по умолчанию. На слух не проверено: плагина на Маке
-# нет. По умолчанию — «жёстко», как было до 09.10.2026; какое положение сделать главным,
-# выберет владелец, сравнив на своём треке. Числа — в пределах плагина (filter 0,02–0,5,
-# bias и corr 0–1), это держит селфтест.
+# нет. Новому треку — «средне» (KNOBS; владелец 09.10.2026 выбрал по описанию, на слух не сравнивал).
+# Первое положение, «жёстко», — как было до ручки: записи без неё сведены так, и пересборка
+# тюн им не меняет. Числа — в пределах плагина (filter 0,02–0,5, bias и corr 0–1), это держит селфтест.
 SOFT = {"жёстко": (1, 0.02, 0), "средне": (1, 0.05, 0.25), "мягко": (0.8, 0.1, 0.5)}
 
 # --- саунд-дизайн -----------------------------------------------------------
@@ -2002,7 +2002,7 @@ VOICE_STEP, VOICE_LIMIT = 2.0, 6.0
 ECHO_STEP, ECHO_LIMITS = 4.0, (-12.0, 8.0)
 # at — с какой секунды бита входит первое слово; None — как в присланном файле (_moved).
 KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swap": False, "like": None, "at": None,
-         "key": "", "soft": "жёстко"}
+         "key": "", "soft": "средне"}
 # Кнопки идут через service.handle_callback: префикс service.CALLBACK_PREFIX
 # и действие sk. Импортировать service отсюда нельзя — он импортирует нас.
 PREFIX = "s:sk:"
@@ -2816,7 +2816,7 @@ def look(knobs: dict) -> str:
         words.append(f"голос с {_minutes(knobs['at'])}")
     if STYLES[knobs["style"]].get("autotune"):
         words += [f"автотюн в тональности {knobs['key']}"] if knobs.get("key") else []
-        words += [f"автотюн {knobs['soft']}"] if knobs.get("soft") in tuple(SOFT)[1:] else []
+        words += [f"автотюн {knobs['soft']}"] if knobs.get("soft") in SOFT and knobs["soft"] != KNOBS["soft"] else []
     return ", ".join(words)
 
 
@@ -5354,7 +5354,7 @@ def _selftest() -> None:
         before = {name: value for name, value in KNOBS.items() if name not in ("key", "soft")}
         assert heard(before, {"key": "", "soft": "жёстко"}) == before, "трек до новых ручек: «как было» — не правка"
         assert all(0 <= corr <= 1 and 0.02 <= smooth <= 0.5 and 0 <= bias <= 1 for corr, smooth, bias in SOFT.values()) \
-            and next(iter(SOFT)) == KNOBS["soft"], "числа плагина — в его пределах"
+            and next(iter(SOFT)) == "жёстко" and KNOBS["soft"] == "средне", "числа плагина — в его пределах, новому треку — «средне»"
         melodic = dict(keyed, style="мелодично", soft="мягко")
         assert "автотюн в тональности F#m" in look(melodic) and "автотюн мягко" in look(melodic) and "тональности" not in look(keyed)
         # Проба плагина — той же строкой, что пойдёт в сведение. Подсказка «назови тональность» — только
