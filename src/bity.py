@@ -141,11 +141,26 @@ RISING = f"📈 На подъёме — больше всего новостей
 # Путь словами, без t.me: ссылку YouTube в описании оставить не дал (02.10.2026), адрес бота — оставил.
 ABOUT = ("Скачать бесплатно ({format}): Telegram → {bot} → кнопка «🎚 БИТЫ»\n"
          "Там же бот бесплатно сведёт твой голос с этим битом.\n\n"
-         "Бесплатно и для коммерческого релиза (free for profit). "
-         "Одно условие — подпиши в названии трека: {credit}\n"
+         "{terms}\n"
          "{tempo}\n{hashtags}")
+ABOUT_FREE = "Бесплатно и для коммерческого релиза (free for profit). Одно условие — подпиши в названии трека: {credit}"
+# Бит на чужой петле — поле loop каталога: имя автора петли, как он пишет его в Instagram; вписывается руками
+# (владелец 10.10.2026 о «Фонаре»: грузить «с условиями автора»). «Бесплатно, и для релиза тоже» у такого бита —
+# неправда: у петли blvckmorphine (noty.SHARED, TERMS.txt набора) условия свои — подпись с его именем, отметка
+# в каждой публикации и 50/50 со всего дохода трека. Между кем делится доход, в условиях не сказано («50/50 split
+# (or 33/33/33 where applicable)»), поэтому бот называет число и шлёт к автору, а не толкует. Отметка в Telegram —
+# ссылкой: голое @имя он превратил бы в чужой аккаунт. В описании ролика ссылки нет: YouTube её там не оставляет.
+# «free for profit» у такого бита нет ни в описании, ни в тегах; «[FREE]» в названии остаётся — скачать бесплатно.
+FREE = "Бесплатно, и для релиза тоже. Одно условие — подпиши в названии трека: <b>{credit}</b>."
+LOOPED = ('Скачать и записать — бесплатно. В бите петля <a href="https://www.instagram.com/{loop}/">@{loop}</a>, '
+          "и условия релиза — его: подпиши в названии трека <b>{credit} x {loop}</b>, отметь его в каждой публикации, "
+          "а с дохода трека ему положена доля (50/50) — до релиза напиши ему.")
+ABOUT_LOOPED = ("{credit} x {loop}. Петля — @{loop} (Instagram), условия релиза — его: подпиши в названии трека "
+                "{credit} x {loop}, отметь @{loop} в каждой публикации, с дохода трека ему положена доля (50/50) — "
+                "до релиза напиши ему.")
+LIST_LOOPED = "\n\nУ бита «{titles}» условия другие: в нём чужая петля — они придут вместе с файлом."
 GIVEN = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
-         "Бесплатно, и для релиза тоже. Одно условие — подпиши в названии трека: <b>{credit}</b>.\n\n"
+         "{terms}\n\n"
          f"Записал голос? Жми «{MAKE}» — бит уже будет в заявке, пришлёшь только голос.")
 # БИТ НЕДЕЛИ (air, владелец 06.10.2026). В канал приходят те, кто сам делает музыку, — свести трек
 # ботом, взять бит, — а лента была целиком из чужих релизов, и подписчики уходили. Бит стал рамкой
@@ -153,7 +168,7 @@ GIVEN = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
 # с опросом, в воскресенье — итог по голосам (otbor.final). До этого бит выходил раз в два дня
 # и ничего за собой не вёл. Приз назван условно: первую неделю треков может прийти меньше трёх.
 POST = ("🎚 <b>БИТ НЕДЕЛИ · «{title}»</b>\n{artists} type beat{tempo}\n\n"
-        "Бесплатно, и для релиза тоже — подпиши в названии трека: <b>{credit}</b>.\n\n"
+        "{terms}\n\n"
         "Как участвовать:\n"
         '1. <a href="{link}">Забери бит в боте</a> и запиши под него голос.\n'
         f"2. Под битом нажми «{MAKE}» и пришли голос — только так бот поймёт, что трек на бит недели.\n"
@@ -164,7 +179,7 @@ POST = ("🎚 <b>БИТ НЕДЕЛИ · «{title}»</b>\n{artists} type beat{tem
 # на YouTube, в субботу, а не в понедельник). Рамки недели в нём нет: «приём до конца субботы»
 # в субботнем посте — неправда. Вид — прежний пост бита, до БИТА НЕДЕЛИ.
 ANNOUNCE = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
-            "Бит ПЛЁНКИ. Бесплатно, и для релиза тоже — подпиши в названии трека: <b>{credit}</b>.\n\n"
+            "Бит ПЛЁНКИ. {terms}\n\n"
             '▸ <a href="{link}">Забрать бит в боте</a>. Там же бот бесплатно сведёт с ним твой голос.')
 POST_ASK = "Под кого сделать следующий бит?"  # первый комментарий (comments.seed берёт поле comment)
 # Понедельник, с десяти утра по Москве: неделя начинается с бита, и звук дня достаётся ему (publish.hushed).
@@ -230,6 +245,11 @@ def _tempo(beat: dict, sep: str = ", ") -> str:
     return "".join(f"{sep}{part}" for part in (beat["bpm"] and f"{beat['bpm']} BPM", beat["key"]) if part)
 
 
+def _terms(beat: dict, free: str = FREE, looped: str = LOOPED) -> str:
+    """Условие бита: общее или, у бита на чужой петле (поле loop), условия её автора."""
+    return (looped if beat.get("loop") else free).format(credit=config.BEAT_CREDIT, loop=beat.get("loop", ""))
+
+
 def youtube_title(beat: dict) -> str:
     """Формат лидеров выдачи type beat'ов: [FREE], имена заглавными через «+», название в кавычках.
     Без «ё»: в поиске набирают «темный принц», и подсказки YouTube пишут так же."""
@@ -242,7 +262,7 @@ def tags(beat: dict) -> str:
     names = [name.casefold().replace("ё", "е") for name in beat["artists"]]  # как в youtube_title
     found = [*(f"{name} type beat" for name in names),
              *([f"{' x '.join(names)} type beat"] if len(names) > 1 else []),
-             f"{names[0]} type beat free for profit", "free for profit type beat", "type beat",
+             *(() if beat.get("loop") else (f"{names[0]} type beat free for profit", "free for profit type beat")), "type beat",
              *(f"бит в стиле {name}" for name in names), *([f"{beat['bpm']} bpm type beat"] if beat["bpm"] else [])]
     while len(", ".join(found)) > TAGS_LIMIT:
         found.pop()
@@ -253,9 +273,9 @@ def about(beat_id: str, beat: dict) -> str:
     """Описание ролика: скачать и свести — в боте (путь через меню, не ссылка), условия, темп, хэштеги."""
     tempo = " · ".join(filter(None, (beat["bpm"] and f"BPM: {beat['bpm']}", beat["key"] and f"Тональность: {beat['key']}")))
     hashtags = " ".join([*(f"#{re.sub(r'\W', '', name.casefold().replace('ё', 'е'))}typebeat" for name in beat["artists"][:3]),
-                         "#typebeat", "#freeforprofit"])
+                         "#typebeat", *(() if beat.get("loop") else ("#freeforprofit",))])
     return ABOUT.format(format=(Path(beat.get("name", "")).suffix.lstrip(".").upper() or "WAV"), bot=config.BOT_HANDLE,
-                        credit=config.BEAT_CREDIT, tempo=tempo + "\n" if tempo else "", hashtags=hashtags)
+                        terms=_terms(beat, ABOUT_FREE, ABOUT_LOOPED), tempo=tempo + "\n" if tempo else "", hashtags=hashtags)
 
 
 def rising(rows, artists: list[dict], now) -> list[str]:
@@ -379,7 +399,7 @@ def give(chat_id: str | int, beat_id: str, via: str = "link") -> None:
         telegram.send_message(chat_id, MISSING, buttons=[[skleyka.BEAT_BUTTON]])
         return
     caption = GIVEN.format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
-                           tempo=html.escape(_tempo(beat, " · ")), credit=html.escape(config.BEAT_CREDIT))
+                           tempo=html.escape(_tempo(beat, " · ")), terms=_terms(beat))
     telegram.send_by_id(chat_id, beat["kind"], beat["file_id"], caption,
                         buttons=[[{"text": MAKE, "callback_data": f"{PREFIX}{beat_id}"}]])
     skleyka._count(_label(": выдан"))
@@ -445,7 +465,7 @@ def air() -> str:
     beat, path = catalog[beat_id], config.ARCHIVE / f"beat-{beat_id}.json"
     post = {"rubric": "beat", "beat": beat_id, "comment": POST_ASK, **({} if dated else {"week": week(now)}),
             "text": (ANNOUNCE if dated else POST).format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
-                                tempo=html.escape(_tempo(beat)), credit=html.escape(config.BEAT_CREDIT),
+                                tempo=html.escape(_tempo(beat)), terms=_terms(beat),
                                 link=link(beat_id))}
     config.ARCHIVE.mkdir(parents=True, exist_ok=True)
     state.write_json(path, post)
@@ -493,7 +513,9 @@ def listing(chat_id: str | int) -> None:
         pick(chat_id, catalog[0][0])
     elif catalog:
         rows = [[{"text": _button(beat), "callback_data": f"{PICK}{beat_id}"}] for beat_id, beat in catalog[:LIST_MAX]]
-        telegram.send_message(chat_id, LIST.format(credit=html.escape(config.BEAT_CREDIT)), buttons=rows)
+        looped = [beat["title"] for _, beat in catalog[:LIST_MAX] if beat.get("loop")]
+        telegram.send_message(chat_id, LIST.format(credit=html.escape(config.BEAT_CREDIT))
+                              + (LIST_LOOPED.format(titles=html.escape("», «".join(looped))) if looped else ""), buttons=rows)
     else:
         telegram.send_message(chat_id, EMPTY, buttons=[[skleyka.BEAT_BUTTON]])
 
@@ -864,6 +886,16 @@ def _selftest() -> None:
                {"kind": "news", "artists": ["Незнакомец"], "released_at": state.iso(now)}]
         assert rising(rows, collect.load_artists(), now) == ["Toxi$", "Kizaru"]
 
+        # Бит на чужой петле (поле loop): условия её автора вместо «бесплатно, и для релиза тоже» — в карточке, посте,
+        # анонсе и описании ролика; у обычного бита текст прежний.
+        own = dict(beat, loop="blvckmorphine")
+        for text in (_terms(own), about("1", own)):
+            assert f"{config.BEAT_CREDIT} x blvckmorphine" in text and "50/50" in text and "для релиза" not in text \
+                and "free for profit" not in text and "freeforprofit" not in text, text
+        assert "free for profit" not in tags(own) and "free for profit" in tags(beat) and "#freeforprofit" in about("1", beat)
+        assert _terms(beat) == FREE.format(credit=config.BEAT_CREDIT) and "instagram.com/blvckmorphine" in _terms(own)
+        assert all("{terms}" in text and "{credit}" not in text for text in (GIVEN, POST, ANNOUNCE, ABOUT)), "условие — одно место"
+
         # Переход по ссылке: бит по file_id с условием и кнопкой; неизвестный — «🔎 Нет бита».
         sent.clear()
         with mock.patch.object(service, "count_source", counted.append):
@@ -925,6 +957,10 @@ def _selftest() -> None:
         assert sent[-1][3]["buttons"] == [
             [{"text": "Фары · MADK1D x Тёмный принц… · 156 BPM", "callback_data": f"{PICK}2"}],
             [{"text": "Полёт · Kizaru x Toxi$ · 140 BPM", "callback_data": f"{PICK}1"}]]
+        save({**catalog, "2": dict(load()["2"], loop="blvckmorphine")})
+        listing(46)
+        assert sent.pop()[2] == LIST.format(credit=config.BEAT_CREDIT) + LIST_LOOPED.format(titles="Фары"), "петля — строкой в списке"
+        save({**catalog, "2": {key: value for key, value in load()["2"].items() if key != "loop"}})
         assert _button(dict(beat, bpm=None)) == "Полёт · Kizaru x Toxi$"
         assert not PICK.startswith(PREFIX) and not PREFIX.startswith(PICK), "кнопки списка и сведения не путаются"
         pick(46, "2")
@@ -1115,7 +1151,8 @@ def _selftest() -> None:
           "бит недели постом в канал: только в понедельник с 10:00 и не ночью, один на неделю, новый первым, запас кончился — "
           "строка владельцу и повтор давнего, ручная отметка держит бит вне канала, сорванный выход возвращает отметку, "
           "ролик бита (поле clip) в посте вместо значка, без ролика и при сбое — значок, "
-          "бит с датой (поле day) — анонсом в свой день, без рамки недели и один раз — ок")
+          "бит с датой (поле day) — анонсом в свой день, без рамки недели и один раз, "
+          "бит на чужой петле (поле loop) — условия её автора вместо «бесплатно, и для релиза тоже», без free for profit — ок")
 
 
 def main() -> int:
