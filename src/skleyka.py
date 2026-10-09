@@ -755,11 +755,18 @@ TONICS = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11, "до": 0, "�
 # Тональность в имени файла бита: «140 Fm», «F# min», «Cmin», «B MAJOR», «F# PHRY», «фа минор».
 # Нота латиницей — только заглавной, одиночная «m» — только строчной и не перед цифрой: иначе
 # тональностью стали бы «5 AM», «FM radio» и аккорд «Dm7». Буква без лада («SixStr120B-01») и
-# слог внутри слова («Amsterdam») — не тональность; «I Am» и «Am I» — тоже.
+# слог внутри слова («Amsterdam») — не тональность; «I Am» и «Am I» — тоже. Буква — любая
+# ([^\W\d_]), а не только латиница с кириллицей: иначе «Aminé type beat» — ля минор.
+# Имя артиста тональностью не считается: «A Major Lazer», а слитные «Amin» и «Emin» — перед
+# тире, «&», «x», «type» и «feat» («Emin — Трек», «Amin type beat»). Сами по себе они тональность:
+# так её пишут банки («GV_VocPad_140-Amin» в наборе 11). Цена — «Amin - 140.wav» останется без
+# нот: бот попросит назвать тональность словами, а чужая нота в наборе — фальшь в готовом треке.
+# Файл с одним именем «Emin.mp3» от ми минора не отличить — он читается тональностью.
 KEY = re.compile(
-    r"(?<![A-Za-zА-Яа-яЁё#♯♭])(?<!\bI )(?:(?P<note>[A-G])(?P<mark>[#♯b♭]|[ -]?(?i:sharp|flat))?"
+    r"(?<![^\W\d_])(?<![#♯♭])(?<!\bI )(?:(?P<note>[A-G])(?P<mark>[#♯b♭]|[ -]?(?i:sharp|flat))?"
     r"(?:(?P<m>m)(?!\d)|[ _-]?(?P<mode>(?i:major|maj|minor|min|миноре?|мажоре?|phrygian|phry|dorian|lydian|mixolydian|locrian)))"
-    r"|(?i:(?P<nota>до|ре|ми|фа|соль|ля|си)[ -]?(?P<znak>диез|бемоль)?[ -](?P<lad>миноре?|мажоре?)))(?![A-Za-zА-Яа-яЁё])(?! I\b)")
+    r"|(?i:(?P<nota>до|ре|ми|фа|соль|ля|си)[ -]?(?P<znak>диез|бемоль)?[ -](?P<lad>миноре?|мажоре?)))(?![^\W\d_])(?! I\b)"
+    r"(?![ _]+(?i:lazer))(?!(?<=(?i:[ae]min))[ _]+(?:[-–—&]|(?i:x|type|feat|ft)(?![^\W\d_])))")
 
 
 def key_notes(name: str) -> list[int] | None:
@@ -5312,6 +5319,9 @@ def _selftest() -> None:
                            ("фа минор", at(5, "min")), ("до диез минор", at(1, "min")), ("си-бемоль мажор", at(10, "maj")),
                            ("Loop_05_Full_Mix_105_Ebm_PL", at(3, "min")), ("G sharp minor", at(8, "min")), ("D Dorian 90", at(0, "maj")),
                            ("тюн в ля миноре", at(9, "min")), ("бит в F#m", at(6, "min")),
+                           ("GV_VocPad_140-Amin", at(9, "min")), ("Emin_140", at(4, "min")), ("Emin type beat 140 Fm", at(5, "min")),
+                           ("Aminé type beat", None), ("A Major Lazer type beat", None), ("EMIN_-_Song", None),
+                           ("Emin — Трек", None), ("Amin x Emin type beat", None), ("Amin feat. Kizaru", None),
                            ("SixStr120B-01", None), ("Amsterdam 140", None), ("I Am Legend", None), ("Who Am I", None), ("5 AM", None),
                            ("FM radio", None), ("Dm7 chords", None), ("beat", None), ("демо минор", None), ("F", None)):
             assert key_notes(name) == want, (name, key_notes(name))
