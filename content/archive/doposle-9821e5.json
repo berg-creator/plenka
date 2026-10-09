@@ -1,0 +1,14 @@
+{
+  "comment": "Голос кого услышим следующим? Присылай запись — свожу в боте, без шагов.",
+  "height": 1920,
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 257
+  },
+  "rubric": "doposle",
+  "text": "<b>ДО И ПОСЛЕ</b>\n\nГолос — Kind. С битом его свёл бот канала.\nЧто сделал бот: стиль «мелодично» — автотюн, широкий отзвук и эхо в темп.\n\n▸ Так же можно с твоей записью: <a href=\"https://t.me/plenka_fm_bot?start=skleyka_doposle\">СВЕДЕНИЕ</a>",
+  "video": "BAACAgIAAxkDAAITaGrI0ssylcJXlrV1Wb21XqN9U30sAAJppwACB7VJSl0OZOfa3dDLPQQ",
+  "width": 1080
+}

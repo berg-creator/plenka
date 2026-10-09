@@ -1157,6 +1157,12 @@
       "file": "20261009-111147-8243-news.json",
       "published_at": "2026-10-09T11:12:12+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "doposle-9821e5.json",
+      "published_at": "2026-10-09T11:49:44+00:00",
+      "rubric": "doposle"
     }
   ],
   "photos": [
