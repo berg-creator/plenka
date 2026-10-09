@@ -547,6 +547,12 @@
   "KITS/12 - Glorified Kit/Oneshots/syn - synth to string protal (C5).wav": {
    "kind": "синт",
    "bright": 2102
+  },
+  "Serum/User/Monosounds - Starter/Arps/ARP - Jno Style.fxp": {
+   "kind": "арп"
+  },
+  "Serum/User/Monosounds - Starter/Pads/PD - Cloudlifter.fxp": {
+   "kind": "пэд"
   }
  },
  "loops": {
