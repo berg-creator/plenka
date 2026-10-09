@@ -160,6 +160,12 @@ POST = ("🎚 <b>БИТ НЕДЕЛИ · «{title}»</b>\n{artists} type beat{tem
         f"3. Под готовым треком нажми «{skleyka.OTBOR_KEYS[0]['text']}».\n\n"
         "Треки выходят здесь, под каждым — голосование. Приём — до конца субботы. Наберётся три трека — "
         "в воскресенье итог по голосам, и трек-победитель звукорежиссёр сведёт руками бесплатно.")
+# Анонс бита в названный день (поле day каталога; владелец 10.10.2026: пост «Заело» нужен в день ролика
+# на YouTube, в субботу, а не в понедельник). Рамки недели в нём нет: «приём до конца субботы»
+# в субботнем посте — неправда. Вид — прежний пост бита, до БИТА НЕДЕЛИ.
+ANNOUNCE = ("🎚 <b>«{title}»</b> — {artists} type beat{tempo}\n\n"
+            "Бит ПЛЁНКИ. Бесплатно, и для релиза тоже — подпиши в названии трека: <b>{credit}</b>.\n\n"
+            '▸ <a href="{link}">Забрать бит в боте</a>. Там же бот бесплатно сведёт с ним твой голос.')
 POST_ASK = "Под кого сделать следующий бит?"  # первый комментарий (comments.seed берёт поле comment)
 # Понедельник, с десяти утра по Москве: неделя начинается с бита, и звук дня достаётся ему (publish.hushed).
 WEEK_DAY, WEEK_HOUR_MSK = 0, 10
@@ -415,24 +421,30 @@ def air() -> str:
     вне канала, как и раньше: новым такой бит уже не считается, а в повтор идут только посты
     с сообщением канала (поле message) — его номером и меряется давность. Не вышло — файл
     возвращается к прежнему виду, и следующий заход пробует снова.
+
+    Бит с датой (поле day каталога, «2026-10-10», вписывается руками) выходит в свой день по Москве,
+    в любой день недели, анонсом без рамки недели (ANNOUNCE, без поля week) и дальше считается
+    вышедшим: битом недели он станет только повтором. День пропущен — бит остаётся новым.
     """
     from . import publish  # publish берёт значок отсюда (shot)
     from .compose import MSK
 
     now = state.now()
     local = now.astimezone(MSK)
-    if local.weekday() != WEEK_DAY or local.hour < WEEK_HOUR_MSK or publish.night(now) or weekly(now):
-        return ""
     aired, catalog = _aired(), dict(newest())
+    dated = next((beat_id for beat_id, beat in catalog.items()
+                  if beat.get("day") == local.date().isoformat() and beat_id not in aired), "")
+    if local.hour < WEEK_HOUR_MSK or publish.night(now) or not dated and (local.weekday() != WEEK_DAY or weekly(now)):
+        return ""
     new = [beat_id for beat_id in catalog if beat_id not in aired]
     again = sorted((beat_id for beat_id in catalog if aired.get(beat_id, {}).get("message")),
                    key=lambda beat_id: aired[beat_id]["message"]["message_id"])
     if not new and not again:
         return ""
-    beat_id = (new or again)[0]
+    beat_id = dated or (new or again)[0]
     beat, path = catalog[beat_id], config.ARCHIVE / f"beat-{beat_id}.json"
-    post = {"rubric": "beat", "beat": beat_id, "week": week(now), "comment": POST_ASK,
-            "text": POST.format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
+    post = {"rubric": "beat", "beat": beat_id, "comment": POST_ASK, **({} if dated else {"week": week(now)}),
+            "text": (ANNOUNCE if dated else POST).format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
                                 tempo=html.escape(_tempo(beat)), credit=html.escape(config.BEAT_CREDIT),
                                 link=link(beat_id))}
     config.ARCHIVE.mkdir(parents=True, exist_ok=True)
@@ -445,7 +457,7 @@ def air() -> str:
         else:
             path.unlink(missing_ok=True)
         raise
-    if len(new) == 1:
+    if len(new) == 1 and not dated:
         try:
             telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), LAST_NEW.format(title=html.escape(beat["title"])))
         except telegram.TelegramError as exc:  # бит уже вышел — строка владельцу его не отменяет
@@ -1065,6 +1077,19 @@ def _selftest() -> None:
                 raise AssertionError("сбой выхода должен дойти до дежурства")
             save({**load(), "4": {"artists": ["Kizaru"], "title": "Сбой", "bpm": None, "key": ""}})
         assert shot("1", tmp).stat().st_size and Image.open(tmp / PREVIEW_NAME).size == PREVIEW_SIZE
+        # Бит с датой: в свой день (суббота) с десяти — анонсом без рамки недели, один раз; строки о запасе
+        # нет; в понедельник битом недели идёт другой, а пропущенный день оставляет бит новым.
+        for name in ("2", "3", "4"):
+            (config.ARCHIVE / f"beat-{name}.json").unlink(missing_ok=True)
+        save({"1": load()["1"], "5": {"artists": ["Kizaru"], "title": "Дата", "bpm": 160, "key": "Cm",
+                                      "day": "2026-11-07", "at": "2026-11-01T00:00:00+00:00"}})
+        seen, said = len(aired), len(told)
+        assert monday(6, month=11) == "" and monday(7, 5, month=11) == "", "до своего дня и до десяти утра — нет"
+        assert monday(7, month=11) == "5" and "week" not in aired[-1] and weekly() == "", aired[-1]
+        assert aired[-1]["text"].startswith("🎚 <b>«Дата»</b> — Kizaru type beat, 160 BPM, Cm\n") \
+            and "до конца субботы" not in aired[-1]["text"] and link("5") in aired[-1]["text"], aired[-1]["text"]
+        assert monday(7, 12, month=11) == "" and len(aired) == seen + 1 and len(told) == said, "анонс один, запас не тронут"
+        assert monday(9, month=11) == "1" and aired[-1]["week"] == "2026-11-09", "в понедельник бит недели — другой"
         # Ролик бита (поле clip — file_id) встаёт в пост вместо значка; нет его или не ушёл — значок.
         went: list[str] = []
 
@@ -1089,7 +1114,8 @@ def _selftest() -> None:
           "значок — плёночный портрет со словом названия, без фото — спины, живой ролик в 50 МБ и превью, спрос по медиане без «ё», "
           "бит недели постом в канал: только в понедельник с 10:00 и не ночью, один на неделю, новый первым, запас кончился — "
           "строка владельцу и повтор давнего, ручная отметка держит бит вне канала, сорванный выход возвращает отметку, "
-          "ролик бита (поле clip) в посте вместо значка, без ролика и при сбое — значок — ок")
+          "ролик бита (поле clip) в посте вместо значка, без ролика и при сбое — значок, "
+          "бит с датой (поле day) — анонсом в свой день, без рамки недели и один раз — ок")
 
 
 def main() -> int:
