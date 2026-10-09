@@ -374,9 +374,18 @@ STYLES = {
 # её убирают apad и atrim. Двоеточие в адресе плагина экранировано для обоих уровней
 # разбора фильтра. На Маке ffmpeg собран без lv2 — там стиль идёт без автотюна.
 AUTOTUNE = (r"apad=pad_len=1056,pan=mono|c0=0.5*c0+0.5*c1,"
-            r"lv2=p=http\\://gareus.org/oss/lv2/fat1:c=mode=2|tuning=440|corr=1|filter=0.02|bias=0|fastmode=0|offset=0|{notes},"
+            r"lv2=p=http\\://gareus.org/oss/lv2/fat1:c=mode=2|tuning=440|corr={corr}|filter={filter}|bias={bias}|fastmode=0|offset=0|{notes},"
             r"pan=stereo|c0=c0|c1=c0,atrim=start_sample=1056,asetpts=N/SR/TB")
 NOTES = "до до# ре ре# ми фа фа# соль соль# ля ля# си".split()
+# Мягкость автотюна — три положения ручки soft: (corr, filter, bias) плагина x42 fat1, он же
+# zita-at1. bias — удержание текущей ноты (при 1 — до 1/13 октавы): без него голос у границы
+# двух нот мгновенно перескакивает туда и обратно. filter (0,02–0,5 с) — сглаживание внутри
+# ноты; переход между нотами у плагина всегда мгновенный. corr — доля исправления. «мягко» —
+# filter 0,1 и bias 0,5, значения плагина по умолчанию. На слух не проверено: плагина на Маке
+# нет. По умолчанию — «жёстко», как было до 09.10.2026; какое положение сделать главным,
+# выберет владелец, сравнив на своём треке. Числа — в пределах плагина (filter 0,02–0,5,
+# bias и corr 0–1), это держит селфтест.
+SOFT = {"жёстко": (1, 0.02, 0), "средне": (1, 0.05, 0.25), "мягко": (0.8, 0.1, 0.5)}
 
 # --- саунд-дизайн -----------------------------------------------------------
 # Огибающая для сетки бита и строк голоса — по 10 мс.
@@ -734,8 +743,8 @@ TONICS = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11, "до": 0, "�
 # слог внутри слова («Amsterdam») — не тональность; «I Am» и «Am I» — тоже.
 KEY = re.compile(
     r"(?<![A-Za-zА-Яа-яЁё#♯♭])(?<!\bI )(?:(?P<note>[A-G])(?P<mark>[#♯b♭]|[ -]?(?i:sharp|flat))?"
-    r"(?:(?P<m>m)(?!\d)|[ _-]?(?P<mode>(?i:major|maj|minor|min|минор|мажор|phrygian|phry|dorian|lydian|mixolydian|locrian)))"
-    r"|(?i:(?P<nota>до|ре|ми|фа|соль|ля|си)[ -]?(?P<znak>диез|бемоль)?[ -](?P<lad>минор|мажор)))(?![A-Za-zА-Яа-яЁё])(?! I\b)")
+    r"(?:(?P<m>m)(?!\d)|[ _-]?(?P<mode>(?i:major|maj|minor|min|миноре?|мажоре?|phrygian|phry|dorian|lydian|mixolydian|locrian)))"
+    r"|(?i:(?P<nota>до|ре|ми|фа|соль|ля|си)[ -]?(?P<znak>диез|бемоль)?[ -](?P<lad>миноре?|мажоре?)))(?![A-Za-zА-Яа-яЁё])(?! I\b)")
 
 
 def key_notes(name: str) -> list[int] | None:
@@ -983,9 +992,12 @@ def _tempo_delay(length: float, under: float | None = None, key: str = "", secon
     )
 
 
-def _said(items: list[dict], parts: list[tuple[str, Path, str]]) -> tuple[str, list[int]] | None:
-    """Тональность со слов автора бита — (откуда, ноты): подпись бита из каталога ПЛЁНКИ
-    (номер бита — ключ b файла), иначе имя файла бита. Автор не назвал — None."""
+def _said(items: list[dict], parts: list[tuple[str, Path, str]], key: str = "") -> tuple[str, list[int]] | None:
+    """Тональность со слов — (откуда, ноты): сперва человек (ручка key: он слышит свой трек,
+    а имя файла могло приехать от чужого бита), потом подпись бита из каталога ПЛЁНКИ
+    (номер бита — ключ b файла), потом имя файла бита. Никто не назвал — None."""
+    if notes := key_notes(key):
+        return "слова человека", notes
     catalog = state.read_json(config.BEATS_FILE, {})
     for item in items:
         key = (catalog.get(item.get("b") or "") or {}).get("key") or ""
@@ -994,22 +1006,30 @@ def _said(items: list[dict], parts: list[tuple[str, Path, str]]) -> tuple[str, l
     return next((("имя файла", notes) for name, _, part in parts if part == "бит" and (notes := key_notes(name))), None)
 
 
-def _autotune(beat: Path, said: tuple[str, list[int]] | None = None) -> str:
-    """Автотюн к нотам тональности бита; пусто — плагина в этой сборке ffmpeg нет.
+def _autotune(beat: Path, said: tuple[str, list[int]] | None = None, soft: str = "", loose: list[str] | None = None) -> str:
+    """Автотюн к нотам тональности бита; пусто — ffmpeg этой сборки фильтр не принял.
 
-    said — тональность со слов автора (_said); без неё — из имени самого файла, потом замер,
-    а замер не уверен — все двенадцать полутонов. В журнал идёт только, откуда ноты:
-    имени файла человека там быть не должно."""
-    probe = subprocess.run([clips.ffmpeg(), "-v", "error", "-f", "lavfi", "-i", f"anullsrc=r={RATE}:cl=stereo",
-                            "-t", "0.1", "-af", AUTOTUNE.format(notes="m00=1"), "-f", "null", "-"], capture_output=True)
-    if probe.returncode:
-        print("  автотюн: нет в этой сборке ffmpeg, стиль идёт без него")
-        return ""
+    said — тональность со слов (_said); без неё — из имени самого файла, потом замер,
+    а замер не уверен — все двенадцать полутонов. soft — мягкость (SOFT). loose — сюда отметка,
+    что тюн пошёл по двенадцати полутонам: человеку подсказка назвать тональность. В журнал
+    идёт только, откуда ноты: имени файла человека там быть не должно."""
     source, notes = said or (("имя файла", named) if (named := key_notes(beat.stem)) else ("замер", scale(beat)))
     if len(notes) == 12:
         source = "не уверен — все полутона"
-    print(f"  автотюн к нотам бита ({source}): " + " ".join(NOTES[n] for n in notes))
-    return AUTOTUNE.format(notes="|".join(f"m{n:02d}={int(n in notes)}" for n in range(12)))
+    soft = soft if soft in SOFT else next(iter(SOFT))
+    tune = AUTOTUNE.format(notes="|".join(f"m{n:02d}={int(n in notes)}" for n in range(12)),
+                           **dict(zip(("corr", "filter", "bias"), SOFT[soft])))
+    # Проба — той же строкой с теми же ручками, что пойдёт в сведение: на Маке плагина нет,
+    # а значение, которого плагин не принял, уронило бы сведение уже на голосе.
+    probe = subprocess.run([clips.ffmpeg(), "-v", "error", "-f", "lavfi", "-i", f"anullsrc=r={RATE}:cl=stereo",
+                            "-t", "0.1", "-af", tune, "-f", "null", "-"], capture_output=True)
+    if probe.returncode:
+        print("  автотюн: ffmpeg фильтр не принял (плагина нет в сборке или ручка вне пределов), стиль идёт без него")
+        return ""
+    print(f"  автотюн к нотам бита ({source}), {soft}: " + " ".join(NOTES[n] for n in notes))
+    if loose is not None and len(notes) == 12:
+        loose.append(source)
+    return tune
 
 
 def _band(low: float, high: float, order: int = 3) -> str:
@@ -1437,7 +1457,7 @@ TOTAL = "sum.wav"  # голос с битом до мастера, там же: 
 def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
         voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = (), like: Path | None = None,
         lost: list[str] | None = None, held: list[float] | None = None,
-        said: tuple[str, list[int]] | None = None) -> Path:
+        said: tuple[str, list[int]] | None = None, soft: str = "", loose: list[str] | None = None) -> Path:
     """Сведение в out/skleyka.wav, промежуточное — в out/work.
 
     parts — дорожки по отдельности, [(роль, файл)]: даблы, бэки и эдлибы встают вокруг
@@ -1451,8 +1471,9 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     больше / меньше» — по ±4); дабл не эхо, его не трогает. like — превью трека, к которому
     подтянуть тембр, ширину и громкость («как у <артиста>», _like). lost — сюда роли
     частей, которые в трек не вошли: обработка их испортила; held — сюда секунды остановок
-    бита, где придержано эхо последнего слова (_hold). said — тональность со слов автора бита
-    (_said): к её нотам тянет автотюн."""
+    бита, где придержано эхо последнего слова (_hold). said — тональность со слов человека
+    или автора бита (_said): к её нотам тянет автотюн; soft — его мягкость (SOFT); loose — сюда
+    отметка, что тональность неизвестна и тюн шёл по двенадцати полутонам."""
     look, work = STYLES[style], out / "work"
     work.mkdir(parents=True, exist_ok=True)
     project = abs(clips.probe_seconds(vocal) - clips.probe_seconds(beat)) <= SAME_PROJECT
@@ -1460,7 +1481,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
           + (f", голос {voice:+g} дБ" if voice else "") + (f", эхо {echo:+g} дБ" if echo else ""))
 
     clean = f"{FORMAT},{_center(vocal)}{HIGHPASS}"
-    if tune := look.get("autotune") and _autotune(beat, said):
+    if tune := look.get("autotune") and _autotune(beat, said, soft, loose):
         clean += f",{tune}"
     squeezed, dry, raw = work / "vocal-comp.wav", work / "vocal.wav", loudness(vocal, clean + ",")[0]
     _squeeze(vocal, f"{clean},volume={VOCAL_LUFS - raw:.2f}dB", squeezed, f",{DENSE}" if look.get("dense") else "")
@@ -1935,7 +1956,8 @@ TRACK_DAYS = 7
 VOICE_STEP, VOICE_LIMIT = 2.0, 6.0
 ECHO_STEP, ECHO_LIMITS = 4.0, (-12.0, 8.0)
 # at — с какой секунды бита входит первое слово; None — как в присланном файле (_moved).
-KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swap": False, "like": None, "at": None}
+KNOBS = {"style": "чисто", "design": False, "voice": 0.0, "echo": 0.0, "swap": False, "like": None, "at": None,
+         "key": "", "soft": "жёстко"}
 # Кнопки идут через service.handle_callback: префикс service.CALLBACK_PREFIX
 # и действие sk. Импортировать service отсюда нельзя — он импортирует нас.
 PREFIX = "s:sk:"
@@ -2747,6 +2769,9 @@ def look(knobs: dict) -> str:
         words.append(f"тембр, ширина и громкость — к «{knobs['like']['title']}»")
     if knobs.get("at") is not None:
         words.append(f"голос с {_minutes(knobs['at'])}")
+    if STYLES[knobs["style"]].get("autotune"):
+        words += [f"автотюн в тональности {knobs['key']}"] if knobs.get("key") else []
+        words += [f"автотюн {knobs['soft']}"] if knobs.get("soft") in tuple(SOFT)[1:] else []
     return ", ".join(words)
 
 
@@ -3649,8 +3674,10 @@ TALKED = "Поговорили про этот трек достаточно —
 LIKE_MISSING = "«{name}» в магазинах не нашёл — звук ни к чему не подтягивал."
 LIKE_LOST = "Отрывок «{name}» не скачался — звук к нему не подтягивал.\n"
 LOST = "В трек не вошло: {parts} — на обработке сломался звук, свёл без этого. Разберусь, если напишешь /vopros.\n"
+NO_KEY = ("Тональности бита я не знаю — автотюн тянет голос к ближайшим нотам. Напиши её словами "
+          "(«тональность фа минор», «бит в F#m») — подтяну точно в лад.\n")
 HELD = "Бит замолкает, а голос ещё не вошёл ({at}) — придержал там эхо последнего слова, чтобы не было дыры.\n"
-TALK_KNOBS = ("style", "design", "voice", "echo", "at")
+TALK_KNOBS = ("style", "design", "voice", "echo", "at", "key", "soft")
 TALK_ASK = ("✏️ Что поменять — напиши словами, как другу: «слов не слышно», «голос входит на дропе», "
             "«голос на долю позже», «эха меньше», «погрязнее», «как у Travis Scott».")
 DROP_NOTE = "Голос входит на {voice}, а бас в бите — на {drop}. Если голос уехал — жми «🎯 голос с {drop}».\n"
@@ -3679,6 +3706,11 @@ FACTS = {
     "like": f"подгонка к отрывку чужого трека: тембр до {LIKE_TONE:g} дБ, ширина до {LIKE_WIDTH:g} дБ, громкость "
             f"от {LIKE_LUFS[0]:g} до {LIKE_LUFS[1]:g} LUFS — наклон, а не копия",
     "at": "секунда бита, где встаёт первое слово; голос двигается целиком, со всеми дорожками",
+    "автотюн": "есть только в стиле «мелодично». Тянет голос к семи нотам тональности: её называет человек словами "
+               "(ручка key), иначе она берётся из имени файла бита («140 Fm») или подписи бита ПЛЁНКИ; неизвестна — "
+               "к ближайшему из двенадцати полутонов. По звуку бита тональность не определяется: замер ошибался "
+               f"в двух битах из трёх. Ручка soft — мягкость, {', '.join(SOFT)}: жёстко — нота встаёт сразу, «робот»; "
+               "мягче — голос не скачет у границы двух нот, сглажен внутри ноты, а в «мягко» исправляется не весь",
     "лимиты": f"пересборок на трек {config.SKLEYKA_TWEAKS}, разговоров о треке {TALKS}, "
               f"кнопки и слова работают {TRACK_DAYS} дней с первой сборки",
 }
@@ -3697,6 +3729,15 @@ def heard(knobs: dict, answer: dict) -> dict:
     with contextlib.suppress(KeyError, TypeError, ValueError):
         at = float(answer["at"])
         new["at"] = None if at <= 0 else round(at, 2)  # 0 модель пишет и «не трогать»: безопаснее как в файле
+    # Тональность — только та, что прочлась (key_notes), и в ручке лежит сам прочитанный кусок:
+    # в сообщения идёт он, а не слова модели. Те же ноты другим написанием и мягкость «как было»
+    # ручку не трогают — иначе вопрос о треке запускал бы пересборку.
+    asked = str(answer.get("key") or "").strip()
+    if (key := KEY.search(asked[:1].upper() + asked[1:] if asked.isascii() else asked)) \
+            and key_notes(key[0]) != key_notes(knobs.get("key") or ""):
+        new["key"] = key[0]
+    if answer.get("soft") in SOFT and answer["soft"] != (knobs.get("soft") or next(iter(SOFT))):
+        new["soft"] = answer["soft"]
     return new
 
 
@@ -3707,11 +3748,11 @@ def understood(knobs: dict, text: str, timing: dict | None, spent: bool = False)
     по нему модель ставит голос «на дроп» или «на долю позже». Зовёт его только
     сведение (heed): там замер уже есть, а дежурство не ждёт генератор."""
     now = {key: knobs.get(key) for key in TALK_KNOBS}
-    now["at"] = -1 if now["at"] is None else now["at"]
+    now.update(at=-1 if now["at"] is None else now["at"], key=now["key"] or "", soft=now["soft"] or next(iter(SOFT)))
     answer = llm.generate_skleyka({
         "request": text[:1000],
         "knobs": {**now, "like": (knobs.get("like") or {}).get("title", "")},
-        "limits": {"voice": [-VOICE_LIMIT, VOICE_LIMIT], "echo": list(ECHO_LIMITS),
+        "limits": {"voice": [-VOICE_LIMIT, VOICE_LIMIT], "echo": list(ECHO_LIMITS), "soft": list(SOFT),
                    "style": {name: kind["about"] for name, kind in STYLES.items()}},
         "facts": FACTS,
         **({"rebuild": False} if spent else {}),
@@ -4707,7 +4748,6 @@ def run_job(spec_path: Path) -> int:
             service = _service(login)
             files, linked = _fetch(spec, work / "in", service), _linked(spec, work)
             parts, guessed = _roles(spec["files"], files, knobs.get("swap", False), linked)
-            said = _said(spec["files"], parts)
             reference, ended = _reference(parts, linked), _reference(parts, linked, INSTRUMENTS)
             parts = _groups(parts, work)
             refusal, note = check(parts)
@@ -4779,20 +4819,22 @@ def run_job(spec_path: Path) -> int:
             if drop:
                 note += DROP_NOTE.format(voice=_minutes(voice), drop=_minutes(drop))
             lead = [p for p in parts if p[2] == "вокал"] or [p for p in parts if p[2] in VOCAL_SIDE]
-            extra = {key: knobs[key] for key in ("voice", "echo") if knobs.get(key)}
+            extra = {key: knobs[key] for key in ("voice", "echo", "soft") if knobs.get(key)}
             if like := knobs.get("like"):
                 extra["like"] = reels._download(like["url"], work / "like.m4a", 10_000)
                 if not extra["like"]:
                     note += LIKE_LOST.format(name=html.escape(like["title"]))
                     spec["knobs"] = dict(knobs, like=None)
-            lost, held = [], []
+            lost, held, loose = [], [], []
             master = mix(_bus(lead, True, work / "lead.wav"), beat, work / "out", knobs["style"], knobs["design"],
                          parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead],
-                         lost=lost, held=held, said=said, **extra)
+                         lost=lost, held=held, said=_said(spec["files"], parts, knobs.get("key") or ""), loose=loose, **extra)
             if lost:
                 note += LOST.format(parts=", ".join(lost))
             if held:
                 note += HELD.format(at=", ".join(map(_minutes, held)))
+            if loose and spec["left"] != 0:  # пересборок не осталось — звать «напиши словами» некуда
+                note += NO_KEY
             clip = None
             if config.SKLEYKA_APP_URL and spec["left"] != 0:
                 # Голос для приложения — каким встал в трек, но без сдвига at: страница сдвигает его сама.
@@ -5234,6 +5276,7 @@ def _selftest() -> None:
                            ("Cmin", at(0, "min")), ("call at night B MAJOR 135", at(11, "maj")), ("DECAY F# PHRY 160", at(6, "phr")),
                            ("фа минор", at(5, "min")), ("до диез минор", at(1, "min")), ("си-бемоль мажор", at(10, "maj")),
                            ("Loop_05_Full_Mix_105_Ebm_PL", at(3, "min")), ("G sharp minor", at(8, "min")), ("D Dorian 90", at(0, "maj")),
+                           ("тюн в ля миноре", at(9, "min")), ("бит в F#m", at(6, "min")),
                            ("SixStr120B-01", None), ("Amsterdam 140", None), ("I Am Legend", None), ("Who Am I", None), ("5 AM", None),
                            ("FM radio", None), ("Dm7 chords", None), ("beat", None), ("демо минор", None), ("F", None)):
             assert key_notes(name) == want, (name, key_notes(name))
@@ -5243,6 +5286,38 @@ def _selftest() -> None:
             assert _said([{"r": "бит", "b": "4"}], [("Beat 140 Am.wav", low, "бит")]) == ("имя файла", at(9, "min")), "в подписи одна буква"
             assert _said([{"r": "вокал"}, {"r": "бит"}], [("vocal Am.wav", mid, "вокал"), ("beat.wav", low, "бит")]) is None, \
                 "тональность в имени голоса — не про бит"
+            assert _said([{"r": "бит", "b": "3"}], [("Наждак 140 Am.wav", low, "бит")], "фа минор") == ("слова человека", at(5, "min")), \
+                "слова человека важнее каталога и имени файла"
+        # Тональность словами: прочлась — в ручку ложится сам прочитанный кусок, нет — ручка прежняя;
+        # те же ноты другим написанием — не правка, иначе вопрос о треке запускал бы пересборку.
+        keyed = dict(KNOBS, key="F#m")
+        assert heard(KNOBS, {"key": "фа минор"})["key"] == "фа минор" and heard(KNOBS, {"key": "f#m"}) == keyed \
+            and heard(KNOBS, {"key": "Тональность F#m, вроде"}) == keyed, heard(KNOBS, {"key": "f#m"})
+        assert heard(keyed, {"key": "что-то грустное"}) == keyed and heard(keyed, {"key": ""}) == keyed \
+            and heard(keyed, {"key": "F# minor"}) == keyed and heard(keyed, {"key": "ля минор"})["key"] == "ля минор", \
+            "непонятная тональность и те же ноты ручку не трогают"
+        # Мягкость автотюна: три положения, за края хода нет, числа — в пределах плагина; «жёстко» — строка как до ручки.
+        assert [heard(KNOBS, {"soft": name})["soft"] for name in SOFT] == list(SOFT) \
+            and heard(dict(KNOBS, soft="мягко"), {"soft": "ещё мягче"})["soft"] == "мягко" \
+            and heard(dict(KNOBS, soft="мягко"), {"soft": "жёстко"})["soft"] == "жёстко", "мягкость — только три положения"
+        before = {name: value for name, value in KNOBS.items() if name not in ("key", "soft")}
+        assert heard(before, {"key": "", "soft": "жёстко"}) == before, "трек до новых ручек: «как было» — не правка"
+        assert all(0 <= corr <= 1 and 0.02 <= smooth <= 0.5 and 0 <= bias <= 1 for corr, smooth, bias in SOFT.values()) \
+            and next(iter(SOFT)) == KNOBS["soft"], "числа плагина — в его пределах"
+        melodic = dict(keyed, style="мелодично", soft="мягко")
+        assert "автотюн в тональности F#m" in look(melodic) and "автотюн мягко" in look(melodic) and "тональности" not in look(keyed)
+        # Проба плагина — той же строкой, что пойдёт в сведение. Подсказка «назови тональность» — только
+        # когда автотюн встал и идёт по двенадцати полутонам; фильтр не принят — ни автотюна, ни подсказки.
+        with mock.patch.object(subprocess, "run", return_value=mock.Mock(returncode=0)) as ran:
+            loose: list[str] = []
+            tune = _autotune(tmp / "beat.wav", None, "мягко", loose)
+            assert loose and "corr=0.8|filter=0.1|bias=0.5|" in tune and tune in ran.call_args[0][0], tune
+            loose = []
+            tune = _autotune(tmp / "beat.wav", _said([], [("beat 140 Am.wav", low, "бит")], "фа минор"), "", loose)
+            assert not loose and "corr=1|filter=0.02|bias=0|" in tune and "m05=1|m06=0|" in tune, tune
+        with mock.patch.object(subprocess, "run", return_value=mock.Mock(returncode=1)):
+            loose = []
+            assert _autotune(tmp / "beat.wav", None, "мягко", loose) == "" and not loose, "фильтр не принят — стиль без автотюна"
         # Замер: порога нет — бит не меряется и нот не называет; с порогом семь нот даёт только
         # чистая гамма, а шесть нот, общих до мажору и соль мажору, — «не уверен», все двенадцать.
         gamma, vague = tmp / "gamma.wav", tmp / "vague.wav"
@@ -6668,7 +6743,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме и к одной громкости, бэк из коротких выкриков — эдлибом, "
-          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой; ноты автотюна — со слов автора бита: имя файла и подпись каталога, буква без лада и слово — мимо, замер без уверенности — все полутона — ок")
+          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой; ноты автотюна — со слов человека (ручка key) и автора бита: имя файла и подпись каталога, буква без лада и слово — мимо, замер без уверенности — все полутона и подсказка назвать тональность; мягкость автотюна — три положения, проба плагина той же строкой — ок")
 
 
 def talk_check() -> list[str]:

@@ -145,12 +145,15 @@ SKLEYKA_SCHEMA = {
                "description": "С какой секунды бита входит первое слово голоса; -1 — как в присланном файле"},
         "like": {"type": "string",
                  "description": "К чьему треку подтянуть тембр, ширину и громкость: «Артист» или «Артист — Трек»; пусто — ни к чьему"},
+        "key": {"type": "string",
+                "description": "Тональность бита для автотюна, если человек её назвал: «F#m», «A minor», «фа минор»; не называл — как в knobs"},
+        "soft": {"type": "string", "description": "Мягкость автотюна: жёстко, средне или мягко"},
         "reply": {"type": "string", "description": "Ответ человеку: что сделал, чего не умею или ответ на вопрос о треке, 1–3 фразы до 400 знаков"},
         # Провайдеры опознают ответ по схеме по полю skip (providers/gemini._parse): без него
         # до 26.09 Gemini отвечал, а ответ выбрасывался, и ни одна просьба словами не доходила.
         "skip": {"type": "boolean", "description": "Всегда false"},
     },
-    "required": ["style", "design", "voice", "echo", "at", "like", "reply", "skip"],
+    "required": ["style", "design", "voice", "echo", "at", "like", "key", "soft", "reply", "skip"],
     "additionalProperties": False,
 }
 
