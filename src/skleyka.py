@@ -368,8 +368,8 @@ STYLES = {
 # ноту точно (ровный синус — ±0,1 Гц от ноты), а autotalent — на 11–25 центов
 # ниже: его детектор завышает высоту, и голос звучал бы фальшиво к биту. Скорость
 # 0,02 с — самая быстрая у fat1: ретюн у Lil Uzi Vert 5–20 мс, до 50 мс звучит
-# естественно (Sound On Sound, Antares). Ноты — тональности бита (scale): без неё
-# голос тянется к любому из двенадцати полутонов. Плагин моно, поэтому голос
+# естественно (Sound On Sound, Antares). Ноты — тональности, которую назвал автор бита
+# (key_notes): без неё голос тянется к ближайшему из двенадцати полутонов. Плагин моно, поэтому голос
 # сводится в одну дорожку и обратно; задержку в 1056 отсчётов ffmpeg 6.1 не снимает —
 # её убирают apad и atrim. Двоеточие в адресе плагина экранировано для обоих уровней
 # разбора фильтра. На Маке ffmpeg собран без lv2 — там стиль идёт без автотюна.
@@ -710,21 +710,62 @@ def grid(beat: Path) -> tuple[float, float]:
 BPM = [60 + 0.1 * i for i in range(601)]
 
 
-# Профили тональностей Крумхансла — Кесслер: насколько каждая ступень звучит
-# «своей» в мажоре и миноре, от тоники.
-MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+# Профили тональностей Темперли (Kostka — Payne): насколько каждая ступень звучит
+# «своей» в мажоре и миноре, от тоники. До 09.10.2026 стояли профили Крумхансла — Кесслер
+# и сумма мощностей полос: на 67 битах и петлях с тональностью от автора набор нот
+# совпал у 23. С Темперли и корнем четвёртой степени из мощности полосы — у 37:
+# громкая нота баса больше не перекрикивает остальные.
+MAJOR = [0.748, 0.060, 0.488, 0.082, 0.670, 0.460, 0.096, 0.715, 0.104, 0.366, 0.057, 0.400]
+MINOR = [0.712, 0.084, 0.474, 0.618, 0.049, 0.460, 0.105, 0.747, 0.404, 0.067, 0.133, 0.330]
+# Порог уверенности замера — запас корреляции между лучшим набором нот и следующим.
+# None: порога нет, и замер нот не называет. 09.10.2026 на тех же 67 файлах запас верные
+# ответы от неверных не отделил (медиана у верных 0,08, у неверных 0,10): точных среди
+# «уверенных» 53–67 % при любом пороге (от 0,2 — 7 из 11), а нужно не меньше 85 %. Согласие
+# трёх профилей (16 из 21) и кусков трека (12 из 17) — тоже мимо. Чужая нота в наборе —
+# фальшь в готовом треке, поэтому семь нот бот берёт только со слов автора бита (key_notes).
+SCALE_SURE: float | None = None
+
+SCALES = {"maj": (0, 2, 4, 5, 7, 9, 11), "min": (0, 2, 3, 5, 7, 8, 10), "phr": (0, 1, 3, 5, 7, 8, 10), "dor": (0, 2, 3, 5, 7, 9, 10),
+          "lyd": (0, 2, 4, 6, 7, 9, 11), "mix": (0, 2, 4, 5, 7, 9, 10), "loc": (0, 1, 3, 5, 6, 8, 10)}
+TONICS = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11, "до": 0, "ре": 2, "ми": 4, "фа": 5, "соль": 7, "ля": 9, "си": 11}
+# Тональность в имени файла бита: «140 Fm», «F# min», «Cmin», «B MAJOR», «F# PHRY», «фа минор».
+# Нота латиницей — только заглавной, одиночная «m» — только строчной и не перед цифрой: иначе
+# тональностью стали бы «5 AM», «FM radio» и аккорд «Dm7». Буква без лада («SixStr120B-01») и
+# слог внутри слова («Amsterdam») — не тональность; «I Am» и «Am I» — тоже.
+KEY = re.compile(
+    r"(?<![A-Za-zА-Яа-яЁё#♯♭])(?<!\bI )(?:(?P<note>[A-G])(?P<mark>[#♯b♭]|[ -]?(?i:sharp|flat))?"
+    r"(?:(?P<m>m)(?!\d)|[ _-]?(?P<mode>(?i:major|maj|minor|min|минор|мажор|phrygian|phry|dorian|lydian|mixolydian|locrian)))"
+    r"|(?i:(?P<nota>до|ре|ми|фа|соль|ля|си)[ -]?(?P<znak>диез|бемоль)?[ -](?P<lad>минор|мажор)))(?![A-Za-zА-Яа-яЁё])(?! I\b)")
+
+
+def key_notes(name: str) -> list[int] | None:
+    """Ноты тональности, которую автор бита назвал в имени файла или подписи; не назвал — None.
+
+    Словам автора вера выше замера: на 57 именах с тональностью набор нот верен у всех 57,
+    на 5300 именах звуков, петель и битов без неё ложных срабатываний нет (09.10.2026).
+    Лады — мажор, минор, фригийский, дорийский, лидийский, миксолидийский, локрийский."""
+    found = KEY.search(name)
+    if not found:
+        return None
+    mark = (found["mark"] or found["znak"] or "").strip(" -").lower()
+    tonic = TONICS[(found["note"] or found["nota"]).lower()] + (mark in ("#", "♯", "sharp", "диез")) - (mark in ("b", "♭", "flat", "бемоль"))
+    mode = (found["m"] or found["mode"] or found["lad"]).lower()[:3]
+    return sorted((tonic + step) % 12 for step in SCALES[{"m": "min", "мин": "min", "маж": "maj"}.get(mode, mode)])
 
 
 def scale(beat: Path) -> list[int]:
-    """Ноты тональности бита, 0 — до: к ним автотюн тянет голос.
+    """Ноты тональности бита по звуку, 0 — до; не уверен — все двенадцать.
 
     Громкость каждого полутона от до большой октавы до си второй — узкими
     полосами за один проход ffmpeg, по октавам в сумму, и сравнение с профилями
     MAJOR и MINOR на всех двенадцати тониках. Параллельные мажор и минор делят
-    одни ноты, так что их путаница автотюну не мешает. Без тональности автотюн
-    тянул бы голос к ближайшему из двенадцати полутонов, в том числе чужому биту.
+    одни ноты, поэтому уверенность — запас корреляции до лучшей тональности
+    с другим набором нот. Запас меньше SCALE_SURE — ответ «все полутона»: с ними
+    автотюн тянет голос к ближайшему полутону, и чужой ноты не бывает. Пока порога
+    нет (SCALE_SURE), бит не меряется вовсе.
     """
+    if SCALE_SURE is None:
+        return list(range(12))
     notes = range(36, 84)
     graph = (f"[0:a]pan=mono|c0=0.5*c0+0.5*c1,asplit={len(notes)}" + "".join(f"[i{n}]" for n in notes) + ";"
              + "".join(f"[i{n}]" + f"bandpass=f={440 * 2 ** ((n - 69) / 12):.2f}:t=q:w=25," * 2
@@ -732,11 +773,16 @@ def scale(beat: Path) -> list[int]:
              + "".join(f"[o{n}]" for n in notes) + f"amix=inputs={len(notes)}")
     chroma = [0.0] * 12
     for n, db in re.findall(r"\[astats@(\d+) @ \w+\] RMS level dB: (-?[\d.]+)", _stderr("-i", beat, "-filter_complex", graph)):
-        chroma[int(n) % 12] += 10 ** (float(db) / 10)
-    _, tonic, steps = max((statistics.correlation([chroma[(tonic + i) % 12] for i in range(12)], profile), tonic, steps)
-                          for tonic in range(12)
-                          for profile, steps in ((MAJOR, (0, 2, 4, 5, 7, 9, 11)), (MINOR, (0, 2, 3, 5, 7, 8, 10))))
-    return sorted((tonic + step) % 12 for step in steps)
+        chroma[int(n) % 12] += 10 ** (float(db) / 40)
+    if len(set(chroma)) < 2:  # тишина: сравнивать нечего
+        return list(range(12))
+    best: dict[tuple[int, ...], float] = {}
+    for tonic in range(12):
+        for profile, steps in ((MAJOR, SCALES["maj"]), (MINOR, SCALES["min"])):
+            found = tuple(sorted((tonic + step) % 12 for step in steps))
+            best[found] = max(best.get(found, -1.0), statistics.correlation([chroma[(tonic + i) % 12] for i in range(12)], profile))
+    (found, top), (_, second) = sorted(best.items(), key=lambda pair: -pair[1])[:2]
+    return list(found) if top - second >= SCALE_SURE else list(range(12))
 
 
 def _on_grid(t: float, beat: tuple[float, float], how=round) -> float:
@@ -937,15 +983,32 @@ def _tempo_delay(length: float, under: float | None = None, key: str = "", secon
     )
 
 
-def _autotune(beat: Path) -> str:
-    """Автотюн к нотам тональности бита; пусто — плагина в этой сборке ffmpeg нет."""
+def _said(items: list[dict], parts: list[tuple[str, Path, str]]) -> tuple[str, list[int]] | None:
+    """Тональность со слов автора бита — (откуда, ноты): подпись бита из каталога ПЛЁНКИ
+    (номер бита — ключ b файла), иначе имя файла бита. Автор не назвал — None."""
+    catalog = state.read_json(config.BEATS_FILE, {})
+    for item in items:
+        key = (catalog.get(item.get("b") or "") or {}).get("key") or ""
+        if notes := key_notes(key[:1].upper() + key[1:]):  # подпись бит принимает и строчными: «fm»
+            return "каталог", notes
+    return next((("имя файла", notes) for name, _, part in parts if part == "бит" and (notes := key_notes(name))), None)
+
+
+def _autotune(beat: Path, said: tuple[str, list[int]] | None = None) -> str:
+    """Автотюн к нотам тональности бита; пусто — плагина в этой сборке ffmpeg нет.
+
+    said — тональность со слов автора (_said); без неё — из имени самого файла, потом замер,
+    а замер не уверен — все двенадцать полутонов. В журнал идёт только, откуда ноты:
+    имени файла человека там быть не должно."""
     probe = subprocess.run([clips.ffmpeg(), "-v", "error", "-f", "lavfi", "-i", f"anullsrc=r={RATE}:cl=stereo",
                             "-t", "0.1", "-af", AUTOTUNE.format(notes="m00=1"), "-f", "null", "-"], capture_output=True)
     if probe.returncode:
         print("  автотюн: нет в этой сборке ffmpeg, стиль идёт без него")
         return ""
-    notes = scale(beat)
-    print("  автотюн к нотам бита: " + " ".join(NOTES[n] for n in notes))
+    source, notes = said or (("имя файла", named) if (named := key_notes(beat.stem)) else ("замер", scale(beat)))
+    if len(notes) == 12:
+        source = "не уверен — все полутона"
+    print(f"  автотюн к нотам бита ({source}): " + " ".join(NOTES[n] for n in notes))
     return AUTOTUNE.format(notes="|".join(f"m{n:02d}={int(n in notes)}" for n in range(12)))
 
 
@@ -1373,7 +1436,8 @@ TOTAL = "sum.wav"  # голос с битом до мастера, там же: 
 
 def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: bool = False,
         voice: float = 0.0, echo: float = 0.0, parts: list[tuple[str, Path]] = (), like: Path | None = None,
-        lost: list[str] | None = None, held: list[float] | None = None) -> Path:
+        lost: list[str] | None = None, held: list[float] | None = None,
+        said: tuple[str, list[int]] | None = None) -> Path:
     """Сведение в out/skleyka.wav, промежуточное — в out/work.
 
     parts — дорожки по отдельности, [(роль, файл)]: даблы, бэки и эдлибы встают вокруг
@@ -1387,7 +1451,8 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     больше / меньше» — по ±4); дабл не эхо, его не трогает. like — превью трека, к которому
     подтянуть тембр, ширину и громкость («как у <артиста>», _like). lost — сюда роли
     частей, которые в трек не вошли: обработка их испортила; held — сюда секунды остановок
-    бита, где придержано эхо последнего слова (_hold)."""
+    бита, где придержано эхо последнего слова (_hold). said — тональность со слов автора бита
+    (_said): к её нотам тянет автотюн."""
     look, work = STYLES[style], out / "work"
     work.mkdir(parents=True, exist_ok=True)
     project = abs(clips.probe_seconds(vocal) - clips.probe_seconds(beat)) <= SAME_PROJECT
@@ -1395,7 +1460,7 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
           + (f", голос {voice:+g} дБ" if voice else "") + (f", эхо {echo:+g} дБ" if echo else ""))
 
     clean = f"{FORMAT},{_center(vocal)}{HIGHPASS}"
-    if tune := look.get("autotune") and _autotune(beat):
+    if tune := look.get("autotune") and _autotune(beat, said):
         clean += f",{tune}"
     squeezed, dry, raw = work / "vocal-comp.wav", work / "vocal.wav", loudness(vocal, clean + ",")[0]
     _squeeze(vocal, f"{clean},volume={VOCAL_LUFS - raw:.2f}dB", squeezed, f",{DENSE}" if look.get("dense") else "")
@@ -4642,6 +4707,7 @@ def run_job(spec_path: Path) -> int:
             service = _service(login)
             files, linked = _fetch(spec, work / "in", service), _linked(spec, work)
             parts, guessed = _roles(spec["files"], files, knobs.get("swap", False), linked)
+            said = _said(spec["files"], parts)
             reference, ended = _reference(parts, linked), _reference(parts, linked, INSTRUMENTS)
             parts = _groups(parts, work)
             refusal, note = check(parts)
@@ -4722,7 +4788,7 @@ def run_job(spec_path: Path) -> int:
             lost, held = [], []
             master = mix(_bus(lead, True, work / "lead.wav"), beat, work / "out", knobs["style"], knobs["design"],
                          parts=[(part, path) for name, path, part in parts if (name, path, part) not in lead],
-                         lost=lost, held=held, **extra)
+                         lost=lost, held=held, said=said, **extra)
             if lost:
                 note += LOST.format(parts=", ".join(lost))
             if held:
@@ -5159,6 +5225,34 @@ def _selftest() -> None:
         assert guessed and [part for *_, part in parts] == ["бит", "вокал"], parts
         assert [part for *_, part in sides([("take1.wav", low), ("take2.wav", mid)], swap=True)[0]] == ["вокал", "бит"]
         assert not sides([("vocal.wav", low), ("beat.wav", mid)])[1], "имя сильнее звука"
+
+        # Ноты автотюна — со слов автора бита: имя файла и подпись каталога. Буква без лада, слог
+        # внутри слова, «AM», «FM» и аккорд — не тональность: чужая нота в наборе — фальшь в треке.
+        from unittest import mock
+        at = lambda tonic, mode: sorted((tonic + step) % 12 for step in SCALES[mode])
+        for name, want in (("Kizaru type beat 140 Fm.mp3", at(5, "min")), ("F#m", at(6, "min")), ("F# min", at(6, "min")),
+                           ("Cmin", at(0, "min")), ("call at night B MAJOR 135", at(11, "maj")), ("DECAY F# PHRY 160", at(6, "phr")),
+                           ("фа минор", at(5, "min")), ("до диез минор", at(1, "min")), ("си-бемоль мажор", at(10, "maj")),
+                           ("Loop_05_Full_Mix_105_Ebm_PL", at(3, "min")), ("G sharp minor", at(8, "min")), ("D Dorian 90", at(0, "maj")),
+                           ("SixStr120B-01", None), ("Amsterdam 140", None), ("I Am Legend", None), ("Who Am I", None), ("5 AM", None),
+                           ("FM radio", None), ("Dm7 chords", None), ("beat", None), ("демо минор", None), ("F", None)):
+            assert key_notes(name) == want, (name, key_notes(name))
+        with mock.patch.object(config, "BEATS_FILE", tmp / "beats.json"):
+            state.write_json(config.BEATS_FILE, {"3": {"key": "f# minor"}, "4": {"key": "F"}})
+            assert _said([{"r": "бит", "b": "3"}], [("Наждак 140 Am.wav", low, "бит")]) == ("каталог", at(6, "min")), "подпись каталога важнее имени"
+            assert _said([{"r": "бит", "b": "4"}], [("Beat 140 Am.wav", low, "бит")]) == ("имя файла", at(9, "min")), "в подписи одна буква"
+            assert _said([{"r": "вокал"}, {"r": "бит"}], [("vocal Am.wav", mid, "вокал"), ("beat.wav", low, "бит")]) is None, \
+                "тональность в имени голоса — не про бит"
+        # Замер: порога нет — бит не меряется и нот не называет; с порогом семь нот даёт только
+        # чистая гамма, а шесть нот, общих до мажору и соль мажору, — «не уверен», все двенадцать.
+        gamma, vague = tmp / "gamma.wav", tmp / "vague.wav"
+        for path, tones in ((gamma, (60, 62, 64, 65, 67, 69, 71)), (vague, (60, 62, 64, 67, 69, 71))):
+            _ffmpeg("-f", "lavfi", "-i", "aevalsrc=0.1*(" + "+".join(f"sin({2 * math.pi * 440 * 2 ** ((n - 69) / 12):.2f}*t)"
+                                                                     for n in tones) + "):d=4", path)
+        assert SCALE_SURE is None and scale(tmp / "нет такого.wav") == list(range(12)), "порога нет — замер нот не называет"
+        with mock.patch.object(sys.modules[__name__], "SCALE_SURE", 0.1):
+            assert scale(gamma) == at(0, "maj"), scale(gamma)
+            assert scale(vague) == list(range(12)), "не уверен — все полутона"
 
         # Отказы: тишина, короткий бит; разная длина — оговорка, а не отказ.
         quiet, short, long = tmp / "q.wav", tmp / "s.wav", tmp / "l.wav"
@@ -6574,7 +6668,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме и к одной громкости, бэк из коротких выкриков — эдлибом, "
-          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой — ок")
+          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой; ноты автотюна — со слов автора бита: имя файла и подпись каталога, буква без лада и слово — мимо, замер без уверенности — все полутона — ок")
 
 
 def talk_check() -> list[str]:
