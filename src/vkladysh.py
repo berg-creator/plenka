@@ -257,15 +257,16 @@ def caption(track: dict, show: str = "") -> str:
     return "\n\n".join(parts)
 
 
-def send(chat_id: str, track: dict) -> None:
-    """Карточка с подписью; нет ни обложки, ни фото артиста — одна подпись."""
+def send(chat_id: str, track: dict, note: str = "") -> None:
+    """Карточка с подписью; нет ни обложки, ни фото артиста — одна подпись.
+    note — строка над подписью: зачем карточка пришла, когда человек её не просил (примеры СВЕДЕНИЯ)."""
     started = time.monotonic()
     with ThreadPoolExecutor() as pool:  # Афиша и обложка качаются разом: каждая — секунда-две
         show = pool.submit(concert, track["artist"])
         image = card.cover({"cover": track.get("cover", ""), "artist": track["artist"],
                             "track": track["title"], "kicker": KICKER})
         drawn = time.monotonic() - started
-    text = caption(track, show.result())
+    text = "\n\n".join(filter(None, (note, caption(track, show.result()))))
     if image is None:
         telegram.send_message(chat_id, text)
     else:

@@ -88,6 +88,7 @@
 подтверждает владелец кнопкой, бот банка не видит. Под предложением — «🎧 Примеры: до и после»: по каждой работе два куска
 одного места и одной громкости, ДО свёл бот, ПОСЛЕ — звукорежиссёр. Отзывов и регалий нет по-прежнему — человек слушает сам.
 Каталог (config.SKLEYKA_HAND_EXAMPLES, пары file_id) пишет Мак (--example), дежурство его только читает; пуст — кнопки нет.
+После пар — вкладыш альбома самого звукорежиссёра (config.SKLEYKA_HAND_ALBUM, записан готовым, площадки по нажатию не спрашиваются).
 
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА   сведение, пара ДО/ПОСЛЕ одной громкости и ролик
     python -m src.skleyka --mix ВОКАЛ БИТ --out ПАПКА --style грязно --design
@@ -1920,6 +1921,7 @@ EXAMPLES_BUTTON = {"text": "🎧 Примеры: до и после", "callback_
 EXAMPLE_SIDES = (("before", "ДО — свёл бот"), ("after", "ПОСЛЕ — свёл звукорежиссёр"))
 EXAMPLE_CAPTION = "Пример {n} · {side}"
 EXAMPLE_PERFORMER = "ПЛЁНКА · пример {n}"
+EXAMPLE_ALBUM = "И целая работа тех же рук — альбом, который звукорежиссёр свёл сам:"
 # Счёт задатка: номер трека едет в payload — оплату узнаёт paid, и состояния до неё не нужно
 # (счёт шлёт и Мак, --deposit, а запись с Мака дежурство затёрло бы).
 DEPOSIT = "hand:"
@@ -2275,12 +2277,19 @@ def _examples_keys() -> list[list[dict]] | None:
 def _show(chat_id: str, message_id: int | None) -> None:
     """«🎧 Примеры: до и после»: по каждому примеру два аудио по file_id — ничего не качается и не
     заливается, состояние и лимиты не тронуты. Кнопка снимается с нажатого сообщения, как у ролика
-    (_film), и до отправки: один показ на предложение, а новое «🎧 Отдать звукорежиссёру» вернёт её."""
+    (_film), и до отправки: один показ на предложение, а новое «🎧 Отдать звукорежиссёру» вернёт её.
+    Последним — вкладыш альбома звукорежиссёра (config.SKLEYKA_HAND_ALBUM); не ушёл — пары уже у человека."""
     if message_id:
         telegram.edit_markup(chat_id, message_id, None)
     for n, pair in enumerate(_examples(), 1):
         for key, side in EXAMPLE_SIDES:
             telegram.send_by_id(chat_id, "audio", pair[key], EXAMPLE_CAPTION.format(n=n, side=side))
+    if config.SKLEYKA_HAND_ALBUM:
+        from . import vkladysh  # тянет карточки и сбор — нужен только этой кнопке
+        try:
+            vkladysh.send(chat_id, config.SKLEYKA_HAND_ALBUM, EXAMPLE_ALBUM)
+        except Exception as exc:  # noqa: BLE001 — обложка или Афиша не ответили: примеры человек уже слушает
+            print(f"СВЕДЕНИЕ: вкладыш альбома в примерах не ушёл: {exc}")
 
 
 def _bill(chat_id: str, track_id: str) -> None:
@@ -6167,11 +6176,27 @@ def _selftest() -> None:
         swept: list = []
         telegram.edit_markup = lambda chat, message, markup: swept.append((chat, message, markup))
         count, was, calls[:] = len(sent), load(), []
-        callback(8, 8, "z", message_id=77)
-        assert [(m, p["chat_id"], p["audio"], p["caption"]) for m, p in calls] == [
-            ("sendAudio", "8", "B1", "Пример 1 · ДО — свёл бот"), ("sendAudio", "8", "A1", "Пример 1 · ПОСЛЕ — свёл звукорежиссёр"),
-            ("sendAudio", "8", "B3", "Пример 2 · ДО — свёл бот"), ("sendAudio", "8", "A3", "Пример 2 · ПОСЛЕ — свёл звукорежиссёр")], calls
-        assert swept == [("8", 77, None)] and len(sent) == count and load() == was, "один показ на предложение, состояние то же"
+        # После пар — вкладыш альбома звукорежиссёра одной карточкой со строкой над подписью, без поиска
+        # по площадкам; карточка не ушла — пары всё равно у человека; альбом не задан — одни пары.
+        from . import vkladysh
+        cards: list = []
+        real_card, vkladysh.send = vkladysh.send, lambda chat, album, note="": cards.append((chat, album["title"], note))
+        try:
+            callback(8, 8, "z", message_id=77)
+            pairs_sent = [("sendAudio", "8", "B1", "Пример 1 · ДО — свёл бот"), ("sendAudio", "8", "A1", "Пример 1 · ПОСЛЕ — свёл звукорежиссёр"),
+                          ("sendAudio", "8", "B3", "Пример 2 · ДО — свёл бот"), ("sendAudio", "8", "A3", "Пример 2 · ПОСЛЕ — свёл звукорежиссёр")]
+            assert [(m, p["chat_id"], p["audio"], p["caption"]) for m, p in calls] == pairs_sent, calls
+            assert cards == [("8", "INTRO", EXAMPLE_ALBUM)], cards
+            assert swept == [("8", 77, None)] and len(sent) == count and load() == was, "один показ на предложение, состояние то же"
+            vkladysh.send = lambda *a, **k: 1 / 0
+            calls[:] = []
+            callback(8, 8, "z")
+            assert len(calls) == len(pairs_sent), "сбой карточки пар не отменяет и дежурство не роняет"
+            real_album, config.SKLEYKA_HAND_ALBUM = config.SKLEYKA_HAND_ALBUM, {}
+            callback(8, 8, "z")
+            config.SKLEYKA_HAND_ALBUM = real_album
+        finally:
+            vkladysh.send = real_card
         telegram.edit_markup = lambda chat, message, markup: None
         two_files = [tmp / "do.mp3", tmp / "posle.mp3"]
         for one in two_files:
