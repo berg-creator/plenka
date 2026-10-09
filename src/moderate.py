@@ -695,6 +695,14 @@ def publish_shift() -> None:
                 return
         except Exception as exc:  # noqa: BLE001 — совет не держит выход остальных постов
             log.error("Выход совета недели не удался: %s", exc)
+        try:  # ПАМЯТКА: по средам и субботам, вместо поста о релизе — его в эти сутки держит publish.release_due
+            from . import pamyatka
+
+            if memo := pamyatka.air():
+                print(f"Выход ПАМЯТКИ: {memo} → {target}")
+                return
+        except Exception as exc:  # noqa: BLE001 — памятка не держит выход остальных постов
+            log.error("Выход ПАМЯТКИ не удался: %s", exc)
     if target == "channel":
         try:
             if track := skleyka.doposle_air():

@@ -84,6 +84,7 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "skleyka_kenty": "СВЕДЕНИЕ, КЕНТЫ СКВАД: турнир треков",
            "skleyka_bandlink": "СВЕДЕНИЕ, BandLink: тред релизов",
            "skleyka_pin": "СВЕДЕНИЕ, закреп канала", "skleyka_otbor": "СВЕДЕНИЕ, пост ОТБОРА", "skleyka_sovet": "СВЕДЕНИЕ, пост СОВЕТ НЕДЕЛИ",
+           "skleyka_pamyatka": "СВЕДЕНИЕ, пост ПАМЯТКА",
            "skleyka_doposle": "СВЕДЕНИЕ, пост ДО И ПОСЛЕ",
            # Вне Telegram и ВК (docs/launch/2026-10-06-svedenie-vne-tg-vk.md): каталог ИИ-сервисов
            # и комментарии под подборками «нейросети для сведения», куда ведёт поиск.

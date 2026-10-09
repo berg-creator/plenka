@@ -148,7 +148,8 @@ def due(post: dict) -> bool:
             1 for item in items
             # Отбор (src/otbor.py), ролик (src/reels.py), бит недели (src/bity.py), её итог (otbor.final),
             # совет недели (src/sovet.py) и ДО И ПОСЛЕ (skleyka.doposle_air) выходят мимо слотов
-            # и обычному посту место не занимают.
+            # и обычному посту место не занимают. ПАМЯТКИ (src/pamyatka.py) в списке нет намеренно:
+            # она выходит вместо поста о релизе и слот занимает так же, как занял бы он.
             if item.get("rubric") not in ("news", "otbor", "reel", "beat", "week", "sovet", "doposle")
             and (moment := state._parse(item.get("published_at", "")))
             and feed_day(moment) == feed_day(now)
@@ -172,8 +173,14 @@ def release_due() -> bool:
     state-write и вытеснял из очереди ожидающий сбор: у GitHub в группе ждёт
     ровно один запуск. Теперь выход идёт из дежурства (src/moderate.py), а час
     отсчитывается по журналу публикаций — так же, как интервал обычных постов.
+
+    В сутки ленты, отданные ПАМЯТКЕ (pamyatka.day, владелец 09.10.2026), релиз не выходит вовсе:
+    она идёт вместо него, а не вдобавок. На завтра такой релиз не переносится — к утру он
+    старше config.RELEASE_MAX_AGE_HOURS и убирается из очереди, как любой не вышедший.
     """
-    if releases_today() >= config.RELEASE_PER_DAY:
+    from . import pamyatka
+
+    if pamyatka.day() or releases_today() >= config.RELEASE_PER_DAY:
         return False
     for item in reversed(state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])):
         if item.get("rubric") not in config.RELEASE_RUBRICS:
@@ -531,14 +538,16 @@ def send(post: dict, chat_id: str) -> dict | None:
             log.warning("Бит со значком не ушёл (%s), отправляю текстом", exc)
         return _where(telegram.send_message(chat_id, text, quiet=quiet), "text")
 
-    # Совет недели (src/sovet.py): кадр — карточка с названием брака; не нарисовалась — текстом.
-    if rubric == "sovet":
-        from . import sovet
+    # Совет недели (src/sovet.py) и ПАМЯТКА (src/pamyatka.py): кадр — карточка с названием брака
+    # или заголовком записи; не нарисовалась — текстом.
+    if rubric in ("sovet", "pamyatka"):
+        from . import pamyatka, sovet
 
         try:
-            return _where(telegram.send_photo_file(chat_id, sovet.shot(post), text, quiet=quiet), "caption")
+            shot = (sovet if rubric == "sovet" else pamyatka).shot(post)
+            return _where(telegram.send_photo_file(chat_id, shot, text, quiet=quiet), "caption")
         except Exception as exc:  # noqa: BLE001
-            log.warning("Совет недели с карточкой не ушёл (%s), отправляю текстом", exc)
+            log.warning("Пост %s с карточкой не ушёл (%s), отправляю текстом", rubric, exc)
         return _where(telegram.send_message(chat_id, text, quiet=quiet), "text")
 
     cover = post.get("cover", "")
@@ -595,7 +604,8 @@ def crosspost_vk(post: dict) -> None:
     # Бит зовёт в бота Telegram — во ВКонтакте идти по такой ссылке некому. Трек из СВЕДЕНИЯ
     # (otbor.build_post, поле mixed) лежит только под постом в Telegram: площадок у него нет,
     # и запись во ВКонтакте звала бы слушать то, чего там не услышать.
-    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "doposle") or post.get("mixed"):
+    # ПАМЯТКА, как и совет недели, зовёт в бота Telegram.
+    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle") or post.get("mixed"):
         return
 
     # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
@@ -1078,8 +1088,11 @@ def main() -> int:
         print(f"\nФайл: {path.name}")
         print(f"Рубрика: {post.get('rubric')}")
         if post.get("rubric") in config.RELEASE_RUBRICS:
+            from . import pamyatka
+
             print(f"Релизов за московские сутки: {releases_today()} из {config.RELEASE_PER_DAY}"
-                  f"{', тихие часы — без звука' if night(state.now()) else ''}")
+                  f"{', тихие часы — без звука' if night(state.now()) else ''}"
+                  f"{'; сутки отданы ПАМЯТКЕ — дежурство его не выпустит' if pamyatka.day() else ''}")
         # Картинку видно и без сети: имя артиста ищется в тексте тем же поиском,
         # что при отправке скачает фотографию (card.cover → footage.artist_image).
         portrait = "" if post.get("rubric") == "meme" else footage.find_artist(post.get("text", ""))
