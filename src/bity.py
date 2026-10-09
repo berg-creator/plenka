@@ -554,7 +554,10 @@ def tick() -> None:
     if _RENDER:
         return
     waiting = [beat_id for beat_id, beat in load().items() if "video" not in beat]
-    if waiting and not skleyka.busy(drafts=False):
+    from . import ocenka  # ocenka импортирует этот модуль
+
+    # Оценка большого файла (ocenka.logged) держит тот же служебный вход, что и ролик.
+    if waiting and not skleyka.busy(drafts=False) and not ocenka.logged():
         print(f"  ролик к биту {waiting[0]}: пошёл")
         _RENDER = subprocess.Popen([sys.executable, "-m", "src.bity", "--render", waiting[0]], cwd=config.ROOT), waiting[0]
 

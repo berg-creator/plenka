@@ -37,7 +37,7 @@ from pathlib import Path
 
 import requests
 
-from . import bity, comments, config, otbor, publish, quiz, reels, service, skleyka, state, svedenie, telegram, tracks, urgent
+from . import bity, comments, config, ocenka, otbor, publish, quiz, reels, service, skleyka, state, svedenie, telegram, tracks, urgent
 
 log = logging.getLogger("moderate")
 
@@ -602,6 +602,18 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                         log.error("Сведение не приняло дорожку: %s", exc)
                 continue
 
+            # Трек на ОЦЕНКУ (src/ocenka.py): файл после /ocenka или ответом на её приглашение.
+            # Позже дорожек сведения — открытая заявка важнее — и раньше ОТБОРА: без отметки
+            # оценки файл по-прежнему идёт в отбор.
+            if ocenka.wants(message):
+                print("  трек на оценку")
+                if not args.dry_run:
+                    try:
+                        ocenka.take(message, admin=str(admin) == str(message.get("from", {}).get("id")))
+                    except Exception as exc:  # noqa: BLE001 — чужой файл не роняет дежурство
+                        log.error("Оценка не приняла файл: %s", exc)
+                continue
+
             # Полный трек в ответ на запрос (compose.do_ask_tracks). Разбирается
             # до сервиса: это не просьба о разборе и лимит разборов не тратит.
             # Файл не ответом — тоже сюда: сервис молча пропустил бы его,
@@ -883,7 +895,7 @@ def serve(minutes: int) -> int:
             # ждал бы его без опроса, и кнопки у всех крутились бы впустую. Открытая заявка — нет:
             # она в хранилище, её доведёт свежая смена, а 01.10.2026 пустая заявка от каждого
             # /svedenie продлевала старую смену на полчаса, и новая кнопка не доходила до бота.
-            if code_changed() and not skleyka.busy(drafts=False) and not bity.busy():
+            if code_changed() and not skleyka.busy(drafts=False) and not bity.busy() and not ocenka.busy():
                 print("Код бота обновился — смена уступает место свежей.")
                 break
 
@@ -892,6 +904,10 @@ def serve(minutes: int) -> int:
         skleyka.finish()
     except Exception as exc:  # noqa: BLE001
         log.error("Сведение на конце смены не дождалось: %s", exc)
+    try:
+        ocenka.finish()
+    except Exception as exc:  # noqa: BLE001
+        log.error("Оценка на конце смены не дождалась: %s", exc)
     push_state()
     print(f"Дежурство окончено. Нажатий: {total_handled}. Разборов: {total_served}.")
     return 0
@@ -917,6 +933,10 @@ def _ticks() -> int:
         _stuck_since = _stuck_since or time.monotonic()
         if time.monotonic() - _stuck_since >= STUCK_AFTER:
             _alarm(f"Очередь сведения стоит {STUCK_AFTER // 60} мин.: {exc}")
+    try:
+        ocenka.tick()  # замер готового трека — отдельным процессом, как сведение
+    except Exception as exc:  # noqa: BLE001 — оценка не держит дежурство
+        log.error("Очередь оценки сорвалась: %s", exc)
     try:
         bity.tick()  # ролик к биту ПЛЁНКИ — тоже отдельным процессом
     except Exception as exc:  # noqa: BLE001 — ролик к биту не держит дежурство

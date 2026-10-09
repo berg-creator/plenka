@@ -4206,10 +4206,10 @@ def tick() -> bool:
     if _RUNNING and (_RUNNING[0].poll() is not None or _age(_RUNNING[1]["started"]) > limit * 60):
         _finish(data, *_RUNNING)
         _RUNNING, changed = None, True
-    from . import bity  # bity импортирует этот модуль
+    from . import bity, ocenka  # оба импортируют этот модуль
 
-    # Ролик бита ПЛЁНКИ тоже открывает служебный вход, а ключ, открытый дважды, Telegram гасит.
-    if not _RUNNING and data["jobs"] and not bity.rendering():
+    # Ролик бита ПЛЁНКИ и оценка большого файла тоже открывают служебный вход, а ключ, открытый дважды, Telegram гасит.
+    if not _RUNNING and data["jobs"] and not bity.rendering() and not ocenka.logged():
         _RUNNING, changed = _spawn(data, data["jobs"][0]), True
     changed = _sweep(data) or changed
     for chat_id in [chat_id for chat_id, search in _BEATS.items() if search.poll() is not None]:

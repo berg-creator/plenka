@@ -39,7 +39,7 @@ from datetime import timedelta
 import pathlib
 from pathlib import Path
 
-from . import bity, card, collect, config, llm, otbor, pamyatka, quality, skleyka, state, stories, svedenie, telegram, vkladysh
+from . import bity, card, collect, config, llm, ocenka, otbor, pamyatka, quality, skleyka, state, stories, svedenie, telegram, vkladysh
 from .sources import afisha, deezer, itunes, lastfm
 
 log = logging.getLogger("service")
@@ -127,6 +127,7 @@ COMMANDS = {
     "stop": "watchstop", "стоп": "watchstop",
     "gorod": "city", "город": "city",
     "otbor": "otbor", "отбор": "otbor",
+    "ocenka": "ocenka", "оценка": "ocenka",
     "skleyka": "skleyka", "склейка": "skleyka",
     "svedenie": "skleyka", "сведение": "skleyka",
     "bity": "bity", "биты": "bity", "beats": "bity",
@@ -137,7 +138,7 @@ COMMANDS = {
     "vopros": "vopros", "вопрос": "vopros", "paysupport": "vopros",
 }
 
-# У бота восемь разделов, и называются они везде одинаково — в меню «/», на экране
+# У бота девять разделов, и называются они везде одинаково — в меню «/», на экране
 # до «Начать», здесь и на кнопках: 🎙 ОТБОР, 🎞 ПРОЯВКА и 🔔 СЛЕЖУ. Слежение
 # за релизами и концертами жило только кнопкой под разбором артиста и командами,
 # которых никто не знает, — о нём не узнавали вовсе (владелец, 16.09.2026). Раньше разбор был
@@ -152,6 +153,8 @@ MENU_BEATS = "🎚 <b>БИТЫ</b>\nБесплатные биты ПЛЁНКИ �
 MENU = (
     "🎛 <b>СВЕДЕНИЕ</b>\nПришли вокал и бит — сведу их в готовый трек.\n\n"
     "🎙 <b>ОТБОР</b>\nПишешь сам? Пришли свой трек — он выйдет в канале с твоим именем.\n\n"
+    # ОЦЕНКА (src/ocenka.py) — сразу за отбором: туда и сюда несут готовый трек.
+    "📏 <b>ОЦЕНКА</b>\nПришли готовый трек — замерю и скажу, чем он отличается от выпущенных релизов.\n\n"
     # ПАМЯТКА (src/pamyatka.py) — рядом с тем, что для пишущих музыку: биты, сведение, отбор.
     "⚖️ <b>ПАМЯТКА</b>\nЧьи права на трек и как записать голос — коротко, с цитатами закона.\n\n"
     "📼 <b>ВКЛАДЫШ</b>\nКинь ссылку на трек или альбом — пришлю карточку со всеми площадками для друга.\n\n"
@@ -205,6 +208,7 @@ def menu_buttons() -> list[list[dict]]:
     return (beats if bity.load() else []) + [
         [{"text": "🎛 СВЕДЕНИЕ — вокал и бит в трек", "callback_data": f"{CALLBACK_PREFIX}skleyka"}],
         [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
+        [{"text": "📏 ОЦЕНКА — готовый трек против релизов", "callback_data": f"{CALLBACK_PREFIX}ocenka"}],
         [{"text": "⚖️ ПАМЯТКА — права на трек и запись голоса", "callback_data": pamyatka.PICK.rstrip(":")}],
         [{"text": "📼 ВКЛАДЫШ — трек или альбом другу", "callback_data": f"{CALLBACK_PREFIX}vkladysh"}],
         [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
@@ -1430,6 +1434,12 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         if _subscribed(chat_id, user_id, admin, retry="skleyka"):
             skleyka.start(chat_id, user_id, admin=admin)
         return False
+    if kind == "ocenka" or kind == "menu" and link == "ocenka":
+        # ОЦЕНКА (src/ocenka.py) — без подписки, как биты и вкладыш: замер ведёт в СВЕДЕНИЕ, подписку спросит оно.
+        # Файл после этого идёт в оценку, а не в отбор, — отметку ставит start, ловит дежурство.
+        count_source(ocenka.OPENED)
+        ocenka.start(chat_id, admin=admin)
+        return False
     if kind == "menu" and (body == "gorod" or link in ("gorod", "slezhu") and slug):
         # Из ролика, который кончается решением боли (prompts/reels.md): артист зашит
         # в ссылку адресом как в Афише — ?start=gorod_mayot за концертами в городе,
@@ -1734,6 +1744,11 @@ def handle_callback(query: dict, data: dict) -> None:
             bity.callback(chat_id, user_id, subject[:8], admin=admin)
         return
 
+    if action == "ocenka":
+        count_source(ocenka.OPENED)
+        ocenka.start(chat_id, admin=user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False)))
+        return
+
     if action in ("skleyka", "sk"):
         admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
         # Меню и «Подписался» открывают заявку, кнопки под готовым треком — пересборку.
@@ -1972,7 +1987,8 @@ def _selftest() -> None:
         handle_message(incoming("/start", 1), {})
         handle_message(incoming("/start", 2, date=101), {})
         assert deleted == [2] and len(said) == 1, (deleted, said)
-        assert "СЛЕЖУ" in said[0][0] and said[0][1][4][0]["callback_data"] == f"{CALLBACK_PREFIX}slezhu"
+        assert "СЛЕЖУ" in said[0][0] and said[0][1][5][0]["callback_data"] == f"{CALLBACK_PREFIX}slezhu"
+        assert "ОЦЕНКА" in said[0][0] and said[0][1][2][0]["callback_data"] == f"{CALLBACK_PREFIX}ocenka", "оценка — сразу за отбором"
         handle_message(incoming("/start", 3, date=200), {})
         assert len(said) == 2, "осознанный /start позже — снова приветствие"
 
@@ -2102,7 +2118,7 @@ def _selftest() -> None:
         assert [text for text, _ in replies] == [PROYAVKA, PROYAVKA, MENU_HEAD + MENU] + [intro] * 5, \
             "старая ссылка и /proyavka — в ПРОЯВКУ, метки sved и ad — что прислать"
         assert links == ["https://music.yandex.ru/users/x/playlists/3?utm_source=share"], links
-        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎛", "🎙", "⚖", "📼", "🔔", "🪞", "🎞"], "битов нет — в меню семь разделов"
+        assert [row[0]["text"][:1] for row in replies[2][1]] == ["🎛", "🎙", "📏", "⚖", "📼", "🔔", "🪞", "🎞"], "битов нет — в меню восемь разделов"
         # Кнопка «следить» под ответом ДВОЙНИКА — кнопка сервиса: подписывает watch_add,
         # второго пути к тому же списку нет.
         assert svedenie.buttons("Toxi$")[1][0]["callback_data"] == _cb("watch", "Toxi$")
@@ -2254,7 +2270,7 @@ def _selftest() -> None:
             bity.save({"1": beat})
             say("/start", 0)
             assert replies[-1][0] == MENU_HEAD + MENU_BEATS + MENU and replies[-1][0].index("БИТЫ") < replies[-1][0].index("СВЕДЕНИЕ")
-            assert [row[0]["text"][:1] for row in replies[-1][1]] == ["🎚", "🎛", "🎙", "⚖", "📼", "🔔", "🪞", "🎞"]
+            assert [row[0]["text"][:1] for row in replies[-1][1]] == ["🎚", "🎛", "🎙", "📏", "⚖", "📼", "🔔", "🪞", "🎞"]
             assert telegram.visible_len(replies[-1][0]) <= telegram.MAX_TEXT and all(
                 len(key["callback_data"].encode()) <= CALLBACK_BYTES for row in replies[-1][1] for key in row), "меню в лимитах Telegram"
             assert replies[-1][1][0][0]["callback_data"] == f"{CALLBACK_PREFIX}bity"
@@ -2313,8 +2329,21 @@ def _selftest() -> None:
             bity.save({})
             say("/bity", 7)
             assert replies[-1] == (bity.EMPTY, [[skleyka.BEAT_BUTTON]])
+            # ОЦЕНКА (src/ocenka.py): /ocenka, кнопка меню и ссылка ?start=ocenka ставят отметку «ждём трек» —
+            # без подписки и без модели; вход считается меткой, id человека в счёт не попадает.
+            real_oc, ocenka.start, entered = ocenka.start, lambda chat, **kw: entered.append((str(chat), kw["admin"])), []
+            unsub, globals()["_subscribed"] = globals()["_subscribed"], lambda *a, **kw: 1 / 0
+            try:
+                for n, text in enumerate(("/ocenka", "/оценка", "/start ocenka"), 30):
+                    say(text, n)
+                press(f"{CALLBACK_PREFIX}ocenka")
+                assert entered == [("55501", False)] * 4, entered
+                assert state.read_json(SOURCES_FILE, {})[_today()][ocenka.OPENED] == 4 and "55501" not in SOURCES_FILE.read_text()
+            finally:
+                ocenka.start, globals()["_subscribed"] = real_oc, unsub
             # Витрина бота знает о битах и влезает в лимиты Telegram: у setup своей самопроверки нет.
             from . import setup
+            assert [name for name, _ in setup.BOT_COMMANDS][:4] == ["bity", "svedenie", "otbor", "ocenka"]
             assert setup.BOT_COMMANDS[0][0] == "bity" and COMMANDS["bity"] == COMMANDS["beats"] == "bity"
             assert all(COMMANDS.get(name) for name, _ in setup.BOT_COMMANDS) and "pamyatka" in dict(setup.BOT_COMMANDS)
             assert setup.BOT_DESCRIPTION.index("БИТЫ") < setup.BOT_DESCRIPTION.index("СВЕДЕНИЕ")
@@ -2326,7 +2355,8 @@ def _selftest() -> None:
         (otbor.start, telegram.send_message, globals()["SOURCES_FILE"], svedenie.handle,
          globals()["_subscribed"], svedenie.by_names, telegram.answer_callback, svedenie.invite) = real
         tmp.cleanup()
-    print("метка /start: считается по дню без id и сразу открывает отбор; в меню семь разделов, с битами — восемь, «🎚 БИТЫ» первым; "
+    print("метка /start: считается по дню без id и сразу открывает отбор; в меню восемь разделов, с битами — девять, «🎚 БИТЫ» первым; "
+          "ОЦЕНКА: /ocenka, кнопка и ссылка ставят отметку без подписки, вход считается; "
           "ПАМЯТКА: кнопка, /pamyatka и ссылка поста — раздел без подписки и модели, страницы и записи кнопками, счёт входа и записей; "
           "/bity и кнопка: один бит — сразу файл, несколько — список, метка beat_menu отдельно от ссылки beat; "
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ, одноимённый альбом — кнопкой «💿 Альбом»; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
