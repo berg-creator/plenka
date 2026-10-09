@@ -898,7 +898,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
     (kits / name).write_bytes(data)
     slots = sum(len(x["plugins"]) for x in inserts.values())
     levels = ", ".join(f"{k} — {v}%" for k, v in LEVEL.items())
-    sampled = any(c.get("cut") for c in channels)          # 808 сэмплером: отсечка и огибающая — у него, у Serum их нет
+    sampled = any(c.get("hold") == HOLD for c in channels) # 808 сэмплером: отсечка и огибающая — у него, у Serum их нет
     return (f"Проект FL — «{name}» в этой же папке: каналов {len(channels)}, со звуками и нотами; партии — паттернами на весь бит "
             f"в плейлисте, части — маркерами; дорожки микшера подписаны и разведены по шинам. Фейдеры: {levels}, остальное 100% — "
             f"808 по чужим проектам под твои рефы, музыка — как ты поднял её сам в «Сквозняке»; "
