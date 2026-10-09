@@ -157,6 +157,19 @@ SKLEYKA_SCHEMA = {
     "additionalProperties": False,
 }
 
+# ПРОВЕРКА ТЕКСТА (src/pamyatka.py): модель отвечает одними номерами строк — слов от неё в ответе
+# человеку нет вовсе, строки берёт код из присланного текста. skip — по нему провайдеры опознают ответ.
+TEKST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "lines": {"type": "array", "items": {"type": "integer"},
+                  "description": "Номера строк, где названо вещество, списком чисел; таких нет — пустой список"},
+        "skip": {"type": "boolean", "description": "Всегда false"},
+    },
+    "required": ["lines", "skip"],
+    "additionalProperties": False,
+}
+
 # Схема ответа по рубрике; кого здесь нет, тот отвечает POST_SCHEMA.
 SCHEMAS = {"meme": MEME_SCHEMA}
 
@@ -320,6 +333,19 @@ def generate_comment(payload: dict) -> dict:
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
         f"Напиши вопрос по правилам выше. Не выходит вопроса про этот пост — "
         f"верни skip=true и причину одной строкой."
+    )
+
+
+def generate_tekst(lines: list[str]) -> dict:
+    """ПРОВЕРКА ТЕКСТА (src/pamyatka.py): в каких строках текста названы вещества (prompts/service/tekst.md).
+    Строки уходят с номерами, обратно — номера: показать человеку слово, которого нет в его тексте, нечем."""
+    numbered = {str(n): line for n, line in enumerate(lines, 1)}
+    return _generate(
+        f"{service_prompt('tekst')}\n\n"
+        f"## Данные\n\n"
+        f"```json\n{json.dumps({'lines': numbered}, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"Верни номера строк по правилам выше.",
+        TEKST_SCHEMA,
     )
 
 

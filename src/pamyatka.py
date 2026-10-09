@@ -39,6 +39,18 @@
 Отвергнуто: две темы вместо страниц (права и закон — 17 вопросов из 23, простыня осталась бы) и правка
 сообщения на месте (ответ пропадал бы при возврате к списку — прочитанное остаётся в чате).
 
+Одно исключение из «модель не вызывается» — «🔎 Проверить текст» (владелец 09.10.2026): артист присылает
+текст трека, бот показывает его же строки, где названы вещества, и запись slova. Модель здесь не отвечает
+человеку, а только называет номера строк: её слов в ответе нет, выдумать ей нечем. Вердикта бот не выносит —
+закон судит не слова, а то, о чём информация, и «чисто» перед снятым треком было бы виной канала; замен
+не предлагает; текст не хранит. Границы, тексты и код — раздел «проверка текста» ниже.
+Ищет модель, а не словарь в коде: словарь неполон и был бы списком сленга в открытом репозитории. Решила
+проба 09.10.2026 из Actions (--probe, запуск 37985423309): десять своих коротких текстов, шесть из них
+с названиями веществ, — Gemini прочёл все десять без отказа и назвал нужные строки, «траву у дома»
+с «травой за гаражами» не спутал. Начнёт отказывать чаще раза из десяти — словарь. Пробы короткие
+и без похвалы веществам: как модель читает тексты жёстче, не проверено. Текст уходит генератору (Gemini,
+при его сбое — ГигаЧат): «не хранится» — это о боте, и экран вопроса так и говорит.
+
 Выход — в дни config.PAMYATKA_DAYS с config.PAMYATKA_HOUR_MSK по Москве, не ночью, одна запись
 в сутки ленты, по порядку базы. Отметка вышедшей — pamyatka-<id>.json в content/archive, как у совета
 недели (src/sovet.py): запись дважды не выходит, поэтому id в базе не менять. База кончилась —
@@ -51,12 +63,16 @@
     python -m src.pamyatka --selftest   без сети и Telegram; настоящая база — источники, длина подписи с призывом,
                                         раздел в боте: страницы, кнопки и ответы в лимитах Telegram
     python -m src.pamyatka --dry-run    что в запасе, когда выйдет следующая и её текст, без записи и отправки
+    python -m src.pamyatka --probe      читает ли генератор тексты с названиями веществ: десять проб — только
+                                        из Actions (с Мака Gemini не отвечает), с пустым LLM_FALLBACK
 """
 from __future__ import annotations
 
 import argparse
 import html
+import itertools
 import re
+import subprocess
 import sys
 import tempfile
 from datetime import datetime, time
@@ -73,7 +89,8 @@ CALL = "▸ Лучше пишите ПЛЁНКЕ: все памятки про �
 PICK = "s:pam:"
 ICONS = {LAW: "⚖️", "golos": "🎤"}
 HEAD = "⚖️ <b>ПАМЯТКА</b>"
-INTRO = "Ответы на то, на чём начинающий теряет трек или деньги: чьи права на музыку и как записать голос."
+INTRO = ("Ответы на то, на чём начинающий теряет трек или деньги: чьи права на музыку, как записать голос "
+         "и что в законе о «запрете слов».")
 NOTE = "ПЛЁНКА не юрист: здесь цитаты закона и что с ними делать, свой случай — к юристу."
 MORE = "Новые памятки выходят в канале {channel} по средам и субботам."  # дни — config.PAMYATKA_DAYS, сверяет селфтест
 BACK = "← Все вопросы"
@@ -123,7 +140,8 @@ def find(key: str) -> dict | None:
 def screen(page: int | None = None) -> tuple[str, list[list[dict]]]:
     """Экран раздела в боте: оговорка и вопросы кнопками, config.PAMYATKA_PAGE на страницу, в порядке базы.
     page=None — вход в раздел: со вступлением и строкой о канале (пока в базе есть невышедшее);
-    номер — страница списка, туда же возвращает «← Все вопросы» под ответом."""
+    номер — страница списка, туда же возвращает «← Все вопросы» под ответом. Первой кнопкой на каждой
+    странице — «🔎 Проверить текст»: ролик зовёт кинуть текст, а не листать вопросы."""
     base, size = load(), config.PAMYATKA_PAGE
     at = min(page or 0, max(0, (len(base) - 1) // size)) * size
     rows = [[{"text": f"{ICONS.get(item.get('topic'), '')} {item.get('ask') or item['title']}".strip(),
@@ -133,17 +151,204 @@ def screen(page: int | None = None) -> tuple[str, list[list[dict]]]:
     parts = [HEAD, *([INTRO] if page is None else []), NOTE,
              *([MORE.format(channel=config.CHANNEL_HANDLE)] if page is None and pending() else []),
              *([f"Вопросы {at + 1}–{min(at + size, len(base))} из {len(base)} ↓"] if base else [])]
-    return "\n\n".join(parts), rows + ([turn] if turn else [])
+    return "\n\n".join(parts), [[{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}]] + rows + ([turn] if turn else [])
 
 
 def answer(item: dict) -> tuple[str, list[list[dict]]]:
     """Ответ на вопрос в боте: запись тем же шаблоном, что пост, без призыва и без ссылки — человек уже
-    в боте. Своя строка про бота остаётся строкой, а ведёт туда кнопка под ответом."""
+    в боте. Своя строка про бота остаётся строкой, а ведёт туда кнопка под ответом. Под записью
+    о «запрете слов» (SLOVA) — «🔎 Проверить текст»."""
     door = item.get("start", "").partition("_")[0]
     page = [row["id"] for row in load()].index(item["id"]) // config.PAMYATKA_PAGE
     rows = [[{"text": DOORS[door], "callback_data": f"s:{door}"}]] if item.get("bot") and door in DOORS else []
+    rows += [[{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}]] if item["id"] == SLOVA else []
     return ("\n\n".join(_parts(item) + ([html.escape(item["bot"])] if item.get("bot") else [])),
             rows + [[{"text": BACK, "callback_data": f"{PICK}{page}"}]])
+
+
+# ─────────────────────────── проверка текста ───────────────────────────
+# «🔎 Проверить текст» (владелец 09.10.2026: «было бы круто сделать фичу что можно отправить текст на проверку
+# боту»): артист присылает текст трека, бот показывает его же строки, где названы вещества, и запись slova.
+# Границы — они же селфтест:
+# 1. Вердикта нет: ни «чисто», ни «можно», ни «нарушение». Закон судит не слова, а то, о чём информация
+#    (ст. 46 закона № 3-ФЗ), и «чисто» перед снятым треком — вина канала.
+# 2. Замен, синонимов и способов спрятать слово бот не предлагает.
+# 3. Сверх строк самого артиста названия веществ не звучат: модель отвечает номерами строк (llm.TEKST_SCHEMA),
+#    её слов в ответе нет вовсе, строки берёт код из присланного текста. Промпт веществ не называет, в коде
+#    названия стоят только в пробах генератора (PROBES) — человеку они не уходят.
+# 4. Текст не хранится: дежурство отдаёт его процессу проверки через stdin — ни файла, ни аргумента команды,
+#    ни строки в логе; в счётчик идёт метка (service.count_source), в лимиты — число (service._tekst).
+# 5. «ПЛЁНКА не юрист» — на экране вопроса и в каждом ответе.
+SLOVA = "slova"  # запись базы о «запрете слов»: её текст закона идёт в ответ проверки, под ней — кнопка проверки
+# Кнопка: на экране раздела и под записью slova; «s:tekst:ok» — «Подписался», вход уже посчитан (service).
+TEXT_KEY = "s:tekst"
+TEXT_BUTTON = "🔎 Проверить текст"
+TEXT_HEAD = "🔎 <b>ПРОВЕРКА ТЕКСТА</b>"
+# Текст трека — ответом на сообщение с этой меткой, как у ДВОЙНИКА (svedenie.INTRO_MARK): без ответа
+# он ушёл бы в ПРОЯВКУ. Помнить, о чём спросил, боту не нужно — и хранить про человека нечего.
+TEXT_MARK = "Пришли текст трека ответом на это сообщение"
+TEXT_ASK = (f"{TEXT_HEAD}\n\n{TEXT_MARK} — покажу строки, где названы наркотические вещества, и что о них говорит закон.\n\n"
+            "Что в тексте пропаганда, а что нет, бот не решает: закон описывает не слова, а то, о чём информация. "
+            "ПЛЁНКА не юрист.\n\n"
+            f"Текст читает нейросеть, бот его не сохраняет. До {config.TEKST_CHARS} знаков, проверок в сутки — {config.TEKST_PER_DAY}.")
+TEXT_HINT = "Текст трека"
+TEXT_WAIT = "🔎 Читаю. Ответ придёт отдельным сообщением — обычно меньше минуты."
+TEXT_BUSY = "Прошлый текст ещё читаю — пришли этот, когда придёт ответ."
+TEXT_LONG = f"Текст длиннее {config.TEKST_CHARS} знаков. {TEXT_MARK} частями — по куплету."
+TEXT_LIMIT = f"Проверок в сутки — {config.TEKST_PER_DAY}. Завтра приходи ещё."
+TEXT_FULL = "На сегодня проверки у бота кончились — приходи завтра."
+TEXT_FOUND = "Строки, где нейросеть увидела названия веществ:"
+TEXT_REST = "…и ещё {count} — не поместились."
+TEXT_NONE = "Названий веществ не нашёл; сленг знаю не весь, а закон описывает не слова, а то, о чём информация."
+TEXT_MAYBE = "Нейросеть могла пропустить строку или показать лишнюю."
+TEXT_NOTE = "Это не оценка текста: что в нём пропаганда, а что нет, бот не решает. ПЛЁНКА не юрист — свой случай к юристу."
+# Отказ модели — не вердикт: «не взялась читать» человек иначе прочёл бы как «текст плохой».
+TEXT_FAIL = ("Нейросеть не прочитала текст — проверить не вышло. Это её сбой или отказ, а не оценка текста: "
+             "что в нём названо, бот так и не узнал. Попробуй ещё раз позже.")
+TEXT_AGAIN = "🔎 Проверить ещё текст"
+# Счёт в data/bot_sources.json: сколько раз открыли и сколько текстов прислали — по дню, без человека и без текста.
+TEXT_OPENED = "ПРОВЕРКА ТЕКСТА: открыта"
+TEXT_SENT = "ПРОВЕРКА ТЕКСТА: текст прислан"
+# Строки в ответе — в пределах TEXT_ROOM знаков разметки, длинная строка — началом в TEXT_LINE знаков: с записью
+# о законе в сообщение Telegram (4096) влезает не всё, а обрезка отправки (telegram.MAX_TEXT) рвала бы тег.
+TEXT_ROOM, TEXT_LINE = 2400, 300
+# Проверки, что идут сейчас, по чатам: память смены, как skleyka._BEATS.
+_READING: dict[str, subprocess.Popen] = {}
+
+
+def lines_of(text: str) -> list[str]:
+    """Непустые строки текста, как их прислал человек: по их номерам отвечает модель."""
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def flagged(lines: list[str], numbers: list) -> list[str]:
+    """Строки по номерам модели, в порядке текста и по разу (припев повторяется). Номер мимо текста
+    и всё, что не номер, — прочь: показать можно только строку, которая стоит в тексте."""
+    wanted = sorted({int(n) for n in numbers if isinstance(n, (int, str)) and str(n).isdigit()})
+    return list(dict.fromkeys(lines[n - 1] for n in wanted if 1 <= n <= len(lines)))
+
+
+def found(text: str) -> list[str] | None:
+    """Строки текста, где модель увидела название вещества; None — она не ответила: отказ, сбой
+    или ответ не по схеме (запасной генератор строгих схем не держит)."""
+    from . import llm
+
+    lines = lines_of(text)
+    answer = llm.generate_tekst(lines)
+    if answer.get("skip") or not isinstance(answer.get("lines"), list):
+        # Причину пишет только Gemini: это код его фильтра. У запасного она — слова модели, а в них мог попасть текст.
+        why = answer.get("reason", "")
+        print(f"ПРОВЕРКА ТЕКСТА: модель не ответила — {why if why.startswith('Gemini') else 'отказ или ответ не по схеме'}")
+        return None
+    return flagged(lines, answer["lines"])
+
+
+def report(shown: list[str] | None) -> tuple[str, list[list[dict]]]:
+    """Ответ проверки: None — модель не ответила, пусто — названий не нашлось, иначе строки человека,
+    запись slova целиком и оговорка. Своих слов о тексте, кроме этих трёх шаблонов, у бота нет."""
+    rows = [[{"text": TEXT_AGAIN, "callback_data": TEXT_KEY}], [{"text": BACK, "callback_data": f"{PICK}0"}]]
+    law = find(SLOVA)
+    if shown is None:
+        return f"{TEXT_HEAD}\n\n{TEXT_FAIL}", rows
+    if not shown:
+        ask = [[{"text": f"{ICONS[LAW]} {law['ask']}", "callback_data": f"{PICK}{SLOVA}"}]] if law and law.get("ask") else []
+        return f"{TEXT_HEAD}\n\n{TEXT_NONE}\n\n{TEXT_NOTE}", ask + rows
+    cut = [html.escape(line[:TEXT_LINE] + "…" * (len(line) > TEXT_LINE)) for line in shown]
+    fit = [line for line, size in zip(cut, itertools.accumulate(len(line) + 1 for line in cut)) if size <= TEXT_ROOM]
+    rest = f"\n{TEXT_REST.format(count=len(cut) - len(fit))}" if len(cut) > len(fit) else ""
+    parts = [TEXT_HEAD, f"{TEXT_FOUND}\n<blockquote>" + "\n".join(fit) + f"</blockquote>{rest}",
+             *(_parts(law) if law else []), f"{TEXT_MAYBE} {TEXT_NOTE}"]
+    return "\n\n".join(parts), rows
+
+
+def take(chat_id: str | int, text: str) -> bool:
+    """Текст человека — процессу проверки (--read). Модель отвечает секунды, а при занятых моделях минуты,
+    и дежурство — единственный поллер: ждать её в цикле опроса значит держать кнопки всех (так было
+    с просьбами к сведению, skleyka.heed). Текст идёт через stdin процесса — на диск и в строку запуска
+    он не попадает. False — прошлый текст этого человека ещё читается.
+    ponytail: проверки разных людей идут разом и без общей паузы между запросами (gemini.MIN_INTERVAL —
+    на процесс); упрётся в минутный лимит Gemini — очередь по одному, как у сведения."""
+    chat_id = str(chat_id)
+    for chat, process in list(_READING.items()):
+        if process.poll() is not None:
+            del _READING[chat]
+    if chat_id in _READING:
+        return False
+    process = subprocess.Popen([sys.executable, "-m", "src.pamyatka", "--read", chat_id], cwd=config.ROOT, stdin=subprocess.PIPE)
+    process.stdin.write(text.encode())
+    process.stdin.close()
+    _READING[chat_id] = process
+    return True
+
+
+def finish(seconds: float = 120) -> None:
+    """Конец смены: идущие проверки дочитываются — машина Actions с концом задания гасит процессы,
+    и человек, приславший текст последним, остался бы без ответа с потраченной проверкой."""
+    for process in _READING.values():
+        try:
+            process.wait(seconds)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _read(chat_id: str) -> None:
+    """Процесс проверки: текст из stdin — модели, ответ — человеку. В лог идёт только род сбоя: в тексте
+    ошибки Telegram и в словах модели могли бы оказаться строки человека."""
+    from . import telegram
+
+    try:
+        shown = found(sys.stdin.buffer.read().decode("utf-8", "replace"))
+    except Exception as exc:  # noqa: BLE001 — оба генератора недоступны: человеку — честная строка
+        print(f"ПРОВЕРКА ТЕКСТА: модель не ответила — {type(exc).__name__}")
+        shown = None
+    try:
+        text, rows = report(shown)
+        telegram.send_message(chat_id, text, buttons=rows)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ПРОВЕРКА ТЕКСТА: ответ не ушёл — {type(exc).__name__}")
+
+
+# Пробы генератора: строки свои, не из чужих треков; названия — те, что стоят в самом законе и в новостях,
+# сленга здесь нет. Вторым полем — номера строк с названием вещества; None — намёк, годится любой ответ.
+PROBES: tuple[tuple[str, set[int] | None], ...] = (
+    ("Ночь, район, фонари не горят\nВ кармане кокаин, друзья говорят\nА я молчу и смотрю в окно", {2}),
+    ("Он начинал с травы за гаражами\nПотом героин — и мы его не узнали\nМама плачет, а двор молчит", {1, 2}),
+    ("Мефедрон забрал у меня брата\nЯ помню его смех, он был когда-то", {1}),
+    ("На столе амфетамин и чей-то паспорт\nВ этой квартире давно никто не спасся", {1}),
+    ("Курим гашиш, за окном минус двадцать\nМне двадцать один, и некуда деваться", {1}),
+    ("Экстази в клубе, ЛСД на афише\nЯ вышел на воздух, я этого выше", {1}),
+    ("Я встаю в шесть утра и бегу на завод\nМама звонит, говорит: всё пройдёт\nДеньги придут, а пока только пот", set()),
+    ("Мы пили вино и курили на крыше\nСигареты кончались, а город всё тише", set()),
+    ("Трава у дома зелёная, как в детстве\nЯ вернулся сюда — и некуда деться", set()),
+    ("Меня накрыло, я не сплю третьи сутки\nБелый порошок на зеркале — не шутки", None),
+)
+
+
+def probe() -> int:
+    """Читает ли генератор тексты с названиями веществ — живой запрос на каждую пробу (prompts/service/tekst.md).
+    Из России Gemini не отвечает, поэтому только из Actions; чтобы отказ основного не спрятал запасной,
+    запускать с пустым LLM_FALLBACK. Отказ — skip или ответ не по схеме, сбой — генератор недоступен.
+    Итог — отказы и сбои вместе: больше одного из десяти — проверку текста на этом генераторе не держать."""
+    from . import llm
+
+    bad = misses = 0
+    for n, (text, want) in enumerate(PROBES, 1):
+        try:
+            answer = llm.generate_tekst(lines_of(text))
+        except Exception as exc:  # noqa: BLE001
+            bad += 1
+            print(f"  {n}. СБОЙ: {exc}")
+            continue
+        if answer.get("skip") or not isinstance(answer.get("lines"), list):
+            bad += 1
+            print(f"  {n}. ОТКАЗ: {answer.get('reason') or answer.get('text') or 'ответ не по схеме'}")
+            continue
+        got = {lines_of(text).index(line) + 1 for line in flagged(lines_of(text), answer["lines"])}
+        ok = want is None or got == want
+        misses += not ok
+        print(f"  {n}. {'ок' if ok else 'МИМО'}: строки {sorted(got)}" + ("" if want is None else f", ждали {sorted(want)}"))
+    print(f"Отказов и сбоев: {bad} из {len(PROBES)}; ответил, но мимо: {misses}.")
+    return bad
 
 
 def aired(moment: datetime) -> bool:
@@ -223,6 +428,94 @@ def shot(post: dict) -> Path:
     return card.save(post["title"][:1].upper() + post["title"][1:], [], label="ПАМЯТКА", name=RUBRIC)
 
 
+def _selftest_text() -> None:
+    """Проверка текста: границы раздела «проверка текста» выше — модель и Telegram подменены."""
+    import contextlib
+    import io
+
+    from . import llm, telegram
+
+    law = "\n\n".join(_parts(find(SLOVA)))
+    assert law and TEXT_MARK in TEXT_ASK and TEXT_MARK in TEXT_LONG and "не юрист" in TEXT_ASK and len(TEXT_KEY.encode()) <= 64
+    song = "первая строка\n\n  вторая <строка> про вещество  \nтретья строка\nвторая <строка> про вещество\n"
+    lines = lines_of(song)
+    assert lines == ["первая строка", "вторая <строка> про вещество", "третья строка", "вторая <строка> про вещество"]
+    assert flagged(lines, [4, "2", 9, 0, -3, True, 2.5, None, "вещество"]) == [lines[1]], "номер мимо текста и не номер — прочь, припев — раз"
+    real = llm.generate_tekst, telegram.send_message, subprocess.Popen, sys.stdin
+    said, sent, spawned, log = [], [], [], io.StringIO()
+    try:
+        # Найдено: в ответе шаблон, строка человека, запись о законе и оговорка — и ничего больше: ни слов модели,
+        # ни строки, которой в тексте нет, ни строки, которую модель не назвала.
+        llm.generate_tekst = lambda asked: said.append(asked) or {"skip": False, "lines": [2, 4, 7, "слово модели"], "text": "слово модели"}
+        text, rows = report(found(song))
+        assert said == [lines] and text == "\n\n".join([
+            TEXT_HEAD, f"{TEXT_FOUND}\n<blockquote>вторая &lt;строка&gt; про вещество</blockquote>", law, f"{TEXT_MAYBE} {TEXT_NOTE}"]), text
+        assert [key["callback_data"] for row in rows for key in row] == [TEXT_KEY, f"{PICK}0"]
+        replies = [text]
+        # Не найдено: названная в задаче строка, без «чисто»; запись о законе — кнопкой.
+        llm.generate_tekst = lambda asked: {"skip": False, "lines": []}
+        text, rows = report(found(song))
+        assert text == f"{TEXT_HEAD}\n\n{TEXT_NONE}\n\n{TEXT_NOTE}" and rows[0][0]["callback_data"] == f"{PICK}{SLOVA}"
+        replies.append(text)
+        # Отказ модели, проза запасного генератора и ответ не по схеме — честная строка, а не «названий нет».
+        with contextlib.redirect_stdout(log):
+            for answer in ({"skip": True, "text": "", "reason": "Gemini: PROHIBITED_CONTENT"},
+                           {"skip": False, "text": f"В строке «{lines[1]}» названо вещество", "reason": ""},
+                           {"skip": True, "text": "", "reason": f"не буду читать: {lines[1]}"}, {"skip": False, "lines": "2"}):
+                llm.generate_tekst = lambda asked, answer=answer: answer
+                assert found(song) is None, answer
+        assert report(None)[0] == f"{TEXT_HEAD}\n\n{TEXT_FAIL}" and "PROHIBITED_CONTENT" in log.getvalue() and "строка" not in log.getvalue()
+        replies.append(report(None)[0])
+        # Все строки названы в тексте предельной длины, и строка без переносов: ответ влезает в сообщение целиком.
+        llm.generate_tekst = lambda asked: {"skip": False, "lines": list(range(1, len(asked) + 1))}
+        for long in ("\n".join(f"строка {n} " + "&<>" * 9 for n in range(400))[:config.TEKST_CHARS], "слово " * (config.TEKST_CHARS // 6)):
+            text, _ = report(found(long))
+            assert len(telegram.sanitize(text)) <= telegram.MAX_TEXT and text.count("<blockquote>") == text.count("</blockquote>") == 1
+            assert law in text and TEXT_NOTE in text and ("…и ещё " in text) == ("\n" in long) and ("…</blockquote>" in text) != ("\n" in long)
+        # Процесс проверки: текст — из stdin, ответ — человеку; ни сбой модели, ни сбой отправки текст в лог не несут.
+        telegram.send_message = lambda chat, text, buttons=None, **_: sent.append((chat, text, buttons))
+        sys.stdin = type("In", (), {"buffer": io.BytesIO(song.encode())})()
+        llm.generate_tekst = lambda asked: {"skip": False, "lines": [2]}
+        _read("7")
+        assert sent == [("7", *report([lines[1]]))], sent
+        with contextlib.redirect_stdout(log):
+            for breaks in (lambda asked: 1 / 0, lambda asked: (_ for _ in ()).throw(RuntimeError(song))):
+                sys.stdin = type("In", (), {"buffer": io.BytesIO(song.encode())})()
+                llm.generate_tekst = breaks
+                _read("7")
+                assert sent[-1] == ("7", *report(None))
+            telegram.send_message = lambda chat, text, **_: (_ for _ in ()).throw(telegram.TelegramError(text))
+            sys.stdin = type("In", (), {"buffer": io.BytesIO(song.encode())})()
+            _read("7")
+        assert "строка" not in log.getvalue() and log.getvalue().count("ПРОВЕРКА ТЕКСТА:") == 8, log.getvalue()
+        # Дежурство: текст уходит процессу через stdin — в строке запуска его нет; второй текст того же человека
+        # ждёт конца первого, чужой — нет; кончившийся процесс место освобождает.
+        popen = real[2]
+        subprocess.Popen = lambda args, **kw: spawned.append((args, kw)) or popen(["sleep", "30"], stdin=subprocess.PIPE)
+        assert take(7, song) and not take("7", song) and take("8", song) and len(spawned) == 2
+        assert spawned[0] == ([sys.executable, "-m", "src.pamyatka", "--read", "7"], {"cwd": config.ROOT, "stdin": subprocess.PIPE})
+        for process in _READING.values():
+            process.kill()
+        finish()
+        assert take("7", song) and len(spawned) == 3 and set(_READING) == {"7"}
+    finally:
+        llm.generate_tekst, telegram.send_message, subprocess.Popen, sys.stdin = real
+        for process in _READING.values():
+            process.kill()
+            process.wait()
+        _READING.clear()
+    # Ни в одном ответе нет вердикта и нет совета, как переписать: слова закона не в счёт — это цитата.
+    verdict = ("чист", "можно", "нельзя", "нарушен", "нарушает", "законн", "разреш", "запрещ", "безопасн", "легальн", "пройд",
+               "замен", "синоним", "перепи", "вместо")
+    for text in (TEXT_ASK, TEXT_WAIT, TEXT_BUSY, TEXT_LONG, TEXT_LIMIT, TEXT_FULL, TEXT_BUTTON, TEXT_AGAIN, *replies):
+        assert not [word for word in verdict if word in text.replace(law, "").casefold()], text
+    assert all("не юрист" in text for text in (TEXT_ASK, *replies[:2])), "оговорка — на экране вопроса и в ответах"
+    # Пробы генератора — свои строки; в ответ человеку они не попадают, промпт веществ не называет.
+    prompt = (config.PROMPTS / "service" / "tekst.md").read_text(encoding="utf-8").casefold()
+    named = {word.casefold() for text, want in PROBES if want for n in want for word in re.findall(r"\w{5,}", lines_of(text)[n - 1])}
+    assert len(PROBES) == 10 and sum(bool(want) for _, want in PROBES) >= 5 and not [word for word in named if word in prompt]
+
+
 def _selftest() -> None:
     import os
 
@@ -246,7 +539,8 @@ def _selftest() -> None:
         assert reply == text.split("\n\n▸")[0] + (f"\n\n{html.escape(item['bot'])}" if item.get("bot") else ""), item["id"]
         assert telegram.visible_len(reply) <= telegram.MAX_TEXT and keys[-1][0]["text"] == BACK
         assert [key["callback_data"] for row in keys for key in row] == \
-            [f"s:{item.get('start', '').partition('_')[0]}"] * bool(item.get("bot")) + [f"{PICK}{base.index(item) // config.PAMYATKA_PAGE}"]
+            [f"s:{item.get('start', '').partition('_')[0]}"] * bool(item.get("bot")) + [TEXT_KEY] * (item["id"] == SLOVA) + \
+            [f"{PICK}{base.index(item) // config.PAMYATKA_PAGE}"]
         assert telegram.visible_len(text) <= quality.CAPTION_LIMIT, f"{item['id']}: подпись {telegram.visible_len(text)} знаков"
         assert set(re.findall(r"ст\. (\d+)", text)) == set(re.findall(r"ст\. (\d+)", cited)), f"{item['id']}: статьи текста и источника"
         assert all(key in skleyka.TAKE_FLAWS for key in re.findall(r'TAKE_FLAWS\["(\w+)"\]', cited)), item["id"]
@@ -263,14 +557,16 @@ def _selftest() -> None:
     assert config.PAMYATKA_DAYS == (2, 5), "MORE называет среду и субботу"
     pages = [screen(n) for n in range(-(-len(base) // config.PAMYATKA_PAGE))]
     assert keys == pages[0][1] and screen(99) == pages[-1], "вход — первая страница, лишний номер — последняя"
-    asked = [key for _, rows in pages for row in rows for key in row if not key["callback_data"].removeprefix(PICK).isdigit()]
+    assert all(rows[0] == [{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}] for _, rows in pages), "проверка текста — первой кнопкой"
+    asked = [key for _, rows in pages for row in rows[1:] for key in row if not key["callback_data"].removeprefix(PICK).isdigit()]
     assert [key["callback_data"] for key in asked] == [f"{PICK}{item['id']}" for item in base], "все записи, по разу, в порядке базы"
     assert all(find(key["callback_data"].removeprefix(PICK)) for key in asked) and find("") is None and find("1") is None
     for n, (text, rows) in enumerate(pages):
         turn = [key["callback_data"] for row in rows for key in row if key["callback_data"].removeprefix(PICK).isdigit()]
         assert turn == [f"{PICK}{m}" for m in (n - 1, n + 1) if 0 <= m < len(pages)], (n, turn)
-        assert NOTE in text and INTRO not in text and telegram.visible_len(text) <= telegram.MAX_TEXT and len(rows) <= config.PAMYATKA_PAGE + 1
+        assert NOTE in text and INTRO not in text and telegram.visible_len(text) <= telegram.MAX_TEXT and len(rows) <= config.PAMYATKA_PAGE + 2
         assert all(len(key["callback_data"].encode()) <= 64 and len(key["text"]) <= 40 for row in rows for key in row)
+    _selftest_text()
 
     at = lambda stamp: datetime.fromisoformat(f"2026-10-{stamp}:00+03:00")  # noqa: E731 — 07.10 среда, 10.10 суббота
     real = (state.now, config.ARCHIVE, config.POSTED_FILE, config.PAMYATKA_FILE, publish.to_channel, telegram.send_message,
@@ -367,9 +663,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="ПАМЯТКА: пост-совет артисту по средам и субботам")
     parser.add_argument("--selftest", action="store_true", help="проверка без сети и Telegram")
     parser.add_argument("--dry-run", action="store_true", help="что в запасе и какой пост вышел бы следующим, без записи")
+    parser.add_argument("--probe", action="store_true",
+                        help="читает ли генератор тексты с названиями веществ: десять проб — только из Actions")
+    parser.add_argument("--read", metavar="ЧАТ", help=argparse.SUPPRESS)  # процесс проверки текста: его запускает дежурство
     args = parser.parse_args()
     if args.selftest:
         return _selftest()
+    if args.probe:
+        return 1 if probe() > 1 else 0
+    if args.read:
+        return _read(args.read)
     from . import telegram
 
     left = pending()

@@ -156,7 +156,8 @@ MENU = (
     # ОЦЕНКА (src/ocenka.py) — сразу за отбором: туда и сюда несут готовый трек.
     "📏 <b>ОЦЕНКА</b>\nПришли готовый трек — замерю и скажу, чем он отличается от выпущенных релизов.\n\n"
     # ПАМЯТКА (src/pamyatka.py) — рядом с тем, что для пишущих музыку: биты, сведение, отбор.
-    "⚖️ <b>ПАМЯТКА</b>\nЧьи права на трек и как записать голос — коротко, с цитатами закона.\n\n"
+    "⚖️ <b>ПАМЯТКА</b>\nЧьи права на трек, как записать голос и что с «запретом слов» — коротко, с цитатами закона. "
+    "Текст трека проверю: покажу строки, где названы вещества.\n\n"
     "📼 <b>ВКЛАДЫШ</b>\nКинь ссылку на трек или альбом — пришлю карточку со всеми площадками для друга.\n\n"
     "🔔 <b>СЛЕЖУ</b>\nНазови артистов и свой город — напишу, когда выйдет релиз или объявят концерт.\n\n"
     # Площадку называет только INTRO ДВОЙНИКА: лайки можно и не кидать, а написать артистов.
@@ -209,7 +210,8 @@ def menu_buttons() -> list[list[dict]]:
         [{"text": "🎛 СВЕДЕНИЕ — вокал и бит в трек", "callback_data": f"{CALLBACK_PREFIX}skleyka"}],
         [{"text": "🎙 ОТБОР — прислать трек", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
         [{"text": "📏 ОЦЕНКА — готовый трек против релизов", "callback_data": f"{CALLBACK_PREFIX}ocenka"}],
-        [{"text": "⚖️ ПАМЯТКА — права на трек и запись голоса", "callback_data": pamyatka.PICK.rstrip(":")}],
+        # Не длиннее прежней подписи («…права на трек и запись голоса», 42 знака): та в кнопку влезала.
+        [{"text": "⚖️ ПАМЯТКА — права, голос и запрет слов", "callback_data": pamyatka.PICK.rstrip(":")}],
         [{"text": "📼 ВКЛАДЫШ — трек или альбом другу", "callback_data": f"{CALLBACK_PREFIX}vkladysh"}],
         [{"text": "🔔 СЛЕЖУ — релизы и концерты", "callback_data": f"{CALLBACK_PREFIX}slezhu"}],
         [{"text": "🪞 ДВОЙНИК — на сколько ты артист", "callback_data": f"{CALLBACK_PREFIX}sved"}],
@@ -1382,6 +1384,11 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         # «Как у кого бит» (src/skleyka.py): имя артиста — в поиск бесплатного бита, а не в разбор.
         skleyka.beats(chat_id, text)
         return False
+    if not text.startswith("/") and pamyatka.TEXT_MARK in asked:
+        # Ответ на вопрос «🔎 Проверить текст» (src/pamyatka.py): текст трека — на проверку, а не в ПРОЯВКУ.
+        if _subscribed(chat_id, user_id, admin, retry="tekst:ok"):
+            _tekst(chat_id, key, text, data, admin)
+        return False
     if not text.startswith("/") and (svedenie.INTRO_MARK in asked or svedenie.NAMES_MARK in asked):
         # Ответ на INTRO ДВОЙНИКА или на вопрос об артистах: ссылка — в разбор лайков,
         # остальное — список артистов. Без ответа тот же список ушёл бы в ПРОЯВКУ.
@@ -1699,6 +1706,30 @@ def _memo(chat_id: str, subject: str = "") -> None:
     telegram.send_message(chat_id, text, buttons=rows)
 
 
+def _tekst(chat_id: str, key: str, text: str, data: dict, admin: bool) -> None:
+    """Текст трека на проверку (pamyatka.take). Счёт суток — число по отпечатку человека в файле лимитов;
+    общий потолок — тот же, что у разборов (SERVICE_DAILY_TOTAL): и то и другое — запрос к генератору,
+    а его бесплатная квота общая с постами канала. Тратится и проверка, на которую модель не ответила:
+    запрос ушёл. Сам текст сюда не пишется и в счётчик не идёт — только метка."""
+    day = data.get("texts") or {}
+    if day.get("day") != _today():
+        day = data["texts"] = {"day": _today(), "users": {}}
+    if len(text) > config.TEKST_CHARS:
+        reply = pamyatka.TEXT_LONG
+    elif not admin and day["users"].get(key, 0) >= config.TEKST_PER_DAY:
+        reply = pamyatka.TEXT_LIMIT
+    elif not admin and _new_day(data).get("total", 0) >= config.SERVICE_DAILY_TOTAL:
+        reply = pamyatka.TEXT_FULL
+    elif not pamyatka.take(chat_id, text):
+        reply = pamyatka.TEXT_BUSY
+    else:
+        day["users"][key] = day["users"].get(key, 0) + 1
+        data["total"] = data.get("total", 0) + 1
+        count_source(pamyatka.TEXT_SENT)
+        reply = pamyatka.TEXT_WAIT
+    telegram.send_message(chat_id, reply, ask=pamyatka.TEXT_HINT if reply == pamyatka.TEXT_LONG else "")
+
+
 def handle_callback(query: dict, data: dict) -> None:
     """Нажатие кнопки сервиса.
 
@@ -1754,6 +1785,17 @@ def handle_callback(query: dict, data: dict) -> None:
     if action == "pam":
         # ПАМЯТКА (pamyatka.PICK): раздел из меню, страница списка или запись. Без подписки.
         _memo(chat_id, subject[:32])
+        return
+
+    if action == "tekst":
+        # «🔎 Проверить текст» (pamyatka.TEXT_KEY) на экране ПАМЯТКИ и под записью о «запрете слов»: что прислать.
+        # Раздел открыт всем, а проверку читает модель — она за подписку, как всё в боте, что стоит запроса.
+        # «:ok» — «Подписался»: вход уже посчитан.
+        admin = user_id == str(config.secret("TELEGRAM_ADMIN_ID", required=False))
+        if not subject:
+            count_source(pamyatka.TEXT_OPENED)
+        if _subscribed(chat_id, user_id, admin, retry="tekst:ok"):
+            telegram.send_message(chat_id, pamyatka.TEXT_ASK, ask=pamyatka.TEXT_HINT)
         return
 
     if action == "bit":
@@ -2333,7 +2375,7 @@ def _selftest() -> None:
                 door = pamyatka.PICK.rstrip(":")
                 assert [row[0]["callback_data"] for row in menu_buttons()].count(door) == 1, "кнопка раздела в меню"
                 press(door)
-                assert replies[-1] == first and pamyatka.NOTE in first[0] and len(first[1]) == config.PAMYATKA_PAGE + 1
+                assert replies[-1] == first and pamyatka.NOTE in first[0] and len(first[1]) == config.PAMYATKA_PAGE + 2
                 press(first[1][-1][0]["callback_data"])
                 assert replies[-1] == pamyatka.screen(1) != first and pamyatka.INTRO not in replies[-1][0]
                 memo = pamyatka.load()[0]
@@ -2350,6 +2392,51 @@ def _selftest() -> None:
                 assert "77701" not in SOURCES_FILE.read_text() and "55501" not in SOURCES_FILE.read_text()
             finally:
                 globals()["_subscribed"], llm._generate = unsub, real_llm
+            # «🔎 Проверить текст» (pamyatka.take): кнопка на экране раздела и под записью о «запрете слов» — вопрос
+            # с меткой; ответ на него идёт процессу проверки, а не в ПРОЯВКУ. Три в сутки на человека, общий потолок
+            # разборов, длинный текст — отказ с той же меткой, без подписки проверки нет. Текст не пишется
+            # ни в лимиты, ни в счётчик: там число и метка.
+            song, took, limits, walls = "строка раз\nстрока про вещество", [], {}, []
+            real_take, pamyatka.take = pamyatka.take, lambda chat, text: took.append((chat, text)) or len(took) != 2
+            plain = lambda text: re.sub(r"<[^>]+>", "", text)  # noqa: E731 — Telegram отдаёт текст вопроса без разметки
+
+            def lyric(text: str, n: int, asked: str = plain(pamyatka.TEXT_ASK), user: int = 77701) -> str:
+                handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": user}, "message_id": 700 + n,
+                                "date": 70000 + n * 60, "text": text, "reply_to_message": {"text": asked}}, limits)
+                return replies[-1][0]
+
+            def check(data: str) -> str:
+                handle_callback({"id": "q", "data": data, "message": {"chat": {"id": 55501}, "message_id": 5},
+                                 "from": {"id": 77701}}, limits)
+                return replies[-1][0]
+
+            try:
+                assert pamyatka.screen()[1][0] == pamyatka.answer(pamyatka.find(pamyatka.SLOVA))[1][0] \
+                    == [{"text": pamyatka.TEXT_BUTTON, "callback_data": pamyatka.TEXT_KEY}]
+                assert check(pamyatka.TEXT_KEY) == pamyatka.TEXT_ASK and pamyatka.TEXT_KEY.startswith(CALLBACK_PREFIX)
+                assert lyric(song, 0) == pamyatka.TEXT_WAIT and took == [("55501", song)]
+                assert lyric(song, 1) == pamyatka.TEXT_BUSY, "прошлый текст ещё читается — проверка не тратится"
+                assert lyric("я" * (config.TEKST_CHARS + 1), 2) == pamyatka.TEXT_LONG and len(took) == 2
+                assert lyric(song, 3, plain(pamyatka.TEXT_LONG)) == pamyatka.TEXT_WAIT, "ответ на «длиннее» — тоже текст на проверку"
+                assert lyric(song, 4) == pamyatka.TEXT_WAIT and lyric(song, 5) == pamyatka.TEXT_LIMIT and len(took) == 4
+                assert config.TEKST_PER_DAY == 3 and lyric(song, 6, user=77702) == pamyatka.TEXT_WAIT, "лимит — на человека"
+                limits["total"] = config.SERVICE_DAILY_TOTAL
+                assert lyric(song, 7, user=77703) == pamyatka.TEXT_FULL and len(took) == 5, "общий потолок — как у разборов"
+                limits["texts"]["day"], limits["total"] = "2000-01-01", 0
+                assert lyric(song, 8) == pamyatka.TEXT_WAIT and limits["texts"]["users"] == {user_key("77701"): 1}, "новые сутки"
+                globals()["_subscribed"] = lambda *a, **kw: walls.append(kw.get("retry")) or False
+                said = len(replies)
+                lyric(song, 9)
+                check(pamyatka.TEXT_KEY)
+                assert len(took) == 6 and len(replies) == said and walls == ["tekst:ok"] * 2, "без подписки — ни вопроса, ни проверки"
+                globals()["_subscribed"] = lambda *a, **kw: True
+                assert check(f"{pamyatka.TEXT_KEY}:ok") == pamyatka.TEXT_ASK, "«Подписался» — тот же вопрос"
+                day = state.read_json(SOURCES_FILE, {})[_today()]
+                assert (day[pamyatka.TEXT_OPENED], day[pamyatka.TEXT_SENT]) == (2, 5), day
+                kept = str(limits) + SOURCES_FILE.read_text()
+                assert "вещество" not in kept and "строка" not in kept and "77701" not in kept and "55501" not in kept, "текст человека сохранён"
+            finally:
+                pamyatka.take, globals()["_subscribed"] = real_take, lambda *a, **kw: True
             # Ссылка поста ПАМЯТКИ про бит «free» — сразу список битов (подписчику: проверка — ниже).
             listed = len(replies)
             say("/start bity_pamyatka", 13)
@@ -2444,6 +2531,7 @@ def _selftest() -> None:
           "без подписки — «Подписался» вместо бита и отметки, отказ считается, после подписки — тот же бит, по ссылке — в счёте ссылки; "
           "«🎧 Отдать звукорежиссёру» под оценкой — цена и СВЕДЕНИЕ, счёта задатка нет; "
           "ПАМЯТКА: кнопка, /pamyatka и ссылка поста — раздел без подписки и модели, страницы и записи кнопками, счёт входа и записей; "
+          "«🔎 Проверить текст»: ответ на вопрос — процессу проверки, три в сутки, общий потолок, длинный — отказ, без подписки — нет, текст не сохранён; "
           "/bity и кнопка: один бит — сразу файл, несколько — список, метка beat_menu отдельно от ссылки beat; "
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ, одноимённый альбом — кнопкой «💿 Альбом»; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "
           "приглашение sv_<код>: вступление друга, «Подписался» с кодом, код в открытый файл не попал; "

@@ -908,6 +908,12 @@ def serve(minutes: int) -> int:
         ocenka.finish()
     except Exception as exc:  # noqa: BLE001
         log.error("Оценка на конце смены не дождалась: %s", exc)
+    try:
+        from . import pamyatka
+
+        pamyatka.finish()  # текст на проверке дочитывается: машина с концом задания гасит процессы
+    except Exception as exc:  # noqa: BLE001
+        log.error("Проверка текста на конце смены не дождалась: %s", exc)
     push_state()
     print(f"Дежурство окончено. Нажатий: {total_handled}. Разборов: {total_served}.")
     return 0
