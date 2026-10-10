@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import re
 import textwrap
@@ -21,7 +22,7 @@ from io import BytesIO
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat
 
 from . import config, footage, stories
 
@@ -522,6 +523,139 @@ def meme_preview(paths: list[Path], out: Path) -> int:
             image.save(target, "JPEG", quality=90)
             print(f"{target}\n  подпись: {item.get('text', '')}")
     return 0
+
+
+# ─────────────────────── реклама юриста ───────────────────────
+
+# Карточка ПАМЯТКИ — пародия на дешёвую телерекламу юриста (владелец, 10.10.2026, о карточке разбора
+# под первым постом рубрики: «фотка сейчас оч плохо»). Дешевизна тут нарочная, и держат её приёмы
+# жанра, а не небрежность: чистые жёлтый, красный и синий, плашка со слоганом наискось рукописным
+# шрифтом с синей тенью, статуя Свободы, вырезанная из неба грубо и наклеенная с белой каймой, адрес
+# бота «номером телефона» во всю ширину и мелкий шрифт по низу. Людей в кадре нет: ни лиц, ни кадров
+# чужой рекламы — только буквы, плашки и свободное фото статуи (CC0, источник — assets/pamyatka/svoboda.txt).
+# Заголовок — тот же Oswald, что на всех кадрах канала: узкий жирный и есть шрифт щита. Слоган — Lobster
+# (OFL, с кириллицей): рукописного шрифта в репозитории не было, а системного на раннере Actions нет.
+AD_FONT = stories.FONTS / "Lobster.ttf"
+AD_STATUE = config.ROOT / "assets" / "pamyatka" / "svoboda.png"
+AD_RED, AD_BLUE, AD_YELLOW, AD_BLACK, AD_WHITE = (214, 16, 32), (18, 44, 160), (255, 218, 0), (14, 12, 10), (255, 255, 255)
+# Поле заголовка — над статуей и плашкой, во всю ширину щита: заголовок — главное, что читается в ленте.
+AD_BOX = (60, 118, 1020, 640)
+AD_TOP = 216  # выше кегль не растёт: два коротких слова не должны кричать громче самого щита
+AD_MIN = 96  # ниже — заголовок длинен для карточки: в ленте с телефона он уже не главный (сторожит селфтест памятки)
+AD_LEAD = 1.08  # шаг строк в кеглях: точки «Ё» не садятся на строку выше
+AD_TAIL = 0.15  # сверх шага: точки «Ё» над первой строкой и хвост «Щ» под последней, в кеглях
+
+
+def poster(text: str, width: float, height: float) -> tuple[list[str], int]:
+    """Заголовок щита: строки заглавными и самый крупный кегль, при котором они встают в поле.
+
+    Слова не рвутся и не режутся: слов в заголовке до десятка, поэтому перебираются все разбиения
+    на строки и берётся то, что даёт кегль крупнее, а из равных — где строк больше (поле заполнено)
+    и они ровнее. Тире и знак без букв держатся за слово слева, предлог и частица — за слово справа:
+    «—» в начале строки и «не» в её конце читаются как ошибка вёрстки, а не как дешёвый щит.
+    Тире и двоеточие посреди строки рвут мысль («студию — ещё / не соавтор»), поэтому такое разбиение
+    берётся, только когда другого нет; запятая посреди строки стоит дюжину пунктов кегля.
+    """
+    words: list[str] = []
+    glue = False
+    for word in text.upper().split():
+        letters = sum(ch.isalpha() for ch in word)
+        if words and (glue or not letters):
+            words[-1] += f" {word}"
+        else:
+            words.append(word)
+        glue = 0 < letters <= 2 or word in ("ДЛЯ", "БЕЗ", "ПРО", "ПРИ", "НАД", "ПОД")
+    probe, best = stories.font(200), None
+    for count in range(min(len(words), 5)):
+        for cuts in itertools.combinations(range(1, len(words)), count):
+            lines = [" ".join(words[a:b]) for a, b in zip((0, *cuts), (*cuts, len(words)))]
+            wide = [probe.getlength(line) for line in lines]
+            size = int(min(AD_TOP, 200 * width / max(wide), height / (len(lines) * AD_LEAD + AD_TAIL)))
+            torn = sum(100 * (line.count("— ") + line.count(": ")) + 12 * line.count(", ") for line in lines)
+            rank = (size - torn, len(lines), -sum((max(wide) - w) ** 2 for w in wide))
+            if best is None or rank > best[0]:
+                best = rank, lines, size
+    _, lines, size = best
+    while size > 8 and max(stories.font(size).getlength(line) for line in lines) > width:
+        size -= 2  # ширина растёт с кеглем не строго ровно: добираем настоящим шрифтом
+    return lines, size
+
+
+def _spaced(draw: ImageDraw.ImageDraw, middle: tuple[float, float], text: str, f, fill, track: float, shade=None) -> None:
+    """Строка вразрядку, серединой в точке, с жёсткой тенью: так набран «номер телефона» на щите.
+    По высоте ровняется по самим знакам: у адреса бота подчёркивания висят ниже строки."""
+    _, up, _, down = f.getbbox(text)
+    x = middle[0] - (sum(f.getlength(ch) for ch in text) + track * (len(text) - 1)) / 2
+    y = middle[1] - (up + down) / 2
+    if shade:
+        stories.tracked(draw, (x + 5, y + 5), text, f, shade, track)
+    stories.tracked(draw, (x, y), text, f, fill, track)
+
+
+def advert(title: str, slogan: str, *, label: str, handle: str, fine: str = "") -> Image.Image:
+    """Щит рекламы юриста: рубрика, заголовок, слоган на плашке у статуи, адрес бота, мелкий шрифт.
+
+    fine — оговорка по низу, как в настоящей рекламе юристов. Без неё щит не жёлтый, а синий:
+    запись не о законе, и рекламой юриста ей выглядеть незачем — но рубрика узнаётся по тем же плашкам.
+    """
+    high, low, glow, ink, band, band_ink, shade = (
+        ((255, 224, 0), (255, 150, 0), (255, 240, 110), AD_BLACK, AD_BLUE, AD_WHITE, AD_BLUE) if fine
+        else ((30, 78, 200), (12, 30, 120), (52, 104, 226), AD_YELLOW, AD_YELLOW, AD_BLACK, AD_BLACK))
+    size = (WIDTH, HEIGHT)
+    img = Image.composite(Image.new("RGB", size, low), Image.new("RGB", size, high), Image.linear_gradient("L").resize(size))
+    # Лучи расходятся от факела статуи: без них поле — ровная заливка, с ними — щит.
+    statue = Image.open(AD_STATUE).convert("RGBA")
+    statue = ImageOps.expand(statue.resize((round(statue.width * 780 / statue.height), 780), Image.LANCZOS), 8)
+    left, top = WIDTH - 46 - statue.width, 644
+    rays = Image.new("L", size, 0)
+    pen = ImageDraw.Draw(rays)
+    for turn in range(7, 360, 20):  # с семи градусов: ровно горизонтальный край луча читается как шов
+        pen.pieslice([left + 62 - 2200, top + 40 - 2200, left + 62 + 2200, top + 40 + 2200], turn, turn + 10, fill=120)
+    img.paste(glow, mask=rays)
+    draw = ImageDraw.Draw(img)
+
+    # Чёрные поля сверху и снизу, как у ролика на экране: сверху рубрика, снизу мелкий шрифт.
+    draw.rectangle([0, 0, WIDTH, 90], fill=AD_BLACK)
+    _spaced(draw, (WIDTH / 2, 45), label, stories.font(50), AD_YELLOW, 16)
+
+    x0, y0, x1, y1 = AD_BOX
+    lines, kegl = poster(title, x1 - x0, y1 - y0)
+    f = stories.font(kegl)
+    # Блок ставится серединой поля по самим знакам: точки «Ё» и хвост «Щ» есть не в каждом заголовке.
+    up, down = -f.getbbox(lines[0], anchor="ls")[1], f.getbbox(lines[-1], anchor="ls")[3]
+    y = (y0 + y1 + up - down - (len(lines) - 1) * kegl * AD_LEAD) / 2
+    for line in lines:
+        draw.text((x0, y), line, font=f, fill=ink, anchor="ls")
+        y += kegl * AD_LEAD
+
+    # Статуя наклейкой: белая кайма вокруг грубой маски и жёсткая тень — дешёвый коллаж, а не фотомонтаж.
+    rim = statue.getchannel("A").filter(ImageFilter.MaxFilter(15))
+    img.paste(shade, (left + 14, top + 14), rim)
+    img.paste(AD_WHITE, (left, top), rim)
+    img.paste(statue, (left, top), statue)
+
+    # Красная плашка наискось: слоган рукописным шрифтом, белым с синей тенью; последнее слово крупнее.
+    head, _, tail = slogan.rpartition(" ")
+    plate = Image.new("RGBA", (800, 316), AD_RED)
+    pen = ImageDraw.Draw(plate)
+    for text, kegl, at in ((head, 98, (116, 14)), (tail, 148, (150, 124))):
+        script = ImageFont.truetype(str(AD_FONT), kegl)
+        pen.text((at[0] + 6, at[1] + 6), text, font=script, fill=AD_BLUE)
+        pen.text(at, text, font=script, fill=AD_WHITE)
+    plate = plate.rotate(5, Image.BICUBIC, expand=True)
+    img.paste(shade, (-64 + 12, 716 + 14), plate.getchannel("A"))
+    img.paste(plate, (-64, 716), plate)
+
+    # Адрес бота — «номер телефона» на полосе во всю ширину; под ним мелкий шрифт, если он есть.
+    floor = HEIGHT - 70 if fine else HEIGHT
+    draw.rectangle([0, 1166, WIDTH, floor], fill=band)
+    draw.rectangle([0, 1158, WIDTH, 1166], fill=AD_WHITE)
+    _spaced(draw, (WIDTH / 2, (1166 + floor) / 2), handle, stories.font(92 if fine else 112), band_ink, 6,
+            AD_BLACK if fine else None)
+    if fine:
+        draw.rectangle([0, floor, WIDTH, HEIGHT], fill=AD_BLACK)
+        draw.text((WIDTH / 2, floor + 35), fine, font=_meme_font(31), fill=AD_WHITE, anchor="mm")
+    return img
 
 
 def main() -> int:

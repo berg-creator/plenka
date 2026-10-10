@@ -543,11 +543,71 @@ def air() -> str:
     return post["id"]
 
 
-def shot(post: dict) -> Path:
-    """Карточка поста: заголовок крупно, «ПАМЯТКА» — рубрикой (publish.send)."""
+# Щит поста (card.advert). Слоган — тем же зовёт пост (CALL); плашка нарисована под эти слова: сменишь —
+# посмотри картинку. Мелкий шрифт — правило проекта, а не шутка: канал не юрист и юристом выглядеть
+# не должен, поэтому оговорка стоит на каждой карточке о законе.
+SLOGAN = "Лучше пишите ПЛЁНКЕ!"
+FINE = "ПЛЁНКА не юрист. Цитаты закона и что с ними делать"
+
+
+def picture(post: dict):
+    """Щит поста — пародия на дешёвую рекламу юриста (card.advert): заголовок записи плакатом, слоган
+    на плашке у статуи Свободы, адрес бота «номером телефона». Запись о голосе — без мелкого шрифта
+    и на синем: закона в ней нет."""
     from . import card
 
-    return card.save(post["title"][:1].upper() + post["title"][1:], [], label="ПАМЯТКА", name=RUBRIC)
+    law = (find(post["id"]) or {}).get("topic", LAW) == LAW
+    return card.advert(post["title"], SLOGAN, label="ПАМЯТКА", handle=config.BOT_HANDLE, fine=FINE if law else "")
+
+
+def shot(post: dict) -> Path:
+    """Карточка поста файлом, каким его отдаёт card.save: JPEG 1080×1350 (publish.send).
+
+    Карточка — шаблон, а не фото: сверку «одно фото в канале дважды не выходит» (card.cover, отпечатки
+    в data/posted.json) она не проходит и отпечатка посту не даёт. Так и надо: щиты рубрики похожи
+    намеренно. Замер 10.10.2026 на всех 23: ближайшие два расходятся в 27 признаках при пороге 24 —
+    запас в три признака, и первый же новый заголовок мог бы уйти текстом как «повтор».
+    """
+    from . import card
+
+    card.OUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = card.OUT_DIR / f"{RUBRIC}.jpg"
+    picture(post).save(path, "JPEG", quality=90)
+    return path
+
+
+def _selftest_card() -> None:
+    """Карточка: щит каждой записи базы рисуется, слова заголовка целы, а сам он стоит в своём поле."""
+    from PIL import Image, ImageChops
+
+    from . import card, stories
+
+    for path in (stories.DISPLAY_FONT, card.AD_FONT, card.MEME_FONT, card.AD_STATUE):
+        assert path.exists(), f"карточке не из чего рисоваться: нет {path.name}"
+    x0, y0, x1, y1 = card.AD_BOX
+    empty: dict[str, object] = {}
+    for item in load():
+        lines, size = card.poster(item["title"], x1 - x0, y1 - y0)
+        assert " ".join(lines) == " ".join(item["title"].upper().split()), f"{item['id']}: слова заголовка целы и по порядку"
+        assert size >= card.AD_MIN, f"{item['id']}: заголовок длинен для карточки — кегль {size}, нужен от {card.AD_MIN}"
+        image = picture(build(item))
+        assert image.size == (card.WIDTH, card.HEIGHT), item["id"]
+        # Всё, кроме заголовка, у щитов одной темы общее: чем щит отличается от пустого, то и есть знаки
+        # заголовка. Вышли за поле — значит, обрезаны краем или легли на плашку, статую или рубрику.
+        blank = empty.setdefault(item["topic"], picture({"id": item["id"], "title": "—"}))
+        left, top, right, bottom = ImageChops.difference(image, blank).getbbox()
+        assert x0 <= left and y0 <= top and right <= x1 and bottom <= y1, f"{item['id']}: заголовок вышел из поля"
+    assert len(empty) == 2 and ImageChops.difference(*empty.values()).getbbox(), "щит записи о голосе — другого цвета"
+    real = card.OUT_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        card.OUT_DIR = Path(tmp)
+        try:
+            post = build(load()[0])
+            with Image.open(shot(post)) as saved:
+                assert saved.format == "JPEG" and saved.size == (card.WIDTH, card.HEIGHT), "файл — как у card.save"
+            assert "photo" not in post, "шаблон не проходит сверку фото: отпечатка у поста нет (publish.record)"
+        finally:
+            card.OUT_DIR = real
 
 
 def _selftest_text() -> None:
@@ -864,6 +924,7 @@ def _selftest() -> None:
         finally:
             (state.now, config.ARCHIVE, config.POSTED_FILE, config.PAMYATKA_FILE, publish.to_channel, telegram.send_message,
              config.QUEUE, config.INBOX_FILE, compose.USED_FILE, compose.release_jobs, compose.do_now) = real
+    _selftest_card()
     print("pamyatka: самопроверка пройдена")
 
 
