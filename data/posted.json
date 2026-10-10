@@ -1181,6 +1181,12 @@
       "file": "pamyatka-free.json",
       "published_at": "2026-10-10T09:10:12+00:00",
       "rubric": "pamyatka"
+    },
+    {
+      "chat": "channel",
+      "file": "20261010-110602-4635-news.json",
+      "published_at": "2026-10-10T11:06:08+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
