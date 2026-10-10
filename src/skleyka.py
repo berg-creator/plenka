@@ -2829,7 +2829,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     файлы снова у Telegram: сами дорожки бот не хранит. Пока трека нет — выбор режима (m),
     галочки дорожек (t), «Дальше» (n), «Отмена» (x), назад к режиму (b), стиль (y), саунд-дизайн (e),
     справка (h), «нет бита» (g), «голос на чужом бите» (o) и «это к треку» под переспросом (k, which; «разбор вкуса» ловит service);
-    «🎧 Отдать звукорежиссёру» (u) — под треком и под лимитом, «🎧 Примеры: до и после» (z) — под его предложением; кнопки продажи ручного сведения (h…, _sale) —
+    «🎧 Отдать звукорежиссёру» (u) — под треком и под лимитом, «🎧 Примеры: до и после» (z) — под его предложением; кнопки продажи ручного сведения и ответ на её переспрос (h…, _sale) —
     message_id: сообщение с нажатой кнопкой, его кнопки меняются на месте; who — кто нажал, from Telegram;
     keyboard — кнопки того сообщения, text — его текст (текст клиенту под «📤 Отправить клиенту»)."""
     chat_id = str(chat_id)
@@ -3178,7 +3178,7 @@ def _card(data: dict, track_id: str, track: dict, who: dict) -> None:
 # Денег бот не видит — перевод подтверждает владелец; отказ, подарок и вторую правку решает он же,
 # бот ничего не обещает. Реквизиты — секрет SKLEYKA_HAND_PAY: репозиторий открытый.
 SALE_DAYS = 7  # столько после выдачи текст клиента идёт звукорежиссёру: правка входит в цену
-# ponytail: неоплаченная продажа закрывается сама через 30 дней; закрыть раньше — «🎁 Отдать без оплаты».
+# Неоплаченная продажа закрывается сама через 30 дней; раньше её закрывает владелец — «🗄 Закрыть заказ» (hc).
 SALE_UNPAID_DAYS = 30
 SALE_CLAIM_MINUTES = 5  # «Я оплатил» чаще — владельцу второй раз не пишем
 SALE_NUDGE_HOURS = 24
@@ -3206,6 +3206,12 @@ SALE_LOST = ("⚠️ Заказ {track}: клиенту ушло не всё ({w
 SALE_BAD = "⚠️ Заказ {track}: {why} — запусти --hand заново."
 SALE_PIN_WRONG = "Пин не тот — трек не отдан. Кнопка «🎁» снова на месте."
 SALE_PIN_NONE = "⚠️ Пин не задан — трек не отдан. Без пина «🎁» не работает: нужен секрет SKLEYKA_HAND_PIN из цифр."
+# Находка 10.10.2026: клиент с открытым заказом сводил ботом другие песни и писал просьбу к свежему треку
+# («убрать эхо») — текст уходил владельцу как вопрос по заказу. Есть у человека другой трек бота в работе
+# или только что готовый — бот переспрашивает; остывший заказ без задатка владелец закрывает кнопкой.
+SALE_WHICH = "✏️ Это по заказу у звукорежиссёра или к новому треку, который сводит бот?"
+SALE_SHUT = ("Заказ у звукорежиссёра закрыт. Что напишешь сюда дальше, прочитает бот, а не он. "
+             "Вернуться к заказу — /vopros.")
 
 
 def _sale_keys(track_id: str) -> list[list[dict]]:
@@ -3218,13 +3224,13 @@ def _pay_key(track_id: str) -> list[list[dict]]:
 
 
 def _selling(track: dict) -> bool:
-    """Открыта ли продажа: от отправки клиенту до SALE_DAYS после выдачи. Владелец, прошедший путь
+    """Открыта ли продажа: от отправки клиенту до SALE_DAYS после выдачи, пока владелец её не закрыл. Владелец, прошедший путь
     клиента на своём треке, после выдачи свободен сразу — иначе неделю писал бы сам себе."""
     sale = track.get("sale")
     if not sale:
         return False
-    if not sale.get("given"):
-        return _age(sale["sent"]) < SALE_UNPAID_DAYS * 86400
+    if not sale.get("given"):  # closed — владелец закрыл остывший заказ; выдал трек после — срок правки обычный
+        return not sale.get("closed") and _age(sale["sent"]) < SALE_UNPAID_DAYS * 86400
     return _age(sale["given"]) < SALE_DAYS * 86400 and track["chat"] != config.secret("TELEGRAM_ADMIN_ID", required=False)
 
 
@@ -3273,12 +3279,21 @@ def _gift_key(track_id: str) -> list[list[dict]]:
     return [[{"text": "🎁 Отдать без оплаты", "callback_data": f"{PREFIX}{track_id}:hg"}]]
 
 
-def _pin(track_id: str, typed: str, message_id: int | None) -> bool:
+def _shut_key(data: dict, track_id: str, track: dict) -> list[list[dict]]:
+    """«🗄 Закрыть заказ» владельцу — только у неоплаченной продажи без задатка: с задатком заказ
+    закрывает «↩️ Не беру», у выданного трека закрывать нечего."""
+    if (track.get("sale") or {}).get("given") or _deposit(data, track_id):
+        return []
+    return [[{"text": "🗄 Закрыть заказ", "callback_data": f"{PREFIX}{track_id}:hc"}]]
+
+
+def _pin(track_id: str, typed: str, message_id: int | None, keys: list[list[dict]]) -> bool:
     """Пин перед «🎁 Отдать без оплаты» (владелец, 05.10.2026): кнопка висит под строкой заказа, на которую
     он отвечает клиенту, и промах пальцем отдавал трек даром. Цифры набираются кнопками и едут в данных
     самой кнопки: память смены не нужна, а пин текстом в этом чате ушёл бы клиенту — ответом не на то
     сообщение. Пин — секрет SKLEYKA_HAND_PIN; нет его или он не из цифр — кнопка не отдаёт ничего
-    и говорит об этом владельцу: пропавший секрет иначе молча вернул бы выдачу одним нажатием."""
+    и говорит об этом владельцу: пропавший секрет иначе молча вернул бы выдачу одним нажатием.
+    keys — кнопки, которые цифры сменили: не тот пин возвращает их все, а не одну «🎁»."""
     owner, pin = config.secret("TELEGRAM_ADMIN_ID"), config.secret("SKLEYKA_HAND_PIN", required=False)
     if not pin.isdigit():
         telegram.send_message(owner, SALE_PIN_NONE)
@@ -3291,7 +3306,7 @@ def _pin(track_id: str, typed: str, message_id: int | None) -> bool:
         back = {"text": f"↩️ Не отдавать · пин {len(typed)} из {len(pin)}", "callback_data": f"{PREFIX}{track_id}:hx"}
         telegram.edit_markup(owner, message_id, rows + [[back]])
     else:
-        telegram.edit_markup(owner, message_id, _gift_key(track_id))
+        telegram.edit_markup(owner, message_id, keys)
         telegram.send_message(owner, SALE_PIN_WRONG)
     return False
 
@@ -3341,18 +3356,39 @@ def _sale_send(data: dict, track_id: str, track: dict, payload: str, message_id:
     telegram.edit_markup(owner, message_id, None)
     _owner(track_id, track, f"{name}: кусок и текст ушли клиенту, цена {price} ₽"
            + (f", к доплате {owed}" if owed else "") + ". Жду его ответа.",
-           _gift_key(track_id))
+           _gift_key(track_id) + _shut_key(data, track_id, track))
 
 
 def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, message_id: int | None, text: str) -> None:
     """Кнопки продажи ручного сведения. Клиента — «как оплатить» (hl), «что-то не так» (hw),
-    «я оплатил» (hp) — только из чата самого трека и пока продажа открыта; владельца — отправить
-    клиенту (hs…), деньги пришли или нет (hy, hn), отдать без оплаты (hg и цифры пина, hx — передумал),
-    «не беру — вернуть задаток» (hr) — только от владельца в его личке. Чужое нажатие — молча мимо:
-    отвечать подделке нечего."""
+    «я оплатил» (hp) и ответ на переспрос sale_text: «по заказу» (ho), «к новому треку» (hk и его номер) —
+    только из чата самого трека и пока продажа открыта, по закрытой — одна строка SALE_SHUT, без реквизитов;
+    владельца — отправить клиенту (hs…), деньги пришли или нет (hy, hn), отдать без оплаты (hg и цифры пина,
+    hx — передумал), «не беру — вернуть задаток» (hr), закрыть остывший заказ (hc — спросить, hcy — закрыть) — только от владельца
+    в его личке. Чужое нажатие — молча мимо: отвечать подделке нечего."""
     owner, track = config.secret("TELEGRAM_ADMIN_ID"), data["tracks"].get(track_id)
-    if code in ("hl", "hw", "hp"):
-        if not track or track["chat"] != chat_id or not _selling(track):
+    if code in ("hl", "hw", "hp", "ho") or code.startswith("hk"):
+        if not track or track["chat"] != chat_id:
+            return
+        if (track.get("sale") or {}).get("closed") and not track["sale"].get("given"):
+            telegram.send_message(chat_id, SALE_SHUT)
+            return
+        if not _selling(track):
+            return
+        if code not in ("hl", "hw", "hp"):
+            # Текст ждал в треке заказа и забирается один раз. По заказу — прежним путём sale_text.
+            # К новому треку — в заявку или трек в очереди (wish), а готовому — просьбой talk: трек назван
+            # кнопкой, как ответом на его ручки; номера в кнопке нет (была одна заявка, и её уже нет) — «-»,
+            # и talk отвечает STALE, а не крутит ручку последнего трека, которым может оказаться трек заказа.
+            telegram.edit_markup(chat_id, message_id, None)
+            if not (words := track.pop("ask", "")):
+                return
+            save(data)
+            if code == "ho":
+                sale_text(chat_id, words, sure=True)
+            elif not wish(chat_id, words):
+                talk(chat_id, words, {"reply_markup": {"inline_keyboard": [[
+                    {"callback_data": f"{PREFIX}{code[2:] or '-'}:"}]]}}, admin=admin)
             return
         sale, name = track["sale"], track["sale"].get("who", "клиент")
         sale.setdefault("touched", state.iso())  # нажал — напоминать о куске не нужно
@@ -3404,6 +3440,30 @@ def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, messa
         _sale_send(data, track_id, track, code[2:], message_id, text)
         return
     sale, gift = track.get("sale"), code.startswith("hg")
+    shut = _shut_key(data, track_id, track)
+    back = _gift_key(track_id) + shut  # что стояло под строкой после «📤» до цифр пина
+    if code in ("hc", "hcy"):
+        # Запись продажи остаётся (счёт «что-то не так» переедет в новую отправку), целый трек не выдаётся;
+        # новый кусок через «📤» открывает продажу заново — _sale_send пишет запись без closed.
+        if not sale or not shut:
+            telegram.send_message(owner, f"Заказ {track_id}: закрывать нечего — трек выдан или внесён задаток (тогда «↩️ Не беру»).")
+        elif sale.get("closed"):
+            telegram.send_message(owner, f"Заказ {track_id} уже закрыт.")
+        elif code == "hc":
+            # Закрывает второе нажатие (hcy): кнопка стоит под строками, на которые владелец отвечает клиенту,
+            # и промах пальцем сказал бы клиенту «заказ закрыт» — та же ловушка, что была у «🎁» до пина.
+            telegram.edit_markup(owner, message_id, [
+                [{"text": "🗄 Точно закрыть", "callback_data": f"{PREFIX}{track_id}:hcy"}],
+                [{"text": "Не закрывать", "callback_data": f"{PREFIX}{track_id}:hx"}]])
+            return
+        else:
+            sale["closed"] = state.iso()
+            save(data)
+            telegram.send_message(track["chat"], SALE_SHUT)
+            _owner(track_id, track, f"{sale.get('who', 'клиент')}: заказ закрыт, клиенту сказано, целый трек не выдан. "
+                   "Открыть заново — новый кусок с Мака (--hand) и «📤».")
+        telegram.edit_markup(owner, message_id, None)
+        return
     if sale and not sale.get("given"):  # отдаётся один раз
         if code == "hn":
             sale.pop("claim", None)  # следующее «Я оплатил» дойдёт до владельца сразу
@@ -3411,9 +3471,9 @@ def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, messa
             save(data)
             telegram.send_message(track["chat"], SALE_NOT_SEEN, buttons=_pay_key(track_id))
         elif code == "hx":
-            telegram.edit_markup(owner, message_id, _gift_key(track_id))
+            telegram.edit_markup(owner, message_id, back)
             return
-        elif gift and not _pin(track_id, code[2:], message_id):
+        elif gift and not _pin(track_id, code[2:], message_id, back):
             return  # пин не набран или не тот — трек остаётся у владельца
         elif not (gift or code == "hy") or not _give(data, track_id, track, SALE_GIFT if gift else SALE_PAID):
             return
@@ -3423,23 +3483,37 @@ def _sale(data: dict, chat_id: str, track_id: str, code: str, admin: bool, messa
     telegram.edit_markup(owner, message_id, None)
 
 
-def sale_text(chat_id: str | int, text: str) -> bool:
+def sale_text(chat_id: str | int, text: str, sure: bool = False) -> bool:
     """Свободный текст клиента при открытой продаже — звукорежиссёру, путём /vopros: метка в строке
     владельцу, его ответ на неё уходит клиенту (answer). Зовётся раньше просьбы к треку и ПРОЯВКИ
     (src/service.py): на «а можно голос погромче» иначе ответил бы разбор вкуса или пересобралась бы
-    версия бота. Лимита вопросов нет: это разговор с клиентом, а не обращение со стороны."""
+    версия бота. Лимита вопросов нет: это разговор с клиентом, а не обращение со стороны.
+    У человека в работе другой трек бота — открыта заявка, трек стоит в очереди или готов меньше часа
+    назад (fresh) — текст бывает и о нём: переспрос двумя кнопками (ho, hk в _sale), текст ждёт в треке
+    заказа полем ask, как у which. sure — человек уже ответил «по заказу»."""
     chat, data = str(chat_id), load()
     found = next(((key, track) for key, track in data["tracks"].items() if track["chat"] == chat and _selling(track)), None)
     if not found:
         return False
     track_id, track = found
+    # Новый трек — не трек заказа: пересборка версии бота по заказу переспроса не стоит.
+    new = next((job["track"] for job in data["jobs"] if job["track"] != track_id
+                and data["tracks"].get(job["track"], {}).get("chat") == chat), fresh(chat, track_id))
+    if not sure and (new or _draft(data, chat)):
+        track["ask"] = text[:1000]
+        save(data)
+        telegram.send_message(chat, SALE_WHICH, buttons=[
+            [{"text": "🎧 Это по заказу", "callback_data": f"{PREFIX}{track_id}:ho"}],
+            [{"text": "🎛 Это к новому треку", "callback_data": f"{PREFIX}{track_id}:hk{new}"}]])
+        return True
     sale = track["sale"]
     if "touched" not in sale or "due" in sale:
         sale.setdefault("touched", state.iso())
         if "due" in sale:  # пишет, а не платит — сутки до напоминания об оплате считаются заново
             sale["due"] = state.iso()
         save(data)
-    _owner(track_id, track, f"{track['sale'].get('who', 'клиент')}:\n\n{html.escape(text[:2000])}")
+    _owner(track_id, track, f"{track['sale'].get('who', 'клиент')}:\n\n{html.escape(text[:2000])}",
+           _shut_key(data, track_id, track) or None)
     telegram.send_message(chat, SALE_PASSED)
     return True
 
@@ -3460,7 +3534,8 @@ def _nudge(data: dict) -> bool:
     for track_id, track in data["tracks"].items():
         sale = track.get("sale") or {}
         pay = "due" in sale
-        if not sale.get("piece") or sale.get("given") or not pay and (sale.get("touched") or sale.get("nudged")) \
+        if not sale.get("piece") or sale.get("given") or sale.get("closed") \
+                or not pay and (sale.get("touched") or sale.get("nudged")) \
                 or _age(sale["due" if pay else "sent"]) < SALE_NUDGE_HOURS * 3600:
             continue
         sale.pop("due", None)
@@ -3845,11 +3920,12 @@ def heed(knobs: dict, wish: str, timing: dict, talk: bool = False, spent: bool =
 TALK_WINDOW = 3600
 
 
-def fresh(chat_id: str | int) -> str:
-    """Трек человека, готовый меньше TALK_WINDOW назад, — к нему просьба без ответа на сообщение."""
+def fresh(chat_id: str | int, but: str = "") -> str:
+    """Трек человека, готовый меньше TALK_WINDOW назад, — к нему просьба без ответа на сообщение.
+    but — трек не в счёт: трек заказа, когда ищется новый рядом с ним (sale_text)."""
     chat_id, tracks = str(chat_id), load()["tracks"]
     ready = [key for key, track in tracks.items()
-             if track["chat"] == chat_id and _age(track.get("done", "")) < TALK_WINDOW]
+             if key != but and track["chat"] == chat_id and _age(track.get("done", "")) < TALK_WINDOW]
     return max(ready, key=lambda key: tracks[key]["done"], default="")
 
 
@@ -6238,6 +6314,83 @@ def _selftest() -> None:
         assert not sale_text(8, "привет") and not sale_text(6, "привет"), "без продажи текст идёт своим путём"
         assert load()["tracks"]["t5"]["sale"]["touched"], "написал — напоминать не о чем"
 
+        # Переспрос (находка 10.10.2026): у клиента с открытым заказом в работе другой трек бота — готов
+        # меньше часа назад или стоит в очереди — текст не уходит владельцу молча, а ждёт ответа кнопкой.
+        # «По заказу» — прежний путь; «к новому треку» — ручка трека из кнопки, хотя последним (_last)
+        # остаётся трек заказа; без нового трека — как раньше; кнопки из чужого чата — мимо.
+        data = load()
+        data["tracks"]["t50"] = {"chat": "5", "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(stamp - timedelta(days=1)),
+                                 "done": state.iso(), "mix": 96, "files": []}
+        save(data)
+        count, jobs = len(sent), len(data["jobs"])
+        assert _last(data, "5") == "t5" and sale_text(5, "убери эхо") and sent[count:] == [SALE_WHICH] \
+            and [(key["text"], key["callback_data"]) for row in keys[-1] for key in row] == [
+                ("🎧 Это по заказу", f"{PREFIX}t5:ho"), ("🎛 Это к новому треку", f"{PREFIX}t5:hkt50")], sent[count:]
+        assert press(8, "ho") == ([], []) and press(8, "hkt50") == ([], []) and load()["tracks"]["t5"]["ask"] == "убери эхо"
+        got, _ = press(5, "ho")
+        assert got == [got[0], SALE_PASSED] and got[0].startswith(head[5] + "Лил · @lilpi:\n\nубери эхо") \
+            and len(load()["jobs"]) == jobs, got
+        assert press(5, "ho") == ([], []) and press(5, "hkt50") == ([], []), "текст — один раз"
+        sale_text(5, "убери эхо")
+        got, _ = press(5, "hkt50")
+        data = load()
+        assert len(got) == 1 and got[0].startswith("✏️ Принял — разберу") and len(data["jobs"]) == jobs + 1 \
+            and (data["jobs"][-1]["track"], data["jobs"][-1]["wish"]) == ("t50", "убери эхо") \
+            and "talks" not in data["tracks"]["t5"], "ручка — новому треку, владельцу ничего"
+        data["tracks"]["t50"]["done"] = state.iso(stamp - timedelta(seconds=TALK_WINDOW + 1))
+        save(data)
+        assert sale_text(5, "и голос громче") and sent[-1] == SALE_WHICH and keys[-1][1][0]["callback_data"] == f"{PREFIX}t5:hkt50", \
+            "трек в очереди сведения — тоже новый"
+        assert press(5, "hkt50")[0] == [WISH_LATE] and len(load()["jobs"]) == jobs + 1, "при очереди — путём wish"
+        data = load()
+        data["jobs"].pop()
+        data["tracks"]["t5"]["ask"] = "громче"
+        save(data)
+        assert press(5, "hk")[0] == [STALE] and len(load()["jobs"]) == jobs, "нового трека уже нет — ручку заказа не крутим"
+        count = len(sent)
+        assert sale_text(5, "когда целый трек") and sent[count + 1:] == [SALE_PASSED] \
+            and sent[count].startswith(head[5] + "Лил · @lilpi:\n\nкогда целый трек"), "нет свежего трека — прежний путь"
+        data = load()
+        del data["tracks"]["t50"]
+        save(data)
+
+        # «🗄 Закрыть заказ»: кнопка — у неоплаченной продажи без задатка, под строкой после «📤» и под текстом
+        # клиента; нажатие — только владельца и один раз: клиенту строка, целый трек не выдан. Дальше продажи
+        # нет: напоминаний нет, чистка трек не держит, текст идёт боту, кнопки клиента реквизитов не дают.
+        # Новый кусок через «📤» открывает продажу заново.
+        shut = lambda track: [[{"text": "🗄 Закрыть заказ", "callback_data": f"{PREFIX}{track}:hc"}]]  # noqa: E731
+        got, rows = press(1, "hs2500.1.901,1", mid=702, text="Кусок.", track="t8")
+        assert rows[1] == _gift_key("t8") + shut("t8") and not _shut_key(load(), "t5", load()["tracks"]["t5"]), "с задатком — «Не беру»"
+        assert press(1, "hc")[0] == ["Заказ t5: закрывать нечего — трек выдан или внесён задаток (тогда «↩️ Не беру»)."] \
+            and press(6, "hc", track="t8") == ([], []) and press(6, "hcy", track="t8") == ([], []) \
+            and _selling(load()["tracks"]["t8"]), "клиент сам заказ не закроет"
+        assert press(1, "hc", track="t8") == ([], []) and [row[0]["callback_data"] for row in edits[-1]] == [
+            f"{PREFIX}t8:hcy", f"{PREFIX}t8:hx"] and _selling(load()["tracks"]["t8"]), "первое нажатие только спрашивает"
+        assert press(1, "hx", track="t8") == ([], []) and edits[-1] == _gift_key("t8") + shut("t8") \
+            and _selling(load()["tracks"]["t8"]), "«Не закрывать» возвращает кнопки, заказ открыт"
+        got, _ = press(1, "hcy", track="t8")
+        data = load()
+        assert got[0] == SALE_SHUT and "/vopros" in SALE_SHUT and "<" not in SALE_SHUT and not copies() \
+            and got[1].startswith(head[6] + "Лил · @lilpi: заказ закрыт, клиенту сказано, целый трек не выдан.") \
+            and data["tracks"]["t8"]["sale"]["closed"] and "given" not in data["tracks"]["t8"]["sale"] \
+            and not _selling(data["tracks"]["t8"]) and not _ordered(data, "t8", data["tracks"]["t8"]), got
+        assert press(1, "hc", track="t8")[0] == ["Заказ t8 уже закрыт."], "закрывается один раз"
+        state.now = lambda: stamp.replace(hour=9, minute=0) + timedelta(days=2)  # 12:00 МСК, сутки молчания прошли
+        assert not _nudge(load()), "закрытому заказу не напоминаем"
+        state.now = lambda: stamp
+        assert not sale_text(6, "убери эхо"), "после закрытия текст идёт боту"
+        for code in ("hl", "hw", "hp", "ho"):
+            assert press(6, code, track="t8") == ([SALE_SHUT], [None]), code
+        sale = load()["tracks"]["t8"]["sale"]
+        assert not {"liked", "claim", "due"} & set(sale) and not sale["wrong"], "закрытый заказ реквизитов не даёт и правок не считает"
+        got, rows = press(1, "hs2500.1.911,1", mid=703, text="Новый кусок.", track="t8")
+        assert copies() == [("6", "1", 911)] and _selling(load()["tracks"]["t8"]) and "closed" not in load()["tracks"]["t8"]["sale"], \
+            "новый кусок открывает продажу заново"
+        assert sale_text(6, "спасибо", sure=True) and keys[-2] == shut("t8") and sent[-1] == SALE_PASSED, "кнопка — и под текстом клиента"
+        data = load()
+        del data["tracks"]["t8"]["sale"]
+        save(data)
+
         # Кнопки клиента из чужого чата — отказ молча; подложенные в кнопку номера не читаются вовсе.
         for code in ("hl", "hw", "hp", "hp1.0.900,1"):
             assert press(8, code) == ([], []) and not calls, code
@@ -6313,7 +6466,7 @@ def _selftest() -> None:
         got, rows = press(6, "hl", track="t8")
         assert got[0] == SALE_PAY_NONE.format(price="2500 ₽") and "пришлёт звукорежиссёр" in got[0] and rows[0] == _pay_key("t8") \
             and got[1].startswith(head[6] + "Лил: клиенту понравилось. Реквизитов у бота нет (секрет SKLEYKA_HAND_PAY пуст)"), got
-        # Пин: «🎁» открывает цифры, набор едет в кнопках; не тот пин и «Не отдавать» возвращают кнопку,
+        # Пин: «🎁» открывает цифры, набор едет в кнопках; не тот пин и «Не отдавать» возвращают кнопки под строкой,
         # трек остаётся у владельца; чужое нажатие с верным пином — мимо. Секрета нет — кнопка закрыта.
         edits.append(None)
         assert press(1, "hg", track="t8")[0] == [SALE_PIN_NONE] and edits[-1] is None and not copies() \
@@ -6323,10 +6476,10 @@ def _selftest() -> None:
             and edits[-1][-1][0] == {"text": "↩️ Не отдавать · пин 0 из 4", "callback_data": f"{PREFIX}t8:hx"}, edits[-1]
         assert press(1, "hg407", track="t8") == ([], []) and edits[-1][3][0]["callback_data"] == f"{PREFIX}t8:hg4070" \
             and "пин 3 из 4" in edits[-1][-1][0]["text"] and len(edits[-1][3][0]["callback_data"].encode()) <= 64
-        assert press(1, "hg4070", track="t8")[0] == [SALE_PIN_WRONG] and edits[-1] == _gift_key("t8") and not copies() \
+        assert press(1, "hg4070", track="t8")[0] == [SALE_PIN_WRONG] and edits[-1] == _gift_key("t8") + shut("t8") and not copies() \
             and "given" not in load()["tracks"]["t8"]["sale"], "не тот пин — трек не отдан"
         edits.append(None)
-        assert press(1, "hx", track="t8") == ([], []) and edits[-1] == _gift_key("t8") and not copies()
+        assert press(1, "hx", track="t8") == ([], []) and edits[-1] == _gift_key("t8") + shut("t8") and not copies()
         assert press(6, "hg4071", track="t8") == ([], []) and not calls and "given" not in load()["tracks"]["t8"]["sale"]
         got, _ = press(1, "hg4071", track="t8")
         assert copies() == [("6", "1", 902), ("6", "1", 903)] and got[0] == SALE_GIFT and "Трек твой" in got[0] \
