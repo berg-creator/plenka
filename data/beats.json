@@ -98,6 +98,10 @@
     "at": "2026-10-09T22:50:17+00:00",
     "bpm": 135,
     "file_id": "BQACAgIAAxkDAAIUEGrJbiFV6gqTkGPS81WtzYwVzfj5AAJ6sQACtfJQSoI932XPiU7VPQQ",
+    "hits": {
+      "menu": 1,
+      "mix": 1
+    },
     "key": "B",
     "kind": "document",
     "loop": "blvckmorphine",
