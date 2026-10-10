@@ -623,7 +623,7 @@ def _selftest() -> None:
         compose.do_now = lambda count, jobs: written.extend(source["fingerprint"] for *_, source in jobs) or 0
         state.append_jsonl(config.INBOX_FILE, [
             {"kind": "release", "fingerprint": f"день {date}", "score": 90, "artist": "Артист", "tracked": "Артист",
-             "title": f"Релиз {date}", "released_at": out(date)} for date in (7, 8, 14)])
+             "title": f"Релиз {date}", "released_at": out(date)} for date in (5, 7, 8, 14)])
         os.environ.setdefault("TELEGRAM_CHANNEL_ID", "-1")
         os.environ.setdefault("TELEGRAM_ADMIN_ID", "1")
         sent, lines = [], []
@@ -633,6 +633,12 @@ def _selftest() -> None:
         items = [{"id": key, "title": f"запись {key}", "text": ["Текст."], "sources": ["ГК РФ"]} for key in "abc"]
         state.write_json(config.PAMYATKA_FILE, items[:2])
         try:
+            # Релиз прошлых суток ленты утром не выходит и без памятки (publish.missed, владелец 10.10.2026).
+            state.now = lambda: at("06T09:20")
+            mon, tue = queued(5, 99), queued(6, 1)
+            assert publish.next_post(releases=True) == tue and not mon.exists(), "вторник, 9:20 — пост понедельника убран, выходит пост вторника"
+            assert found() == [], "и сбор в 9:17 о релизе понедельника не пишет"
+            tue.unlink()
             state.now = lambda: at("06T13:00")
             assert not due() and air() == "" and not day() and publish.release_due(), "вторник — молчит, релиз выходит"
             state.write_json(config.POSTED_FILE, {"items": [{"rubric": "release", "published_at": state.iso(at("06T10:00"))}]})

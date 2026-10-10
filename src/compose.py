@@ -972,7 +972,8 @@ def do_fresh(dry_run: bool) -> int:
 
     Релиз, чей день отдан ПАМЯТКЕ (pamyatka.took), не пишется и использованным не помечается:
     он не выйдет ни в свои сутки, ни наутро (publish.next_post), и генератор на него не тратится.
-    Релиз следующего дня, найденный ночью до 9:00 МСК, пишется как обычно.
+    Релиз следующего дня, найденный ночью до 9:00 МСК, пишется как обычно. Так же не пишется релиз,
+    чьи сутки ленты кончились (publish.missed): сбор в 9:17 МСК находил вчерашний, и пост выходил сразу.
     """
     from . import pamyatka
 
@@ -983,7 +984,7 @@ def do_fresh(dry_run: bool) -> int:
     by_name = {a["name"]: a for a in artists}
     rows = list(state.read_jsonl(config.INBOX_FILE))
     fresh = [i for i in fresh_releases(rows, set(state.read_json(USED_FILE, [])))
-             if not pamyatka.took(state._parse(i["released_at"]))]
+             if not (publish.missed(out := state._parse(i["released_at"])) or pamyatka.took(out))]
     jobs = release_jobs([i for i in fresh if store_checked(i, by_name)], rows, by_name)
     if dry_run:
         for _, rubric, payload, _ in jobs:
