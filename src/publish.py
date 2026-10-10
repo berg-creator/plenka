@@ -46,9 +46,8 @@ def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = F
     (посты до 11.09.2026) — считаем от created_at. Будущая дата не пускает:
     iTunes ставит выход на 07:00 UTC, поэтому сравниваются дни, а не часы.
 
-    Так же убирается пост о релизе, чей день отдан ПАМЯТКЕ (pamyatka.took): на следующее утро
-    он не переносится. Сутки ленты кончаются в 9:00 МСК, а пост с выходом в 10:00 МСК (iTunes)
-    годен до 10:00 следующего дня — без этого он час выходил вчерашним и забирал выход у свежего.
+    Так же убирается пост о релизе, чьи сутки ленты кончились (missed), и пост о релизе, чей день
+    отдан ПАМЯТКЕ (pamyatka.took) — тот уже в свои сутки, не дожидаясь утра.
     """
     from . import pamyatka
 
@@ -66,7 +65,7 @@ def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = F
         released = state._parse(post.get("released_at") or post.get("created_at") or "")
         if released is None or released.date() > now.date():
             continue
-        stale = now - released > max_age
+        stale = now - released > max_age or missed(released, now)
         if stale or pamyatka.took(released, now):
             log.warning("Релиз %s, %s: %s", "протух" if stale else "суток ПАМЯТКИ",
                         "убрал бы" if dry_run else "убран из очереди", path.name)
@@ -99,6 +98,21 @@ def feed_day(moment: datetime):
     from .compose import MSK
 
     return (moment.astimezone(MSK) - timedelta(hours=config.QUIET_TO_HOUR)).date()
+
+
+def missed(released: datetime, moment: datetime | None = None) -> bool:
+    """Кончились ли сутки ленты релиза: его день — дата выхода по Москве, и с 9:00 МСК следующего дня
+    пост о нём не выходит и не пишется (next_post, compose.do_fresh; владелец 10.10.2026).
+
+    iTunes ставит выход на 10:00 МСК, пост живёт сутки (config.RELEASE_MAX_AGE_HOURS), а сутки ленты
+    начинаются в 9:00: целый час вчерашний релиз, не попавший в config.RELEASE_PER_DAY, при большем весе
+    выходил вместо свежего, а без свежего в очереди съедал единственный выход дня — и сегодняшний релиз
+    уходил на завтрашнее утро, отставание тянулось само (30.09, 03.10 и 06.10.2026). Ночью до 9:00
+    вчерашний выходить вправе: это хвост его же суток.
+    """
+    from .compose import MSK
+
+    return feed_day(moment or state.now()) > released.astimezone(MSK).date()
 
 
 def hushed(chat_id: str | int) -> bool:
@@ -872,9 +886,6 @@ def _selftest() -> None:
                                "score": 100},
             # Пост до 11.09: даты выхода нет, трек есть — выходит сразу.
             "5-verdict.json": {"rubric": "verdict", "created_at": ago(hours=1), "full_track_file_id": "ID"},
-            # До срока меньше окна на трек — ждать нельзя.
-            "6-release.json": {"rubric": "release", "released_at": ago(hours=23), "created_at": ago(minutes=10),
-                               "score": 70},
             # Выйдет послезавтра — не выходит и не убирается.
             "7-release.json": {"rubric": "release", "released_at": ago(days=-2), "created_at": ago(hours=3),
                                "score": 100},
@@ -886,10 +897,26 @@ def _selftest() -> None:
         while path := next_post(releases=True):
             order.append(path.name)
             path.unlink()
-        assert order == ["2-release.json", "6-release.json", "5-verdict.json"], order
+        assert order == ["2-release.json", "5-verdict.json"], order
         assert sorted(p.name for p in config.QUEUE.glob("*.json")) == [
             "1-meme.json", "3-release.json", "7-release.json"
         ]
+
+        # Релиз прошлых суток ленты утром не выходит (missed, владелец 10.10.2026): вчерашний весомее свежего,
+        # выход у обоих в 10:00 МСК, как ставит iTunes. В 8:30 — хвост его суток: он выходит и трека не ждёт,
+        # до срока меньше окна. В 9:20 сутки ленты новые — он убран, выходит свежий.
+        late, new = config.QUEUE / "6-release.json", config.QUEUE / "9-release.json"
+        state.write_json(late, {"rubric": "release", "released_at": "2026-09-10T07:00:00+00:00",
+                                "created_at": "2026-09-11T05:20:00+00:00", "score": 99})
+        state.write_json(new, {"rubric": "release", "released_at": "2026-09-11T07:00:00+00:00",
+                               "created_at": "2026-09-11T03:00:00+00:00", "score": 1})
+        state.now = lambda: datetime(2026, 9, 11, 5, 30, tzinfo=timezone.utc)
+        assert next_post(releases=True) == late, "ночью вчерашний релиз ещё выходит"
+        state.now = lambda: datetime(2026, 9, 11, 6, 20, tzinfo=timezone.utc)
+        assert next_post(releases=True, dry_run=True) == new and late.exists(), "сухой прогон очередь не трогает"
+        assert next_post(releases=True) == new and not late.exists(), "утром вчерашний релиз убран, выходит свежий"
+        new.unlink()
+        state.now = lambda: now
 
         # Пост, ушедший владельцу на утверждение, второй раз ему не подаётся:
         # в личке он остаётся в очереди, пока тот не нажмёт кнопку, и ежечасный
@@ -932,7 +959,7 @@ def _selftest() -> None:
         # ни дневные слоты не съедают (26.09.2026 лента из-за них молчала весь день).
         posted(("release", ago(hours=17)), ("release", ago(hours=16)), ("verdict", ago(hours=15)))
         assert release_due() and due({"rubric": "meme"})
-        print("выходы релизов: сутки, окно на трек, лимит в день, звук в канале — у одного поста за сутки, обычный слот уступает, "
+        print("выходы релизов: сутки, окно на трек, вчерашний утром не выходит, лимит в день, звук в канале — у одного поста за сутки, обычный слот уступает, "
               "бит недели и её итог — мимо слотов")
     finally:
         (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,

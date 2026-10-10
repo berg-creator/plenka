@@ -26,7 +26,8 @@
 с собранным по яркости — у пресета со случайной фазой она гуляет от запуска к запуску на 16%; сверяются ручки.
 Отвергнуто: класть в репозиторий сами пресеты и таблицы — они чужие и платные.
 
-    python -m src.serum --check     плагин грузится, звучит, .fxp пишется и читается обратно (нужен SERUM_PYTHON)
+    python -m src.serum --check     плагин грузится, звучит, .fxp пишется и читается обратно, Audio Unit берёт пресет
+                                    из состояния, которое сборка кладёт в проект FL (нужен SERUM_PYTHON)
     python -m src.serum --knobs     что значит доля каждой ручки: подписи самого плагина (нужен SERUM_PYTHON)
     python -m src.serum --make      собрать и проверить один пресет: задание JSON из stdin, итог — строкой JSON
 
@@ -45,6 +46,7 @@ import unicodedata
 from pathlib import Path
 
 VST3 = Path("/Library/Audio/Plug-Ins/VST3/Serum.vst3")
+AU = Path("/Library/Audio/Plug-Ins/Components/Serum.component")    # им Serum стоит в проекте FL
 SR = 44100
 NOTE, VEL, HOLD, LEN = 60, 100, 1.0, 2.0    # как в промере библиотеки (поле serum списка звуков): C5 в FL, секунда
 PEAK = (.05, 1.0)       # пик одной ноты: тише — «тишина» (в библиотеке из 884 пресетов таких 4), выше — перегруз
@@ -274,10 +276,20 @@ def check() -> str:
         save_fxp(p, f"{tmp}/check.fxp", "check")
         q = _plugin()
         load_fxp(q, f"{tmp}/check.fxp")
+        # Проект FL держит Serum как Audio Unit, а тот пресет с длиной «весь файл» (так пишет библиотека) молча
+        # не берёт: 10.10.2026 четыре канала «Ржавчины» открылись с Init. Грузим в него то, что кладёт сборка проекта.
+        from pedalboard import load_plugin
+        from . import flp
+        raw = Path(f"{tmp}/check.fxp").read_bytes()
+        Path(f"{tmp}/lib.fxp").write_bytes(raw[:4] + struct.pack(">I", len(raw)) + raw[8:])
+        a = load_plugin(str(AU))
+        init = [v.raw_value for v in a.parameters.values()]
+        a.raw_state = flp.au_state(Path(f"{tmp}/lib.fxp"))
+        assert [v.raw_value for v in a.parameters.values()] != init, "Audio Unit не взял пресет из состояния проекта FL"
     two = heard(q)
     assert q.parameters["filter_on"].raw_value == 1 and abs(q.parameters["fil_cutoff_hz"].raw_value - .5) < .005 \
         and abs(one[1] - two[1]) < .1 * one[1], f"fxp вернулся другим: {one} и {two}"
-    return f"Serum {p.version}: звучит, fxp пишется и читается ({one[1]} и {two[1]} Гц, пик {two[0]:.2f})"
+    return f"Serum {p.version}: звучит, fxp пишется и читается ({one[1]} и {two[1]} Гц, пик {two[0]:.2f}), Audio Unit берёт пресет из состояния проекта FL"
 
 
 def knobs() -> str:

@@ -1693,16 +1693,18 @@ WHAT_NEXT = "Забирай карточку. Разберём что-нибуд
 
 def _memo(chat_id: str, subject: str = "") -> None:
     """Раздел «ПАМЯТКА» (src/pamyatka.py): пустой subject — вход (меню, /pamyatka, ссылка из поста),
-    число — страница списка, иначе id записи; записи с таким id уже нет — список. Отвечает только
-    готовыми записями базы, модель не зовётся. Счёт — вход и каждая открытая запись, по дню и без
-    id человека: владельцу видно, какие вопросы открывают (--sources | grep ПАМЯТКА)."""
+    id записи — ответ, «тема.страница» — список темы; всё прочее — снова вход, без счёта: «← Назад»
+    из темы, запись, которой уже нет, и кнопки прежнего общего списка в старых сообщениях. Отвечает
+    только готовыми записями базы, модель не зовётся. Счёт — вход и каждая открытая запись, по дню и без
+    id человека: владельцу видно, какие вопросы открывают (--sources | grep ПАМЯТКА); выбор темы
+    и листание не считаются."""
     if item := pamyatka.find(subject):
         count_source(pamyatka.label(item))
         text, rows = pamyatka.answer(item)
     else:
         if not subject:
             count_source(pamyatka.OPENED)
-        text, rows = pamyatka.screen(int(subject) if subject.isdigit() else None if not subject else 0)
+        text, rows = pamyatka.screen(subject)
     telegram.send_message(chat_id, text, buttons=rows)
 
 
@@ -1783,7 +1785,7 @@ def handle_callback(query: dict, data: dict) -> None:
         return
 
     if action == "pam":
-        # ПАМЯТКА (pamyatka.PICK): раздел из меню, страница списка или запись. Без подписки.
+        # ПАМЯТКА (pamyatka.PICK): раздел из меню, тема, её страница или запись. Без подписки.
         _memo(chat_id, subject[:32])
         return
 
@@ -2363,7 +2365,9 @@ def _selftest() -> None:
             assert (day[bity.MENU_LABEL], day["beat"], day["БИТ ПЛЁНКИ: выдан"]) == (5, 1, 6), day
             assert SOURCES[bity.MENU_LABEL] != SOURCES["beat"]
             # ПАМЯТКА (src/pamyatka.py): кнопка меню, /pamyatka и ссылка из поста — раздел без подписки и без
-            # модели; страница и запись — кнопками s:pam:; счёт — вход и каждая запись, листание не считается.
+            # модели; вход — две темы без вопросов, тема, её страница и запись — кнопками s:pam:, «← Все вопросы» —
+            # в тему записи, кнопка прежнего общего списка — на вход; счёт — вход и каждая запись, выбор темы
+            # и листание не считаются.
             unsub, asked_llm = globals()["_subscribed"], []
             globals()["_subscribed"] = lambda *a, **kw: 1 / 0
             real_llm, llm._generate = llm._generate, lambda *a, **kw: asked_llm.append(a)
@@ -2375,17 +2379,24 @@ def _selftest() -> None:
                 door = pamyatka.PICK.rstrip(":")
                 assert [row[0]["callback_data"] for row in menu_buttons()].count(door) == 1, "кнопка раздела в меню"
                 press(door)
-                assert replies[-1] == first and pamyatka.NOTE in first[0] and len(first[1]) == config.PAMYATKA_PAGE + 2
-                press(first[1][-1][0]["callback_data"])
-                assert replies[-1] == pamyatka.screen(1) != first and pamyatka.INTRO not in replies[-1][0]
+                assert replies[-1] == first and pamyatka.NOTE in first[0] and len(first[1]) == 1 + len(pamyatka.TOPICS)
+                for topic, row in zip(pamyatka.TOPICS, first[1][1:]):
+                    press(row[0]["callback_data"])
+                    assert replies[-1] == pamyatka.screen(topic) != first and pamyatka.INTRO not in replies[-1][0]
+                    assert (pamyatka.NOTE in replies[-1][0]) == (topic == pamyatka.LAW), "оговорка о юристе — в теме закона"
+                press(f"{pamyatka.PICK}{pamyatka.LAW}.1")
+                assert replies[-1] == pamyatka.screen(f"{pamyatka.LAW}.1") != pamyatka.screen(pamyatka.LAW), "вторая страница темы"
+                press(replies[-1][1][-1][0]["callback_data"])
+                assert replies[-1] == first, "«← Назад» из темы — вход"
                 memo = pamyatka.load()[0]
                 press(f"{pamyatka.PICK}{memo['id']}")
                 assert replies[-1] == pamyatka.answer(memo) and replies[-1][1][-1][0]["text"] == pamyatka.BACK
                 assert replies[-1][1][0][0]["callback_data"] == f"{CALLBACK_PREFIX}bity", "под записью про бит — кнопка меню «🎚 БИТЫ»"
                 press(replies[-1][1][-1][0]["callback_data"])
-                assert replies[-1] == pamyatka.screen(0)
-                press(f"{pamyatka.PICK}нет-такой")
-                assert replies[-1] == pamyatka.screen(0), "записи уже нет — список"
+                assert replies[-1] == pamyatka.screen(memo["topic"]) != first, "«← Все вопросы» — список темы записи"
+                for old in ("нет-такой", "0", "1", "2"):  # записи уже нет; страницы и «← Все вопросы» прежнего списка
+                    press(f"{pamyatka.PICK}{old}")
+                    assert replies[-1] == first, old
                 day = state.read_json(SOURCES_FILE, {})[_today()]
                 assert (day[pamyatka.RUBRIC], day[pamyatka.OPENED], day[pamyatka.label(memo)]) == (1, 4, 1), day
                 assert not asked_llm and pamyatka.PICK.startswith(CALLBACK_PREFIX) and COMMANDS["pamyatka"] == COMMANDS["памятка"]
@@ -2530,7 +2541,7 @@ def _selftest() -> None:
           "ОЦЕНКА: /ocenka, кнопка и ссылка ставят отметку, вход считается; биты и ОЦЕНКА — подписчику канала: "
           "без подписки — «Подписался» вместо бита и отметки, отказ считается, после подписки — тот же бит, по ссылке — в счёте ссылки; "
           "«🎧 Отдать звукорежиссёру» под оценкой — цена и СВЕДЕНИЕ, счёта задатка нет; "
-          "ПАМЯТКА: кнопка, /pamyatka и ссылка поста — раздел без подписки и модели, страницы и записи кнопками, счёт входа и записей; "
+          "ПАМЯТКА: кнопка, /pamyatka и ссылка поста — раздел без подписки и модели, вход — две темы, в теме вопросы и страницы кнопками, «← Все вопросы» — в тему записи, кнопки прежнего списка — на вход, счёт входа и записей; "
           "«🔎 Проверить текст»: ответ на вопрос — процессу проверки, три в сутки, общий потолок, длинный — отказ, без подписки — нет, текст не сохранён; "
           "/bity и кнопка: один бит — сразу файл, несколько — список, метка beat_menu отдельно от ссылки beat; "
           "ссылка на плейлист — в ДВОЙНИКА, трек — во ВКЛАДЫШ, одноимённый альбом — кнопкой «💿 Альбом»; ответ на INTRO: ссылка — в лайки, артисты — в by_names; "

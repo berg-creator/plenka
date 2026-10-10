@@ -1175,6 +1175,12 @@
       "file": "beat-4.json",
       "published_at": "2026-10-10T07:06:54+00:00",
       "rubric": "beat"
+    },
+    {
+      "chat": "channel",
+      "file": "pamyatka-free.json",
+      "published_at": "2026-10-10T09:10:12+00:00",
+      "rubric": "pamyatka"
     }
   ],
   "photos": [
