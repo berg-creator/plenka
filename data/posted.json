@@ -1169,6 +1169,12 @@
       "file": "20261008-145351-3809-lineage.json",
       "published_at": "2026-10-09T16:10:15+00:00",
       "rubric": "lineage"
+    },
+    {
+      "chat": "channel",
+      "file": "beat-4.json",
+      "published_at": "2026-10-10T07:06:54+00:00",
+      "rubric": "beat"
     }
   ],
   "photos": [
