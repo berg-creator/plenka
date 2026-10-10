@@ -25,11 +25,11 @@
 по печатному виду страницы (?docview&page=1&print=1&nd=…&rdk=…): обычный вид длинный документ
 обрывает молча, а печатный отдаёт его целиком и пишет дату, на которую текст действует; поправки,
 ещё не внесённые в текст, ИПС показывает в списке редакций пометкой «не готова» — их читать отдельно.
-Последняя строка поста зовёт в бота, слова «в боте» в ней — ссылка. Своя строка записи — поле bot,
+Конец поста зовёт в бота: значок и короткая строка, целиком ссылка. Своя строка записи — поле bot,
 метка ссылки — поле start: про бит «free» она ведёт в список битов, про запись голоса — в сведение
 (отдельной проверки голоса в боте нет: замер записи, skleyka.gauge, идёт внутри сведения и человеку
-не показывается). Записи про права (поле topic) без своей строки шаблон дописывает призыв CALL —
-«Лучше пишите ПЛЁНКЕ» со ссылкой на раздел в боте (владелец 09.10.2026). Команд в тексте поста нет:
+не показывается). Последней строкой каждого поста шаблон ставит призыв CALL — «Лучше пишите ПЛЁНКЕ»
+со ссылкой на раздел в боте (владелец 09.10.2026; с 10.10.2026 — под каждым постом). Команд в тексте поста нет:
 в канале Telegram подсвечивает /команду, а нажатие никуда не ведёт.
 
 Та же база открывается в боте разделом «ПАМЯТКА» (screen, answer; кнопки и счёт — service._memo):
@@ -85,7 +85,10 @@ from . import config, state
 RUBRIC = "pamyatka"
 LAW = "prava"  # поле topic записи про права; вторая тема — "golos", запись голоса
 # Отсылка к названию сериала о юристе — без имени персонажа: его нигде не пишем.
-CALL = "▸ Лучше пишите ПЛЁНКЕ: все памятки про права — в боте"
+CALL = "⚖️ Лучше пишите ПЛЁНКЕ"
+# Строка-ссылка в конце поста — не длиннее одной строки телефона (владелец 10.10.2026: «в боте» уезжало
+# на вторую строку, «не красиво»). Число — с запасом от узкого экрана, сверяет селфтест.
+LINE_MAX = 28
 # Кнопки раздела в боте: s:pam:<id> — запись, s:pam:<тема>.<страница> — список темы; «s:pam» без хвоста — вход
 # из меню (service.menu_buttons), он считается. Числа и точки в id не бывает — селфтест базы, — поэтому HOME,
 # первый экран без счёта входа, — число: так до 10.10.2026 выглядели страницы общего списка и «← Все вопросы»,
@@ -125,13 +128,13 @@ def _parts(item: dict) -> list[str]:
 
 
 def build(item: dict) -> dict:
-    """Пост канала: запись и последней строкой — своя строка про бота или, у записи про права, призыв CALL."""
-    parts = _parts(item)
-    line, start = (item["bot"], item["start"]) if item.get("bot") else (CALL, RUBRIC) if item.get("topic") == LAW else ("", "")
-    if line:
-        url = f"https://t.me/{config.BOT_HANDLE.lstrip('@')}?start={start}"
-        parts.append(re.sub("(?i)в боте", lambda found: f'<a href="{url}">{found[0]}</a>', html.escape(line), count=1))
-    return {"rubric": RUBRIC, "id": item["id"], "title": item["title"], "text": "\n\n".join(parts)}
+    """Пост канала: запись, под ней своя строка про бота, если она есть, и последней — призыв CALL в раздел
+    (владелец 10.10.2026: ссылка на сам раздел нужна в каждом посте, а не только там, где нет своей строки)."""
+    base = f"https://t.me/{config.BOT_HANDLE.lstrip('@')}?start="
+    lines = ([(item["bot"], item["start"])] if item.get("bot") else []) + [(CALL, RUBRIC)]
+    calls = [f'{icon} <a href="{base}{start}">{html.escape(words)}</a>'
+             for (icon, _, words), start in ((line.partition(" "), start) for line, start in lines)]
+    return {"rubric": RUBRIC, "id": item["id"], "title": item["title"], "text": "\n\n".join(_parts(item) + ["\n".join(calls)])}
 
 
 def label(item: dict) -> str:
@@ -538,19 +541,22 @@ def _selftest() -> None:
     # Настоящая база: у каждой записи источник, подпись влезает в подпись к фото, сказанное о боте стоит на коде.
     base = load()
     assert len(base) >= 16 and len({item["id"] for item in base}) == len(base), "id записей не повторяются"
-    link = f'<a href="https://t.me/{config.BOT_HANDLE.lstrip("@")}?start={RUBRIC}">в боте</a>'
+    icon, _, words = CALL.partition(" ")
+    link = f'{icon} <a href="https://t.me/{config.BOT_HANDLE.lstrip("@")}?start={RUBRIC}">{words}</a>'
     for item in base:
         text, cited = build(item)["text"], " ".join(item.get("sources") or [])
         assert re.fullmatch(r"[a-z0-9-]+", item["id"]) and not item["id"].isdigit() and cited, f"{item['id']}: нет источника"
-        # Последняя строка зовёт в бота: своя — в биты или сведение, у записи про права без своей — призыв в раздел.
-        assert item.get("topic") in ICONS and text.count("<a href") == 1, f"{item['id']}: тема и одна ссылка в бота"
-        assert item.get("bot") or text.endswith(CALL.replace("в боте", link)), f"{item['id']}: призыв — последней строкой"
-        assert not item.get("bot") or item["start"].partition("_")[0] in DOORS and CALL not in text, f"{item['id']}: своя строка — с кнопкой"
+        # Конец поста зовёт в бота: своя строка — в биты или сведение, последней у каждой записи — призыв в раздел.
+        own = bool(item.get("bot"))
+        assert item.get("topic") in ICONS and text.count("<a href") == 1 + own, f"{item['id']}: тема и ссылки в бота"
+        assert text.endswith(link) and "▸" not in text, f"{item['id']}: призыв — последней строкой"
+        assert all(len(line) <= LINE_MAX for line in (item.get("bot", ""), CALL)), f"{item['id']}: строка-ссылка рвётся на телефоне"
+        assert not own or item["start"].partition("_")[0] in DOORS, f"{item['id']}: своя строка — с кнопкой"
         assert not re.search(r"(?<![:/\w<])/[a-z]", text), f"{item['id']}: команда в посте канала не нажимается"
         # Раздел в боте: вопрос влезает в кнопку, её данные — в 64 байта, ответ — без призыва и ссылки.
         reply, keys = answer(item)
         assert 0 < len(item.get("ask") or "") <= 36 and len(f"{PICK}{item['id']}".encode()) <= 64, f"{item['id']}: кнопка"
-        assert reply == text.split("\n\n▸")[0] + (f"\n\n{html.escape(item['bot'])}" if item.get("bot") else ""), item["id"]
+        assert reply == text.rsplit("\n\n", 1)[0] + (f"\n\n{html.escape(item['bot'])}" if item.get("bot") else ""), item["id"]
         assert telegram.visible_len(reply) <= telegram.MAX_TEXT and keys[-1][0]["text"] == BACK
         assert [key["callback_data"] for row in keys for key in row] == \
             [f"s:{item.get('start', '').partition('_')[0]}"] * bool(item.get("bot")) + [TEXT_KEY] * (item["id"] == SLOVA) + \
@@ -558,7 +564,7 @@ def _selftest() -> None:
         assert telegram.visible_len(text) <= quality.CAPTION_LIMIT, f"{item['id']}: подпись {telegram.visible_len(text)} знаков"
         assert set(re.findall(r"ст\. (\d+)", text)) == set(re.findall(r"ст\. (\d+)", cited)), f"{item['id']}: статьи текста и источника"
         assert all(key in skleyka.TAKE_FLAWS for key in re.findall(r'TAKE_FLAWS\["(\w+)"\]', cited)), item["id"]
-        assert not item.get("bot") or f'?start={item["start"]}">' in text, f"{item['id']}: «в боте» не стало ссылкой"
+        assert not item.get("bot") or f'?start={item["start"]}">' in text, f"{item['id']}: своя строка не стала ссылкой"
         assert "prod." not in text or config.BEAT_CREDIT in text, f"{item['id']}: условие бита — config.BEAT_CREDIT"
         assert " ГБ" not in text or f"до {config.SKLEYKA_LINK_MB // 1024} ГБ и {config.SKLEYKA_LINK_FILES} файлов" in text, f"{item['id']}: лимиты облака — из config"
         assert "Проверить свой голос" not in text, f"{item['id']}: отдельной проверки голоса в боте нет"
@@ -657,7 +663,7 @@ def _selftest() -> None:
             assert found() == [], "находка среды в её сутки не пишется — памятка ещё не вышла, но запись в базе есть"
             assert not took(at("06T10:00")), "релиз вторника — обычного дня — памятка не забирает"
             state.now = lambda: at("07T12:30")
-            assert air() == "a" and sent[0]["text"] == "<b>ПАМЯТКА: запись a</b>\n\nТекст." and not lines
+            assert air() == "a" and sent[0]["text"].startswith("<b>ПАМЯТКА: запись a</b>\n\nТекст.\n\n⚖️ <a ") and not lines
             assert air() == "" and len(sent) == 1, "одна запись в сутки"
             assert day() and not publish.release_due(), "памятка вышла — релиз в эти сутки не выходит"
             state.now = lambda: at("08T02:00")
