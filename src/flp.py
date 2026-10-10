@@ -69,7 +69,8 @@ Fruity Parametric EQ 2). В проект оно ложится записью 53
 Проект, сохранённый владельцем в «Сегодня», утром не стирается (`keep`): папка переезжает рядом, пути звуков
 в проекте переписываются, остальное — байт в байт.
 Serum у владельца — Audio Unit; его состояние — plist, где поле vstdata — файл .fxp целиком (снято с его
-проекта), поэтому пресет бита, и свой тоже, лежит в канале сразу.
+проекта), поэтому пресет бита, и свой тоже, лежит в канале сразу. Длину в заголовке fxp сборка пишет сама:
+у пресетов библиотеки она на восемь байт больше положенного, и Audio Unit такой пресет не берёт (`au_state`).
 Sytrus — родной генератор FL: владелец 09.10.2026 сам перевёл на него мелодию «Фонаря» (пресет «Another fat saw»), а всем
 трём синтезаторам музыки поставил отсечку «сам себя», каждому свою группу. Канал Sytrus — плагин с состоянием заводского
 пресета по имени из паспорта (`noty.NATIVE`, SHUT); нет такого пресета в поставке FL — канал без звука и строка в записке.
@@ -282,14 +283,24 @@ def _int(n: int, size: int) -> bytes:
 
 # --- сборка ------------------------------------------------------------------
 
+def au_state(fxp: Path) -> bytes:
+    """Состояние Audio Unit Serum — plist, где vstdata — файл .fxp целиком. Длина в заголовке fxp — без первых восьми
+    байт: пресеты библиотеки пишут в неё весь файл, и Audio Unit такой пресет молча не берёт — канал открывается
+    с Init (владелец 10.10.2026 о «Ржавчине»: «стоковое звучание без пресета»). VST3 длину не сверяет, поэтому
+    `serum --check` грузит это состояние в сам Audio Unit."""
+    data = fxp.read_bytes()
+    data = data[:4] + struct.pack(">I", len(data) - 8) + data[8:]
+    return plistlib.dumps({"ProgramNumber": 0, "manufacturer": int.from_bytes(b"XFER", "big"), "vstdata": data,
+                           "subtype": int.from_bytes(b"XfsX", "big"), "version": 1, "type": int.from_bytes(b"aumu", "big"),
+                           "name": fxp.stem.split(" — ", 1)[-1]}, fmt=plistlib.FMT_BINARY, sort_keys=False)
+
+
 def _serum(wrap: list[tuple[int, bytes]], fxp: Path) -> list[tuple[int, bytes]]:
-    """Обёртка Serum из базы FL с пресетом внутри. Состояние Audio Unit — plist, где vstdata — файл .fxp целиком;
-    запись состояния в обёртке — номер 53, перед plist ноль и его длина. Обёртка не Audio Unit — пресета в ней нет."""
+    """Обёртка Serum из базы FL с пресетом внутри: запись состояния в обёртке — номер 53, перед plist ноль
+    и его длина. Обёртка не Audio Unit — пресета в ней нет."""
     ev = dict(wrap)
     if SERUM_AU in ev.get(213, b""):
-        state = plistlib.dumps({"ProgramNumber": 0, "manufacturer": int.from_bytes(b"XFER", "big"), "vstdata": fxp.read_bytes(),
-                                "subtype": int.from_bytes(b"XfsX", "big"), "version": 1, "type": int.from_bytes(b"aumu", "big"),
-                                "name": fxp.stem.split(" — ", 1)[-1]}, fmt=plistlib.FMT_BINARY, sort_keys=False)
+        state = au_state(fxp)
         ev[213] += struct.pack("<IQIQ", 53, len(state) + 12, 0, len(state)) + state
     return [(e, ev[e]) for e in (201, 212, 213) if e in ev]
 
@@ -1013,8 +1024,8 @@ def selftest() -> None:
         for name in ("808 — Тон D#1.wav", "Хэт — а.wav", "Хэт — б.wav", "Петля — Чужая петля.wav", CLIPS[0][1]):
             with wave.open(str(kits / name), "wb") as w:        # две секунды: на 120 — такт
                 w.setnchannels(1), w.setsampwidth(2), w.setframerate(8000), w.writeframes(bytes(32000))
-        (serum / "Мелодия — Основа.fxp").write_bytes(b"CcnK-osnova")
-        (serum / "Мелодия — Свой.fxp").write_bytes(b"CcnK-svoy")
+        (serum / "Мелодия — Основа.fxp").write_bytes(b"CcnK\0\0\0\x13FPCh-osnova")     # длина — весь файл, как в библиотеке
+        (serum / "Мелодия — Свой.fxp").write_bytes(b"CcnK\0\0\0\x11FPCh-svoy")
         wrapper = lambda name, state: pack([(199, b"11.5.5\0"), (28, b"\3"), (201, _text("Fruity Wrapper")), (212, bytes(52)),
                                             (203, _text(name)), (213, state)], 2, 0x30)
         (db / "Effects" / "Pro-Q 4.fst").write_bytes(wrapper("Pro-Q 4", _int(8, 4)))
@@ -1086,7 +1097,8 @@ def selftest() -> None:
             assert ch[0]["sound"].endswith("/808 — Тон D#1.wav") and ch[0]["root"] == 27 and ch[1]["root"] is None, ch[:2]
             assert [c["cut"] for c in ch[:4]] == [1, 0, 0, 4], "отсечка «сам себя» — у 808 и у синтезатора музыки, группа у каждого своя"
             assert [c["env"] for c in ch[:4]] == [HOLD, None, None, None], "огибающая громкости с числами владельца — только у 808"
-            assert b"CcnK-svoy" in ch[3]["state"] and b"osnova" not in ch[3]["state"], "в Serum — свой пресет бита, а не основа"
+            assert b"FPCh-svoy" in ch[3]["state"] and b"osnova" not in ch[3]["state"], "в Serum — свой пресет бита, а не основа"
+            assert b"CcnK\0\0\0\x09FPCh-svoy" in ch[3]["state"], "длина в заголовке fxp — без первых восьми байт, иначе Serum откроется с Init"
             assert ch[3]["plugin"] == "Fruity Wrapper" and "своя группа отсечки у каждого" in line, line
             same = sorted(notes)                                    # ноты партии — те же: место, длина, высота, сила, панорама, слайд
             assert got["patterns"][1] == {"name": "808", "notes": {0: same}} and got["patterns"][2]["notes"] == {1: same, 2: same}
