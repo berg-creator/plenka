@@ -42,16 +42,30 @@
 Отвергнута правка сообщения на месте (ответ пропадал бы при возврате к списку — прочитанное остаётся в чате).
 
 Одно исключение из «модель не вызывается» — «🔎 Проверить текст» (владелец 09.10.2026): артист присылает
-текст трека, бот показывает его же строки, где названы вещества, и запись slova. Модель здесь не отвечает
-человеку, а только называет номера строк: её слов в ответе нет, выдумать ей нечем. Вердикта бот не выносит —
-закон судит не слова, а то, о чём информация, и «чисто» перед снятым треком было бы виной канала; замен
-не предлагает; текст не хранит. Границы, тексты и код — раздел «проверка текста» ниже.
-Ищет модель, а не словарь в коде: словарь неполон и был бы списком сленга в открытом репозитории. Решила
-проба 09.10.2026 из Actions (--probe, запуск 37985423309): десять своих коротких текстов, шесть из них
+текст трека, бот показывает его же строки по темам и под каждой темой — слова закона. Сначала тема была одна,
+названия веществ; 10.10.2026 владелец попросил «всё, за что треки закрывали и что сейчас в треках пикают».
+«Всё» бот не найдёт, а экстремизм определяют суд и экспертиза по смыслу, а не по словам, поэтому это подсветка
+строк по темам, а не проверка на закон. Темы — data/tekst.json (themes): в базе стоит только то, у чего есть
+и случай 2022–2026 годов (публикация с цитатой), и норма (цитата с pravo.gov.ru). Модель здесь не отвечает
+человеку, а только называет номера строк и id тем из этого перечня: её слов в ответе нет, выдумать ей нечем.
+Вердикта бот не выносит — закон судит не слова, а смысл, и «чисто» перед снятым треком было бы виной канала;
+строку называет темой, а не нарушением; замен не предлагает; текст не хранит. Границы, тексты и код — раздел
+«проверка текста» ниже.
+Отвергнуто: чувства верующих (ст. 148 УК — по трекам только жалобы и проверки, приговор был за ролики),
+недостоверная информация (блокировка была, но недостоверность по строке не видна), статус иноагента (он
+о человеке, а не о тексте), «аморальный образ жизни», алкоголь и откровенные сцены (в решениях судов названы,
+но тема подсветила бы полтекста любого трека) и списки стоп-слов лейблов — это правила площадок, а не закон.
+Нормы тем сверены 10.10.2026 по печатному виду: УК — nd=102041891, редакция 365; КоАП — nd=102074277,
+редакция 970; № 114-ФЗ — nd=102079221, редакция 26 (поправка от 27.10.2025 № 385-ФЗ в текст на сайте
+не внесена — не проверено); № 149-ФЗ — nd=102108264, редакция 96; № 436-ФЗ — nd=102144583, редакция 24.
+Номер статьи с верхним индексом (20.3¹) в базе пишется через точку — 20.3.1; « … » в цитате — пропуск.
+Ищет модель, а не словарь в коде: словарь неполон и был бы списком сленга и брани в открытом репозитории.
+Решила проба 09.10.2026 из Actions (--probe, запуск 37985423309): десять своих коротких текстов, шесть из них
 с названиями веществ, — Gemini прочёл все десять без отказа и назвал нужные строки, «траву у дома»
-с «травой за гаражами» не спутал. Начнёт отказывать чаще раза из десяти — словарь. Пробы короткие
-и без похвалы веществам: как модель читает тексты жёстче, не проверено. Текст уходит генератору (Gemini,
-при его сбое — ГигаЧат): «не хранится» — это о боте, и экран вопроса так и говорит.
+с «травой за гаражами» не спутал. Начнёт отказывать чаще раза из десяти — словарь. На новых темах проба
+после 10.10.2026 не шла: как модель читает строки о вражде, насилии и терроре и не отказывается ли —
+не проверено. Пробы короткие и мягкие: как модель читает тексты жёстче, не проверено. Текст уходит генератору
+(Gemini, при его сбое — ГигаЧат): «не хранится» — это о боте, и экран вопроса так и говорит.
 
 Выход — в дни config.PAMYATKA_DAYS с config.PAMYATKA_HOUR_MSK по Москве, не ночью, одна запись
 в сутки ленты, по порядку базы. Отметка вышедшей — pamyatka-<id>.json в content/archive, как у совета
@@ -65,7 +79,7 @@
     python -m src.pamyatka --selftest   без сети и Telegram; настоящая база — источники, длина подписи с призывом,
                                         раздел в боте: страницы, кнопки и ответы в лимитах Telegram
     python -m src.pamyatka --dry-run    что в запасе, когда выйдет следующая и её текст, без записи и отправки
-    python -m src.pamyatka --probe      читает ли генератор тексты с названиями веществ: десять проб — только
+    python -m src.pamyatka --probe      читает ли генератор тексты по темам проверки: двадцать проб — только
                                         из Actions (с Мака Gemini не отвечает), с пустым LLM_FALLBACK
 """
 from __future__ import annotations
@@ -79,6 +93,7 @@ import sys
 import tempfile
 from datetime import datetime, time
 from pathlib import Path
+from time import sleep
 
 from . import config, state
 
@@ -185,18 +200,28 @@ def answer(item: dict) -> tuple[str, list[list[dict]]]:
 
 # ─────────────────────────── проверка текста ───────────────────────────
 # «🔎 Проверить текст» (владелец 09.10.2026: «было бы круто сделать фичу что можно отправить текст на проверку
-# боту»): артист присылает текст трека, бот показывает его же строки, где названы вещества, и запись slova.
+# боту»; 10.10.2026: «помимо веществ проверка и на экстремизм и т. д. Пускай всё, за что треки закрывали и что
+# сейчас в треках пикают, находит бот в тексте»): артист присылает текст трека, бот показывает его же строки
+# по темам (data/tekst.json) и под каждой темой — слова закона со статьёй; у темы веществ — запись slova.
+# «Всё» бот не найдёт, а экстремизм определяют суд и экспертиза по смыслу, а не по словам, — поэтому это
+# подсветка строк по темам, а не проверка на закон. Тема стоит в базе, только когда у неё есть и случай
+# (публикация издания с цитатой), и норма (дословная цитата с pravo.gov.ru): основание, по которому режут
+# площадки и лейблы без нормы закона, темой не становится.
 # Границы — они же селфтест:
-# 1. Вердикта нет: ни «чисто», ни «можно», ни «нарушение». Закон судит не слова, а то, о чём информация
-#    (ст. 46 закона № 3-ФЗ), и «чисто» перед снятым треком — вина канала.
+# 1. Вердикта нет: ни «чисто», ни «можно», ни «нарушение». Закон судит не слова, а смысл (о веществах —
+#    ст. 46 закона № 3-ФЗ: то, о чём информация), и «чисто» перед снятым треком — вина канала.
 # 2. Замен, синонимов и способов спрятать слово бот не предлагает.
-# 3. Сверх строк самого артиста названия веществ не звучат: модель отвечает номерами строк (llm.TEKST_SCHEMA),
-#    её слов в ответе нет вовсе, строки берёт код из присланного текста. Промпт веществ не называет, в коде
-#    названия стоят только в пробах генератора (PROBES) — человеку они не уходят.
+# 3. Сверх строк самого артиста названия веществ, брань и оскорбительные слова не звучат: модель отвечает
+#    номерами строк и id тем из закрытого перечня (llm.tekst_schema), её слов в ответе нет вовсе, строки берёт
+#    код из присланного текста. Ни промпт, ни база тем слов не перечисляют; названия веществ стоят в коде только
+#    в пробах генератора (PROBES), брань там закрыта звёздочками — человеку пробы не уходят.
 # 4. Текст не хранится: дежурство отдаёт его процессу проверки через stdin — ни файла, ни аргумента команды,
 #    ни строки в логе; в счётчик идёт метка (service.count_source), в лимиты — число (service._tekst).
 # 5. «ПЛЁНКА не юрист» — на экране вопроса и в каждом ответе.
-SLOVA = "slova"  # запись базы о «запрете слов»: её текст закона идёт в ответ проверки, под ней — кнопка проверки
+# 6. Строку человека бот называет только темой и никогда — нарушением: названия тем нейтральные («вражда
+#    к группе людей», а не «экстремизм»), под темой — цитаты закона со статьёй и ничего больше: ни совета,
+#    ни «что делать».
+SLOVA = "slova"  # запись базы о «запрете слов»: её текст закона идёт в ответ проверки темой веществ, под ней — кнопка проверки
 # Кнопка: на экране раздела и под записью slova; «s:tekst:ok» — «Подписался», вход уже посчитан (service).
 TEXT_KEY = "s:tekst"
 TEXT_BUTTON = "🔎 Проверить текст"
@@ -204,9 +229,33 @@ TEXT_HEAD = "🔎 <b>ПРОВЕРКА ТЕКСТА</b>"
 # Текст трека — ответом на сообщение с этой меткой, как у ДВОЙНИКА (svedenie.INTRO_MARK): без ответа
 # он ушёл бы в ПРОЯВКУ. Помнить, о чём спросил, боту не нужно — и хранить про человека нечего.
 TEXT_MARK = "Пришли текст трека ответом на это сообщение"
-TEXT_ASK = (f"{TEXT_HEAD}\n\n{TEXT_MARK} — покажу строки, где названы наркотические вещества, и что о них говорит закон.\n\n"
-            "Что в тексте пропаганда, а что нет, бот не решает: закон описывает не слова, а то, о чём информация. "
-            "ПЛЁНКА не юрист.\n\n"
+
+
+def themes() -> list[dict]:
+    """Темы проверки (data/tekst.json), в порядке базы: id, название для человека (name), что искать — строка
+    для промпта (look), закон (law: статья, дословная цитата, источник; у веществ вместо него memo — запись
+    базы памяток) и случаи (cases: адрес публикации и цитата с неё). Тема без закона или без случая — не тема:
+    базу правят руками, и кривая правка не должна ни ронять дежурство, ни показывать человеку тему без слов закона."""
+    data = state.read_json(config.TEKST_FILE, [])
+
+    def whole(item: object) -> bool:
+        return (isinstance(item, dict) and all(isinstance(item.get(key), str) and item[key] for key in ("id", "name", "look"))
+                and isinstance(item.get("law"), list) and isinstance(item.get("cases"), list)
+                and bool(item["law"] or find(item.get("memo") or ""))
+                and all(isinstance(law, dict) and law.get("article") and law.get("quote") for law in item["law"])
+                and bool(item["cases"])
+                and all(isinstance(case, dict) and case.get("url") and case.get("quote") for case in item["cases"]))
+
+    return [item for item in data if whole(item)] if isinstance(data, list) else []
+
+
+# Перечень тем — в вопросе и в ответе «не нашёл»: человек видит, по чему бот смотрел, а по чему нет.
+TEXT_TOPICS = "; ".join(item["name"] for item in themes())
+TEXT_ASK = (f"{TEXT_HEAD}\n\n{TEXT_MARK} — подсвечу строки по темам, из-за которых треки снимали с площадок и запикивали, "
+            "и покажу, что о каждой теме сказано в законе.\n\n"
+            f"Темы: {TEXT_TOPICS}.\n\n"
+            "Это подсветка строк, а не проверка на закон: что в тексте противоправно, бот не решает — это оценивают суд "
+            "и экспертиза, и по смыслу, а не по словам. Все такие строки бот не найдёт. ПЛЁНКА не юрист.\n\n"
             f"Текст читает нейросеть, бот его не сохраняет. До {config.TEKST_CHARS} знаков, проверок в сутки — {config.TEKST_PER_DAY}.")
 TEXT_HINT = "Текст трека"
 TEXT_WAIT = "🔎 Читаю. Ответ придёт отдельным сообщением — обычно меньше минуты."
@@ -214,21 +263,27 @@ TEXT_BUSY = "Прошлый текст ещё читаю — пришли это
 TEXT_LONG = f"Текст длиннее {config.TEKST_CHARS} знаков. {TEXT_MARK} частями — по куплету."
 TEXT_LIMIT = f"Проверок в сутки — {config.TEKST_PER_DAY}. Завтра приходи ещё."
 TEXT_FULL = "На сегодня проверки у бота кончились — приходи завтра."
-TEXT_FOUND = "Строки, где нейросеть увидела названия веществ:"
+TEXT_FOUND = ("Строки по темам, из-за которых треки снимали и запикивали. Тема — не оценка строки: "
+              "противоправна ли она, решают суд и экспертиза.")
+TEXT_TOPIC = "Тема: {name}"
 TEXT_REST = "…и ещё {count} — не поместились."
-TEXT_NONE = "Названий веществ не нашёл; сленг знаю не весь, а закон описывает не слова, а то, о чём информация."
+TEXT_NONE = f"Строк по этим темам не нашёл: {TEXT_TOPICS}. Сленг и намёки знаю не все, а закон описывает не слова, а смысл."
 TEXT_MAYBE = "Нейросеть могла пропустить строку или показать лишнюю."
-TEXT_NOTE = "Это не оценка текста: что в нём пропаганда, а что нет, бот не решает. ПЛЁНКА не юрист — свой случай к юристу."
+TEXT_NOTE = "Это не оценка текста: что в нём противоправно, а что нет, бот не решает. ПЛЁНКА не юрист — свой случай к юристу."
 # Отказ модели — не вердикт: «не взялась читать» человек иначе прочёл бы как «текст плохой».
 TEXT_FAIL = ("Нейросеть не прочитала текст — проверить не вышло. Это её сбой или отказ, а не оценка текста: "
-             "что в нём названо, бот так и не узнал. Попробуй ещё раз позже.")
+             "что в нём есть, бот так и не узнал. Попробуй ещё раз позже.")
 TEXT_AGAIN = "🔎 Проверить ещё текст"
 # Счёт в data/bot_sources.json: сколько раз открыли и сколько текстов прислали — по дню, без человека и без текста.
 TEXT_OPENED = "ПРОВЕРКА ТЕКСТА: открыта"
 TEXT_SENT = "ПРОВЕРКА ТЕКСТА: текст прислан"
-# Строки в ответе — в пределах TEXT_ROOM знаков разметки, длинная строка — началом в TEXT_LINE знаков: с записью
-# о законе в сообщение Telegram (4096) влезает не всё, а обрезка отправки (telegram.MAX_TEXT) рвала бы тег.
-TEXT_ROOM, TEXT_LINE = 2400, 300
+# Строки одной темы — в пределах TEXT_ROOM знаков разметки, длинная строка — началом в TEXT_LINE знаков. Тем
+# дюжина, и с законом в одно сообщение Telegram (4096) они влезают не всегда: ответ складывается из целых блоков
+# тем в сообщения по TEXT_MESSAGE знаков. Обрезка отправки (telegram.MAX_TEXT) рвала бы тег и цитату закона.
+TEXT_ROOM, TEXT_LINE, TEXT_MESSAGE = 1400, 300, 4000
+# Между сообщениями одного ответа — пауза: Telegram держит около сообщения в секунду на чат, а повтора
+# после отказа за частоту у отправки нет. Ждёт процесс проверки, а не дежурство.
+TEXT_PAUSE = 1.0
 # Проверки, что идут сейчас, по чатам: память смены, как skleyka._BEATS.
 _READING: dict[str, subprocess.Popen] = {}
 
@@ -238,44 +293,71 @@ def lines_of(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def flagged(lines: list[str], numbers: list) -> list[str]:
-    """Строки по номерам модели, в порядке текста и по разу (припев повторяется). Номер мимо текста
-    и всё, что не номер, — прочь: показать можно только строку, которая стоит в тексте."""
-    wanted = sorted({int(n) for n in numbers if isinstance(n, (int, str)) and str(n).isdigit()})
-    return list(dict.fromkeys(lines[n - 1] for n in wanted if 1 <= n <= len(lines)))
+def flagged(lines: list[str], marks: list, ids: list[str]) -> dict[str, list[str]]:
+    """Строки по темам: «id темы → строки в порядке текста, по разу (припев повторяется)», темы — в порядке
+    перечня. Отметка модели — {"n": номер, "topics": [id]}; номер мимо текста, тема не из перечня и всё,
+    что не такая отметка, — прочь: показать можно только строку из текста и только под темой из базы."""
+    hits: dict[str, set[int]] = {}
+    for mark in marks:
+        n, topics = (mark.get("n"), mark.get("topics")) if isinstance(mark, dict) else (None, None)
+        if not isinstance(n, (int, str)) or not str(n).isdigit() or not 1 <= int(n) <= len(lines) or not isinstance(topics, list):
+            continue
+        for topic in topics:
+            if isinstance(topic, str) and topic in ids:
+                hits.setdefault(topic, set()).add(int(n))
+    return {key: list(dict.fromkeys(lines[n - 1] for n in sorted(hits[key]))) for key in ids if key in hits}
 
 
-def found(text: str) -> list[str] | None:
-    """Строки текста, где модель увидела название вещества; None — она не ответила: отказ, сбой
+def found(text: str) -> dict[str, list[str]] | None:
+    """Строки текста по темам, как их разметила модель; None — она не ответила: отказ, сбой
     или ответ не по схеме (запасной генератор строгих схем не держит)."""
     from . import llm
 
-    lines = lines_of(text)
-    answer = llm.generate_tekst(lines)
+    lines, topics = lines_of(text), themes()
+    answer = llm.generate_tekst(lines, {topic["id"]: topic["look"] for topic in topics})
     if answer.get("skip") or not isinstance(answer.get("lines"), list):
         # Причину пишет только Gemini: это код его фильтра. У запасного она — слова модели, а в них мог попасть текст.
         why = answer.get("reason", "")
         print(f"ПРОВЕРКА ТЕКСТА: модель не ответила — {why if why.startswith('Gemini') else 'отказ или ответ не по схеме'}")
         return None
-    return flagged(lines, answer["lines"])
+    return flagged(lines, answer["lines"], [topic["id"] for topic in topics])
 
 
-def report(shown: list[str] | None) -> tuple[str, list[list[dict]]]:
-    """Ответ проверки: None — модель не ответила, пусто — названий не нашлось, иначе строки человека,
-    запись slova целиком и оговорка. Своих слов о тексте, кроме этих трёх шаблонов, у бота нет."""
-    rows = [[{"text": TEXT_AGAIN, "callback_data": TEXT_KEY}], [{"text": BACK, "callback_data": f"{PICK}0"}]]
-    law = find(SLOVA)
-    if shown is None:
-        return f"{TEXT_HEAD}\n\n{TEXT_FAIL}", rows
-    if not shown:
-        ask = [[{"text": f"{ICONS[LAW]} {law['ask']}", "callback_data": f"{PICK}{SLOVA}"}]] if law and law.get("ask") else []
-        return f"{TEXT_HEAD}\n\n{TEXT_NONE}\n\n{TEXT_NOTE}", ask + rows
+def _law(topic: dict) -> list[str]:
+    """Закон темы и ничего больше: цитаты со статьёй; у веществ — запись базы памяток целиком."""
+    memo = find(topic.get("memo") or "")
+    return _parts(memo) if memo else [f"«{html.escape(law['quote'])}» ({html.escape(law['article'])})" for law in topic["law"]]
+
+
+def _block(topic: dict, shown: list[str]) -> str:
+    """Тема в ответе: название, строки человека и закон. Первая строка остаётся и когда она одна длиннее
+    TEXT_ROOM (сплошные «&» и «<» в разметке втрое длиннее): пустую цитату Telegram не принимает."""
     cut = [html.escape(line[:TEXT_LINE] + "…" * (len(line) > TEXT_LINE)) for line in shown]
-    fit = [line for line, size in zip(cut, itertools.accumulate(len(line) + 1 for line in cut)) if size <= TEXT_ROOM]
+    fit = [line for line, size in zip(cut, itertools.accumulate(len(line) + 1 for line in cut)) if size <= TEXT_ROOM] or cut[:1]
     rest = f"\n{TEXT_REST.format(count=len(cut) - len(fit))}" if len(cut) > len(fit) else ""
-    parts = [TEXT_HEAD, f"{TEXT_FOUND}\n<blockquote>" + "\n".join(fit) + f"</blockquote>{rest}",
-             *(_parts(law) if law else []), f"{TEXT_MAYBE} {TEXT_NOTE}"]
-    return "\n\n".join(parts), rows
+    head = f"<b>{html.escape(TEXT_TOPIC.format(name=topic['name']))}</b>\n<blockquote>" + "\n".join(fit) + f"</blockquote>{rest}"
+    return "\n\n".join([head, *_law(topic)])
+
+
+def report(shown: dict[str, list[str]] | None) -> tuple[list[str], list[list[dict]]]:
+    """Ответ проверки — сообщения по порядку и кнопки под последним. None — модель не ответила, пусто — строк
+    по темам не нашлось, иначе под каждой темой строки человека и её закон, в конце оговорка. Своих слов
+    о тексте, кроме этих шаблонов, у бота нет; блок темы между сообщениями не рвётся."""
+    rows = [[{"text": TEXT_AGAIN, "callback_data": TEXT_KEY}], [{"text": BACK, "callback_data": f"{PICK}0"}]]
+    if shown is None:
+        return [f"{TEXT_HEAD}\n\n{TEXT_FAIL}"], rows
+    blocks = [_block(topic, shown[topic["id"]]) for topic in themes() if shown.get(topic["id"])]
+    if not blocks:
+        law = find(SLOVA)
+        ask = [[{"text": f"{ICONS[LAW]} {law['ask']}", "callback_data": f"{PICK}{SLOVA}"}]] if law and law.get("ask") else []
+        return [f"{TEXT_HEAD}\n\n{TEXT_NONE}\n\n{TEXT_NOTE}"], ask + rows
+    texts: list[str] = []
+    for part in (f"{TEXT_HEAD}\n\n{TEXT_FOUND}", *blocks, f"{TEXT_MAYBE} {TEXT_NOTE}"):
+        if texts and len(texts[-1]) + len(part) + 2 <= TEXT_MESSAGE:
+            texts[-1] += f"\n\n{part}"
+        else:
+            texts.append(part)
+    return texts, rows
 
 
 def take(chat_id: str | int, text: str) -> bool:
@@ -319,39 +401,59 @@ def _read(chat_id: str) -> None:
         print(f"ПРОВЕРКА ТЕКСТА: модель не ответила — {type(exc).__name__}")
         shown = None
     try:
-        text, rows = report(shown)
-        telegram.send_message(chat_id, text, buttons=rows)
+        texts, rows = report(shown)
+        for n, text in enumerate(texts, 1):
+            if n > 1:
+                sleep(TEXT_PAUSE)
+            telegram.send_message(chat_id, text, buttons=rows if n == len(texts) else None)
     except Exception as exc:  # noqa: BLE001
         print(f"ПРОВЕРКА ТЕКСТА: ответ не ушёл — {type(exc).__name__}")
 
 
-# Пробы генератора: строки свои, не из чужих треков; названия — те, что стоят в самом законе и в новостях,
-# сленга здесь нет. Вторым полем — номера строк с названием вещества; None — намёк, годится любой ответ.
-PROBES: tuple[tuple[str, set[int] | None], ...] = (
-    ("Ночь, район, фонари не горят\nВ кармане кокаин, друзья говорят\nА я молчу и смотрю в окно", {2}),
-    ("Он начинал с травы за гаражами\nПотом героин — и мы его не узнали\nМама плачет, а двор молчит", {1, 2}),
-    ("Мефедрон забрал у меня брата\nЯ помню его смех, он был когда-то", {1}),
-    ("На столе амфетамин и чей-то паспорт\nВ этой квартире давно никто не спасся", {1}),
-    ("Курим гашиш, за окном минус двадцать\nМне двадцать один, и некуда деваться", {1}),
-    ("Экстази в клубе, ЛСД на афише\nЯ вышел на воздух, я этого выше", {1}),
-    ("Я встаю в шесть утра и бегу на завод\nМама звонит, говорит: всё пройдёт\nДеньги придут, а пока только пот", set()),
-    ("Мы пили вино и курили на крыше\nСигареты кончались, а город всё тише", set()),
-    ("Трава у дома зелёная, как в детстве\nЯ вернулся сюда — и некуда деться", set()),
+# Пробы генератора: строки свои, не из чужих треков. Вторым полем — «номер строки → id темы», которую модель
+# обязана у строки назвать (лишние темы у той же строки не ошибка); пусто — отмеченных строк быть не должно;
+# None — намёк, годится любой ответ. Названия веществ — те, что стоят в самом законе и в новостях, сленга нет.
+PROBES: tuple[tuple[str, dict[int, str] | None], ...] = (
+    ("Ночь, район, фонари не горят\nВ кармане кокаин, друзья говорят\nА я молчу и смотрю в окно", {2: "veshchestva"}),
+    ("Он начинал с травы за гаражами\nПотом героин — и мы его не узнали\nМама плачет, а двор молчит", {1: "veshchestva", 2: "veshchestva"}),
+    ("Мефедрон забрал у меня брата\nЯ помню его смех, он был когда-то", {1: "veshchestva"}),
+    ("На столе амфетамин и чей-то паспорт\nВ этой квартире давно никто не спасся", {1: "veshchestva"}),
+    ("Курим гашиш, за окном минус двадцать\nМне двадцать один, и некуда деваться", {1: "veshchestva"}),
+    ("Экстази в клубе, ЛСД на афише\nЯ вышел на воздух, я этого выше", {1: "veshchestva"}),
+    ("Я встаю в шесть утра и бегу на завод\nМама звонит, говорит: всё пройдёт\nДеньги придут, а пока только пот", {}),
+    ("Мы пили вино и курили на крыше\nСигареты кончались, а город всё тише", {}),
+    ("Трава у дома зелёная, как в детстве\nЯ вернулся сюда — и некуда деться", {}),
     ("Меня накрыло, я не сплю третьи сутки\nБелый порошок на зеркале — не шутки", None),
+    # Новые темы (10.10.2026). Репозиторий открытый, поэтому группа, место и организация выдуманы, брань закрыта
+    # звёздочками, вторая строка каждой пробы — пустая по теме. У тем о нацизме, вооружённых силах и «неприличной
+    # форме» положительной пробы нет: мягкой выдуманной строки для них не выходит; об армии — проба-обманка.
+    ("Мне всё по х**, я иду напролом\nЗа спиной район, впереди мой дом", {1: "bran"}),
+    ("Все тарелианцы — люди второго сорта\nТак говорил сосед, пока шёл из порта", {1: "vrazhda"}),
+    ("Собирай толпу, пойдём бить тарелианцев\nА пока что вечер, и фонарь мигает", {1: "nasilie"}),
+    ("Заречье выйдет из состава России\nА я считаю мелочь у окна в магазине", {1: "tselostnost"}),
+    ("Респект «Чёрному рассвету» за взрыв на вокзале\nА я стою в толпе и смотрю на причалы", {1: "terror"}),
+    ("Я кричу со сцены лозунг экстремистов из «Чёрного рассвета»\nЗал молчит, и мне уже не до куплета", {1: "simvolika"}),
+    ("Он целует парня — и это красиво\nА дождь всё идёт, и на улице сыро", {1: "netradits"}),
+    ("Я шагну с крыши — и всем станет легче\nНо пока я пою, и на кухне свечи", {1: "suitsid"}),
+    ("В новостях сказали: армия Тарелии отступает\nА я варю пельмени, и чайник закипает", {}),
+    ("Я люблю свой двор и своих пацанов\nМы выросли вместе у этих домов", {}),
 )
 
 
 def probe() -> int:
-    """Читает ли генератор тексты с названиями веществ — живой запрос на каждую пробу (prompts/service/tekst.md).
+    """Читает ли генератор тексты по темам проверки — живой запрос на каждую пробу (prompts/service/tekst.md).
     Из России Gemini не отвечает, поэтому только из Actions; чтобы отказ основного не спрятал запасной,
     запускать с пустым LLM_FALLBACK. Отказ — skip или ответ не по схеме, сбой — генератор недоступен.
-    Итог — отказы и сбои вместе: больше одного из десяти — проверку текста на этом генераторе не держать."""
+    Итог — отказы и сбои вместе: больше одного на десять проб — проверку текста на этом генераторе не держать."""
     from . import llm
 
+    topics = themes()
+    looks, ids = {topic["id"]: topic["look"] for topic in topics}, [topic["id"] for topic in topics]
     bad = misses = 0
     for n, (text, want) in enumerate(PROBES, 1):
+        lines = lines_of(text)
         try:
-            answer = llm.generate_tekst(lines_of(text))
+            answer = llm.generate_tekst(lines, looks)
         except Exception as exc:  # noqa: BLE001
             bad += 1
             print(f"  {n}. СБОЙ: {exc}")
@@ -360,10 +462,13 @@ def probe() -> int:
             bad += 1
             print(f"  {n}. ОТКАЗ: {answer.get('reason') or answer.get('text') or 'ответ не по схеме'}")
             continue
-        got = {lines_of(text).index(line) + 1 for line in flagged(lines_of(text), answer["lines"])}
-        ok = want is None or got == want
+        got: dict[int, list[str]] = {}
+        for key, shown in flagged(lines, answer["lines"], ids).items():
+            for line in shown:
+                got.setdefault(lines.index(line) + 1, []).append(key)
+        ok = want is None or (set(got) == set(want) and all(key in got[line] for line, key in want.items()))
         misses += not ok
-        print(f"  {n}. {'ок' if ok else 'МИМО'}: строки {sorted(got)}" + ("" if want is None else f", ждали {sorted(want)}"))
+        print(f"  {n}. {'ок' if ok else 'МИМО'}: {dict(sorted(got.items())) or 'строк нет'}" + ("" if want is None else f", ждали {want or 'пусто'}"))
     print(f"Отказов и сбоев: {bad} из {len(PROBES)}; ответил, но мимо: {misses}.")
     return bad
 
@@ -452,55 +557,105 @@ def _selftest_text() -> None:
 
     from . import llm, telegram
 
-    law = "\n\n".join(_parts(find(SLOVA)))
-    assert law and TEXT_MARK in TEXT_ASK and TEXT_MARK in TEXT_LONG and "не юрист" in TEXT_ASK and len(TEXT_KEY.encode()) <= 64
+    # База тем: записи целы (кривая не пропала молча), id не повторяются, у каждой закон с цитатой, статьёй
+    # и источником (у веществ — запись slova базы памяток) и случай с адресом и цитатой.
+    topics, source = themes(), state.read_json(config.TEKST_FILE, [])
+    ids = [topic["id"] for topic in topics]
+    assert len(topics) == len(source) >= 2 and len(set(ids)) == len(ids) and all(re.fullmatch("[a-z]+", key) for key in ids), ids
+    for topic in topics:
+        assert _law(topic) and all(law["source"] for law in topic["law"]), topic["id"]
+        assert all(case["url"].startswith("https://") and case["quote"] and case.get("from") for case in topic["cases"]), topic["id"]
+        assert "\n" not in topic["name"] + topic["look"], topic["id"]
+    assert [topic["id"] for topic in topics if topic.get("memo")] == ["veshchestva"] and find(SLOVA)
+    drugs, hate = (next(topic for topic in topics if topic["id"] == key) for key in ("veshchestva", "vrazhda"))
+    slova = "\n\n".join(_parts(find(SLOVA)))
+    assert _law(drugs) == _parts(find(SLOVA)) and TEXT_MARK in TEXT_ASK and TEXT_MARK in TEXT_LONG and len(TEXT_KEY.encode()) <= 64
+    # Экран вопроса и «не нашёл» называют все темы; вопрос говорит, что это подсветка, а не проверка на закон.
+    assert all(topic["name"] in TEXT_ASK and topic["name"] in TEXT_NONE for topic in topics)
+    assert "подсветка строк, а не проверка на закон" in TEXT_ASK and "не юрист" in TEXT_ASK and "а смысл" in TEXT_NONE
+    assert len(telegram.sanitize(TEXT_ASK)) <= telegram.MAX_TEXT
+
+    def laws(name: dict) -> list[str]:
+        return [f"«{html.escape(law['quote'])}» ({html.escape(law['article'])})" for law in name["law"]]
+
     song = "первая строка\n\n  вторая <строка> про вещество  \nтретья строка\nвторая <строка> про вещество\n"
     lines = lines_of(song)
     assert lines == ["первая строка", "вторая <строка> про вещество", "третья строка", "вторая <строка> про вещество"]
-    assert flagged(lines, [4, "2", 9, 0, -3, True, 2.5, None, "вещество"]) == [lines[1]], "номер мимо текста и не номер — прочь, припев — раз"
+    # Отметки модели: номер мимо текста, тема не из перечня и всё, что не «номер + темы», — прочь; припев — раз.
+    marks = [{"n": 4, "topics": ["veshchestva"]}, {"n": "2", "topics": ["vrazhda", "veshchestva", "выдуманная", 5, None]},
+             {"n": 9, "topics": ["bran"]}, {"n": 0, "topics": ["bran"]}, {"n": -3, "topics": ["bran"]}, {"n": True, "topics": ["bran"]},
+             {"n": 2.5, "topics": ["bran"]}, {"n": 3, "topics": "bran"}, {"n": 1, "topics": ["выдуманная"]}, {"n": 3}, {"topics": ["bran"]},
+             3, "вещество", None, [3, "bran"], {"n": 3, "topics": ["vrazhda"], "note": "слово модели"}]
+    marked = flagged(lines, marks, ids)
+    assert marked == {"veshchestva": [lines[1]], "vrazhda": [lines[1], lines[2]]} and list(marked) == ["veshchestva", "vrazhda"], marked
     real = llm.generate_tekst, telegram.send_message, subprocess.Popen, sys.stdin
+    pause, globals()["TEXT_PAUSE"] = TEXT_PAUSE, 0
     said, sent, spawned, log = [], [], [], io.StringIO()
     try:
-        # Найдено: в ответе шаблон, строка человека, запись о законе и оговорка — и ничего больше: ни слов модели,
-        # ни строки, которой в тексте нет, ни строки, которую модель не назвала.
-        llm.generate_tekst = lambda asked: said.append(asked) or {"skip": False, "lines": [2, 4, 7, "слово модели"], "text": "слово модели"}
-        text, rows = report(found(song))
-        assert said == [lines] and text == "\n\n".join([
-            TEXT_HEAD, f"{TEXT_FOUND}\n<blockquote>вторая &lt;строка&gt; про вещество</blockquote>", law, f"{TEXT_MAYBE} {TEXT_NOTE}"]), text
+        # Найдено по двум темам: в ответе шаблон, строки человека под названием темы, закон темы и оговорка —
+        # и ничего больше: ни слов модели, ни строки, которой в тексте нет, ни темы, которой нет в базе.
+        llm.generate_tekst = lambda asked, looks: said.append((asked, looks)) or {"skip": False, "lines": marks, "text": "слово модели"}
+        texts, rows = report(found(song))
+        assert said == [(lines, {topic["id"]: topic["look"] for topic in topics})]
+        assert texts == ["\n\n".join([
+            TEXT_HEAD, TEXT_FOUND,
+            f"<b>Тема: {drugs['name']}</b>\n<blockquote>вторая &lt;строка&gt; про вещество</blockquote>", slova,
+            f"<b>Тема: {hate['name']}</b>\n<blockquote>вторая &lt;строка&gt; про вещество\nтретья строка</blockquote>", *laws(hate),
+            f"{TEXT_MAYBE} {TEXT_NOTE}"])], texts
         assert [key["callback_data"] for row in rows for key in row] == [TEXT_KEY, f"{PICK}0"]
-        replies = [text]
-        # Не найдено: названная в задаче строка, без «чисто»; запись о законе — кнопкой.
-        llm.generate_tekst = lambda asked: {"skip": False, "lines": []}
-        text, rows = report(found(song))
-        assert text == f"{TEXT_HEAD}\n\n{TEXT_NONE}\n\n{TEXT_NOTE}" and rows[0][0]["callback_data"] == f"{PICK}{SLOVA}"
-        replies.append(text)
-        # Отказ модели, проза запасного генератора и ответ не по схеме — честная строка, а не «названий нет».
+        # Ни одного слова, которого нет в шаблоне, строках человека и законе тем.
+        words = lambda text: set(re.findall(r"\w+", html.unescape(re.sub("<[^>]+>", " ", text)).casefold()))  # noqa: E731
+        own = words(" ".join([TEXT_HEAD, TEXT_FOUND, TEXT_TOPIC, TEXT_REST, TEXT_MAYBE, TEXT_NOTE, song,
+                              *(part for topic in topics for part in (topic["name"], *_law(topic)))]))
+        assert words(texts[0]) <= own and "модели" not in words(texts[0]), words(texts[0]) - own
+        replies = ["\n\n".join(texts)]
+        # Не найдено — и когда отметок нет, и когда все они мимо перечня: честная строка с темами, без «чисто»;
+        # запись о законе — кнопкой.
+        for answer in ([], [{"n": 2, "topics": ["выдуманная"]}, {"n": 77, "topics": ["bran"]}]):
+            llm.generate_tekst = lambda asked, looks, answer=answer: {"skip": False, "lines": answer}
+            texts, rows = report(found(song))
+            assert texts == [f"{TEXT_HEAD}\n\n{TEXT_NONE}\n\n{TEXT_NOTE}"] and rows[0][0]["callback_data"] == f"{PICK}{SLOVA}"
+        replies.append(texts[0])
+        # Отказ модели, проза запасного генератора и ответ не по схеме — честная строка, а не «строк нет».
         with contextlib.redirect_stdout(log):
             for answer in ({"skip": True, "text": "", "reason": "Gemini: PROHIBITED_CONTENT"},
                            {"skip": False, "text": f"В строке «{lines[1]}» названо вещество", "reason": ""},
                            {"skip": True, "text": "", "reason": f"не буду читать: {lines[1]}"}, {"skip": False, "lines": "2"}):
-                llm.generate_tekst = lambda asked, answer=answer: answer
+                llm.generate_tekst = lambda asked, looks, answer=answer: answer
                 assert found(song) is None, answer
-        assert report(None)[0] == f"{TEXT_HEAD}\n\n{TEXT_FAIL}" and "PROHIBITED_CONTENT" in log.getvalue() and "строка" not in log.getvalue()
-        replies.append(report(None)[0])
-        # Все строки названы в тексте предельной длины, и строка без переносов: ответ влезает в сообщение целиком.
-        llm.generate_tekst = lambda asked: {"skip": False, "lines": list(range(1, len(asked) + 1))}
-        for long in ("\n".join(f"строка {n} " + "&<>" * 9 for n in range(400))[:config.TEKST_CHARS], "слово " * (config.TEKST_CHARS // 6)):
-            text, _ = report(found(long))
-            assert len(telegram.sanitize(text)) <= telegram.MAX_TEXT and text.count("<blockquote>") == text.count("</blockquote>") == 1
-            assert law in text and TEXT_NOTE in text and ("…и ещё " in text) == ("\n" in long) and ("…</blockquote>" in text) != ("\n" in long)
-        # Процесс проверки: текст — из stdin, ответ — человеку; ни сбой модели, ни сбой отправки текст в лог не несут.
+        assert report(None)[0] == [f"{TEXT_HEAD}\n\n{TEXT_FAIL}"] and "PROHIBITED_CONTENT" in log.getvalue() and "строка" not in log.getvalue()
+        replies.append(report(None)[0][0])
+        # Каждая строка — по всем темам, текст предельной длины и строка без переносов: ответ уходит несколькими
+        # сообщениями, каждое влезает в сообщение Telegram, блок темы и её закон не разорваны, оговорка — в конце.
+        llm.generate_tekst = lambda asked, looks: {"skip": False, "lines": [{"n": n, "topics": list(looks)} for n in range(1, len(asked) + 1)]}
+        for long in ("\n".join(f"строка {n} " + "&<>" * 9 for n in range(400))[:config.TEKST_CHARS], "слово " * (config.TEKST_CHARS // 6),
+                     "&" * config.TEKST_CHARS):
+            texts, _ = report(found(long))
+            assert len(texts) > 1 and all(len(telegram.sanitize(text)) <= telegram.MAX_TEXT for text in texts), [len(text) for text in texts]
+            assert all(text.count("<blockquote>") == text.count("</blockquote>") and text.count("<b>") == text.count("</b>") for text in texts)
+            whole = "\n\n".join(texts)
+            assert whole.count("<blockquote>") == len(topics) and "<blockquote></blockquote>" not in whole and texts[-1].endswith(TEXT_NOTE)
+            assert all(any("\n\n".join(_law(topic)) in text for text in texts) for topic in topics), "закон темы — целиком в одном сообщении"
+            assert ("…и ещё " in whole) == ("\n" in long) and ("…</blockquote>" in whole) != ("\n" in long)
+        replies.append(whole)
+        # Процесс проверки: текст — из stdin, ответ — человеку, кнопки — под последним сообщением; ни сбой модели,
+        # ни сбой отправки текст в лог не несут.
         telegram.send_message = lambda chat, text, buttons=None, **_: sent.append((chat, text, buttons))
-        sys.stdin = type("In", (), {"buffer": io.BytesIO(song.encode())})()
-        llm.generate_tekst = lambda asked: {"skip": False, "lines": [2]}
+        sys.stdin = type("In", (), {"buffer": io.BytesIO(long.encode())})()
         _read("7")
-        assert sent == [("7", *report([lines[1]]))], sent
+        texts, rows = report(found(long))
+        assert sent == [("7", text, None) for text in texts[:-1]] + [("7", texts[-1], rows)], len(sent)
+        sys.stdin = type("In", (), {"buffer": io.BytesIO(song.encode())})()
+        llm.generate_tekst = lambda asked, looks: {"skip": False, "lines": [{"n": 2, "topics": ["veshchestva"]}]}
+        _read("7")
+        texts, rows = report({"veshchestva": [lines[1]]})
+        assert len(texts) == 1 and sent[-1] == ("7", texts[0], rows), sent[-1]
         with contextlib.redirect_stdout(log):
-            for breaks in (lambda asked: 1 / 0, lambda asked: (_ for _ in ()).throw(RuntimeError(song))):
+            for breaks in (lambda asked, looks: 1 / 0, lambda asked, looks: (_ for _ in ()).throw(RuntimeError(song))):
                 sys.stdin = type("In", (), {"buffer": io.BytesIO(song.encode())})()
                 llm.generate_tekst = breaks
                 _read("7")
-                assert sent[-1] == ("7", *report(None))
+                assert sent[-1] == ("7", report(None)[0][0], report(None)[1])
             telegram.send_message = lambda chat, text, **_: (_ for _ in ()).throw(telegram.TelegramError(text))
             sys.stdin = type("In", (), {"buffer": io.BytesIO(song.encode())})()
             _read("7")
@@ -517,20 +672,31 @@ def _selftest_text() -> None:
         assert take("7", song) and len(spawned) == 3 and set(_READING) == {"7"}
     finally:
         llm.generate_tekst, telegram.send_message, subprocess.Popen, sys.stdin = real
+        globals()["TEXT_PAUSE"] = pause
         for process in _READING.values():
             process.kill()
             process.wait()
         _READING.clear()
-    # Ни в одном ответе нет вердикта и нет совета, как переписать: слова закона не в счёт — это цитата.
+    # Ни в одном ответе нет вердикта и нет совета, как переписать, — в том числе в названиях тем: бот называет
+    # строку темой, а не нарушением. Слова закона не в счёт — это цитата со статьёй.
     verdict = ("чист", "можно", "нельзя", "нарушен", "нарушает", "законн", "разреш", "запрещ", "безопасн", "легальн", "пройд",
-               "замен", "синоним", "перепи", "вместо")
+               "замен", "синоним", "перепи", "вместо", "виновн", "преступ", "наказ", "штраф", "статья грозит")
+    quotes = [part for topic in topics for part in _law(topic)]
     for text in (TEXT_ASK, TEXT_WAIT, TEXT_BUSY, TEXT_LONG, TEXT_LIMIT, TEXT_FULL, TEXT_BUTTON, TEXT_AGAIN, *replies):
-        assert not [word for word in verdict if word in text.replace(law, "").casefold()], text
-    assert all("не юрист" in text for text in (TEXT_ASK, *replies[:2])), "оговорка — на экране вопроса и в ответах"
-    # Пробы генератора — свои строки; в ответ человеку они не попадают, промпт веществ не называет.
+        for part in quotes:
+            text = text.replace(part, "")
+        assert not [word for word in verdict if word in text.casefold()], text
+    assert all("не юрист" in text for text in (TEXT_ASK, replies[0], replies[1], replies[3])), "оговорка — на экране вопроса и в ответах"
+    assert "не оценка текста" in replies[2] and "проверить не вышло" in replies[2]
+    # Пробы генератора — свои строки; в ответ человеку они не попадают. Ни промпт, ни база тем веществ не называют;
+    # темы проб — из базы.
     prompt = (config.PROMPTS / "service" / "tekst.md").read_text(encoding="utf-8").casefold()
-    named = {word.casefold() for text, want in PROBES if want for n in want for word in re.findall(r"\w{5,}", lines_of(text)[n - 1])}
-    assert len(PROBES) == 10 and sum(bool(want) for _, want in PROBES) >= 5 and not [word for word in named if word in prompt]
+    base = " ".join(topic["name"] + " " + topic["look"] for topic in topics).casefold()
+    named = {word.casefold() for text, want in PROBES if want for n, key in want.items() if key == "veshchestva"
+             for word in re.findall(r"\w{5,}", lines_of(text)[n - 1])}
+    assert not [word for word in named if word in prompt or word in base], [word for word in named if word in prompt or word in base]
+    assert len(PROBES) == 20 and {key for _, want in PROBES if want for key in want.values()} <= set(ids)
+    assert sum(bool(want) for _, want in PROBES) >= 12 and all(n <= len(lines_of(text)) for text, want in PROBES if want for n in want)
 
 
 def _selftest() -> None:
@@ -706,13 +872,13 @@ def main() -> None:
     parser.add_argument("--selftest", action="store_true", help="проверка без сети и Telegram")
     parser.add_argument("--dry-run", action="store_true", help="что в запасе и какой пост вышел бы следующим, без записи")
     parser.add_argument("--probe", action="store_true",
-                        help="читает ли генератор тексты с названиями веществ: десять проб — только из Actions")
+                        help="читает ли генератор тексты по темам проверки: двадцать проб — только из Actions")
     parser.add_argument("--read", metavar="ЧАТ", help=argparse.SUPPRESS)  # процесс проверки текста: его запускает дежурство
     args = parser.parse_args()
     if args.selftest:
         return _selftest()
     if args.probe:
-        return 1 if probe() > 1 else 0
+        return 1 if probe() > len(PROBES) // 10 else 0
     if args.read:
         return _read(args.read)
     from . import telegram

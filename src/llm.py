@@ -157,18 +157,33 @@ SKLEYKA_SCHEMA = {
     "additionalProperties": False,
 }
 
-# ПРОВЕРКА ТЕКСТА (src/pamyatka.py): модель отвечает одними номерами строк — слов от неё в ответе
-# человеку нет вовсе, строки берёт код из присланного текста. skip — по нему провайдеры опознают ответ.
-TEKST_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "lines": {"type": "array", "items": {"type": "integer"},
-                  "description": "Номера строк, где названо вещество, списком чисел; таких нет — пустой список"},
-        "skip": {"type": "boolean", "description": "Всегда false"},
-    },
-    "required": ["lines", "skip"],
-    "additionalProperties": False,
-}
+# ПРОВЕРКА ТЕКСТА (src/pamyatka.py): модель отвечает одними номерами строк и id тем из закрытого перечня
+# (data/tekst.json) — слов от неё в ответе человеку нет вовсе, строки берёт код из присланного текста,
+# названия тем и закон — из базы. skip — по нему провайдеры опознают ответ.
+def tekst_schema(ids: list[str]) -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "lines": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "n": {"type": "integer", "description": "Номер строки"},
+                        "topics": {"type": "array", "items": {"type": "string", "enum": ids},
+                                   "description": "id тем из перечня, к которым относится строка"},
+                    },
+                    "required": ["n", "topics"],
+                    "additionalProperties": False,
+                },
+                "description": 'Отмеченные строки списком объектов {"n": номер строки, "topics": [id тем из перечня]}; '
+                               "таких нет — пустой список",
+            },
+            "skip": {"type": "boolean", "description": "Всегда false"},
+        },
+        "required": ["lines", "skip"],
+        "additionalProperties": False,
+    }
 
 # Схема ответа по рубрике; кого здесь нет, тот отвечает POST_SCHEMA.
 SCHEMAS = {"meme": MEME_SCHEMA}
@@ -336,16 +351,17 @@ def generate_comment(payload: dict) -> dict:
     )
 
 
-def generate_tekst(lines: list[str]) -> dict:
-    """ПРОВЕРКА ТЕКСТА (src/pamyatka.py): в каких строках текста названы вещества (prompts/service/tekst.md).
-    Строки уходят с номерами, обратно — номера: показать человеку слово, которого нет в его тексте, нечем."""
+def generate_tekst(lines: list[str], topics: dict[str, str]) -> dict:
+    """ПРОВЕРКА ТЕКСТА (src/pamyatka.py): какие строки текста к каким темам относятся (prompts/service/tekst.md).
+    topics — «id темы → что к ней относится» из data/tekst.json. Строки уходят с номерами, обратно — номера
+    и id тем: показать человеку слово, которого нет в его тексте, нечем. Запрос один на проверку, как и был."""
     numbered = {str(n): line for n, line in enumerate(lines, 1)}
     return _generate(
         f"{service_prompt('tekst')}\n\n"
         f"## Данные\n\n"
-        f"```json\n{json.dumps({'lines': numbered}, ensure_ascii=False, indent=2)}\n```\n\n"
-        f"Верни номера строк по правилам выше.",
-        TEKST_SCHEMA,
+        f"```json\n{json.dumps({'topics': topics, 'lines': numbered}, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"Верни номера строк и id тем по правилам выше.",
+        tekst_schema(list(topics)),
     )
 
 
