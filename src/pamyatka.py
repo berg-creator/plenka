@@ -33,11 +33,13 @@
 в канале Telegram подсвечивает /команду, а нажатие никуда не ведёт.
 
 Та же база открывается в боте разделом «ПАМЯТКА» (screen, answer; кнопки и счёт — service._memo):
-вопросы кнопками (поле ask) по config.PAMYATKA_PAGE на экран, ответ — та же запись без призыва.
+вход — две темы, «права и закон» и «запись голоса» (владелец 10.10.2026: «сначала 2 кнопки … а только
+потом список памяток»), в теме — её вопросы кнопками (поле ask) по config.PAMYATKA_PAGE на экран,
+ответ — та же запись без призыва.
 Это справочник, а не консультант: модель не вызывается, текст человека раздел не разбирает —
 «модель выдумывает, юриста у нас нет» (владелец 09.10.2026), и экран раздела говорит это первым.
-Отвергнуто: две темы вместо страниц (права и закон — 17 вопросов из 23, простыня осталась бы) и правка
-сообщения на месте (ответ пропадал бы при возврате к списку — прочитанное остаётся в чате).
+Страницы внутри темы остались: права и закон — 17 вопросов из 23, одним экраном это простыня.
+Отвергнута правка сообщения на месте (ответ пропадал бы при возврате к списку — прочитанное остаётся в чате).
 
 Одно исключение из «модель не вызывается» — «🔎 Проверить текст» (владелец 09.10.2026): артист присылает
 текст трека, бот показывает его же строки, где названы вещества, и запись slova. Модель здесь не отвечает
@@ -84,10 +86,14 @@ RUBRIC = "pamyatka"
 LAW = "prava"  # поле topic записи про права; вторая тема — "golos", запись голоса
 # Отсылка к названию сериала о юристе — без имени персонажа: его нигде не пишем.
 CALL = "▸ Лучше пишите ПЛЁНКЕ: все памятки про права — в боте"
-# Кнопки раздела в боте: s:pam:<id> — запись, s:pam:<номер> — страница списка; «s:pam» без хвоста — вход
-# из меню (service.menu_buttons). Число id не бывает — селфтест базы.
+# Кнопки раздела в боте: s:pam:<id> — запись, s:pam:<тема>.<страница> — список темы; «s:pam» без хвоста — вход
+# из меню (service.menu_buttons), он считается. Числа и точки в id не бывает — селфтест базы, — поэтому HOME,
+# первый экран без счёта входа, — число: так до 10.10.2026 выглядели страницы общего списка и «← Все вопросы»,
+# и кнопки в старых сообщениях ведут туда же.
 PICK = "s:pam:"
-ICONS = {LAW: "⚖️", "golos": "🎤"}
+HOME = f"{PICK}0"
+ICONS = {LAW: "⚖️", "golos": "🎙"}
+TOPICS = {LAW: "Права и закон", "golos": "Запись голоса"}
 HEAD = "⚖️ <b>ПАМЯТКА</b>"
 INTRO = ("Ответы на то, на чём начинающий теряет трек или деньги: чьи права на музыку, как записать голос "
          "и что в законе о «запрете слов».")
@@ -137,33 +143,41 @@ def find(key: str) -> dict | None:
     return next((item for item in load() if item["id"] == key), None)
 
 
-def screen(page: int | None = None) -> tuple[str, list[list[dict]]]:
-    """Экран раздела в боте: оговорка и вопросы кнопками, config.PAMYATKA_PAGE на страницу, в порядке базы.
-    page=None — вход в раздел: со вступлением и строкой о канале (пока в базе есть невышедшее);
-    номер — страница списка, туда же возвращает «← Все вопросы» под ответом. Первой кнопкой на каждой
-    странице — «🔎 Проверить текст»: ролик зовёт кинуть текст, а не листать вопросы."""
-    base, size = load(), config.PAMYATKA_PAGE
-    at = min(page or 0, max(0, (len(base) - 1) // size)) * size
-    rows = [[{"text": f"{ICONS.get(item.get('topic'), '')} {item.get('ask') or item['title']}".strip(),
+def screen(where: str = "") -> tuple[str, list[list[dict]]]:
+    """Экран раздела в боте по хвосту кнопки. «<тема>.<страница>» — вопросы этой темы кнопками,
+    config.PAMYATKA_PAGE на страницу, в порядке базы, и «← Назад» на вход; оговорка о юристе — только в теме
+    закона. Всё остальное (пусто, число прежних страниц, тема, которой нет) — вход: вступление, оговорка,
+    строка о канале (пока в базе есть невышедшее) и три кнопки — «🔎 Проверить текст» (ролик зовёт кинуть
+    текст, а не листать вопросы; в темах её нет) и две темы. Вопросов на входе нет."""
+    topic, _, page = where.partition(".")
+    if topic not in TOPICS:
+        parts = [HEAD, INTRO, NOTE, *([MORE.format(channel=config.CHANNEL_HANDLE)] if pending() else [])]
+        return "\n\n".join(parts), [[{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}]] + \
+            [[{"text": f"{ICONS[key]} {name}", "callback_data": f"{PICK}{key}.0"}] for key, name in TOPICS.items()]
+    base, size = [item for item in load() if item.get("topic") == topic], config.PAMYATKA_PAGE
+    # isdecimal, а не isdigit: «²» — цифра, но int() на ней падает, а хвост кнопки приходит из чужих рук.
+    at = min(int(page) if page.isdecimal() else 0, max(0, (len(base) - 1) // size)) * size
+    rows = [[{"text": f"{ICONS[topic]} {item.get('ask') or item['title']}",
               "callback_data": f"{PICK}{item['id']}"}] for item in base[at:at + size]]
-    turn = ([{"text": "← Назад", "callback_data": f"{PICK}{at // size - 1}"}] if at else []) + \
-        ([{"text": "Ещё вопросы →", "callback_data": f"{PICK}{at // size + 1}"}] if at + size < len(base) else [])
-    parts = [HEAD, *([INTRO] if page is None else []), NOTE,
-             *([MORE.format(channel=config.CHANNEL_HANDLE)] if page is None and pending() else []),
-             *([f"Вопросы {at + 1}–{min(at + size, len(base))} из {len(base)} ↓"] if base else [])]
-    return "\n\n".join(parts), [[{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}]] + rows + ([turn] if turn else [])
+    turn = ([{"text": "‹ Предыдущие", "callback_data": f"{PICK}{topic}.{at // size - 1}"}] if at else []) + \
+        ([{"text": "Ещё вопросы ›", "callback_data": f"{PICK}{topic}.{at // size + 1}"}] if at + size < len(base) else [])
+    parts = [f"{ICONS[topic]} <b>ПАМЯТКА: {TOPICS[topic].lower()}</b>", *([NOTE] if topic == LAW else []),
+             *([f"Вопросы {at + 1}–{min(at + size, len(base))} из {len(base)} ↓"] if len(base) > size else [])]
+    return "\n\n".join(parts), rows + ([turn] if turn else []) + [[{"text": "← Назад", "callback_data": HOME}]]
 
 
 def answer(item: dict) -> tuple[str, list[list[dict]]]:
     """Ответ на вопрос в боте: запись тем же шаблоном, что пост, без призыва и без ссылки — человек уже
     в боте. Своя строка про бота остаётся строкой, а ведёт туда кнопка под ответом. Под записью
-    о «запрете слов» (SLOVA) — «🔎 Проверить текст»."""
-    door = item.get("start", "").partition("_")[0]
-    page = [row["id"] for row in load()].index(item["id"]) // config.PAMYATKA_PAGE
+    о «запрете слов» (SLOVA) — «🔎 Проверить текст». «← Все вопросы» — список темы записи, на её странице;
+    запись без темы (кривая правка базы) возвращает на вход."""
+    door, topic = item.get("start", "").partition("_")[0], item.get("topic")
+    mine = [row["id"] for row in load() if row.get("topic") == topic]
+    back = f"{PICK}{topic}.{mine.index(item['id']) // config.PAMYATKA_PAGE}" if topic in TOPICS else HOME
     rows = [[{"text": DOORS[door], "callback_data": f"s:{door}"}]] if item.get("bot") and door in DOORS else []
     rows += [[{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}]] if item["id"] == SLOVA else []
     return ("\n\n".join(_parts(item) + ([html.escape(item["bot"])] if item.get("bot") else [])),
-            rows + [[{"text": BACK, "callback_data": f"{PICK}{page}"}]])
+            rows + [[{"text": BACK, "callback_data": back}]])
 
 
 # ─────────────────────────── проверка текста ───────────────────────────
@@ -540,7 +554,7 @@ def _selftest() -> None:
         assert telegram.visible_len(reply) <= telegram.MAX_TEXT and keys[-1][0]["text"] == BACK
         assert [key["callback_data"] for row in keys for key in row] == \
             [f"s:{item.get('start', '').partition('_')[0]}"] * bool(item.get("bot")) + [TEXT_KEY] * (item["id"] == SLOVA) + \
-            [f"{PICK}{base.index(item) // config.PAMYATKA_PAGE}"]
+            [f"{PICK}{item['topic']}.{[row for row in base if row['topic'] == item['topic']].index(item) // config.PAMYATKA_PAGE}"]
         assert telegram.visible_len(text) <= quality.CAPTION_LIMIT, f"{item['id']}: подпись {telegram.visible_len(text)} знаков"
         assert set(re.findall(r"ст\. (\d+)", text)) == set(re.findall(r"ст\. (\d+)", cited)), f"{item['id']}: статьи текста и источника"
         assert all(key in skleyka.TAKE_FLAWS for key in re.findall(r'TAKE_FLAWS\["(\w+)"\]', cited)), item["id"]
@@ -550,22 +564,38 @@ def _selftest() -> None:
         assert "Проверить свой голос" not in text, f"{item['id']}: отдельной проверки голоса в боте нет"
         # Совет — только у записи о голосе и о правах по ГК: запись о запрете показывает текст закона, и всё.
         assert "Что делать" not in text or "ГК РФ" in cited or item["topic"] != LAW, f"{item['id']}: совет в записи о запрете"
-    # Экран раздела: оговорка на каждой странице, вступление и строка о канале — только на входе, каждая
-    # запись — ровно одной кнопкой, страницы листаются в обе стороны, всё в лимитах Telegram.
+    # Вход в раздел (владелец 10.10.2026): вступление, оговорка, строка о канале и три кнопки — проверка текста
+    # и две темы; ни одного вопроса. Кнопки прежнего общего списка (число — страница и «← Все вопросы»)
+    # и тема, которой нет, ведут сюда же.
     first, keys = screen()
     assert first.startswith(f"{HEAD}\n\n{INTRO}\n\n{NOTE}") and (config.CHANNEL_HANDLE in first) == bool(pending())
     assert config.PAMYATKA_DAYS == (2, 5), "MORE называет среду и субботу"
-    pages = [screen(n) for n in range(-(-len(base) // config.PAMYATKA_PAGE))]
-    assert keys == pages[0][1] and screen(99) == pages[-1], "вход — первая страница, лишний номер — последняя"
-    assert all(rows[0] == [{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}] for _, rows in pages), "проверка текста — первой кнопкой"
-    asked = [key for _, rows in pages for row in rows[1:] for key in row if not key["callback_data"].removeprefix(PICK).isdigit()]
-    assert [key["callback_data"] for key in asked] == [f"{PICK}{item['id']}" for item in base], "все записи, по разу, в порядке базы"
-    assert all(find(key["callback_data"].removeprefix(PICK)) for key in asked) and find("") is None and find("1") is None
-    for n, (text, rows) in enumerate(pages):
-        turn = [key["callback_data"] for row in rows for key in row if key["callback_data"].removeprefix(PICK).isdigit()]
-        assert turn == [f"{PICK}{m}" for m in (n - 1, n + 1) if 0 <= m < len(pages)], (n, turn)
-        assert NOTE in text and INTRO not in text and telegram.visible_len(text) <= telegram.MAX_TEXT and len(rows) <= config.PAMYATKA_PAGE + 2
-        assert all(len(key["callback_data"].encode()) <= 64 and len(key["text"]) <= 40 for row in rows for key in row)
+    assert keys == [[{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}],
+                    [{"text": "⚖️ Права и закон", "callback_data": f"{PICK}{LAW}.0"}],
+                    [{"text": "🎙 Запись голоса", "callback_data": f"{PICK}golos.0"}]], "вход: проверка текста и две темы"
+    assert all(screen(old) == (first, keys) for old in ("0", "1", "2", "99", "нет-такой", "нет.1", ".", HOME.removeprefix(PICK)))
+    assert set(TOPICS) == set(ICONS) and telegram.visible_len(first) <= telegram.MAX_TEXT
+    # Экран темы: только её записи, каждая ровно одной кнопкой, страницы листаются в обе стороны, «← Назад» —
+    # на вход без счёта; оговорка о юристе — в теме закона, проверки текста в темах нет; всё в лимитах Telegram.
+    reach = []
+    for topic in TOPICS:
+        mine = [f"{PICK}{item['id']}" for item in base if item["topic"] == topic]
+        pages = [screen(f"{topic}.{n}") for n in range(-(-len(mine) // config.PAMYATKA_PAGE))]
+        assert pages and screen(topic) == screen(f"{topic}.²") == pages[0] and screen(f"{topic}.99") == pages[-1], "лишний номер — последняя"
+        asked = []
+        for n, (text, rows) in enumerate(pages):
+            marks = [key["callback_data"] for row in rows for key in row]
+            assert rows[-1] == [{"text": "← Назад", "callback_data": HOME}] and TEXT_KEY not in marks and marks.pop() == HOME
+            assert [mark for mark in marks if "." in mark] == [f"{PICK}{topic}.{m}" for m in (n - 1, n + 1) if 0 <= m < len(pages)], (topic, n)
+            asked += [mark for mark in marks if "." not in mark]
+            assert (NOTE in text) == (topic == LAW) and HEAD not in text and INTRO not in text and TOPICS[topic].lower() in text
+            assert telegram.visible_len(text) <= telegram.MAX_TEXT and len(rows) <= config.PAMYATKA_PAGE + 2
+            assert all(len(key["callback_data"].encode()) <= 64 and len(key["text"]) <= 40 for row in rows for key in row)
+        assert asked == mine, f"{topic}: все записи темы, по разу, в порядке базы"
+        reach += asked
+    # Любая запись базы — за два нажатия от входа (тема, вопрос) плюс листание; хвост кнопки записи не спутать с экраном.
+    assert sorted(reach) == sorted(f"{PICK}{item['id']}" for item in base) and all(find(mark.removeprefix(PICK)) for mark in reach)
+    assert find("") is None and find("1") is None and find(f"{LAW}.0") is None and find(LAW), "запись prava — не тема prava"
     _selftest_text()
 
     at = lambda stamp: datetime.fromisoformat(f"2026-10-{stamp}:00+03:00")  # noqa: E731 — 07.10 среда, 10.10 суббота
@@ -679,7 +709,8 @@ def main() -> None:
     print(f"В базе: {len(load())}, не вышло: {len(left)}; сутки отданы памятке: {day()}; сейчас можно выйти: {bool(left) and due()}")
     for item in left:
         print(f"  {item['id']}: подпись {telegram.visible_len(build(item)['text'])} знаков — {item['title']}")
-    print(f"В боте: {len(load())} вопросов, по {config.PAMYATKA_PAGE} на экран; счёт — python -m src.service --sources | grep ПАМЯТКА")
+    print("В боте: " + ", ".join(f"«{name}» — {sum(item.get('topic') == key for item in load())}" for key, name in TOPICS.items())
+          + f" вопросов, по {config.PAMYATKA_PAGE} на экран; счёт — python -m src.service --sources | grep ПАМЯТКА")
     print("\n" + build(left[0])["text"] if left else "Запас кончился: рубрика молчит, релизы в её дни выходят как раньше.")
 
 
