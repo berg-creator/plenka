@@ -1187,6 +1187,12 @@
       "file": "20261010-110602-4635-news.json",
       "published_at": "2026-10-10T11:06:08+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20261008-145438-2833-lineage.json",
+      "published_at": "2026-10-10T16:01:47+00:00",
+      "rubric": "lineage"
     }
   ],
   "photos": [
@@ -1349,6 +1355,7 @@
     "646968d08092e2d2c1330131803982199b198e7d8a7dc979c8fc8a7c026c022f",
     "99bf9936b936617c873d1e6c0ceec17ec176e0ffe0dcd0efd8ce58ec926ef09e",
     "990e2f5b59db99ca22dc669c347a7cfa4c326a1e4c0a561d761dfc3ba43b063f",
-    "162356833611169116902fc86e882b085b486b082e9036901b201b261b220107"
+    "162356833611169116902fc86e882b085b486b082e9036901b201b261b220107",
+    "4c8088907e5076096668966c9b7c8f3ccf2fcf9d4e95c998cd99cda44d802584"
   ]
 }
