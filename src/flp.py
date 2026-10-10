@@ -67,7 +67,8 @@ Fruity Parametric EQ 2). В проект оно ложится записью 53
 не снять — звук играет своей длиной и высотой.
 
 Проект, сохранённый владельцем в «Сегодня», утром не стирается (`keep`): папка переезжает рядом, пути звуков
-в проекте переписываются, остальное — байт в байт.
+в проекте переписываются, остальное — байт в байт. Так же — проект этого бита, сохранённый мимо «Сегодня»
+(его папка битов, ~/FLP, Projects): он один держит папку от чистки, и пути в нём переписываются на месте.
 Serum у владельца — Audio Unit; его состояние — plist, где поле vstdata — файл .fxp целиком (снято с его
 проекта), поэтому пресет бита, и свой тоже, лежит в канале сразу. Длину в заголовке fxp сборка пишет сама:
 у пресетов библиотеки она на восемь байт больше положенного, и Audio Unit такой пресет не берёт (`au_state`).
@@ -959,24 +960,45 @@ def _bars(a: float, b: float) -> str:
     return f"с такта {x[0] + 1:g}.{x[1] + 1:g} по {y[0] + 1:g}.{y[1] + 1:g}"
 
 
-def keep(kits: Path) -> str:
+def _aside(f: Path, kits: Path) -> bool:
+    """Проект мимо «Сегодня» берёт из неё звуки, и все они в ней лежат. Проект прошлого бита, пересохранённый позже,
+    зовёт звуки, которых в папке уже нет, — он не наш, его пути не трогаем."""
+    try:
+        got = [unicodedata.normalize("NFC", v.decode("utf-16-le").rstrip("\0")) for e, v in events(f.read_bytes()) if e == 196]
+    except (AssertionError, IndexError, UnicodeError, OSError):
+        return False
+    here = {unicodedata.normalize("NFC", p.name) for p in kits.iterdir()}
+    mine = [p for p in got if f"/{unicodedata.normalize('NFC', kits.name)}/" in p]
+    return bool(mine) and all(p.rsplit("/", 1)[-1] in here for p in mine)
+
+
+def keep(kits: Path, beside: tuple[Path, ...] = ()) -> str:
     """Проект, который владелец сохранил в «Сегодня» (файл .flp новее метки `.бит`), утром не стирается: папка целиком
     переезжает рядом, в «00 - <дата> <бит>», пути звуков в её проектах переписаны на новое имя (`repath`), прежний
     файл — рядом, .bak. Владелец 06.10.2026 сохранил первый же проект прямо в «Сегодня», а `noty.lay` стирает её
     каждое утро. Нетронутую папку стирает `lay`, как раньше. Проект не разобрался байт в байт — папка переезжает,
-    а файл не тронут: FL спросит звуки сам. Возвращает строку для записки; пустая — переезда не было."""
-    mark = kits / ".бит"
-    since = mark.stat().st_mtime if mark.exists() else 0
-    mine = sorted((f for f in kits.glob("*.flp") if f.stat().st_mtime > since), key=lambda f: f.stat().st_mtime) if kits.is_dir() else []
-    if not mine:
+    а файл не тронут: FL спросит звуки сам. Возвращает строку для записки; пустая — переезда не было.
+    Проект, сохранённый мимо «Сегодня» (папки beside, копии FL из Backup не в счёт), держит папку так же, и пути в нём
+    переписываются там, где он лежит: владелец 09.10.2026 сохранил «Фонарь» через «Сохранить как» в свою папку битов,
+    утром папка переехала, а его последняя версия осталась смотреть в «Сегодня» — на звуки следующего бита."""
+    if not kits.is_dir():
         return ""
+    mark, age = kits / ".бит", lambda f: f.stat().st_mtime
+    since = age(mark) if mark.exists() else 0
+    aside = sorted((f for d in beside if d.is_dir() for f in d.rglob("*.flp")
+                    if "Backup" not in f.parts and age(f) > since and _aside(f, kits)), key=age)
+    built = sorted(kits.glob("*.flp"), key=age)
+    mine = [f for f in built if age(f) > since]
+    if not (mine or aside):
+        return ""
+    last = (mine or built or aside)[-1]     # имя папке даёт проект из неё самой: мимо неё файл зовут как угодно
     day = mark.read_text("utf-8")[:8] if mark.exists() else ""
-    day = day if day.isdigit() else time.strftime("%Y%m%d", time.localtime(mine[-1].stat().st_mtime))
-    title = unicodedata.normalize("NFC", mine[-1].stem).split(" — ")[-1]
+    day = day if day.isdigit() else time.strftime("%Y%m%d", time.localtime(age(last)))
+    title = unicodedata.normalize("NFC", last.stem).split(" — ")[-1]
     new = next(d for k in range(1, 1000) if not (d := kits.with_name(f"00 - {day} {title}" + f" {k}" * (k > 1))).exists())
     kits.rename(new)
     stuck = []
-    for f in sorted(new.glob("*.flp")):
+    for f in sorted(new.glob("*.flp")) + aside:
         moved = repath(f.read_bytes(), kits.name, new.name)
         if moved is None:
             stuck.append(f.name)
@@ -985,7 +1007,8 @@ def keep(kits: Path) -> str:
         f.write_bytes(moved)
     return (f"Прошлый проект ты сохранил в «{kits.name}» — папка не стёрта, а переехала рядом со всеми звуками: «{new.name}». "
             + (f"Пути звуков не переписаны, файл не тронут — {', '.join(stuck)}: при открытии FL спросит, где звуки, — покажи эту папку."
-               if stuck else "Пути звуков в проекте переписаны на неё, прежний файл лежит рядом с окончанием .bak."))
+               if stuck else "Пути звуков в проекте переписаны на неё, прежний файл лежит рядом с окончанием .bak.")
+            + (f" То же — в проектах, сохранённых мимо папки: {', '.join(f'«{f.parent.name}/{f.name}»' for f in aside)}." if aside else ""))
 
 
 # --- проверка ----------------------------------------------------------------
@@ -1265,18 +1288,34 @@ def selftest() -> None:
         assert keep(kits) == "" and kits.is_dir(), "нетронутая папка остаётся чистке"
         os.utime(kits / "А x Б — Проба.flp", (time.time() + 60,) * 2)
         (kits / "битый.flp").write_bytes(b"not FL")
-        said, new = keep(kits), kits.with_name("00 - 20261006 Проба")
+        # Проект того же бита, сохранённый мимо папки: свежий едет путями за ней, давний и зовущий чужой звук — не тронуты
+        side, odd = Path(tmp) / "мимо", Path(next(c["sound"] for c in read(data)["channels"] if c["sound"])).name
+        alien = data.replace(odd.encode("utf-16-le"), ("Ъ" + odd[1:]).encode("utf-16-le"))
+        (side / "Backup").mkdir(parents=True)
+        for name, body, shift in (("свой.flp", data, 60), ("давний.flp", data, -86400), ("чужой.flp", alien, 60), ("Backup/копия.flp", data, 60)):
+            (side / name).write_bytes(body)
+            os.utime(side / name, (time.time() + shift,) * 2)
+        said, new = keep(kits, (side,)), kits.with_name("00 - 20261006 Проба")
+        assert repath((side / "свой.flp").read_bytes(), new.name, kits.name) == data and (side / "свой.flp.bak").read_bytes() == data and "свой.flp" in said, said
+        assert all((side / n).read_bytes() == b for n, b in (("давний.flp", data), ("чужой.flp", alien), ("Backup/копия.flp", data))), "чужие проекты не тронуты"
         moved = (new / "А x Б — Проба.flp").read_bytes()
         assert not kits.exists() and (new / "А x Б — Проба.flp.bak").read_bytes() == data and "битый.flp" in said, said
         assert all(c["sound"].startswith(f"{new}/") and (new / Path(c["sound"]).name).exists() for c in read(moved)["channels"] if c["sound"])
         assert repath(moved, new.name, kits.name) == data and (new / "битый.flp").read_bytes() == b"not FL", "кроме путей не тронуто ничего"
+        # В самой папке ничего не сохранено, проект лежит только мимо неё — звуки всё равно не стираются
+        lone = Path(tmp) / "00 - Завтра"
+        shutil.copytree(new, lone, ignore=shutil.ignore_patterns("*.flp", "*.bak"))
+        (lone / ".бит").write_text("20261007-zavtra abc", "utf-8")
+        (side / "один.flp").write_bytes(repath(data, kits.name, lone.name))
+        os.utime(side / "один.flp", (time.time() + 60,) * 2)
+        assert keep(lone, (side,)) and not lone.exists() and repath((side / "один.flp").read_bytes(), "00 - 20261007 один", kits.name) == data
     print("проект FL: шаблон, каналы со звуком и пресетом (Serum, Sytrus заводским пресетом по имени), отсечка «сам себя» у синтезаторов музыки — каждому своя группа, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
           "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, бочка в моно, низ 808 — срезом Side и полкой Mid в эквалайзере, ручка и огибающая громкости 808; "
           "музыке на длинном звуке-файле под частыми нотами — огибающая «как нарисовано», короткому звуку, редким нотам и барабанам — нет, 808 рядом прежний; "
           "переход аудиоклипом в названных тактах, с уровнем канала и маршрутом в дорожку мелодии или в мастер, подъезд концом на границе такта, звук задом наперёд; "
           "эквалайзер первым слотом дорожки с инструментом, срез по роли и по словам автора, на шинах и мастере своего нет, плагин молчит — "
           "числа в записке; расширитель стерео с числами владельца — последним слотом опоры; WaveShaper с кривой владельца — последним слотом 808, Love Philter без пресета — с его настройками; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота ступенью и прямой («плавно уходит», «плавно входит»); сбой — строка в записке; "
-          "сохранённая папка переезжает, пути звуков — за ней")
+          "сохранённая папка переезжает, пути звуков — за ней, и в проекте, сохранённом мимо неё, тоже: он один держит папку от чистки, давний и чужой не тронуты")
 
 
 def main() -> None:

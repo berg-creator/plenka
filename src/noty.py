@@ -1921,7 +1921,8 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     if seen == mark:
         return f"{beat}: уже собрано"
     make = git("show", f"origin/claude/beats-{beat}:content/beats/{beat}/make.py")
-    saved = flp.keep(kits)              # до первой чистки; не переехала (ошибка диска) — падаем, папку не стираем
+    # до первой чистки; не переехала (ошибка диска) — падаем, папку не стираем
+    saved = flp.keep(kits, (config.PRIVATE / "биты", Path.home() / "FLP", kits.parent.parent / "Projects"))
     with tempfile.TemporaryDirectory(prefix="noty-") as tmp:
         tmp = Path(tmp).resolve()
         try:
