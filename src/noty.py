@@ -262,6 +262,7 @@ STACK_DRY = .3              # секунд до −40 дБ после слоя: 
 SIX = "six speed"           # первый скелет «Г»: хэт до перелома — рисунок трека, мерка владельца — после (`_six`)
 RETRY = 3                   # повторов сбора папки «Сегодня», пока iCloud докачивает звуки: круг помощника — десять минут
 FADE = .005                 # секунд затухания на краях паузы в дорожке петли: без него срез щёлкает
+CHOP = (.003, .008)         # секунд: вход и выход куска нарезки петли (`chops`); короче — стык щёлкает, длиннее — съедена атака
 # Одиночный звук длиннее этого на нотах короче четверти — строка в записке (`_long`), а в проекте FL — огибающая
 # громкости каналу (`flp.GATE`): сэмплер FL доигрывает файл до конца, и частые ноты ложатся копиями друг на друга.
 # Замер «Фонаря» 09.10.2026: остинато шестнадцатыми на файле в 6,87 с — по расчёту 54 копии разом, стоячий аккорд
@@ -393,6 +394,18 @@ def human(notes: list[N], vel: int = 8, seed: int = 0) -> list[N]:
     """Сила вразброс: одинаковые удары подряд звучат машиной."""
     r = random.Random(seed)
     return [n._replace(vel=max(1, min(127, n.vel + r.randint(-vel, vel)))) for n in notes]
+
+
+def swing(notes, share: float = .58):
+    """Свинг шестнадцатых (владелец, 10.10.2026, о бите «Маска»: «хочется больше грува»): вторая шестнадцатая каждой
+    восьмой стоит позже — на доле share восьмой (.5 — ровно, .56–.62 — качает), всё между сеткой едет вместе с ней,
+    концы нот тоже. Это рисунок, а не разброс `human`: одна и та же шестнадцатая опаздывает всегда одинаково.
+    Число вместо нот — одно место: так сдвигаются куски нарезки петли (`chops`). Дробь (`roll`) свингом не гни:
+    внутри восьмой она пойдёт неровно — свингуй костяк, а дробь клади поверх."""
+    def w(x: float) -> float:
+        e, r = divmod(x, 2)
+        return 2 * (e + (r * share if r < 1 else share + (r - 1) * (1 - share)))
+    return w(notes) if isinstance(notes, (int, float)) else [n._replace(pos=w(n.pos), ln=w(n.pos + n.ln) - w(n.pos)) for n in notes]
 
 
 def flam(note: N, gap: float = .25, vel: float = .55) -> list[N]:
@@ -957,6 +970,9 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         out.append("rests: где петля молчит — пары тактов «с — до», счёт с 1, «до» не входит, полтакта — дробью: "
                    "[(8.5, 9), (16, 17)] — вторая половина такта 8 и весь такт 16; хотя бы одна пауза")
     cut = _cut(info)
+    if info.get("chops") is not None and pair:  # длина петли — в шестнадцатых бита: бит вдвое быстрее — петля вдвое длиннее
+        tempo = loop_bpm(pair[0]) or info["bpm"]
+        out += _chops(info, good.get(pair[0], {}).get("bars", 8) * 16 * info["bpm"] // tempo)
     for i, name in enumerate(pair):             # до перелома ноты сверяются с первой петлёй, после — со второй
         lo, hi = ((cut or end, end) if i else (0, cut or end))
         allowed = {NOTES.index(x) for x in good.get(name, {}).get("notes", NOTES)}
@@ -968,6 +984,30 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                            f"({' '.join(sorted({NOTES[n.key % 12] for n in off}, key=NOTES.index))}), — в петле звучат "
                            f"{' '.join(good[name]['notes'])}; мимо — не больше {LOOP_OFF:.0%}")
     return out
+
+
+def _chops(info: dict, long: float) -> list[str]:
+    """Нарезка петли (владелец, 10.10.2026: «местами поиграться с петлей … как это делает канье вест с сэмплами»):
+    в названном такте вместо петли подряд играют её куски. Здесь — только форма: звук режет Мак (`loop_track`).
+    Высота куска — только октава («выше» — вдвое быстрее и короче): другой интервал увёл бы петлю из тональности,
+    а с ней — от 808 и мелодии. Куски не внахлёст и в пределах такта; что между ними — тишина, дыра под барабаны.
+    Сколько тактов резать, сборка не судит: «местами» — правило брифа, порога по замеру нет."""
+    form = ("нарезка петли — [(такт, «приём словами для записки», [(куда, откуда, длина), …]), …]: куда — шаг такта 0–16, "
+            f"откуда — шаг от начала петли (0–{long:g}), всё в шестнадцатых бита, дробь — свинг; четвёртым словом куска — "
+            "«назад» или «выше» (октавой: съедает вдвое больше петли); куски по порядку, не внахлёст, такт — до перелома")
+    try:
+        for bar, how, cuts in info["chops"]:
+            ok, end = isinstance(bar, int) and 1 <= bar <= info["bars"] and isinstance(how, str) and how.strip() and cuts, 0
+            ok = ok and not (_cut(info) and (bar - 1) * 16 >= _cut(info))
+            for to, frm, ln, *kind in cuts:
+                ok = ok and end - 1e-6 <= to and ln > 0 and to + ln <= 16 + 1e-6 and len(kind) <= 1 and set(kind) <= {"назад", "выше"} \
+                    and 0 <= frm and frm + ln * (2 if "выше" in kind else 1) <= long + 1e-6
+                end = to + ln
+            if not ok:
+                return [f"chops, такт {bar}: {form}"]
+    except (TypeError, ValueError):
+        return [f"chops: {form}"]
+    return []
 
 
 def _again(notes: list[N], cut: int, pitch: bool = False) -> float | None:
@@ -1369,6 +1409,10 @@ def _loop_note(info: dict) -> list[str]:
     out.append("Ноты и опоры — замер звука петли, а не буква в имени файла; замер грубый: обертон громкой ноты он считает нотой.")
     if info.get("rests"):
         out.append(f"Петля молчит: {_when(info['rests'])} (дробь — доля такта: 8.5 — середина такта 8).")
+    if info.get("chops"):
+        out.append("Петля местами нарезана — в дорожке уже так: " + "; ".join(f"такт {bar} — {how}" for bar, how, _ in info["chops"])
+                   + f". Куски срезаны по началам нот петли, вход куска — {CHOP[0] * 1000:g} мс, выход — {CHOP[1] * 1000:g} мс; "
+                   "остальные такты — петля целиком.")
     return out + [""]
 
 
@@ -1499,7 +1543,8 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     if info.get("loop"):                # план дорожки петли на весь бит: её собирает Мак (`loop_track`), звук лежит там
         archive.with_suffix(".loop.json").write_text(json.dumps(
             {"bpm": info["bpm"], "bars": info["bars"], "rests": info["rests"],
-             "switch": (info.get("switch") or {}).get("такт")}), encoding="utf-8")       # перелома нет — петля одна на весь бит
+             "switch": (info.get("switch") or {}).get("такт")}                           # перелома нет — петля одна на весь бит
+            | ({"chops": info["chops"]} if info.get("chops") else {})), encoding="utf-8")
     # что нужно проекту FL сверх партитур и звуков: его собирает Мак (`flp.today`) — шаблон FL и плагины стоят там
     archive.with_suffix(".flp.json").write_text(json.dumps(
         {k: info.get(k) for k in ("title", "bpm", "parts", "tricks", "fx", "preset", "sounds")}, ensure_ascii=False), encoding="utf-8")
@@ -1602,6 +1647,26 @@ def _raw(pcm: array, width: int) -> bytes:
     return bytes(out)
 
 
+def _attack(one, ch: int, sr: int, at: int, reach: int) -> int:
+    """С какого кадра петли резать кусок: начало ноты, ближайшее к кадру сетки at, а не сама сетка — живая петля
+    играет мимо неё. В пределах reach ищется место, где громкость окна после кадра сильнее всего обгоняет окно до него;
+    обгон меньше чем в полтора раза — ноты рядом нет (тянется аккорд или тишина): режем по сетке, стык закрывают фейды.
+    Окно — 24 мс: короче периода нижней ноты (ре большой октавы — 14 мс) громкость гуляет вдвое от одной её фазы
+    и «находит» ноту посреди аккорда. Отступ назад на вход куска (`CHOP`) — чтобы фейд кончился к атаке, а не съел её.
+    ponytail: громкость — сумма модулей, без полос: нота, вошедшая тихо поверх громкой, не найдётся, и срез встанет
+    на сетку. Станет слышно — искать по полосам или класть начала нот в замер петли (`zamer.loop`)."""
+    win = sr * 24 // 1000
+
+    def loud(i: int) -> int:
+        return sum(map(abs, one[i * ch:(i + win) * ch]))
+    spots = range(max(win, at - reach), min(at + reach, len(one) // ch - win) + 1, max(1, sr // 500))
+    if not spots:
+        return at
+    floor = max(map(loud, spots)) // 16         # ниже −24 дБ от самого громкого места рядом — шум, а не нота
+    best = max(spots, key=lambda i: loud(i) / (loud(i - win) + floor + 1))
+    return max(best - round(CHOP[0] * sr), 0) if loud(best) > 1.5 * (loud(best - win) + floor) else at
+
+
 def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool = False,
                split: tuple[int, int] | None = None) -> None:
     """Петля на весь бит одним файлом (владелец, 05.10.2026: «может, ты мне дашь дорожку петли на весь трек сразу»).
@@ -1611,7 +1676,12 @@ def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool
     хватает стандартной библиотеки, а формат файла остаётся прежним. plan пришёл из make.py — это числа, а не пути:
     файлы называет вызывающий. Не PCM 16/24 или план негоден — исключение, в папке остаётся просто копия петли.
     split — файл-раскладка (`SHARED_CUT`): петля — первые такты файла минус бас автора, лежащий в нём отдельно; пик
-    остатка поднят до `SHARED_PEAK`, конец петли гаснет к шву повтора."""
+    остатка поднят до `SHARED_PEAK`, конец петли гаснет к шву повтора.
+    Нарезка (plan["chops"], форма — `_chops`): в названном такте петля гаснет до его начала, а в такт ложатся её куски —
+    каждый срезан по началу ноты (`_attack`), с входом и выходом `CHOP`, «выше» — через кадр (октава, вдвое короче),
+    «назад» — задом наперёд. Паузы (rests) глушат и нарезку. Одна дорожка, как и была: клипов в плейлисте не прибавляется.
+    ponytail: октава — среднее двух соседних кадров, без настоящего фильтра: верха выше четверти частоты дискретизации
+    отразятся вниз. У электропиано их почти нет; зашипит на яркой петле — фильтр перед прореживанием."""
     bpm, bars, cut = float(plan["bpm"]), int(plan["bars"]), plan.get("switch")
     rests = [(float(a), float(b)) for a, b in plan.get("rests") or ()]
     if not (tempo and bpm in (tempo, tempo * 2) and bars >= 1 and bars * 240 / bpm <= 600):
@@ -1649,22 +1719,41 @@ def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool
         piece = one[:(min(lo + round((k + 1) * period), hi + fade, total) - a) * ch]
         out[a * ch:a * ch + len(piece)] = piece
         k += 1
-    quiet: list[list[int]] = []
-    for a, b in sorted([(0, lo), (hi, total)] + [(at(a), at(b)) for a, b in rests]):
-        if quiet and a <= quiet[-1][1]:             # паузы встык и внахлёст — одна: между ними нечему затухать
-            quiet[-1][1] = max(quiet[-1][1], b)
-        elif b > a:
-            quiet.append([a, b])
-    for a, b in quiet:
-        f = min(fade, (b - a) // 2)
-        down, up = f if a > 0 else 0, f if b < total else 0         # у края файла затухать не из чего и не во что
-        for i in range(f):
-            for j in range(ch):
-                if down:
-                    out[(a + i) * ch + j] = out[(a + i) * ch + j] * (f - i) // f
-                if up:
-                    out[(b - 1 - i) * ch + j] = out[(b - 1 - i) * ch + j] * (f - i) // f
-        out[(a + down) * ch:(b - up) * ch] = array("i", bytes(4 * (b - up - a - down) * ch))
+
+    def hush(spans) -> None:                        # тишина в отрезках кадров, затухание и возврат — внутри отрезка
+        quiet: list[list[int]] = []
+        for a, b in sorted(spans):
+            if quiet and a <= quiet[-1][1]:         # паузы встык и внахлёст — одна: между ними нечему затухать
+                quiet[-1][1] = max(quiet[-1][1], b)
+            elif b > a:
+                quiet.append([a, b])
+        for a, b in quiet:
+            f = min(fade, (b - a) // 2)
+            down, up = f if a > 0 else 0, f if b < total else 0     # у края файла затухать не из чего и не во что
+            for i in range(f):
+                for j in range(ch):
+                    if down:
+                        out[(a + i) * ch + j] = out[(a + i) * ch + j] * (f - i) // f
+                    if up:
+                        out[(b - 1 - i) * ch + j] = out[(b - 1 - i) * ch + j] * (f - i) // f
+            out[(a + down) * ch:(b - up) * ch] = array("i", bytes(4 * (b - up - a - down) * ch))
+
+    chops, six = () if second else plan.get("chops") or (), 15 / bpm * sr       # six — шестнадцатая бита в кадрах
+    hush([(max(at(bar) - fade, 0), at(bar + 1)) for bar, *_ in chops])          # петля гаснет до такта: её атака в него не лезет
+    for bar, _, cuts in chops:
+        for to, frm, ln, *kind in cuts:
+            start, up = _attack(one, ch, sr, round(frm * six), round(six / 3)), 2 if "выше" in kind else 1
+            size = max(0, min(round(ln * six), (len(one) // ch - start) // up, at(bar + 1) - at(bar) - round(to * six)))
+            piece = one[start * ch:(start + size * up) * ch]
+            if up == 2:
+                piece = [(piece[2 * i * ch + j] + piece[(2 * i + 1) * ch + j]) // 2 for i in range(size) for j in range(ch)]
+            if "назад" in kind:
+                piece = [piece[(size - 1 - i) * ch + j] for i in range(size) for j in range(ch)]
+            p, rise, fall = (at(bar) + round(to * six)) * ch, CHOP[0] * sr, CHOP[1] * sr
+            for i, x in enumerate(piece):
+                x = round(x * min(1, (i // ch) / rise, (size - 1 - i // ch) / fall))
+                out[p + i] = max(-2 ** 31, min(2 ** 31 - 1, out[p + i] + x))
+    hush([(0, lo), (hi, total)] + [(at(a), at(b)) for a, b in rests])
     with wave.open(str(dst), "wb") as w:
         w.setnchannels(ch)
         w.setsampwidth(width)
@@ -1927,6 +2016,8 @@ def _checks() -> None:
     assert spread([N(i, 1) for i in range(40)]) == spread([N(i, 1) for i in range(40)]), "разброс повторяем"
     assert len({n.pan for n in spread([N(i, 1) for i in range(40)])}) > 10
     assert all(92 <= n.vel <= 108 for n in human([N(i, 1) for i in range(40)]))
+    assert [round(n.pos, 2) for n in swing([N(i, 1) for i in range(4)], .6)] == [0, 1.2, 2, 3.2] and swing(1.5, .6) == 1.6 \
+        and swing(7, .5) == 7 and round(sum(n.ln for n in swing([N(0, 1), N(1, 1)], .6)), 6) == 2, "свинг: чётная шестнадцатая позже"
     f = flam(N(8, 1, vel=100))
     assert f[0].pos == 7.75 and f[0].vel == 55 and f[1] == N(8, 1, vel=100)
     e = echo([N(0, 1, 72)], 3, times=2, decay=.5, width=70, pitch=12)
@@ -2096,6 +2187,28 @@ def _checks() -> None:
                 raise AssertionError(f"негодный план должен отказать: {bad}")
             except (ValueError, TypeError, KeyError):
                 pass
+        # Нарезка петли (`chops`). Петля — два такта: нота с ходом громкости от начала, нота на 5 мс позже третьей доли,
+        # нота на втором такте. В третьем такте бита вместо петли — три куска: вторая нота с первой доли (срез встал
+        # на её начало, а не на сетку), первая нота октавой выше и она же задом наперёд; дальше дыра до конца такта
+        with wave.open(str(tmp / "notes.wav"), "wb") as w:
+            w.setnchannels(1), w.setsampwidth(2), w.setframerate(8000)
+            w.writeframes(b"".join(v.to_bytes(2, "little") for v in [10000 + i for i in range(3000)] + [0] * 5040 + [2000] * 3960
+                                   + [0] * 4000 + [3000] * 2000 + [0] * 14000))
+        whole = {"bpm": 120, "bars": 8, "rests": [(7, 8)]}
+        cut = whole | {"chops": [[3, "проба", [[0, 8, 2], [2, 0, 1, "выше"], [4, 0, 2, "назад"]]]]}
+        loop_track(tmp / "notes.wav", tmp / "f.wav", 120, whole)
+        loop_track(tmp / "notes.wav", tmp / "g.wav", 120, cut)
+        (f, _), (g, _) = read(tmp / "f.wav"), read(tmp / "g.wav")
+        assert f[32000] == 10000 and g[:31960] == f[:31960] and g[48000:] == f[48000:] and g[48000] == 3000, \
+            "нарезан только названный такт: остальная дорожка и её длина прежние"
+        first = g.index(2000, 32000)
+        assert not any(g[32000:first]) and 32000 + CHOP[0] * 8000 <= first <= 32045 and g[33900] == 2000 and g[33999] == 0, \
+            "кусок срезан по началу ноты и встал на первую долю: атака цела, старой атаки петли в такте нет, конец гаснет"
+        assert g[34500] == 11000 and g[34501] == 11002, "октавой выше — вдвое быстрее"
+        assert g[36100] == 11899 and g[37000] == 10999 and not any(g[38000:47960]), "задом наперёд; после кусков — дыра"
+        assert _chops(cut, 32) == [] and all(_chops(whole | {"chops": bad}, 32) for bad in (
+            [[9, "такт за концом бита", [[0, 0, 4]]]], [[3, "внахлёст", [[0, 0, 4], [2, 8, 4]]]], [[3, "за такт", [[14, 0, 4]]]],
+            [[3, "мимо петли", [[0, 24, 6, "выше"]]]], [[3, "квинта", [[0, 0, 4, "квинта"]]]], [[3, "", [[0, 0, 4]]]], [3]))
         # Петля-раскладка (`SHARED_CUT`): такт музыки вместе с басом автора, такт тишины, бас один — в дорожке музыка
         # без баса, пик поднят до `SHARED_PEAK`, повтор — через такт петли, а не через длину файла
         with wave.open(str(tmp / "parted.wav"), "wb") as w:
