@@ -1954,6 +1954,9 @@ ACCEPTED = ("Принял: {parts}. Свожу — пришлю минут че�
 EXPIRED = "Дорожки не пришли до конца — заявку закрыл. Начать заново — /svedenie."
 OLD = "Эта заявка уже закрыта. Начать заново — /svedenie."
 EXTRA = "Этот файл не взял: дорожки для трека уже есть. Заменить их — «↩️ Сменить режим»."
+# Один файл и голосом, и битом: 11.10.2026 трек «свёлся» сам с собой, сдвиг голоса на дроп дал эхо в 10 с.
+SAME = ("«{name}» ты уже прислал — второй раз не беру. Нужны разные файлы: голос отдельно, бит отдельно. "
+        "Готовый трек на голос и бит бот не делит; проверить готовый — /ocenka.")
 CANCELLED = "Отменил. Захочешь свести — /svedenie."
 LIMIT = "Треков в сутки — {count}. Следующий можно с {time} по Москве."
 INVITE = ("Твоя ссылка для артиста:\n{link}\n\nПридёт по ней и сведёт свой трек — получишь ещё один трек "
@@ -2663,6 +2666,12 @@ def take(message: dict) -> None:
         telegram.send_message(chat_id, SWAP_TOOK.format(name=html.escape(item["n"])), ask="Toxi$")
         return
     if any(known["m"] == item["m"] for known in draft["files"]):
+        return
+    # Тот же файл в другой роли: file_id совпадает, когда клиент не заливал файл заново, иначе — имя и размер
+    # до байта. Безымянные («дорожка») по размеру не сверяются: стемы одного проекта одной длины.
+    if any(known["f"] == item["f"] or item["n"] != "дорожка" and item["s"] and (known["n"], known["s"]) == (item["n"], item["s"])
+           for known in draft["files"]):
+        telegram.send_message(chat_id, SAME.format(name=html.escape(item["n"])))
         return
     if draft["step"] >= len(draft["plan"]) and not draft.get("links") or len(draft["files"]) >= MAX_PARTS:
         # Шаги кончились или дорожек уже MAX_PARTS: раньше файл пропадал молча, и человек ждал
@@ -5760,6 +5769,14 @@ def _selftest() -> None:
         later("11", STYLE_WAIT + 1)
         files = load()["tracks"][load()["jobs"][-1]["track"]]["files"]
         assert [f["r"] for f in files] == ["вокал", "бит"] and files[0]["g"] == files[1]["g"] == "g1"
+
+        # Один файл и голосом, и битом — отказ строкой, заявка ждёт второй файл.
+        start(47, 47)
+        take(file(40, "track.mp3", chat=47))
+        take(file(41, "track.mp3", chat=47))
+        assert sent[-1] == SAME.format(name="track.mp3") and [f["m"] for f in load()["drafts"]["47"]["files"]] == [40]
+        take(file(42, "beat.mp3", chat=47))
+        assert [f["r"] for f in load()["drafts"]["47"]["files"]] == ["вокал", "бит"]
 
         # «По дорожкам»: галочки, потом шаг за шагом; где файлов несколько — «Дальше».
         start(9, 9)
