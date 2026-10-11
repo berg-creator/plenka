@@ -4,6 +4,7 @@
 и складывает результат в data/inbox.jsonl — сырьё для генератора постов.
 
     python -m src.collect --dry-run     посмотреть, что нашлось, ничего не записывая
+    python -m src.collect --selftest    переиздание старого трека — мимо, новое проходит, без сети
     python -m src.collect               рабочий режим
 """
 
@@ -174,6 +175,10 @@ def collect_releases(artists: list[dict], seen: state.Seen) -> list[dict]:
                 "collected_at": state.iso(),
             }
             record.update(fetch_tracks(item))
+            old = reissue(record, [artist.get("deezer_id")])
+            if old:
+                log.info("%s: «%s» — переиздание трека %s, не берём", artist["name"], record["title"], old)
+                continue
             found.append(record)
     return found
 
@@ -256,6 +261,9 @@ def releases_from_news(news: list[dict], artists: list[dict], seen: state.Seen) 
                     continue
                 seen.add(record["fingerprint"])
                 record.update(fetch_tracks(item))
+                if reissue(record, item["artist_ids"]):
+                    log.info("%s: «%s» — переиздание старого трека, не берём", credit, item["title"])
+                    continue
                 log.info("%s: «%s» — релиз из новости %s", credit, item["title"], row.get("outlet", ""))
                 found.append(record)
     return found
@@ -422,6 +430,52 @@ def deezer_twin(item: dict) -> tuple[int | None, dict]:
             if len(data.get("tracks") or []) == item.get("track_count"):
                 return album["id"], data
     return None, {}
+
+
+# Переиздание узнаётся по записи, а не по названию: та же песня — та же длина.
+REISSUE_DAYS = 365
+REISSUE_SECONDS = 2
+
+
+def reissue(record: dict, artist_ids: list) -> str:
+    """Дата старой записи, если релиз — переиздание старого трека; иначе пустая строка.
+
+    Лейбл перевыпускает старое синглом, и магазин ставит ему сегодняшнюю дату: 10.10.2026
+    iTunes отдал свежими релизами JAŸ-Z «Roc Boys (And The Winner Is)...» (трек 2007 года)
+    и «03' Bonnie & Clyde» (2002), а 02.10 пост «JAŸ-Z выпустил Girls, Girls, Girls» о трёх
+    версиях трека 2001 года вышел в канал. Переиздание — релиз из версий одной песни (каждый
+    трек зовётся как сам релиз), одна из которых старше года. Признаков два, хватает любого:
+    iTunes оставляет треку день первого выхода (поле oldest треклиста), а Deezer больше года
+    знает у того же артиста трек с тем же названием до скобок и той же длиной. Второй нужен
+    релизам из Deezer и из новостей; один он пропустил бы «Girl's Best Friend» (09.08.2026):
+    записи 1999 года в Deezer нет.
+
+    Одного названия мало: «Ростов» Басты и Елены Джая (18.09.2026) — новая запись трека
+    2010 года, на полторы минуты короче, и это новость. Альбом, названный по синглу
+    позапрошлого года, — тоже, поэтому релиз, где есть и другие песни, не сверяется вовсе;
+    юбилейное издание альбома с новыми треками сюда не попадает по той же причине.
+    Жанр и догадки модели — не признак. Deezer не ответил — релиз идёт как раньше:
+    пропущенное переиздание дешевле потерянного релиза.
+    """
+    bare = _bare(record.get("title", ""))
+    tracks = record.get("tracks") or []
+    released = _parse(record.get("released_at"))
+    if not bare or not tracks or released is None or any(_bare(t.get("title", "")) != bare for t in tracks):
+        return ""
+    lengths = [t["seconds"] for t in tracks if t.get("seconds")]
+    old = (released - timedelta(days=REISSUE_DAYS)).date().isoformat()
+    if (record.get("oldest") or old) < old:
+        return record["oldest"]
+    try:
+        for hit in deezer.search_tracks(f"{record.get('tracked', '')} {bare}"):
+            if (hit.get("artist", {}).get("id") in artist_ids and _bare(hit.get("title", "")) == bare
+                    and any(abs((hit.get("duration") or 0) - seconds) <= REISSUE_SECONDS for seconds in lengths)):
+                date = deezer.track_date(hit["id"])
+                if date and date < old:
+                    return date
+    except Exception as exc:  # noqa: BLE001 — магазин не ответил: релиз идёт как раньше
+        log.warning("«%s»: переиздание не сверено (%s)", record.get("title", ""), exc)
+    return ""
 
 
 def _needs_tracks(row: dict) -> bool:
@@ -666,8 +720,52 @@ def _parse(raw: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _selftest() -> int:
+    hits = [{"id": 1, "title": "Roc Boys (And The Winner Is)...", "duration": 252, "artist": {"id": 1309}},
+            {"id": 2, "title": "Roc Boys (And The Winner Is)...", "duration": 251, "artist": {"id": 6661808}}]
+    dates = {1: "2007-12-06", 2: "2014-09-21"}
+    single = {"title": "Roc Boys (And The Winner Is)... - Single", "tracked": "JAY-Z",
+              "released_at": "2026-10-10T07:00:00+00:00",
+              "tracks": [{"title": "Roc Boys (And The Winner Is)...", "seconds": 252},
+                         {"title": "Roc Boys (And The Winner Is)... (Radio Edit)", "seconds": 252}]}
+    logging.disable(logging.WARNING)  # отказ магазина ниже — нарочный
+    real = deezer.search_tracks, deezer.track_date
+    deezer.search_tracks, deezer.track_date = (lambda query, limit=25: hits), (lambda track: dates[track])
+    try:
+        # Тот же трек у того же артиста, вышедший больше года назад, — переиздание.
+        assert reissue(single, [1309]) == "2007-12-06"
+        # iTunes сам помнит день первой записи — Deezer о ней может и не знать («Girl's Best Friend»).
+        assert reissue({**single, "oldest": "1999-08-01"}, [42]) == "1999-08-01"
+        assert reissue({**single, "oldest": "2026-10-10"}, [42]) == ""
+        # Караоке и кавер под тем же названием артиста не старят.
+        assert reissue(single, [42]) == ""
+        # Новый сингл с тем же словом в названии — новый.
+        fresh = {**single, "title": "Roc Boys 2 - Single", "tracks": [{"title": "Roc Boys 2", "seconds": 252}]}
+        assert reissue(fresh, [1309]) == ""
+        # Новая запись под старым названием — другая длина («Ростов», 18.09.2026).
+        again = {**single, "tracks": [{"title": "Roc Boys (And The Winner Is)...", "seconds": 178}]}
+        assert reissue(again, [1309]) == ""
+        # Альбом, названный по старому синглу, с другими песнями внутри — не переиздание.
+        album = {**single, "title": "Roc Boys", "tracks": single["tracks"] + [{"title": "Pray", "seconds": 264}]}
+        assert reissue(album, [1309]) == "" and reissue({**album, "oldest": "2007-10-10"}, [1309]) == ""
+        # Сингл этого года и его переиздание с радио-версией — одна и та же новость, не старьё.
+        dates[1] = "2026-03-01"
+        assert reissue(single, [1309]) == ""
+        # Треклиста нет или магазин не ответил — релиз идёт как раньше.
+        dates[1] = "2007-12-06"
+        assert reissue({**single, "tracks": []}, [1309]) == ""
+        deezer.search_tracks = lambda query, limit=25: 1 / 0
+        assert reissue(single, [1309]) == ""
+    finally:
+        deezer.search_tracks, deezer.track_date = real
+    print("✓ сбор: переиздание старого трека мимо; чужой кавер, новый сингл с тем же словом, новая запись"
+          " другой длины, альбом с заглавным треком и сингл этого года проходят; без треклиста и без Deezer — как раньше")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Агент слежки за музыкальными новинками")
+    parser.add_argument("--selftest", action="store_true", help="переиздание старого трека, без сети")
     parser.add_argument("--dry-run", action="store_true", help="показать находки, ничего не записывая")
     parser.add_argument("--skip-releases", action="store_true", help="не опрашивать iTunes/Deezer")
     parser.add_argument("--skip-news", action="store_true", help="не читать RSS")
@@ -677,6 +775,9 @@ def main() -> int:
         help="дозагрузить треклисты к релизам, найденным раньше",
     )
     args = parser.parse_args()
+
+    if args.selftest:
+        return _selftest()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()

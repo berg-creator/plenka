@@ -217,6 +217,7 @@ def album_tracks(collection_id: str | int) -> dict:
         return {}
 
     tracks: list[dict] = []
+    dates: list[str] = []
     genre = album = ""
     for item in data.get("results", []):
         if item.get("wrapperType") == "collection":
@@ -237,6 +238,7 @@ def album_tracks(collection_id: str | int) -> dict:
             }
         )
         genre = genre or item.get("primaryGenreName", "")
+        dates.append((item.get("releaseDate") or "")[:10])
 
     tracks = [t for t in tracks if t["title"]]
     return {
@@ -244,6 +246,9 @@ def album_tracks(collection_id: str | int) -> dict:
         "genre": genre,
         "duration_sec": sum(t["seconds"] for t in tracks),
         "album": album,  # не «title» — см. deezer.album_tracks
+        # День самой ранней записи. Переизданию магазин ставит сегодняшнюю дату, а трекам
+        # оставляет день первого выхода — по нему collect.reissue узнаёт старое.
+        "oldest": min((date for date in dates if date), default=""),
     }
 
 

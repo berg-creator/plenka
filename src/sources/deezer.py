@@ -208,6 +208,19 @@ def search_albums(title: str, limit: int = 25) -> list[dict]:
     return (data or {}).get("data") or []
 
 
+def search_tracks(query: str, limit: int = 25) -> list[dict]:
+    """Треки по простому запросу, как их отдаёт поиск: id, title, duration, artist.
+    Расширенный запрос artist:"…" track:"…" на знаках в названии отдаёт пустоту,
+    а даты выхода поиск не отдаёт вовсе — её даёт track_date."""
+    data = get_json(f"{BASE}/search/track", params={"q": query, "limit": limit}, min_interval=MIN_INTERVAL)
+    return (data or {}).get("data") or []
+
+
+def track_date(track_id: str | int) -> str:
+    """Дата выхода трека, «2007-12-06»; Deezer её не знает — пусто."""
+    return (get_json(f"{BASE}/track/{track_id}", min_interval=MIN_INTERVAL) or {}).get("release_date") or ""
+
+
 def album_release(album_id: str | int) -> dict:
     """Релиз по id альбома в том же виде, что recent_releases, но с подписью:
     здесь исполнитель неизвестен заранее, и взять его неоткуда, кроме карточки."""
