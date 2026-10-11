@@ -314,8 +314,16 @@ SHARED_PEAK = .9            # пик дорожки петли после выч
 # Темп — число перед «BPM»; опоры тактов в замере случайны — баса в акустической записи 1922 года нет (ниже 200 Гц — 0,03%)
 FLIPS = ("KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - аккорды 115 BPM.wav",
          "KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - замедленная 115 BPM.wav")
-LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS))
-LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS)      # откуда петля вправе быть
+# Гитара из проекта владельца под заказ на 12.10.2026 («скри на столе (там гитара - основа»; о темпе: «в целом можно и бпм
+# таким же экстримальным оставить (208)»): петля `Afrobeat - AB_GuitarA110E-01` набора 06, два такта на 110, перегнана на Маке
+# так же, как её подогнал FL в его проекте (режим клипа Resample — скорость вместе с высотой, 110 → 104): четыре такта на 208,
+# ми мажор стал ми-бемоль мажором. Правило «растяжки нет» цело: бит берёт готовый файл в своём темпе. Отвергнуто: держать
+# высоту растяжкой — владельцу нравится то, что звучит в проекте, а там гитара ниже родной на 0,97 полутона. Только биту
+# по заказу: откуда набор 06, известно лишь из его README (MusicRadar SampleRadar), сам пак не сверен — раздавать ли бит
+# на этой петле, решает владелец. Темп — число перед «BPM», как у `FLIPS`; баса в петле нет, опоры тактов в замере случайны
+FITTED = ("KITS/06 - Bad Bunny Kit/Loops/Afrobeat - AB_GuitarA110E-01 - как в проекте 208 BPM.wav",)
+LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS, *FITTED))
+LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS, *FITTED)      # откуда петля вправе быть
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 # Переход — звук в пустом такте, аудиоклипом в плейлисте. Владелец 09.10.2026 доделал так утренний «Фонарь»: удары набора 13
 # в тактах 16, 32 и 48, где петля молчит, и подъезд — звук набора 14 задом наперёд, обрезанный границей такта 33; три из
@@ -822,11 +830,12 @@ def loop_bpm(name: str) -> int | None:
     """Темп петли из имени файла: «AC_NylStr85A-01» — 85, «K02Organ110E-03» — 110. None — петля не из разрешённых
     видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои. У петли наборов 11 и 12
     (узнаётся по папке, поэтому имя нужно полное) темп — число перед «BPM»: «… Am 140 BPM» — 140, нет его — None.
-    У двух петель набора 14 (`SHARED`) — последнее число имени, у петель из записи 1922 года (`FLIPS`) — как в наборе 11."""
+    У двух петель набора 14 (`SHARED`) — последнее число имени, у петель из записи 1922 года (`FLIPS`) и гитары из проекта
+    владельца (`FITTED`) — как в наборе 11."""
     stem = name.rsplit("/", 1)[-1]
     if name in SHARED:
         return int(re.findall(r"\d{2,3}", stem)[-1])
-    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")) or name in FLIPS:
+    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")) or name in FLIPS + FITTED:
         return int(m[1]) if (m := re.search(r"(?<!\d)(\d{2,3})\s*BPM", stem, re.I)) else None
     if not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS)) or re.search("Beat|Bass|Drum", stem):
         return None
@@ -948,6 +957,8 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                        "только биту по заказу владельца (order)")
         elif name in FLIPS and not info.get("order"):
             out.append(f"{word}: «{name}» — петля, нарезанная из записи 1922 года под заказ владельца: только биту по заказу (order)")
+        elif name in FITTED and not info.get("order"):
+            out.append(f"{word}: «{name}» — петля из проекта владельца, подогнанная под его темп: только биту по заказу (order)")
         elif not m:
             out.append(f"{word}: «{name}» не замерена по звуку (не в 1, 2, 4 или 8 тактов или не скачана из iCloud) — "
                        "бери петлю из замера: python3 -m src.noty --loop СЛОВО")
@@ -2610,6 +2621,12 @@ def _checks() -> None:
         "петли записи 1922 года: темп, замер и пара на перелом"
     assert not any(w in "\n".join(_loop(flip, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "под заказ")), _loop(flip, share)
     assert "нарезанная из записи 1922 года под заказ" in "\n".join(_loop(flip | {"order": ""}, share)), "утром их не берут"
+    # Гитара из проекта владельца (`FITTED`, заказ на 12.10.2026): темп — число перед «BPM», а не 110 из родного имени,
+    # в списке и замерена в четыре такта; берёт её только заказ
+    fit = shared | dict(bpm=208, loop=FITTED[0], scale=_scale(heard, *FITTED))
+    assert all(loop_bpm(n) == 208 and n in known() and heard[n]["bars"] == 4 for n in FITTED), "гитара из проекта: темп и замер"
+    assert not any(w in "\n".join(_loop(fit, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "по заказу")), _loop(fit, share)
+    assert "из проекта владельца, подогнанная под его темп" in "\n".join(_loop(fit | {"order": ""}, share)), "утром её не берут"
     assert "после перелома играет вторая петля" in "\n".join(problems(looped | {"switch": {"такт": 9, "переход": "x"}}, drums)), \
         "без заказа перелом бита петлёй требует вторую"
     said = about(shared)
