@@ -305,8 +305,17 @@ SHARED = ("KITS/14 - 300 Subs Kit/Loops/call at night B MAJOR 135.wav", "KITS/14
 SHARED_CUT = (4, 44)
 SHARED_BY = "blvckmorphine"
 SHARED_PEAK = .9            # пик дорожки петли после вычета баса: музыка в файле на −12 и −5 дБ, под барабанами её не слышно
-LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in SHARED)
-LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED)      # откуда петля вправе быть
+# Две петли, нарезанные на Маке из записи набора 08 под заказ владельца (11.10.2026: «у меня есть оч старая запись»,
+# «поиграться с сэмплом»): «Lonesome Mamma Blues», Jazz-Bo's Carolina Serenaders, Cameo 232, июнь 1922, оцифровка Great 78
+# Project (archive.org/details/78_lonesome-mamma-blues_jazz-bos-carolina-serenaders-nickel-brown_gbia0101529b). Только биту
+# по заказу (`_loop`), как две петли набора 14: что делать с записью столетней давности, решает владелец, а не утренний автор.
+# О правах известно только это: README набора зовёт записи до 1923 года «public domain в США», в карточке archive.org поля
+# о правах нет. Поэтому петли лежат рядом с записью, а не в наборе 11: туда идёт годное на раздачу с записанной лицензией.
+# Темп — число перед «BPM»; опоры тактов в замере случайны — баса в акустической записи 1922 года нет (ниже 200 Гц — 0,03%)
+FLIPS = ("KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - аккорды 115 BPM.wav",
+         "KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - замедленная 115 BPM.wav")
+LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS))
+LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS)      # откуда петля вправе быть
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 # Переход — звук в пустом такте, аудиоклипом в плейлисте. Владелец 09.10.2026 доделал так утренний «Фонарь»: удары набора 13
 # в тактах 16, 32 и 48, где петля молчит, и подъезд — звук набора 14 задом наперёд, обрезанный границей такта 33; три из
@@ -813,11 +822,11 @@ def loop_bpm(name: str) -> int | None:
     """Темп петли из имени файла: «AC_NylStr85A-01» — 85, «K02Organ110E-03» — 110. None — петля не из разрешённых
     видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои. У петли наборов 11 и 12
     (узнаётся по папке, поэтому имя нужно полное) темп — число перед «BPM»: «… Am 140 BPM» — 140, нет его — None.
-    У двух петель набора 14 (`SHARED`) — последнее число имени."""
+    У двух петель набора 14 (`SHARED`) — последнее число имени, у петель из записи 1922 года (`FLIPS`) — как в наборе 11."""
     stem = name.rsplit("/", 1)[-1]
     if name in SHARED:
         return int(re.findall(r"\d{2,3}", stem)[-1])
-    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")):
+    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")) or name in FLIPS:
         return int(m[1]) if (m := re.search(r"(?<!\d)(\d{2,3})\s*BPM", stem, re.I)) else None
     if not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS)) or re.search("Beat|Bass|Drum", stem):
         return None
@@ -937,6 +946,8 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         elif name in SHARED and not info.get("order"):
             out.append(f"{word}: «{name}» — петля на условиях автора (половина дохода, подпись «x {SHARED_BY}»): "
                        "только биту по заказу владельца (order)")
+        elif name in FLIPS and not info.get("order"):
+            out.append(f"{word}: «{name}» — петля, нарезанная из записи 1922 года под заказ владельца: только биту по заказу (order)")
         elif not m:
             out.append(f"{word}: «{name}» не замерена по звуку (не в 1, 2, 4 или 8 тактов или не скачана из iCloud) — "
                        "бери петлю из замера: python3 -m src.noty --loop СЛОВО")
@@ -2592,6 +2603,13 @@ def _checks() -> None:
         assert problems(more("пэд"), share | {"пэд": pad((59, 66))}) == [], problems(more("пэд"), share | {"пэд": pad((59, 66))})
         assert "склад:" in loop_card("call at night") and "шум" in loop_card("call at night"), loop_card("call at night")
     assert "только биту по заказу владельца" in "\n".join(problems(shared | {"order": "", "sample": "s140"}, share)), "утром её не берут"
+    # Петли из записи 1922 года (`FLIPS`, заказ 11.10.2026): темп — число перед «BPM», обе в списке и замерены в четыре такта,
+    # вторая годится первой в пару на перелом; берёт их только заказ
+    flip = shared | dict(bpm=115, loop=FLIPS[0], scale=_scale(heard, *FLIPS))
+    assert all(loop_bpm(n) == 115 and n in known() and heard[n]["bars"] == 4 for n in FLIPS) and not _twin(*FLIPS, heard), \
+        "петли записи 1922 года: темп, замер и пара на перелом"
+    assert not any(w in "\n".join(_loop(flip, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "под заказ")), _loop(flip, share)
+    assert "нарезанная из записи 1922 года под заказ" in "\n".join(_loop(flip | {"order": ""}, share)), "утром их не берут"
     assert "после перелома играет вторая петля" in "\n".join(problems(looped | {"switch": {"такт": 9, "переход": "x"}}, drums)), \
         "без заказа перелом бита петлёй требует вторую"
     said = about(shared)
