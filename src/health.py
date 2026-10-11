@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from datetime import timedelta
 
 from . import config, llm, state, telegram
@@ -67,8 +68,12 @@ def problems() -> list[str]:
     # ДВОЙНИК держится на том, что Яндекс Музыка отвечает без входа. Закроет —
     # бот замолчит молча, а проверить это больше нечем. Спрашиваем, только когда
     # настроена функция Облака: без неё с адресов GitHub Яндекс отвечает 451 всегда.
+    # Одной пробы мало: 11.10.2026 обрыв связи с функцией Облака сторож назвал закрытым
+    # Яндексом. Вторая — через полминуты, и в строке владельцу — причина отказа.
     if config.secret("YANDEX_FUNCTION_URL", required=False) and not yandex_music.artist("Баста"):
-        issues.append("⚠️ Яндекс Музыка не отвечает без входа — ДВОЙНИК не считает.")
+        time.sleep(30)
+        if not yandex_music.artist("Баста"):
+            issues.append(f"⚠️ ДВОЙНИК не считает: Яндекс Музыка не ответила — {yandex_music.failure or 'Басту не нашла'}.")
 
     if alarm := spare_alarm(list(state.read_jsonl(config.LLM_LOG))):
         issues.append(alarm)

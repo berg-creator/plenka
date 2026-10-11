@@ -51,6 +51,11 @@ UPSTREAM = "https://api.music.yandex.net/"
 UA = "plenka-bot"
 BATCH = 300
 TIMEOUT = 15
+
+# Почему последний запрос не удался — для сторожа. _get отдаёт None на любой отказ,
+# а «Яндекс закрыл вход» и «функция Облака лежит» лечатся по-разному: 11.10.2026
+# сторож назвал закрытым Яндексом обрыв связи с самим Облаком.
+failure = ""
 # «Мне нравится» — плейлист с этим номером у любого пользователя.
 LIKES_KIND = "3"
 
@@ -68,6 +73,7 @@ EDITORIAL = ("лучшее:", "в стиле:", "похожее:")
 
 def _get(path: str, **params: Any) -> Any | None:
     """GET к API. Возвращает поле result или None на любом отказе."""
+    global failure
     url, headers = UPSTREAM + path, {"User-Agent": UA}
     function = config.secret("YANDEX_FUNCTION_URL", required=False)
     if function:
@@ -79,17 +85,21 @@ def _get(path: str, **params: Any) -> Any | None:
             response = requests.get(url, params=params, headers=headers, timeout=TIMEOUT)
         except requests.RequestException as exc:
             log.warning("Яндекс Музыка %s: %s", path, exc)
+            failure = "нет связи с функцией Облака" if function else "нет связи"
             return None
         if response.status_code == 200:
             try:
                 return response.json().get("result")
             except ValueError:
                 log.warning("Яндекс Музыка %s: ответ не JSON", path)
+                failure = "ответ не JSON"
                 return None
         if response.status_code != 429:
             log.info("Яндекс Музыка %s: %s", path, response.status_code)
+            failure = f"ответ {response.status_code}"
             return None
         time.sleep(2**attempt)
+    failure = "ответ 429"
     return None
 
 
