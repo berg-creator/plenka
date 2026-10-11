@@ -100,7 +100,9 @@ jobs:
           git config user.name "plenka-bot"
           git config user.email "bot@users.noreply.github.com"
           # data целиком, а не data/web_voice.json: файла ещё нет, и git add на нём упал бы.
-          git add -A content/queue content/archive data
+          # И content целиком, а не content/queue: очередь бывает пустой, папки тогда
+          # в репозитории нет — 11.10.2026 три запуска подряд упали на этой строке.
+          git add -A content data
           git diff --cached --quiet || git commit -m "разбор: выдумки исправлены, мнения и связи сверены"
           git pull --rebase --autostash origin main
           git push origin HEAD:main

@@ -21,6 +21,7 @@ import argparse
 import random
 import re
 import textwrap
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -135,6 +136,7 @@ def strip_html(text: str) -> str:
 
 # История живёт секунды: длинный текст в ней не читают.
 STORY_LIMIT = 240
+UPLOAD_TRIES = 3
 
 
 def shorten(text: str, limit: int = STORY_LIMIT) -> str:
@@ -296,12 +298,24 @@ def render(text: str, rubric_title: str = "") -> Image.Image:
 def publish(image_path: Path) -> str:
     """Загружает картинку и публикует историю от имени сообщества."""
     gid = vk.group_id()
-    server = vk._call("stories.getPhotoUploadServer", add_to_news=1, group_id=gid)
-
-    with image_path.open("rb") as handle:
-        uploaded = requests.post(
-            server["upload_url"], files={"file": ("story.jpg", handle, "image/jpeg")}, timeout=90
-        ).json()
+    # Узел загрузки отвечает и не JSON: 09 и 10.10.2026 история два дня падала
+    # с «Expecting value» без кода и тела. Узел каждый раз выдаётся заново,
+    # поэтому повтор — с новым адресом, а последний отказ называет себя сам.
+    for attempt in range(UPLOAD_TRIES):
+        server = vk._call("stories.getPhotoUploadServer", add_to_news=1, group_id=gid)
+        with image_path.open("rb") as handle:
+            response = requests.post(
+                server["upload_url"], files={"file": ("story.jpg", handle, "image/jpeg")}, timeout=90
+            )
+        try:
+            uploaded = response.json()
+            break
+        except ValueError:
+            if attempt == UPLOAD_TRIES - 1:
+                raise vk.VKError(
+                    f"узел загрузки ответил не JSON (код {response.status_code}): {response.text[:200]!r}"
+                )
+            time.sleep(5)
 
     if "response" not in uploaded and "upload_result" not in uploaded:
         raise vk.VKError(f"загрузка не удалась: {str(uploaded)[:200]}")
