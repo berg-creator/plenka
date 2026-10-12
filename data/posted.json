@@ -1205,6 +1205,12 @@
       "file": "20261012-111345-3180-news.json",
       "published_at": "2026-10-12T11:13:53+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "20261012-111931-5994-poll.json",
+      "published_at": "2026-10-12T14:22:38+00:00",
+      "rubric": "poll"
     }
   ],
   "photos": [
