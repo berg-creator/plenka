@@ -1199,6 +1199,12 @@
       "file": "beat-5.json",
       "published_at": "2026-10-12T07:01:03+00:00",
       "rubric": "beat"
+    },
+    {
+      "chat": "channel",
+      "file": "20261012-111345-3180-news.json",
+      "published_at": "2026-10-12T11:13:53+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1362,6 +1368,7 @@
     "99bf9936b936617c873d1e6c0ceec17ec176e0ffe0dcd0efd8ce58ec926ef09e",
     "990e2f5b59db99ca22dc669c347a7cfa4c326a1e4c0a561d761dfc3ba43b063f",
     "162356833611169116902fc86e882b085b486b082e9036901b201b261b220107",
-    "4c8088907e5076096668966c9b7c8f3ccf2fcf9d4e95c998cd99cda44d802584"
+    "4c8088907e5076096668966c9b7c8f3ccf2fcf9d4e95c998cd99cda44d802584",
+    "248ced2d3bcc1e698e237f176cddceccdecc52cc61d961797969696968797869"
   ]
 }
