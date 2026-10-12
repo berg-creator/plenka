@@ -81,15 +81,27 @@ Sytrus — родной генератор FL: владелец 09.10.2026 са�
 Одна партия — один паттерн на весь бит и одна дорожка плейлиста, части подписаны маркерами. Отвергнуто: резать
 партию на паттерны по частям — долгие ноты 808 и слайды идут через стык частей, разрез оборвал бы их.
 
+Владелец 12.10.2026: «ни один инструмент микса не должен превышать 0 дб отметки. то есть макс до предела. красной
+громкость быть не должна нигде». До этого сборка сама ставила фейдер 808 на 125% — выше 0 дБ. Теперь фейдера и ручки
+канала выше 100% нет, а пик дорожек и сумму на мастере сборка прикидывает по нотам и пикам звуков-файлов и убавляет
+фейдеры (`_levels`, константы GAIN и ROOF — там же отвергнутое); мастер с Fruity Soft Clipper последним слотом, как
+в битах владельца, держит себя сам, и ради него фейдеры не убавляются. Это расчёт худшего случая, а не замер: эффектов
+в слотах и синтезаторов он не видит, и гарантии «красного не будет» не даёт — её даст только замер в самом FL.
+
+Владелец 12.10.2026: «можешь ли ты сделать так, чтобы когда я захожу в проект после тебя мне не приходилось закрывать
+окна всех плагинов». Запись окна каждого плагина уходит в проект закрытой (`_shut` — там же, по каким файлам это сверено).
+
 Звука сборка не слышит и FL не запускает: селфтест проверяет только, что файл читается обратно.
 
     python -m src.flp --selftest        проект читается обратно: темп, каналы, ноты партии, слоты, уровни и маршруты микшера,
                                         переход аудиоклипом в названном такте, подъезд концом на границе такта,
                                         сайдчейн бочки с 808 и их моно, огибающая 808 и музыки на длинном звуке, эквалайзер первым слотом и его срезы,
                                         расширитель стерео на опоре, пресет и ячейка Gross Beat, клип автоматизации;
-                                        сохранённая папка переезжает с путями
+                                        сохранённая папка переезжает с путями; ни фейдера, ни ручки канала выше 100%,
+                                        по расчёту пиков громкая дорожка уходит под потолок, сумма на мастере — тоже,
+                                        если мастер не держит мягкий клиппер последним слотом; окна плагинов закрыты
     python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, где стоят аудиоклипы, паттерны, клипы, дорожки микшера, сайдчейн и моно, срезы эквалайзера,
-                                        числа расширителя стерео
+                                        числа расширителя стерео, открытые окна плагинов
 """
 from __future__ import annotations
 
@@ -105,10 +117,11 @@ import time
 import unicodedata
 import wave
 import zlib
+from array import array
 from pathlib import Path
 
 from . import proq
-from .noty import GM_DRUM, LIBRARY, LONG, MOVES, N, NATIVE, SAMPLED, _names, _notes, _rows, _size, fsc, read_fsc, seconds
+from .noty import GM_DRUM, LIBRARY, LONG, MOVES, N, NATIVE, SAMPLED, _names, _notes, _pcm, _rows, _size, fsc, read_fsc, seconds
 
 BASE = Path("/Applications/FL Studio 20.app/Contents/Resources/FL/Data/Templates/Minimal/Empty/Empty.flp")
 DB = LIBRARY["KITS"].parent / "Presets" / "Plugin database"
@@ -136,9 +149,27 @@ SHUT = struct.pack("<8xI4xI16xII8x", 2, 0x150, 194, 278)
 # него в 3 из 6 — 50–71%, 57%, 75–100%. У 808 — число проекта 03 (пересборка New Tank): 125; музыка стояла на его же 57,
 # пока владелец в нашем «Сквозняке» не поднял мелодию до 71% (автосохранение FL 06.10.2026, 15:15) — теперь 71. Барабаны —
 # 100: клэп, снейр и хэт стоят там на 88–125%, в обе стороны; бочка «вдвое тише» (45–50%) — только где она лежит под каждой
-# нотой 808 и сжимает его дорожку, а у нас рисунок бочки свой. В пяти своих битах владелец держит 808 на 86–100%:
-# 125 он на слух ещё не оценил, число не тронуто.
-LEVEL = {"808": 125, "музыка": 71}
+# нотой 808 и сжимает его дорожку, а у нас рисунок бочки свой. До 12.10.2026 808 стоял на 125% — выше 0 дБ, и дорожка
+# горела красным; теперь он на 100, как в своих битах владельца (86–100%, в «Фонаре» — 101%), а дальше считает `_levels`.
+LEVEL = {"музыка": 71}
+# Владелец 12.10.2026: «ни один инструмент микса не должен превышать 0 дб отметки. то есть макс до предела. красной
+# громкость быть не должна нигде». Держат это две вещи. Без расчёта: фейдера и ручки канала выше 100% сборка не ставит
+# (`today` сверяет по записанному проекту), а усиления выше единицы в настройках, которые она кладёт сама, нет — перегруз
+# 808 (post 111 при заводских 128), WaveShaper (post 128 — заводское), расширитель (громкость 256 — заводская).
+# И расчёт (`_levels`): пик каждой дорожки и сумма на мастере по нотам и пикам звуков-файлов; дорожка выше потолка —
+# её фейдер вниз, мастер выше — все дорожки вниз на одну долю, баланс прежний; мастер, который владелец держит мягким
+# клиппером последним слотом, держит себя сам. Это прикидка, а не замер: звука сборка не слышит. Отвергнуто: ограничитель потолком на дорожках и мастере — «плоский звук» (владелец, 06.10.2026); убавлять
+# один фейдер мастера — тогда в эффекты мастера и шин сумма входит прежней, перегруженной; ставить всё «на −20 на всякий
+# случай» — первые два проекта он ругал за тихий звук.
+# Закон фейдера дорожки и ручки канала: множитель = (11^доля − 1) / 10. Это VolTodB из utils.py скриптов FL — по памяти,
+# на этом Маке файла нет; зато формула проходит через три известные точки: 100% — 0 дБ, 125% — +5,6 дБ и множитель 1,90
+# (так предел фейдера подписан в описании формата PyFLP), 78% — −5,2 дБ (умолчание ручки канала). В FL не сверено.
+GAIN = lambda pct: (11 ** (pct / 100) - 1) / 10
+FADE = lambda gain: 100 * math.log(1 + 10 * gain, 11)
+# Потолок расчёта — −1 дБ. Запас — расчёт, а не опыт: сумма пиков уже худший случай (пики всех дорожек совпали), а децибел
+# оставлен на то, чего расчёт не видит, — эквалайзер и ревер в слотах сдвигают пик. Мало — красное скажет владелец.
+ROOF = 10 ** (-1 / 20)
+PIECE = .01                     # кусок расчёта, секунды: пик звука берётся по кускам такой длины
 # Перегруз 808: Fruity Soft Clipper, порог 23 из 127 и post 111 из 160 — дорожка 808 проекта 02 (пересборка Stop Breathing),
 # слот 4 (перегруз на 808 — в 2 проектах из 6). Состояние плагина — эти два числа: в заводском Default.fst — 100 и 128.
 DRIVE = ("fruitysoftclipper", struct.pack("<II", 23, 111))
@@ -153,7 +184,7 @@ DRIVE = ("fruitysoftclipper", struct.pack("<II", 23, 111))
 # Последнее число — номер входа среди дорожек, посланных в эту: в шаблоне «Trap» из поставки FL у «Sub ► Mix», куда идут
 # дорожки 11 и 124, там 2. Маршрут — байт 1 в событии 235 бочки на месте дорожки 808 и запись «параметр 64 + дорожка 808 = 0»
 # в событии 225 сразу за её параметром 226 — одинаково в чужих проектах 04 и 06 и в битах владельца. Провал на звуке
-# не мерил никто: у него после лимитера на дорожке пусто и фейдер 808 100%, у нас следом перегруз и фейдер 125%.
+# не мерил никто: у него после лимитера на дорожке пусто и фейдер 808 100%, у нас следом перегруз.
 _LIMIT, _GATE = (1000, 1000, 1000, 1115, 3, 5000, 3, 2882), (1000, 0, 4187)
 DUCK = ("fruitylimiter", struct.pack("<42i", 6, *_LIMIT, 0, 138, 0, 0, 2314, 1, 0, *_GATE,
                                      *_LIMIT, 1000, 0, 0, 0, 6666, 1, 650, *_GATE, 50, 1, 0x01010101, 0, 1))
@@ -162,7 +193,7 @@ DUCK = ("fruitylimiter", struct.pack("<42i", 6, *_LIMIT, 0, 138, 0, 0, 2314, 1, 
 # и дорожка 808: владелец в автосохранении нашего «Сквозняка» вернул ей 0, а в своих битах не трогает эту ручку вовсе —
 # низ 808 он сводит к центру срезом Side в Pro-Q 4 (`proq.BASS`). У бочки ручка оставлена: о ней он ещё не сказал.
 MONO = 64
-# Ручка громкости канала 808, %: 100 в проектах 05 и 06 (в 06 — при фейдере 125%, как у нас), 86 в 02; умолчание FL — 78.
+# Ручка громкости канала 808, %: 100 в проектах 05 и 06, 86 в 02; умолчание FL — 78. Выше 100 ручка не идёт.
 KNOB = 100
 # Огибающая громкости канала 808 — стадии после задержки: атака 100 (ноль), hold 65536 (до упора), спад 100, sustain 0,
 # release 100. Так владелец ставит её сам: автосохранение FL открытого «Сквозняка» (06.10.2026, 13:33 — она же на его снимке
@@ -200,7 +231,7 @@ WIDE = ("fruitystereoenhancer", struct.pack("<6i", -18, 256, -54, -248, 1, 0))
 # сжаты zlib. С заводскими пресетами FL не совпало (сверено 33) — кривая его. По виду записи: три числа ручек — 73, 128
 # и 128 — и кривая из пяти точек, выпуклая: вход 0,125 — выход 0,625, дальше (0,3; 0,91), (0,5; 0,98) и (1; 1); шаг
 # по входу записан от прошлой точки, как у клипа автоматизации. Какое число какая ручка, по форме плагина не сверено.
-# На слух не проверял никто: у него фейдер 808 — 101%, у нас 125%.
+# На слух не проверял никто: у него фейдер 808 — 101%, у нас не выше 100%.
 SHAPE = ("fruitywaveshaper", zlib.decompress(base64.b85decode(b"c-muTU}5lNU|?u~Vg^P=Ai)g9tPEH|1A=+L9zs8X(hN)>BJcJwDF3Z}oya;{khvh<B$bmO@dg#o_x3UUhv4E23=g2{KiF@VYqf)k|3?E5H2|XfB9#")))
 # Фильтр — Fruity Love Philter звена `fx` без названного пресета. Состояние — дорожка мелодии того же «Фонаря» (микшер 1,
 # слот 3): 1200 байт, байт в байт. Внутри шапка и поток zlib на 70650 байт, второй раз он не жмётся — поэтому просто
@@ -462,20 +493,35 @@ def project(base: bytes, bpm: float, channels: list[dict], inserts: dict[int, di
             out += [x for bar, name in markers for x in ((148, _int((bar - 1) * BAR, 4)), (205, _text(name)))]
         elif e == 238 and int.from_bytes(v[:4], "little") <= len(tracks):
             out.append((239, _text(tracks[int.from_bytes(v[:4], "little") - 1])))
-    return pack(head + rack + out, len(channels) + len(clips))
+    return pack([(e, _shut(v) if e == 212 else v) for e, v in head + rack + out], len(channels) + len(clips))
+
+
+def _shut(v: bytes) -> bytes:
+    """Запись окна плагина (событие 212) — закрытым окном. Владелец 12.10.2026: «можешь ли ты сделать так, чтобы когда
+    я захожу в проект после тебя мне не приходилось закрывать окна всех плагинов». Запись слота сборка берёт из базы
+    плагинов FL, а у родных плагинов она там снята с открытого окна. Признаки — байты 16–19, младший бит — «окно
+    открыто» (так в описании формата PyFLP, флаг Visible), хвост — место окна и его размер. Сверено по файлам
+    на этом Маке: в четырёх проектах, сохранённых владельцем («Фонарь», «Стекло», «Маска v2», «сборная солянка» —
+    128 записей), бита нет ни у одной и размер везде ноль; в чужих проектах и в наших сборках он стоит у части
+    плагинов, и только у них записан размер — один и тот же плагин в одном проекте бывает и так, и так. Закрытое окно
+    пишем, как сам FL: бит снят, размер ноль, место и остальные признаки целы; состояние плагина — другое событие
+    (213), оно не тронуто. В FL не открывал никто: закрыты ли окна на деле, увидит только владелец."""
+    return v[:16] + bytes([v[16] & 0xFE]) + (v[17:44] + bytes(8) if len(v) == 52 else v[17:]) if len(v) > 16 else v
 
 
 def read(data: bytes) -> dict:
     """Проект обратно — своим разбором: то, что сверяет селфтест и печатает --read."""
     out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": [],
-           "eq": {}, "wide": {}, "owner": []}
+           "eq": {}, "wide": {}, "owner": [], "open": []}
     text = lambda v: v.decode("utf-16-le").rstrip("\0")
     ch = pat = plug = name = None
     state = b""
     ins, env = -1, 0
     for e, v in events(data):
         n = int.from_bytes(v, "little") if e < 192 else 0
-        if e == 156:
+        if e == 212:                            # запись окна плагина: младший бит признаков — окно открыто (`_shut`)
+            out["open"] += [f"микшер {ins}" if ins >= 0 else f"канал {len(out['channels']) - 1}"] if len(v) > 16 and v[16] & 1 else []
+        elif e == 156:
             out["bpm"] = n / 1000
         elif e == 65:
             pat = out["patterns"].setdefault(n, {"name": None, "notes": {}})
@@ -721,6 +767,124 @@ def _piles(wav: Path, notes: list[N], bpm: float) -> bool:
     return (seconds(wav) or math.inf) > max(step, LONG)
 
 
+def _blocks(f: Path) -> list[float]:
+    """Пик звука кусками по PIECE секунд, в долях полной шкалы. Куски файла разбираются сами, как в `_seconds`: мелодии
+    набора 12 и FX наборов 13 и 14 — 32 бита с плавающей точкой, `wave` их не открывает. Читать можно только копию
+    в папке сборки: в KITS две трети файлов — заглушки iCloud, чтение их скачивает. Не разобрался — пусто."""
+    fmt, raw = b"", b""
+    try:
+        with f.open("rb") as w:
+            head = w.read(12)
+            while head[:4] == b"RIFF" and not raw and len(chunk := w.read(8)) == 8:
+                size = int.from_bytes(chunk[4:], "little")
+                body = w.read(size + size % 2)
+                fmt, raw = (body, raw) if chunk[:4] == b"fmt " else (fmt, body[:size]) if chunk[:4] == b"data" else (fmt, raw)
+    except OSError:
+        return []
+    tag, ch, rate, _, _, bits = struct.unpack("<HHIIHH", fmt[:16].ljust(16, b"\0"))
+    tag = int.from_bytes(fmt[24:26], "little") if tag == 0xFFFE and len(fmt) >= 26 else tag     # WAVE_FORMAT_EXTENSIBLE
+    raw = raw[:len(raw) - len(raw) % max(1, bits // 8)]
+    if (tag, bits) == (3, 32):
+        pcm, full = array("f", raw), 1.0
+    elif tag == 1 and bits in (16, 24, 32):
+        pcm, full = _pcm(raw, bits // 8), 2.0 ** 31
+    else:
+        return []
+    n = max(1, round(rate * PIECE)) * max(1, ch)
+    return [max(max(b), -min(b)) / full for b in (pcm[i:i + n] for i in range(0, len(pcm), n))]
+
+
+def _peaks(kits: Path, channels: list[dict], bpm: float) -> tuple[dict[int, list[float]], list[str]]:
+    """Потолок звука каждой дорожки микшера до её эффектов и фейдера, кусками по PIECE, и каналы, которых расчёт не видит
+    (синтезатор; звук не прочёлся). Нота — пик куска файла × ручка канала × сила × панорама; ноты и каналы дорожки
+    складываются пиками — худший случай, на деле ниже. Сэмплер без огибающей доигрывает файл до конца, с огибающей
+    (HOLD, GATE) — до конца ноты; высота ноты сжимает и растягивает звук. Сила ноты взята прямой (сила / 127) — закон FL
+    неизвестен, прямая выше любого выпуклого; панорама — равной мощности, край громче центра на 3 дБ: так, по описанию
+    FL, устроен его круговой закон. Оба числа в FL не сверены.
+    ponytail: отсечка «сам себя» не считается — она только у 808, а его ноты и так кончаются огибающей; слайд-нота
+    звука не добавляет и пропущена, как она тянет высоту — не считается."""
+    sec = 15 / bpm                                              # шестнадцатая; тик плейлиста — её 24-я доля
+    spots = lambda c: c.get("spots") or [(0, c["clip"])]
+    end = max([n.pos + n.ln for c in channels for n in c.get("notes") or ()]
+              + [(pos + ln) / 24 for c in channels if c.get("clip") for pos, ln in spots(c)], default=0)
+    size, out, blind, seen = int(end * sec / PIECE) + 2, {}, [], {}
+    for c in channels:
+        name = Path(c["sound"]).name if c.get("sound") else ""
+        env = seen.setdefault(name, _blocks(kits / name)) if name else []
+        if not env:
+            blind.append(c["name"])
+            continue
+        acc, knob, root = out.setdefault(c["insert"], [0.0] * size), GAIN(c.get("knob") or 10000 / 128), c.get("root")
+        if c.get("clip"):                                       # кусок клипа: своей длиной и высотой, с начала звука
+            env = env[::-1] if c.get("back") else env
+            plays = [(pos / 24 * sec, 1.0, knob, ln / 24 * sec) for pos, ln in spots(c)]
+        else:
+            plays = [(n.pos * sec, 2 ** ((n.key + n.fine / 100 - (60 if root is None else root)) / 12),
+                      knob * n.vel / 127 * 2 ** .5 * math.sin(math.pi / 4 * (1 + abs(n.pan) / 100)),
+                      n.ln * sec if c.get("hold") else math.inf) for n in c.get("notes") or () if not n.slide]
+        for at, rate, gain, dur in plays:
+            first = int(at / PIECE)
+            for j in range(min(math.ceil(min(dur, len(env) * PIECE / rate) / PIECE) + 1, size - first)):
+                acc[first + j] += gain * max(env[max(0, int((j - 1) * rate)):int((j + 1) * rate) + 1], default=0)
+    return out, blind
+
+
+def _levels(kits: Path, bpm: float, channels: list[dict], inserts: dict[int, dict], pinned: set[int], capped: set[int]) -> str:
+    """Фейдеры под правило «ничего не выше 0 дБ» — правит `inserts` (и ручку канала у клипа, заведённого прямо в мастер)
+    и возвращает строку для записки. Сначала каждая дорожка сама: её потолок выше ROOF — её фейдер вниз. Потом суммы —
+    шины и мастер: сумма выше ROOF — все дорожки с инструментами вниз на одну долю; фейдеры шин и мастера не тронуты,
+    чтобы в их эффекты входил уже убавленный звук.
+    capped — дорожки, где последним слотом стоит Fruity Soft Clipper с заводским post или ниже: выше нуля он не пускает,
+    и фейдеры ради такой дорожки не убавляются. Так владелец держит мастер во всех своих битах, и это замерено: его
+    «Фонарь» и «Стекло» выгружены файлами в 32 бита с плавающей точкой (такой файл выше нуля записать может), четверть
+    кусков у обоих выше −1 дБ, а пик — −0,008 и −0,005 дБ. Без этого проект выходил бы тише его собственных: «Качели»
+    12.10.2026 по расчёту пришлось бы убавить целиком на 8,2 дБ.
+    pinned — дорожки 808 с перегрузом сборки: за WaveShaper и клиппером звук выше полной шкалы не выходит, но и поджат
+    к ней — считаем его у потолка всё время, пока звучит нота.
+    Эффектов в слотах расчёт не видит. Подъёма нет: насколько расчёт завышен, неизвестно."""
+    pre, blind = _peaks(kits, channels, bpm)
+    pre |= {i: [float(x > 0) for x in pre[i]] for i in pinned & pre.keys()}
+    gain = lambda i: GAIN(inserts[i].get("level") or 100)
+    kids = lambda i: [j for j, r in inserts.items() if j and j != i and (r.get("to") or 0) == i]
+    db = lambda x: f"{20 * math.log10(x):+.1f}".replace(".", ",").replace("-", "−") + " дБ" if x > 0 else "тишина"
+
+    def after(i: int, cap: bool = True) -> list[float]:     # дорожка после своего фейдера: свои каналы и все, кто в неё идёт
+        rows = ([pre[i]] if i in pre else []) + [r for j in kids(i) if (r := after(j))]
+        return [gain(i) * (min(1, sum(x)) if cap and i in capped else sum(x)) for x in zip(*rows)]
+
+    def worst() -> tuple[float, int]:                       # самая громкая сумма без своего клиппера: шина или мастер
+        return max(((max(after(i), default=0), i) for i in inserts if (not i or kids(i)) and i not in capped), default=(0, 0))
+
+    for i in pre.keys() - {0} - capped:
+        if (top := max(pre[i])) * gain(i) > ROOF:
+            inserts[i]["level"] = max(1, math.floor(FADE(ROOF / top)))
+    (was, who), cut = worst(), 1.0
+    for _ in range(4):                          # сумма с клиппером внутри убавляется не ровно на долю — поэтому кругами
+        if (top := worst()[0]) <= ROOF:
+            break
+        cut *= ROOF / top
+        for i in inserts.keys() - {0}:
+            if not kids(i):
+                inserts[i]["level"] = max(1, math.floor(FADE(gain(i) * ROOF / top)))
+        for c in channels:                      # клип «в мастер» идёт мимо дорожек: его фейдер — ручка канала
+            if not c["insert"] and c.get("sound"):
+                c["knob"] = max(1, math.floor(FADE(GAIN(c.get("knob") or 10000 / 128) * ROOF / top)))
+        pre |= {0: [x * ROOF / top for x in pre[0]]} if 0 in pre else {}
+    faders = ", ".join(f"{r['name']} — {r.get('level') or 100}%" for i, r in sorted(inserts.items()) if i)
+    tops = ", ".join(f"{inserts[i]['name']} {db(max(after(i), default=0))}" for i in sorted(pre.keys() - {0}))
+    into = max(after(0, False), default=0)
+    return ("Твоё правило от 12.10 — ничего не выше 0 дБ: фейдера и ручки канала выше 100% сборка не ставит, а пик каждой дорожки "
+            "прикинут по нотам и пикам звуков-файлов — где выходил выше −1 дБ, фейдер убавлен. "
+            + (f"Сумма дорожек выходила выше нуля (по расчёту {db(was)}, {inserts[who].get('name') or 'мастер'}), клиппера последним "
+               f"слотом там нет — поэтому все дорожки убавлены на одну долю ({db(cut)}), баланс между ними прежний. " if cut < 1 else "")
+            + f"Фейдеры: {faders}. По расчёту пик дорожек — {tops or 'не посчитан'}; мастер — "
+            + (f"последним слотом Fruity Soft Clipper, выше нуля он не пускает (в твоих «Фонаре» и «Стекле» с ним пик файла −0,01 дБ), сумма дорожек "
+               f"входит в него на {db(into)} — режет он, как в твоих битах" if 0 in capped else f"не выше {db(into)}")
+            + ". Это расчёт худшего случая (пики всех дорожек совпали), а не замер: звука сборка не слышит, эффектов в слотах "
+            "(ревер, фильтр и эквалайзер сдвигают пик)" + (f" и каналов без звука-файла ({', '.join(blind)})" if blind else "")
+            + " не видит — загорится где-то красным, убавь эту дорожку и скажи мне.")
+
+
 def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB, home: Path | None = None,
           banks=PRESETS, auto: Path = AUTO, eq=proq.states) -> str:
     """Проект бита — в папку «Сегодня», из того, что в ней уже лежит: партитуры, звуки с именем партии впереди,
@@ -798,14 +962,14 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
                  for a, b in spans for ln in [min(full, round((b - a) * 96))]]
         level, back, top = re.search(r"(\d+)\s*%", said), "задом наперёд" in said, "в мастер" in said or not lead
         channels.append({"name": nfc(f.stem).split(" — ", 1)[1], "insert": 0 if top else lead, "sound": where(f), "clip": full,
-                         "spots": spots, "knob": int(level[1]) if level else None, "back": back})
+                         "spots": spots, "knob": min(100, int(level[1])) if level else None, "back": back})
         moves.append(f"{channels[-1]['name']} — " + ", ".join(_bars(a, b) for a, b in spans) + (f", канал {level[1]}%" if level else "")
                      + (", задом наперёд" if back else "") + (", в мастер" if top else f", в дорожку «{rows[lead - 1]}»"))
     effects, drums = _effects(db / "Effects"), next((b for b in buses if "барабан" in b), None)
     kick = next((p for p, _ in scores if "бочк" in p.lower()), None)       # вход сайдчейна один — первая бочка
     bed = max(((sum(n.ln for n in ns) / len(ns), p) for p, ns in scores if ns and role(p) == "музыка"),
               key=lambda x: x[0], default=(0, None))[1]                     # опора — партия музыки с самой долгой нотой в среднем
-    proto, inserts, lost, own, timed, miss, ducked, cuts = _clip(auto), {}, 0, [], [], [], [], []
+    proto, inserts, lost, own, timed, miss, ducked, cuts, pinned, capped = _clip(auto), {}, 0, [], [], [], [], [], set(), set()
     own, miss = own + gens, miss + lack
     for i, row in enumerate([MASTER] + rows):
         steps, bus = _chain(fx.get(row.lower(), ""), effects, buses)
@@ -820,6 +984,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             steps += [] if steps else [blank(DRIVE[0])]
             if st := bare(DRIVE[0]):
                 st["state"] = DRIVE[1]
+                pinned.add(i)
                 own.append(f"{row}: Fruity Soft Clipper перегрузом (порог 23 из 127, post 111 из 160)")
         # Сайдчейн: лимитер-компрессор в начало цепочки 808, перед перегрузом (эквалайзер ниже встанет перед ним);
         # свой Fruity Limiter автора без пресета — он и есть
@@ -844,6 +1009,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
         if kind == "808" and SHAPE[0] in effects and (bare(SHAPE[0]) or len(steps) < 10):
             steps += [] if bare(SHAPE[0]) else [blank(SHAPE[0])]
             bare(SHAPE[0])["state"] = SHAPE[1]
+            pinned.add(i)
             own.append(f"{row}: Fruity WaveShaper последним слотом — твоя кривая из «Фонаря»")
         # Фильтр автора без названного пресета — с настройками владельца, а не плагина по умолчанию; пресет по имени старше
         for st in steps:
@@ -857,7 +1023,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
             bare(WIDE[0])["state"] = WIDE[1]
             own.append(f"{row}: Fruity Stereo Enhancer — ширина опоры, как в твоих битах (пресет «For strings»: разведение −54 из 96, "
                        "сдвиг фазы −248 из 512, панорама −18 из 128)")
-        loaded, clips = [], {}
+        loaded, clips, last = [], {}, None
         for st in steps:
             data, label = _bytes(st["file"]), st["file"].stem
             if not data:
@@ -880,6 +1046,10 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
                 miss.append(f"клип автоматизации для {label} не поставлен: в этой поставке FL нет шаблона с таким клипом")
             cuts += [(i, len(loaded), row, st["eq"])] if st.get("eq") else []
             loaded.append(data)
+            last = (st, dict(events(data)).get(213, b""))
+        # Мягкий клиппер последним слотом, всегда включён, post — заводской или ниже: выше нуля дорожка не выйдет (`_levels`)
+        if last and last[0]["key"] == DRIVE[0] and not last[0]["spans"] and len(last[1]) == 8 and int.from_bytes(last[1][4:], "little") <= 128:
+            capped.add(i)
         inserts[i] = {"name": row if i else None, "plugins": loaded, "to": number.get(bus) if i and bus != row.lower() else None,
                       "level": LEVEL.get(kind), "auto": clips, "mono": bool(kind) and "бочк" in row.lower()}
     if kick:                                # бочка идёт своим путём и ещё в дорожку 808 — с уровнем 0, только для компрессора
@@ -896,6 +1066,7 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
     miss += [f"срезы Pro-Q 4 не выставились (плагин без FL не ответил или в базе FL он не VST2) — выстави сам: {', '.join(hand)}"] if hand else []
     if proq.KEY not in effects:
         miss.append("эквалайзер на дорожки не встал: в базе плагинов FL нет «FabFilter Pro-Q 4»")
+    said = _levels(kits, plan["bpm"], channels, inserts, pinned, capped)
     flat = str(plan.get("parts") or "")
     for _ in range(3):                      # пояснения в скобках — не части: «(петля молчит в тактах 24–25)»
         flat = re.sub(r"\([^()]*\)", "", flat)
@@ -904,18 +1075,17 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
     data = project(base.read_bytes(), plan["bpm"], channels, inserts, markers, proto)
     back = read(data)
     assert back["bpm"] == plan["bpm"] and len(back["channels"]) == len(channels) + len(timed), "проект записался не так"
+    assert max([x["level"] for x in back["inserts"].values()] + [c["knob"] for c in back["channels"]]) <= 100, "фейдер или ручка выше 0 дБ"
     end = max(ln for _, _, ln, _ in back["clips"]) / 96                 # отрезок за концом бита клип обрезает
     want = [[(a, min(b, end)) for a, b in x[1] if a < end] for r in inserts.values() for _, x in sorted(r["auto"].items())]
     assert [c["on"] for c in back["channels"][len(channels):]] == want and len(back["links"]) == len(want), "клип автоматизации записался не так"
     (kits / name).write_bytes(data)
     slots = sum(len(x["plugins"]) for x in inserts.values())
-    levels = ", ".join(f"{k} — {v}%" for k, v in LEVEL.items())
     sampled = any(c.get("hold") == HOLD for c in channels) # 808 сэмплером: отсечка и огибающая — у него, у Serum их нет
     return (f"Проект FL — «{name}» в этой же папке: каналов {len(channels)}, со звуками и нотами; партии — паттернами на весь бит "
-            f"в плейлисте, части — маркерами; дорожки микшера подписаны и разведены по шинам. Фейдеры: {levels}, остальное 100% — "
-            f"808 по чужим проектам под твои рефы, музыка — как ты поднял её сам в «Сквозняке»; "
-            + (f"у канала 808 отсечка «сам себя» и ручка громкости {KNOB}%, " if sampled else
-               f"у канала 808 ручка громкости {KNOB}% (он на синтезаторе: отсечки и огибающей сэмплера у него нет), ")
+            f"в плейлисте, части — маркерами; дорожки микшера подписаны и разведены по шинам. {said} "
+            + (f"У канала 808 отсечка «сам себя» и ручка громкости {KNOB}%, " if sampled else
+               f"У канала 808 ручка громкости {KNOB}% (он на синтезаторе: отсечки и огибающей сэмплера у него нет), ")
             + ("дорожка бочки — в моно (разведение стерео «слито»), " if kick else "") + "у 808 ручка разведения не тронута: "
             "его низ сведён к центру срезом Side в Pro-Q 4, как в твоих битах. "
             + ("У канала 808 уже включена огибающая громкости с твоими числами — атака 0, hold до упора, "
@@ -1029,6 +1199,7 @@ def _fake() -> bytes:
 
 def selftest() -> None:
     import tempfile
+    OPEN = struct.pack("<8xI4xI16x4i", 2, 0x145, 10, 20, 300, 200)      # окно открыто: признак 1, место и размер
     notes = [N(0, 4, 31, 112), N(4, 2.5, 34, 90, pan=-50, fine=30), N(6, 1, 38, 100, slide=True), N(100 * 16, 8, 31)]
     plan = {"title": "А x Б — Проба", "bpm": 120, "parts": "вступление 1–8 (тихо, петля молчит в тактах 3–4), игра 9–104",
             "tricks": ["808 — «Тон D#1»: корневая нота канала — 27 по имени файла", "хэт: корневая нота канала — на слух"],
@@ -1049,7 +1220,7 @@ def selftest() -> None:
                 w.setnchannels(1), w.setsampwidth(2), w.setframerate(8000), w.writeframes(bytes(32000))
         (serum / "Мелодия — Основа.fxp").write_bytes(b"CcnK\0\0\0\x13FPCh-osnova")     # длина — весь файл, как в библиотеке
         (serum / "Мелодия — Свой.fxp").write_bytes(b"CcnK\0\0\0\x11FPCh-svoy")
-        wrapper = lambda name, state: pack([(199, b"11.5.5\0"), (28, b"\3"), (201, _text("Fruity Wrapper")), (212, bytes(52)),
+        wrapper = lambda name, state: pack([(199, b"11.5.5\0"), (28, b"\3"), (201, _text("Fruity Wrapper")), (212, OPEN),
                                             (203, _text(name)), (213, state)], 2, 0x30)
         (db / "Effects" / "Pro-Q 4.fst").write_bytes(wrapper("Pro-Q 4", _int(8, 4)))
         # Pro-Q 4 видом VST2 — эквалайзер дорожек; кусок его состояния в миниатюре — для машин без плагина: числа полос
@@ -1075,9 +1246,9 @@ def selftest() -> None:
         assert proq.states([hat], lambda js: [(Path(tmp) / "нет").read_bytes()]) == [None] == proq.states([hat], lambda js: []) and proq.states([]) == []
         assert _vst2(_int(8, 4) + SERUM_AU, b"FFBS") is None, "обёртка не VST2 — состояние в неё не кладём"
         (db / "Effects" / "Dynamics" / "Fruity Soft Clipper.fst").write_bytes(pack(
-            [(199, b"11.5.5\0"), (201, _text("Fruity Soft Clipper")), (212, bytes(52)), (213, bytes(8))], 2, 0x30))
+            [(199, b"11.5.5\0"), (201, _text("Fruity Soft Clipper")), (212, OPEN), (213, bytes(8))], 2, 0x30))
         (db / SERUM).write_bytes(wrapper("Serum", _int(8, 4) + SERUM_AU))
-        native = lambda name, state: pack([(199, b"11.5.5\0"), (201, _text(name)), (212, bytes(52)), (213, state)], 2, 0x30)
+        native = lambda name, state: pack([(199, b"11.5.5\0"), (201, _text(name)), (212, OPEN), (213, state)], 2, 0x30)
         (db / "Effects" / "Gross Beat.fst").write_bytes(native("Gross Beat", b"gross-default"))
         (db / "Effects" / "Dynamics" / "Fruity Limiter.fst").write_bytes(native("Fruity Limiter", b"limiter-default"))
         (db / "Effects" / "Fruity Stereo Enhancer.fst").write_bytes(native("Fruity Stereo Enhancer", struct.pack("<6i", 0, 256, 0, 0, 1, 0)))
@@ -1114,6 +1285,12 @@ def selftest() -> None:
             line = today(kits, serum, plan, Path(tmp) / "Empty.flp", db, None, (pre,), Path(tmp) / "Auto.flp", plug)
             data = (kits / "А x Б — Проба.flp").read_bytes()
             got = read(data)
+            # Окна плагинов закрыты: в базе запись окна снята с открытого (признак и размер), в проекте их нет ни у слота,
+            # ни у канала Serum; место окна и прочие признаки целы, состояния плагинов — байт в байт (сверены ниже)
+            wins = [v[8:] for e, v in events(data) if e == 212]
+            shut = OPEN[8:16] + _int(0x144, 4) + OPEN[20:44] + bytes(8)
+            assert not got["open"] and wins.count(shut) == sum(len(x["slots"]) for x in got["inserts"].values()) + 1, (got["open"], wins.count(shut))
+            assert read(data.replace(shut, OPEN[8:], 1))["open"] == ["канал 3"] and _shut(b"short") == b"short", "открытое окно чтение видит"
             ch = got["channels"]
             assert got["bpm"] == 120 and [c["name"] for c in ch] == ["808", "хэт", "хэт 2", "мелодия", "Петля — на весь бит", "петля: Gross Beat"], ch
             assert [c["kind"] for c in ch] == ["сэмплер"] * 3 + ["плагин", "аудиоклип", "автоматизация"] and [c["insert"] for c in ch][:5] == [1, 2, 2, 3, 4]
@@ -1161,8 +1338,8 @@ def selftest() -> None:
             # мастер: цепочка автора и ограничитель с заводским пресетом последним; «местами: …, такты 1 и 7» — слова, клипа нет
             assert mix[0] == {"name": None, "slots": {0: "Pro-Q 4", 1: "Fruity Soft Clipper"}, "to": [], "level": 100}, mix[0]
             assert b"limiter-loud" not in data and b"limiter-default" not in data, "ограничитель на мастер сам не встаёт"
-            # 808: поднят, клиппер автор назвал без чисел — он с числами чужого проекта; мелодия и петля опущены, барабаны — 100
-            assert mix[1] == {"name": "808", "slots": {0: "FabFilter Pro-Q 4", 1: "Fruity Soft Clipper"}, "to": [6], "level": 125} and DRIVE[1] in data, mix[1]
+            # 808: не выше 100, клиппер автор назвал без чисел — он с числами чужого проекта; мелодия и петля опущены, барабаны — 100
+            assert mix[1] == {"name": "808", "slots": {0: "FabFilter Pro-Q 4", 1: "Fruity Soft Clipper"}, "to": [6], "level": 100} and DRIVE[1] in data, mix[1]
             assert mix[2] == {"name": "хэт", "slots": {0: "FabFilter Pro-Q 4"}, "to": [6], "level": 100}, "808 и барабаны — в свою шину"
             assert mix[3] == {"name": "мелодия", "slots": {0: "FabFilter Pro-Q 4", 1: "Fruity Stereo Enhancer"}, "to": [5], "level": 71}, mix[3]
             assert mix[4] == {"name": "петля", "slots": {0: "Fruity Soft Clipper", 1: "FabFilter Pro-Q 4", 2: "Gross Beat"}, "to": [0], "level": 71}, mix[4]
@@ -1198,7 +1375,7 @@ def selftest() -> None:
             got = read(deep)
             mix = got["inserts"]
             assert mix[1] == {"name": "808", "slots": {0: "FabFilter Pro-Q 4", 1: "Fruity Limiter", 2: "Fruity Soft Clipper"},
-                              "to": [4], "level": 125}, mix[1]
+                              "to": [4], "level": 100}, mix[1]
             assert mix[3] == {"name": "бочка", "slots": {0: "FabFilter Pro-Q 4"}, "to": [1, 4], "level": 100} and mix[2]["to"] == [4], mix[3]
             assert proq.say(got["eq"][3, 0]) == "срез низа 30 Гц" and proq.say(got["eq"][1, 0]) == bass, got["eq"]
             assert got["duck"] == [(3, 1)] and got["mono"] == [3] and DUCK[1] in deep and DRIVE[1] in deep, (got["duck"], got["mono"])
@@ -1309,12 +1486,55 @@ def selftest() -> None:
         (side / "один.flp").write_bytes(repath(data, kits.name, lone.name))
         os.utime(side / "один.flp", (time.time() + 60,) * 2)
         assert keep(lone, (side,)) and not lone.exists() and repath((side / "один.flp").read_bytes(), "00 - 20261007 один", kits.name) == data
+        # Правило «ничего не выше 0 дБ» (владелец 12.10.2026). Закон фейдера проходит через три известные точки FL.
+        # Громкая дорожка сама уходит под потолок, сумма на мастере — тоже, и все дорожки убавлены на одну долю: и та,
+        # что без звука-файла (синтезатор), и клип «в мастер» — ручкой канала; шина не тронута. Тихий проект не тронут.
+        # 808 с перегрузом считается у потолка, каким бы тихим ни был его файл. 16 бит и 32 с плавающей точкой читаются.
+        dB = lambda x: 20 * math.log10(x)
+        assert GAIN(100) == 1 and abs(dB(GAIN(125)) - 5.6) < .05 and abs(dB(GAIN(10000 / 128)) + 5.2) < .05 and abs(FADE(GAIN(42)) - 42) < 1e-9
+        loud = Path(tmp) / "громко"
+        loud.mkdir()
+        with wave.open(str(loud / "полный.wav"), "wb") as w:
+            w.setnchannels(1), w.setsampwidth(2), w.setframerate(8000), w.writeframes(struct.pack("<h", 32767) * 8000)
+        half = array("f", [.5, -.25] * 4000).tobytes()
+        (loud / "половина.wav").write_bytes(b"RIFF" + _int(36 + len(half), 4) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 3, 1, 8000, 32000, 4, 32)
+                                            + b"data" + _int(len(half), 4) + half)
+        (loud / "битый.wav").write_bytes(b"not WAV")
+        assert max(_blocks(loud / "полный.wav")) > .9999 and max(_blocks(loud / "половина.wav")) == .5 and _blocks(loud / "битый.wav") == []
+        hit = [N(0, 4, 60, 127), N(16, 4, 60, 127)]
+        mix = lambda quiet=False: (
+            [{"name": "а", "insert": 1, "sound": "полный.wav", "notes": hit, "knob": 20 if quiet else 100, "hold": HOLD},
+             {"name": "б", "insert": 2, "sound": "половина.wav", "notes": hit, "knob": 20 if quiet else 100},
+             {"name": "синт", "insert": 3, "notes": hit}, {"name": "битый", "insert": 3, "sound": "битый.wav", "notes": hit},
+             {"name": "удар", "insert": 0, "sound": "полный.wav", "clip": 96, "knob": 44}],
+            {0: {}, 1: {"name": "а", "to": 4}, 2: {"name": "б", "to": 4, "level": 71}, 3: {"name": "синт"}, 4: {"name": "шина"}})
+        chans, ins = mix()
+        told = _levels(loud, 120, chans, ins, set(), set())
+        pre = _peaks(loud, chans, 120)[0]
+        top = max(GAIN(ins[1]["level"]) * a + GAIN(ins[2]["level"]) * b + c for a, b, c in zip(pre[1], pre[2], pre[0]))
+        assert .8 * ROOF < top <= ROOF and "level" not in ins[4] and "level" not in ins[0], (top, ins)
+        assert ins[1]["level"] < 95 and ins[3]["level"] < 100 and chans[4]["knob"] < 44 and all(r.get("level", 100) <= 100 for r in ins.values()), (ins, chans[4])
+        assert abs(dB(GAIN(ins[2]["level"]) / GAIN(ins[3]["level"])) - dB(GAIN(71))) < .3, "баланс прежний: убавлены на одну долю"
+        assert "убавлены на одну долю" in told and "каналов без звука-файла (синт, битый)" in told and "а не замер" in told, told
+        chans, ins = mix(quiet=True)
+        told = _levels(loud, 120, chans, ins, set(), set())
+        assert (ins[2].get("level"), ins[1].get("level"), chans[4]["knob"]) == (71, None, 44) and "убавлены на одну" not in told, (ins, told)
+        # Мягкий клиппер последним слотом мастера держит его сам, как в битах владельца: общего убавления нет — только
+        # громкая дорожка под свой потолок (шина здесь тоже с клиппером); клиппер на шине и дорожке мастер без клиппера не спасает
+        chans, ins = mix()
+        told = _levels(loud, 120, chans, ins, set(), {0, 4})
+        assert (ins[1]["level"], ins[2]["level"], ins[3].get("level"), chans[4]["knob"]) == (95, 71, None, 44), (ins, chans[4])
+        assert "убавлены на одну" not in told and "последним слотом Fruity Soft Clipper" in told and "входит в него на +" in told, told
+        chans, ins = mix()
+        assert "убавлены на одну долю" in _levels(loud, 120, chans, ins, set(), {4, 1}) and ins[1]["level"] < 95 and ins[3]["level"] < 100, ins
+        _levels(loud, 120, chans[:1], ins := {0: {}, 1: {"name": "а"}}, {1}, set())
+        assert ins[1]["level"] == math.floor(FADE(ROOF)) == 95, "808 за перегрузом — у потолка, как бы тих ни был файл"
     print("проект FL: шаблон, каналы со звуком и пресетом (Serum, Sytrus заводским пресетом по имени), отсечка «сам себя» у синтезаторов музыки — каждому своя группа, ноты, клипы, маркеры, слоты, уровни и шины читаются обратно; отсечка 808, "
           "перегруз по умолчанию, ограничитель на мастер сам не встаёт; бочка сайдчейном в лимитер на 808, бочка в моно, низ 808 — срезом Side и полкой Mid в эквалайзере, ручка и огибающая громкости 808; "
           "музыке на длинном звуке-файле под частыми нотами — огибающая «как нарисовано», короткому звуку, редким нотам и барабанам — нет, 808 рядом прежний; "
           "переход аудиоклипом в названных тактах, с уровнем канала и маршрутом в дорожку мелодии или в мастер, подъезд концом на границе такта, звук задом наперёд; "
           "эквалайзер первым слотом дорожки с инструментом, срез по роли и по словам автора, на шинах и мастере своего нет, плагин молчит — "
-          "числа в записке; расширитель стерео с числами владельца — последним слотом опоры; WaveShaper с кривой владельца — последним слотом 808, Love Philter без пресета — с его настройками; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота ступенью и прямой («плавно уходит», «плавно входит»); сбой — строка в записке; "
+          "числа в записке; расширитель стерео с числами владельца — последним слотом опоры; WaveShaper с кривой владельца — последним слотом 808, Love Philter без пресета — с его настройками; пресет FL и ячейка Gross Beat; клип автоматизации на mix слота ступенью и прямой («плавно уходит», «плавно входит»); сбой — строка в записке; ни фейдера, ни ручки канала выше 100%, по расчёту пиков громкая дорожка уходит под потолок, сумма на мастере без клиппера — тоже, все дорожки на одну долю, а мастер с мягким клиппером последним слотом держит себя сам; тихий проект не тронут; окна плагинов закрыты — ни у слота, ни у канала признака открытого окна нет, место окна и состояние плагина целы; "
           "сохранённая папка переезжает, пути звуков — за ней, и в проекте, сохранённом мимо неё, тоже: он один держит папку от чистки, давний и чужой не тронуты")
 
 
@@ -1350,8 +1570,10 @@ def main() -> None:
         for kind, idx, ln, track in got["clips"]:
             print(f"клип: {kind} {idx}, тактов {ln / BAR:g}, дорожка плейлиста {track + 1}")
         print("маркеры: " + ", ".join(f"{bar} {name}" for bar, name in got["markers"]))
+        print("окна плагинов: " + (f"открыты — {', '.join(got['open'])}" if got["open"] else "закрыты все"))
         for i, x in got["inserts"].items():
-            print(f"микшер {i}: {x['name'] or ('мастер' if not i else '—')} — фейдер {x['level']}%, слоты: "
+            print(f"микшер {i}: {x['name'] or ('мастер' if not i else '—')} — фейдер {x['level']}%"
+                  + (f" ({20 * math.log10(GAIN(x['level'])):+.1f} дБ по закону фейдера)" if 0 < x["level"] != 100 else "") + ", слоты: "
                   + (", ".join(f"{s + 1} {p}" + (f" ({proq.say(got['eq'][i, s])})" if (i, s) in got["eq"] else "")
                                + (" (разведение {2} из 96, сдвиг фазы {3} из 512, панорама {0} из 128)".format(*got["wide"][i, s])
                                   if (i, s) in got["wide"] else "")
