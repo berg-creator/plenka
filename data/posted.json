@@ -1211,6 +1211,12 @@
       "file": "20261012-111931-5994-poll.json",
       "published_at": "2026-10-12T14:22:38+00:00",
       "rubric": "poll"
+    },
+    {
+      "chat": "channel",
+      "file": "doposle-1ccee8.json",
+      "published_at": "2026-10-13T06:00:22+00:00",
+      "rubric": "doposle"
     }
   ],
   "photos": [

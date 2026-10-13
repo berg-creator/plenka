@@ -1,0 +1,14 @@
+{
+  "comment": "Голос кого услышим следующим? Присылай запись — свожу в боте, без шагов.",
+  "height": 1920,
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 271
+  },
+  "rubric": "doposle",
+  "text": "<b>ДО И ПОСЛЕ</b>\n\nГолос — Певец Андрей🎤🎧. С битом его свёл бот канала.\nЧто сделал бот: стиль «чисто» — голос сверху, немного воздуха.\n\n▸ Так же можно с твоей записью: <a href=\"https://t.me/plenka_fm_bot?start=skleyka_doposle\">СВЕДЕНИЕ</a>",
+  "video": "BAACAgIAAxkDAAIWDWrNGxaEcMEFD0wusOR0Ds04tgdUAAKLsgAC5tFoSqM2IUbqiP8QPQQ",
+  "width": 1080
+}
