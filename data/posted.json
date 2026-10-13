@@ -1217,6 +1217,12 @@
       "file": "doposle-1ccee8.json",
       "published_at": "2026-10-13T06:00:22+00:00",
       "rubric": "doposle"
+    },
+    {
+      "chat": "channel",
+      "file": "20261013-121629-2781-news.json",
+      "published_at": "2026-10-13T12:16:50+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1381,6 +1387,7 @@
     "990e2f5b59db99ca22dc669c347a7cfa4c326a1e4c0a561d761dfc3ba43b063f",
     "162356833611169116902fc86e882b085b486b082e9036901b201b261b220107",
     "4c8088907e5076096668966c9b7c8f3ccf2fcf9d4e95c998cd99cda44d802584",
-    "248ced2d3bcc1e698e237f176cddceccdecc52cc61d961797969696968797869"
+    "248ced2d3bcc1e698e237f176cddceccdecc52cc61d961797969696968797869",
+    "1fac2724351031317611761133113b931be319c50f0b074b068704cb04cb068b"
   ]
 }
