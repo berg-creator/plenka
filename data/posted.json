@@ -1229,6 +1229,12 @@
       "file": "pamyatka-slova.json",
       "published_at": "2026-10-14T09:00:40+00:00",
       "rubric": "pamyatka"
+    },
+    {
+      "chat": "channel",
+      "file": "20261014-110820-7921-news.json",
+      "published_at": "2026-10-14T11:09:38+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1394,6 +1400,7 @@
     "162356833611169116902fc86e882b085b486b082e9036901b201b261b220107",
     "4c8088907e5076096668966c9b7c8f3ccf2fcf9d4e95c998cd99cda44d802584",
     "248ced2d3bcc1e698e237f176cddceccdecc52cc61d961797969696968797869",
-    "1fac2724351031317611761133113b931be319c50f0b074b068704cb04cb068b"
+    "1fac2724351031317611761133113b931be319c50f0b074b068704cb04cb068b",
+    "49177f1fe4cdccdddcd8d6ccdadedacc618d6149617979597169796969696969"
   ]
 }
