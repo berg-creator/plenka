@@ -591,7 +591,10 @@ def read(data: bytes) -> dict:
                     ch["fade"] = ("входит" if y > was[1] else "уходит") if dx and was[1] != y else ch["fade"]
                     was = (at, y)
         elif e == 233:
-            for k in range(0, len(v), 32):
+            # запись клипа плейлиста: 32 байта до FL 21, 60 — с FL 21 (сверено 14.10.2026 на 1418 проектах владельца);
+            # длина, кратная обоим, — по версии, сохранившей проект
+            step = 60 if len(v) % 60 == 0 and (len(v) % 32 or out["version"][:2] >= "21") else 32
+            for k in range(0, len(v) - 13, step):
                 pos, base, idx, ln, track = struct.unpack("<IHHIH", v[k:k + 14])
                 out["clips"].append(("паттерн" if idx > base else "канал", idx - base if idx > base else idx, ln, TRACKS - 1 - track))
                 if idx < len(out["channels"]):          # где стоит клип канала — в долях от начала бита
