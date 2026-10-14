@@ -1223,6 +1223,12 @@
       "file": "20261013-121629-2781-news.json",
       "published_at": "2026-10-13T12:16:50+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "pamyatka-slova.json",
+      "published_at": "2026-10-14T09:00:40+00:00",
+      "rubric": "pamyatka"
     }
   ],
   "photos": [
