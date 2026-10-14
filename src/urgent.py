@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 from datetime import timedelta
 
 from . import collect, compose, config, publish, state, telegram
@@ -64,6 +65,34 @@ def fresh_news(max_age_hours: int) -> list[dict]:
             continue
         items.append(item)
     return items
+
+
+def told(item: dict, hours: int = config.URGENT_MAX_AGE_HOURS * 2) -> list[str]:
+    """Заголовки новостей, вышедших в канал за последние дни, где назван тот же артист.
+
+    Одно событие издания пишут в разные дни, у каждой статьи своя ссылка, и seen.json
+    видит в них разные находки: 12.10.2026 о взаимной подписке OG Buda и Soda Luv вышел
+    пост по Telegram The Flow, 14.10 — второй о том же, по статье «Рэп Мьюзик».
+    Тот же ли это факт, решает модель (поле told, prompts/rubrics/news.md): издания
+    называют одно событие разными словами («снова подписались», «зафолловили»),
+    и сравнение слов в коде его не узнаёт. Лишний заголовок в списке дёшев —
+    модель его отбросит, поэтому артист ищется просто в тексте поста.
+    """
+    names = [name.casefold() for name in item.get("artists") or []]
+    if not names:
+        return []
+    cutoff = state.now() - timedelta(hours=hours)
+    since = cutoff.strftime("%Y%m%d")
+    heads = []
+    for path in sorted(config.ARCHIVE.glob("*-news.json")):
+        if path.name < since:
+            continue
+        post = state.read_json(path, {})
+        created = state._parse(post.get("created_at", ""))
+        text = re.sub(r"<[^>]+>", "", post.get("text", "")).strip()
+        if created and created >= cutoff and any(name in text.casefold() for name in names):
+            heads.append(text.split("\n")[0])
+    return heads
 
 
 def sweep() -> int:
@@ -240,7 +269,7 @@ def run(limit: int, dry_run: bool, target: str) -> int:
             print(f"  — пропущено (сниппет не достаётся): {item.get('title', '')[:50]}")
             continue
         item = with_article(item)
-        result = compose.generate_checked("news", compose._news_payload(item))
+        result = compose.generate_checked("news", {**compose._news_payload(item), "told": told(item)})
 
         if result["skip"] or not result["text"]:
             # Отвергнутая моделью новость завтра свежее не станет — забираем
@@ -369,10 +398,26 @@ def _selftest() -> int:
         run(1, False, "admin")
     assert asked == ["snippet", "scene"] and used == ["snippet", "snippet-big", "scene"], (asked, used)
     assert saved == [[{"artist": "Quavo", "track": "Lead", "seconds": 181, "url": "https://www.deezer.com/album/1"}]], saved
+    # Тот же факт из другого издания: модель видит вышедший заголовок о тех же артистах,
+    # давний и чужой ей не показываются.
+    import tempfile
+    from datetime import datetime, timezone
+    with tempfile.TemporaryDirectory() as folder, \
+            mock.patch.object(config, "ARCHIVE", Path(folder)), \
+            mock.patch.object(state, "now", lambda: datetime(2026, 10, 14, 11, 0, tzinfo=timezone.utc)):
+        for name, created, text in [
+                ("20261012-111345-3180-news", "2026-10-12T11:13:45+00:00",
+                 "<b>OG BUDA И SODA LUV СНОВА ПОДПИСАЛИСЬ ДРУГ НА ДРУГА</b>\n\nВ рэп-пабликах праздник."),
+                ("20261012-120000-1111-news", "2026-10-12T12:00:00+00:00", "<b>KIZARU ОТМЕНИЛ КОНЦЕРТ</b>"),
+                ("20261009-120000-2222-news", "2026-10-09T12:00:00+00:00", "<b>SODA LUV ВЫПУСТИЛ КЛИП</b>")]:
+            state.write_json(Path(folder) / f"{name}.json", {"created_at": created, "text": text})
+        assert told({"artists": ["OG Buda", "SODA LUV"]}) == ["OG BUDA И SODA LUV СНОВА ПОДПИСАЛИСЬ ДРУГ НА ДРУГА"]
+        assert told({"artists": []}) == []
     # Заголовок без названия в кавычках — в магазин не ходим, новость выходит как раньше.
     assert collect.named_release({"title": "Quavo анонсировал альбом"}) == {}
     print("срочное: сниппет, свой артист и сцена первыми, отброшенная уступает место, "
-          "сниппет без ролика не пишется, заход по часам, трек названного релиза едет в пост")
+          "сниппет без ролика не пишется, заход по часам, трек названного релиза едет в пост, "
+          "вышедшая новость о тех же артистах — модели на сверку")
     return 0
 
 
