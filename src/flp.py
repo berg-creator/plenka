@@ -118,6 +118,7 @@ import unicodedata
 import wave
 import zlib
 from array import array
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import proq
@@ -526,7 +527,7 @@ def _shut(v: bytes) -> bytes:
 def read(data: bytes) -> dict:
     """Проект обратно — своим разбором: то, что сверяет селфтест и печатает --read."""
     out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": [],
-           "eq": {}, "wide": {}, "owner": [], "open": []}
+           "eq": {}, "wide": {}, "owner": [], "open": [], "version": "", "title": "", "created": None, "hours": None}
     text = lambda v: v.decode("utf-16-le").rstrip("\0")
     ch = pat = plug = name = None
     state = b""
@@ -537,6 +538,16 @@ def read(data: bytes) -> dict:
             out["open"] += [f"микшер {ins}" if ins >= 0 else f"канал {len(out['channels']) - 1}"] if len(v) > 16 and v[16] & 1 else []
         elif e == 156:
             out["bpm"] = n / 1000
+        elif e == 199:                          # версия FL, сохранившая проект, — ASCII
+            out["version"] = v.rstrip(b"\0").decode("ascii", "replace")
+        elif e == 194 and ch is None:           # название проекта (Project info)
+            out["title"] = text(v)
+        elif e == 237 and len(v) == 16:         # Timestamp: день создания от 30.12.1899 и время работы в днях — оба double
+            # Дате файла верить нельзя: после переезда на новый диск «изменён» и «создан» — день копирования. Номер — DATA+29,
+            # сверено 14.10.2026 на ПК владельца (236 — дорожка микшера); в PyFLP это ProjectID.Timestamp
+            day, work = struct.unpack("<dd", v)
+            out["created"] = (datetime(1899, 12, 30) + timedelta(days=day)).isoformat(" ", "minutes") if day > 0 else None
+            out["hours"] = round(work * 24, 2)
         elif e == 65:
             pat = out["patterns"].setdefault(n, {"name": None, "notes": {}})
         elif e == 224:
@@ -1299,7 +1310,7 @@ def selftest() -> None:
                                                      "Philter в тактах 2", "Philter плавно, такты 1–8")
                 for s in _chain(text, fx, [])[0]] == [("уходит", [(0, 32)]), ("входит", [(4, 8)]), ("", [(4, 8)]), ("", [])], "слово «плавно»"
         clip = pack([(64, bytes(2)), (21, b"\5"), (203, _text("Volume")), (234, bytes(17) + _int(2, 4) + bytes(48) + b"tail"), (99, bytes(2))], 1)
-        for base, auto in [(_fake(), clip)] + [(BASE.read_bytes(), AUTO.read_bytes())] * (BASE.exists() and AUTO.exists()):   # на Маке — и шаблоны FL
+        for base, auto in [(_fake(), clip)] + ([(BASE.read_bytes(), AUTO.read_bytes())] if BASE.exists() and AUTO.exists() else []):   # на Маке — и шаблоны FL
             (Path(tmp) / "Empty.flp").write_bytes(base)
             (Path(tmp) / "Auto.flp").write_bytes(auto)
             # плагин эквалайзера молчит: Pro-Q 4 в слоте без настроек, числа — в записке
@@ -1589,6 +1600,8 @@ def main() -> None:
         selftest()
     elif args.read:
         got = read(Path(args.read).read_bytes())
+        print(f"FL {got['version'] or '?'}" + (f", «{got['title']}»" if got["title"] else "")
+              + (f", создан {got['created']}, в работе {got['hours']:g} ч" if got["created"] else ", даты создания в файле нет"))
         print(f"{got['bpm']:g} BPM")
         for i, c in enumerate(got["channels"]):
             print(f"канал {i}: {c['name']} — {c['kind']}" + (f", дорожка микшера {c['insert']}" if c["kind"] != "автоматизация" else "")
