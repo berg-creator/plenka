@@ -1235,6 +1235,12 @@
       "file": "20261014-110820-7921-news.json",
       "published_at": "2026-10-14T11:09:38+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "sovet-2026-10-12.json",
+      "published_at": "2026-10-15T09:01:28+00:00",
+      "rubric": "sovet"
     }
   ],
   "photos": [
