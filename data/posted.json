@@ -1241,6 +1241,12 @@
       "file": "sovet-2026-10-12.json",
       "published_at": "2026-10-15T09:01:28+00:00",
       "rubric": "sovet"
+    },
+    {
+      "chat": "channel",
+      "file": "20261015-111340-2818-news.json",
+      "published_at": "2026-10-15T11:13:51+00:00",
+      "rubric": "news"
     }
   ],
   "photos": [
@@ -1407,6 +1413,7 @@
     "4c8088907e5076096668966c9b7c8f3ccf2fcf9d4e95c998cd99cda44d802584",
     "248ced2d3bcc1e698e237f176cddceccdecc52cc61d961797969696968797869",
     "1fac2724351031317611761133113b931be319c50f0b074b068704cb04cb068b",
-    "49177f1fe4cdccdddcd8d6ccdadedacc618d6149617979597169796969696969"
+    "49177f1fe4cdccdddcd8d6ccdadedacc618d6149617979597169796969696969",
+    "b295b61b0539452c653c84ba94b016981e9a9ed9ad59ac4daa4c3a9728a62c26"
   ]
 }
