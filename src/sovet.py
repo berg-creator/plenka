@@ -150,10 +150,18 @@ def air() -> str:
 
 
 def shot(post: dict) -> Path:
-    """Карточка поста: название брака крупно, «СОВЕТ НЕДЕЛИ» — рубрикой (publish.send)."""
-    from . import card
+    """Карточка поста: синий щит записей ПАМЯТКИ о голосе, название брака крупно (publish.send).
 
-    return card.save(post["title"], [], label="СОВЕТ НЕДЕЛИ", name="sovet")
+    До 15.10.2026 — бежевая карточка card.save, владелец о ней: «фотка ужасна». Щит — тот же,
+    что у памятки о записи голоса: совет о том же, а «пишите» на плашке читается и как «записывайте».
+    """
+    from . import card, pamyatka
+
+    card.OUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = card.OUT_DIR / "sovet.jpg"
+    card.advert(post["title"], pamyatka.SLOGAN, label="СОВЕТ НЕДЕЛИ",
+                handle=config.BOT_HANDLE).convert("RGB").save(path, "JPEG", quality=90)
+    return path
 
 
 def _selftest() -> None:
