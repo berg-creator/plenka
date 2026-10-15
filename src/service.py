@@ -81,6 +81,7 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            "skleyka_text4free": "СВЕДЕНИЕ, платно: TEXT4FREE",
            "skleyka_predlozhka": "СВЕДЕНИЕ, платно: Ищу Битмейкера | Артиста",
            "skleyka_zvr": "СВЕДЕНИЕ, платно: ZVUK VO RTU",
+           "skleyka_punch": "СВЕДЕНИЕ, платно: PUNCH TIME",
            "skleyka_kenty": "СВЕДЕНИЕ, КЕНТЫ СКВАД: турнир треков",
            "skleyka_bandlink": "СВЕДЕНИЕ, BandLink: тред релизов",
            "skleyka_pin": "СВЕДЕНИЕ, закреп канала", "skleyka_otbor": "СВЕДЕНИЕ, пост ОТБОРА", "skleyka_sovet": "СВЕДЕНИЕ, пост СОВЕТ НЕДЕЛИ",
