@@ -544,7 +544,83 @@
           "quote": "his musical productions instinctively became noted for resembling those of Pharrell Williams and his works in N.E.R.D and The Neptunes during the 2000s, which Tyler has referenced as his greatest inspirations and references."
         }
       ]
+    },
+    {
+      "id": "оргазм-нострадамуса--хаски",
+      "by": "auto",
+      "added_at": "2026-10-15T14:50:33+00:00",
+      "kind": "said",
+      "modern": "Хаски",
+      "ancestor": "Оргазм Нострадамуса и сибирский хардкор-панк",
+      "connection": "Хаски назвал лидера «Оргазма Нострадамуса» одним из людей, повлиявших на его творчество, и поставил отсылки к группе в свой клип",
+      "facts": [
+        "В клипе Хаски есть отсылки к творчеству панк-рок-группы «Оргазм Нострадамуса»",
+        "Хаски назвал лидера группы Алексея «Угла» Фишева одним из людей, повлиявших на его творчество",
+        "«Оргазм Нострадамуса» — сибирская хардкор-панк-группа, основанная в 1995 году в Улан-Удэ"
+      ],
+      "artist": "Хаски",
+      "ends": [
+        {
+          "artist": "Оргазм Нострадамуса",
+          "track": "Раздражение аморала",
+          "url": "https://www.deezer.com/track/590106002"
+        },
+        {
+          "artist": "Хаски",
+          "track": "Поэма о Родине",
+          "url": "https://www.deezer.com/track/547892822"
+        }
+      ],
+      "sources": [
+        {
+          "fact": "В клипе Хаски есть отсылки к творчеству панк-рок-группы «Оргазм Нострадамуса»",
+          "url": "https://ru.wikipedia.org/wiki/%D0%A5%D0%B0%D1%81%D0%BA%D0%B8_%28%D1%80%D1%8D%D0%BF%D0%B5%D1%80%29",
+          "quote": "В клипе содержатся отсылки к творчеству панк-рок-группы Оргазм Нострадамуса"
+        },
+        {
+          "fact": "Хаски назвал лидера группы Алексея «Угла» Фишева одним из людей, повлиявших на его творчество",
+          "url": "https://ru.wikipedia.org/wiki/%D0%A5%D0%B0%D1%81%D0%BA%D0%B8_%28%D1%80%D1%8D%D0%BF%D0%B5%D1%80%29",
+          "quote": "Позднее Хаски признался, что ныне покойный лидер этой группы Алексей Фишев, известный по прозвищу «Угол», является одним из людей, повлиявшим на его творчество"
+        },
+        {
+          "fact": "«Оргазм Нострадамуса» — сибирская хардкор-панк-группа, основанная в 1995 году в Улан-Удэ",
+          "url": "https://ru.wikipedia.org/wiki/%D0%9E%D1%80%D0%B3%D0%B0%D0%B7%D0%BC_%D0%9D%D0%BE%D1%81%D1%82%D1%80%D0%B0%D0%B4%D0%B0%D0%BC%D1%83%D1%81%D0%B0",
+          "quote": "сибирская хардкор-панк-группа, основанная в 1995 году в городе Улан-Удэ"
+        }
+      ]
+    },
+    {
+      "id": "outkast--denzel-curry",
+      "by": "auto",
+      "added_at": "2026-10-15T14:50:37+00:00",
+      "kind": "said",
+      "modern": "Denzel Curry",
+      "ancestor": "OutKast и южный рэп",
+      "connection": "Denzel Curry назвал пластинку OutKast «Aquemini» своим сильным влиянием и под неё рисовал обложку Nostalgic 64",
+      "facts": [
+        "Denzel Curry говорил, что на него сильно повлияла пластинка OutKast «Aquemini»: обложку Nostalgic 64 он рисовал, слушая её"
+      ],
+      "artist": "Denzel Curry",
+      "ends": [
+        {
+          "artist": "OutKast",
+          "track": "Rosa Parks",
+          "url": "https://www.deezer.com/track/962886"
+        },
+        {
+          "artist": "Denzel Curry",
+          "track": "Ultimate",
+          "url": "https://www.deezer.com/track/134031294"
+        }
+      ],
+      "sources": [
+        {
+          "fact": "Denzel Curry говорил, что на него сильно повлияла пластинка OutKast «Aquemini»: обложку Nostalgic 64 он рисовал, слушая её",
+          "url": "https://en.wikipedia.org/wiki/Denzel_Curry",
+          "quote": "Curry himself has stated that he was heavily inspired by Outkast's record, Aquemini, saying he drew the cover for Nostalgic 64 while listening to the record."
+        }
+      ]
     }
   ],
-  "searched_at": "2026-10-08T12:47:32+00:00"
+  "searched_at": "2026-10-15T14:50:37+00:00"
 }
