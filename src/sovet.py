@@ -150,18 +150,16 @@ def air() -> str:
 
 
 def shot(post: dict) -> Path:
-    """Карточка поста: синий щит записей ПАМЯТКИ о голосе, название брака крупно (publish.send).
+    """Карточка поста: рука на фейдерах пульта во весь кадр, название брака крупно (publish.send).
 
-    До 15.10.2026 — бежевая карточка card.save, владелец о ней: «фотка ужасна». Щит — тот же,
-    что у памятки о записи голоса: совет о том же, а «пишите» на плашке читается и как «записывайте».
+    Владелец 15.10.2026: бежевая карточка с одним заголовком — «фотка ужасна», а щит ПАМЯТКИ
+    со статуей — про права и закон, совет же — «про сведение». Снимок — CC0, источник
+    в assets/sovet/pult.txt; он заранее обрезан под 4:5, чтобы рука не ушла за край кадра.
     """
-    from . import card, pamyatka
+    from . import card
 
-    card.OUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = card.OUT_DIR / "sovet.jpg"
-    card.advert(post["title"], pamyatka.SLOGAN, label="СОВЕТ НЕДЕЛИ",
-                handle=config.BOT_HANDLE).convert("RGB").save(path, "JPEG", quality=90)
-    return path
+    return card.save(post["title"], [], label="СОВЕТ НЕДЕЛИ", name="sovet",
+                     photo_url=config.ROOT / "assets" / "sovet" / "pult.jpg")  # Path: строку card._open качает по сети
 
 
 def _selftest() -> None:

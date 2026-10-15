@@ -1,0 +1,11 @@
+pult.jpg — рука на фейдерах пульта, кадр рубрики СОВЕТ НЕДЕЛИ (src/sovet.py, shot).
+
+Исходник: «Fader tweaked on Mackie D8B Digital Mixer (2011-07-04 by hanmaili) pixabay - 225498.jpg», Викисклад
+https://commons.wikimedia.org/wiki/File:Fader_tweaked_on_Mackie_D8B_Digital_Mixer_(2011-07-04_by_hanmaili)_pixabay_-_225498.jpg
+Автор: hanmaili (Корея), снято 4 июля 2011 года; первоисточник — Pixabay, снимок 225498.
+Лицензия: CC0 1.0 (шаблон страницы {{Pixabay|status=confirmed}}, сверено рецензентом Викисклада 07.05.2015),
+https://creativecommons.org/publicdomain/zero/1.0/deed.ru
+Указывать автора лицензия не требует; сверено по странице файла 15.10.2026.
+
+Что сделано с фото: уменьшено до 1920 px по ширине и обрезано под 4:5 по правому краю, чтобы рука
+осталась в кадре: card.photo_backdrop режет по центру.
