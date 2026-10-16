@@ -1,0 +1,23 @@
+{
+  "artist": "A$AP Rocky",
+  "cover": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/7f/ea/4b/7fea4b23-892f-f0a2-c733-a26dcb6a6062/196874896983.jpg/600x600bb.jpg",
+  "created_at": "2026-10-16T16:47:08+00:00",
+  "links": {
+    "Jeremih": 196045,
+    "reggie": 105445362
+  },
+  "preview": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/56/2f/3d/562f3d24-6365-5c86-b523-7f4fa6a5e45f/mzaf_15232127357438017689.plus.aac.p.m4a",
+  "release": "Shroom Clouds (feat. reggie & Jeremih)",
+  "released_at": "2026-10-16T07:00:00+00:00",
+  "rubric": "release",
+  "score": 100,
+  "seconds": 195,
+  "source_url": "https://music.apple.com/us/album/shroom-clouds-feat-reggie-jeremih-single/6823385914?uo=4",
+  "text": "<b>A$AP ROCKY ВЫПУСТИЛ \"SHROOM CLOUDS\" И ЗАТЯНУЛСЯ НА ТРЕХ ГОСТЕЙ</b>\n\nФристайл под грибными облаками с регги и R&B.\n\nВ первый же день пригласили двоих друзей: регги-мэна reggie и певца Jeremih.\n\n<blockquote>Больше дыма, чем песни.</blockquote>\n\n▸ <a href=\"https://music.apple.com/us/album/shroom-clouds-feat-reggie-jeremih-single/6823385914?uo=4\">Слушать в Apple Music</a>",
+  "track": "Shroom Clouds (feat. reggie & Jeremih)",
+  "track_request": {
+    "message_id": 6088,
+    "sent_at": "2026-10-16T16:47:14+00:00",
+    "youtube": "https://www.youtube.com/watch?v=V7e6UCmF-Hs"
+  }
+}
