@@ -1,4 +1,9 @@
 {
+  "fakemink & skepta - chiltern firehouse .": {
+    "at": "2026-10-16T06:42:07+00:00",
+    "by": "claude",
+    "voice": {}
+  },
   "kargi angelozi & kai angel - daijvi!": {
     "at": "2026-10-14T12:39:29+00:00",
     "by": "claude",
@@ -8,5 +13,13 @@
     "at": "2026-10-14T20:42:26+00:00",
     "by": "claude",
     "voice": {}
+  },
+  "lucky daye & pusha t - mouf say": {
+    "at": "2026-10-16T06:42:07+00:00",
+    "by": "claude",
+    "voice": {
+      "text": "Whether you want something smooth and breezy like “Fly U Out” or sharp lyricism on “Mouf Say,” ALOUD! seems engineered to stay on rotation for months.",
+      "who": "artistrack.com"
+    }
   }
 }
