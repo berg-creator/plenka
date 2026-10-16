@@ -1271,6 +1271,12 @@
       "file": "20261016-084141-3496-lineage.json",
       "published_at": "2026-10-16T16:00:53+00:00",
       "rubric": "lineage"
+    },
+    {
+      "chat": "channel",
+      "file": "20261016-211110-5373-release.json",
+      "published_at": "2026-10-16T22:10:55+00:00",
+      "rubric": "release"
     }
   ],
   "photos": [
@@ -1442,6 +1448,7 @@
     "6d4f254de60a660c68032502618c698e69126acc26c62fc61def1fcf401e000e",
     "b204bc6479e679b2e1b482b3c3139b160e363e410ccf0cdf0d9f0c9f071f01ff",
     "8a4e994018415863a667e76737e4eddaecb17d45fd0dff49fb4d8308e3813380",
-    "871e98e6a33a479d8d8e9d0619a718e31a67186798e68c4e471d23ba98e68716"
+    "871e98e6a33a479d8d8e9d0619a718e31a67186798e68c4e471d23ba98e68716",
+    "73c3f387f4879987d9e3d986a582e5cae786676dcc6c4c6ce44c24782c783939"
   ]
 }
