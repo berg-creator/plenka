@@ -280,14 +280,17 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                    if (post.get("snippet") or post.get("video")) and not track else {})
         # Под тизером спрашиваем о новости, а не «как вам сниппет».
         about = ("snippet", "сниппет") if post.get("snippet") else (rubric, "ролик")
+        # Ночью ветка молчит, как и сам пост (publish.hushed): иначе звенит трек в комментарии.
+        quiet = publish.hushed(chat_id)
         try:
             if track:
                 # Вопрос — подписью под первым плеером; у разбора их два, корень и наследник.
                 for number, file in enumerate(files):
-                    telegram.send_audio(chat_id, file, "" if number else ask(post, rubric, "трек"), reply_to=message_id)
+                    telegram.send_audio(chat_id, file, "" if number else ask(post, rubric, "трек"),
+                                         reply_to=message_id, quiet=quiet)
                 if rubric == "otbor":
                     try:
-                        poll = telegram.send_poll(chat_id, *OTBOR_POLL, reply_to=message_id) or {}
+                        poll = telegram.send_poll(chat_id, *OTBOR_POLL, reply_to=message_id, quiet=quiet) or {}
                         if post.get("file") and poll.get("message_id"):
                             # Опрос считается (otbor.final): итог бита недели закрывает его по этому номеру.
                             path = config.ARCHIVE / post["file"]
@@ -297,11 +300,11 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                         # Трек уже в ветке — без опроса она всё равно живая.
                         log.warning("Опрос под отбором не ушёл: %s", exc)
             elif snippet and into_post(post, snippet, message):
-                telegram.send_message(chat_id, ask(post, *about), reply_to=message_id)
+                telegram.send_message(chat_id, ask(post, *about), reply_to=message_id, quiet=quiet)
             elif snippet:
                 telegram.send_video_file(chat_id, snippet["path"], ask(post, *about),
                                          seconds=snippet["seconds"], width=snippet["width"],
-                                         height=snippet["height"], reply_to=message_id)
+                                         height=snippet["height"], reply_to=message_id, quiet=quiet)
             elif rubric in config.RELEASE_RUBRICS and post.get("file"):
                 # Трек ещё придёт: запоминаем ветку, туда он и встанет первым.
                 path = config.ARCHIVE / post["file"]
@@ -312,10 +315,10 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
             else:
                 # У ролика вопрос для спора уже написан в сценарии (src/reels.py) — модель не нужна.
                 telegram.send_message(chat_id, "\n\n".join(filter(None, (links, post.get("comment") or ask(post, rubric)))),
-                                      reply_to=message_id)
+                                      reply_to=message_id, quiet=quiet)
                 links = ""
             if links:
-                telegram.send_message(chat_id, links, reply_to=message_id)
+                telegram.send_message(chat_id, links, reply_to=message_id, quiet=quiet)
             if missing and post.get("file"):
                 # Файл ещё придёт (Mac владельца спал): запоминаем ветку, как у релиза.
                 path = config.ARCHIVE / post["file"]

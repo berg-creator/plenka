@@ -741,13 +741,15 @@ def send_audio(
 
 
 def send_poll(chat_id: str, question: str, options: list[str], *, anonymous: bool = True,
-              reply_to: int | None = None) -> dict:
+              reply_to: int | None = None, quiet: bool = False) -> dict:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "question": question[:300],
         "options": json.dumps([o[:100] for o in options[:10]], ensure_ascii=False),
         "is_anonymous": anonymous,
     }
+    if quiet:
+        payload["disable_notification"] = True
     if reply_to is not None:
         payload["reply_parameters"] = json.dumps({"message_id": reply_to})
     return _call("sendPoll", payload)
