@@ -90,6 +90,13 @@ from . import clips, collect, config, make_cover, skleyka, state, stories, teleg
 # «бит» первым словом подписи; «биты» и «битмейкер» — не он.
 MARK = re.compile(r"\s*бит\b[\s:.,-]*", re.IGNORECASE)
 DASH = re.compile(r"\s+[—–-]\s+")
+# Западный корень русского артиста: звук образца утреннего бита — с запада, а в названии бита русское имя
+# первым (владелец 17.10.2026: «ру рэп крадёт у запада… в названии первым главное писать ру»). Пары — по словам
+# самих артистов и изданий, цитаты и адреса — NEXT.md, раздел 84; у Madk1d сравнения звука с западом не нашлось,
+# 2hollis — упоминание в его тексте и корень Fortuna 812, с которым он пишется.
+ROOTS = {"9mice": "Playboi Carti", "Kai Angel": "Playboi Carti", "Платина": "Playboi Carti", "Saluki": "Don Toliver",
+         "Тёмный принц": "Kanye West", "Fortuna 812": "2hollis", "Madk1d": "2hollis"}
+WEST = {name.casefold() for name in ROOTS.values()}
 # Артисты: «Kizaru x Toxi$», кириллическая «х», «&», «feat.», запятая.
 SPLIT = re.compile(r"\s+(?:x|х|&|feat\.?|ft\.?)\s+|\s*,\s*", re.IGNORECASE)
 # Хвост названия после запятой: темп, тональность или оба — «, 140 Fm», «, F# minor», «, 140 bpm».
@@ -241,7 +248,7 @@ def parse(caption: str) -> dict | None:
             break  # «Лето, 2» — это название, а не темп
         bpm, key = bpm or (int(tail["bpm"]) if tail["bpm"] else None), key or " ".join((tail["key"] or "").split())
         title = title[:tail.start()]
-    artists = [name for name in SPLIT.split(who) if name.strip()]
+    artists = sorted((name for name in SPLIT.split(who) if name.strip()), key=lambda name: _plain(name) in WEST)
     title = title.strip(" \"'«»“”")
     if not (artists and title):
         return None
@@ -856,6 +863,7 @@ def _selftest() -> None:
         assert parse("бит Kizaru x Toxi$ — Злой")["title"] == "Злой", "без запятой — это название"
         assert parse("бит Kizaru х Toxi$ - Лето, 2") == {"artists": ["Kizaru", "Toxi$"], "title": "Лето, 2", "bpm": None, "key": ""}
         assert parse("бит Kizaru") is None and parse("бит — Полёт") is None
+        assert parse("бит Playboi Carti x 9mice — Тест")["artists"] == ["9mice", "Playboi Carti"], "русское имя первым"
 
         # Маршрут: «бит» от владельца — сюда; от другого, «биты» и файл без подписи — старыми путями.
         assert wants(message("бит Kizaru x Toxi$ — Полёт, 140 Fm"), owner)
