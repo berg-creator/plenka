@@ -1277,6 +1277,12 @@
       "file": "20261016-211110-5373-release.json",
       "published_at": "2026-10-16T22:10:55+00:00",
       "rubric": "release"
+    },
+    {
+      "chat": "channel",
+      "file": "beat-6.json",
+      "published_at": "2026-10-17T08:15:17+00:00",
+      "rubric": "beat"
     }
   ],
   "photos": [
