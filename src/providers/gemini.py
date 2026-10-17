@@ -20,9 +20,11 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -120,6 +122,43 @@ def ground(models: list[str], prompt: str) -> tuple[str, list[str]]:
             chunks = candidate.get("groundingMetadata", {}).get("groundingChunks") or []
             return text, [c["web"]["uri"] for c in chunks if c.get("web", {}).get("uri")]
         errors.append(f"{model}: {data}")
+    raise RuntimeError(f"Gemini не ответил ({'; '.join(errors)})")
+
+
+# Какие звуки Gemini берёт вложением (ai.google.dev, «Audio understanding»). WAV бита весит 30–50 МБ,
+# а вложение — до 20 МБ на весь запрос, поэтому бит уходит в MP3 (bity.ear).
+AUDIO_MIME = {".mp3": "audio/mp3", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac",
+              ".aac": "audio/aac", ".m4a": "audio/aac", ".aiff": "audio/aiff"}
+
+
+def hear(models: list[str], prompt: str, audio: Path, schema: dict) -> dict:
+    """Звук вместе с текстом, ответ строго по схеме — как есть, без поля skip: это не пост
+    (generate и _parse ждут его). Модели по очереди, до первой ответившей.
+
+    Слышит Gemini не то, что человек: по документации звук сводится в моно и 16 кбит/с,
+    поэтому ширину и верха он не различит вовсе — судит аранжировку и ритм."""
+    payload = {
+        "contents": [{"role": "user", "parts": [
+            {"inline_data": {"mime_type": AUDIO_MIME[audio.suffix.lower()],
+                             "data": base64.b64encode(audio.read_bytes()).decode()}},
+            {"text": prompt},
+        ]}],
+        "generationConfig": {"responseMimeType": "application/json", "responseSchema": _to_gemini_schema(schema)},
+    }
+    errors = []
+    for model in models:
+        data = _post(model, payload)
+        if isinstance(data, str):
+            errors.append(f"{model}: {data}")
+            continue
+        candidate = (data.get("candidates") or [{}])[0]
+        text = "".join(part.get("text", "") for part in candidate.get("content", {}).get("parts") or [])
+        try:
+            # Кто ответил — в ответ: квота у моделей своя, и балл запасной модели с баллом основной не сравнить.
+            return {**json.loads(text), "model": model}
+        except json.JSONDecodeError:
+            reason = data.get("promptFeedback", {}).get("blockReason") or candidate.get("finishReason")
+            errors.append(f"{model}: неразборчивый ответ ({reason}): {text[:200]!r}")
     raise RuntimeError(f"Gemini не ответил ({'; '.join(errors)})")
 
 

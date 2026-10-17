@@ -41,8 +41,8 @@
 это 2 или 4 такта и хвост ревера, который пришлось бы накладывать на следующий повтор.
 Отвергнуто: `chroma_cqt` как есть — три полосы CQT на полутон складываются окном, и громкая нота «звучит»
 в обоих соседних полутонах; берётся одна центральная полоса.
-Две петли набора 14 (`noty.SHARED`, 08.10.2026) — не петли, а раскладки: петля вместе с басом автора, её слои
-по отдельности и бас один. Мерится музыка без баса (петля минус бас, `parted`), а опоры тактов — по самому басу
+Петли blvckmorphine (`noty.SHARED`: две с 08.10.2026, двенадцать с 17.10.2026) — не петли, а раскладки: петля вместе
+с басом автора, её слои по отдельности и бас один — с такта, у каждого файла своего. Мерится музыка без баса (петля минус бас, `parted`), а опоры тактов — по самому басу
 через pyin: бас там громче музыки на 18–23 дБ, и хрома всей петли называла бы «нотами» его гармоники.
 Слои в таком файле лежат по одному, и с них снимается склад петли (`stack`, 09.10.2026) — седьмое поле её замера:
 сколько слоёв, где каждый стоит, сколько в нём нот, как часто меняется аккорд, сколько верхов и есть ли хвост. Владелец
@@ -557,7 +557,8 @@ def stack(y: np.ndarray, sr: int, bpm: float, cut: tuple[int, int]) -> dict:
         if rest is None:
             return out
         loud = c.sum((0, 1)) >= .0625 * np.percentile(c.sum((0, 1)), 90)
-        band = spec[(f >= 100) & (f < 8000)][:, loud]
+        frames = min(spec.shape[1], len(loud))      # CQT и STFT при иной длине слоя расходятся на кадр («wavwavwav», 17.10.2026)
+        band = spec[(f >= 100) & (f < 8000)][:, :frames][:, loud[:frames]]
         noise = np.median(np.exp(np.log(band + 1e-10).mean(0)) / (band.mean(0) + 1e-10)) > STACK_NOISE
         amp = np.sqrt(c.reshape(84, -1))
         voice = amp.copy()
@@ -573,6 +574,16 @@ def stack(y: np.ndarray, sr: int, bpm: float, cut: tuple[int, int]) -> dict:
 
     first, step = 2 * n + 1, n + 1
     return one(music) | {"layers": [one(y[edge[b]:edge[b + n]], y[edge[b + n]:edge[b + step]]) for b in range(first, at - n, step)]}
+
+
+def even(cut: tuple[int, int]) -> bool:
+    """Слои раскладки идут ровной сеткой, которую ждёт `stack`: за петлёй дважды и тактом хвоста — слои по cut[0] тактов
+    с тактом после каждого, и последний кончается ровно перед басом. У «04566» и «3462» набора 13 слои разной длины,
+    и такт баса с сеткой не сходится: склада у них нет, и сборка о нём молчит.
+    ponytail: сходится такт — не значит, что слои ровные; отличить их можно только по тишине между ними, а хвост слоя
+    её занимает. Найдётся раскладка с неровными слоями и «ровным» тактом баса — мерить паузы по уровню."""
+    n, at = cut
+    return at > 3 * n + 1 and (at - 2 * n - 1) % (n + 1) == 0
 
 
 def stack_row(s: dict) -> str:
@@ -598,8 +609,9 @@ def loops(word: str = "") -> str:
             continue
         y, sr = librosa.load(path, sr=None)
         low, whole = None, y
-        if name in noty.SHARED:             # раскладка: мерится музыка без баса автора, опоры — по басу
-            y, low = parted(y, sr, noty.loop_bpm(name), noty.SHARED_CUT)
+        cut = (noty.SHARED_BARS, noty.SHARED[name]) if name in noty.SHARED else None
+        if cut:                             # раскладка: мерится музыка без баса автора, опоры — по басу
+            y, low = parted(y, sr, noty.loop_bpm(name), cut)
         m = loop(y, sr, noty.loop_bpm(name))
         if not m:
             skipped["не 1, 2, 4 или 8 тактов"] += 1
@@ -607,11 +619,11 @@ def loops(word: str = "") -> str:
         m["roots"] = low or m["roots"]
         rows[name] = " | ".join((str(m["bars"]), " ".join(m["notes"]), f"{m['tonic']} {m['mode']} {m['sure']:.2f}", f"{m['tune']:+d}",
                                  " ".join(m["roots"]), " ".join(str(round(w * 100)) for w in m["weights"]),
-                                 *([stack_row(stack(whole, sr, noty.loop_bpm(name), noty.SHARED_CUT))] if low else [])))
+                                 *([stack_row(stack(whole, sr, noty.loop_bpm(name), cut))] if low and even(cut) else [])))
     about = ("замер звука петли (zamer --loops), поля через « | »: такты по темпу из имени | звучащие ноты (энергия от "
              f"{LOOP_NOTE:.0%} самой громкой) | тоника, лад и уверенность (отрыв от второго по счёту профиля) | строй, центы | "
              "опора каждого такта петли (громчайшая нота в C2–B3) | веса нот от C до B, самая громкая — 100. "
-             "Обертоны громкой ноты считаются нотами, тоника и строй — оценка. У петли-раскладки (noty.SHARED) седьмым полем — "
+             "Обертоны громкой ноты считаются нотами, тоника и строй — оценка. У петли-раскладки (noty.SHARED) с ровной сеткой слоёв (zamer.even) седьмым полем — "
              "склад (zamer.stack), части через « ; »: смен аккорда на такт и верха 6–16 кГц в % у всей музыки без баса автора; "
              "дальше по слою — ноты пианоролла от и до, где стоит самый слышный голос (60 — C5 в FL; «шум» — слой без нот), "
              "нот на такт (не больше одной на шестнадцатую), смен аккорда на такт, верха в %, хвост после слоя в секундах "
@@ -832,6 +844,7 @@ def selftest() -> None:
     assert plucks["span"] == (84, 90) and 7 <= plucks["notes"] <= 9 and plucks["chords"] == 1 and 15 <= plucks["air"] <= 25 \
         and 1 < plucks["tail"] < 2, plucks
     assert noise["span"] is None and noise["tail"] == 0 and noise["air"] > 25, noise
+    assert even((2, 14)) and even((4, 44)) and even((4, 29)) and not even((4, 40)) and not even((4, 9)), "ровная сетка слоёв"
     from unittest import mock
     from . import config, noty
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):

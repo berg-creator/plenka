@@ -776,6 +776,7 @@ def send_quiz(
     explanation: str = "",
     anonymous: bool = True,
     reply_to: int | None = None,
+    quiet: bool = False,
 ) -> dict:
     """Нативная викторина: Telegram сам покажет верный ответ и пояснение.
 
@@ -800,6 +801,8 @@ def send_quiz(
         payload["explanation_parse_mode"] = "HTML"
     if reply_to is not None:
         payload["reply_parameters"] = json.dumps({"message_id": reply_to})
+    if quiet:
+        payload["disable_notification"] = True
     return _call("sendPoll", payload)
 
 

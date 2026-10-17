@@ -101,7 +101,7 @@
     "file_id": "BQACAgIAAxkDAAIUEGrJbiFV6gqTkGPS81WtzYwVzfj5AAJ6sQACtfJQSoI932XPiU7VPQQ",
     "hits": {
       "link": 1,
-      "menu": 6,
+      "menu": 7,
       "mix": 1
     },
     "key": "B",
@@ -112,6 +112,24 @@
     "photo": 19568414,
     "size": 50299310,
     "title": "Фонарь",
+    "video": true
+  },
+  "6": {
+    "artists": [
+      "MF DOOM"
+    ],
+    "at": "2026-10-17T08:02:34+00:00",
+    "bpm": 85,
+    "clip": "BAACAgIAAxkDAAIZlmrTK5rPpjPiDg4TlRNyrxyQFS-PAAIJrwACp8SYShnWy8fi-YKWPQQ",
+    "day": "2026-10-17",
+    "file_id": "BQACAgIAAxkDAAIZnWrTLJ-TwEjMMnHKz3Pkj3Q1Pib1AAISrwACp8SYSriwfoIf5b3gPQQ",
+    "key": "Dm",
+    "kind": "document",
+    "message": 6557,
+    "name": "Маска_MF_DOOM_85_Dm_prod_ПЛЁНКА.wav",
+    "photo": 18087917,
+    "size": 45540102,
+    "title": "Маска",
     "video": true
   }
 }

@@ -525,7 +525,7 @@ def attach(message: dict) -> bool:
     try:
         sent = telegram.send_quiz(
             chat, riddle.get("question", QUESTION), riddle["options"], riddle["correct"],
-            explanation=riddle["explanation"], anonymous=False, reply_to=post,
+            explanation=riddle["explanation"], anonymous=False, reply_to=post, quiet=True,
         )
     except telegram.TelegramError as exc:
         log.warning("Викторина под постом не встала: %s", exc)

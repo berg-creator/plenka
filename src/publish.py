@@ -100,6 +100,11 @@ def feed_day(moment: datetime):
     return (moment.astimezone(MSK) - timedelta(hours=config.QUIET_TO_HOUR)).date()
 
 
+def held(moment: datetime | None = None) -> bool:
+    """Сутки ленты из config.HOLD_DAYS: канал сам не выпускает ничего."""
+    return str(feed_day(moment or state.now())) in config.HOLD_DAYS
+
+
 def missed(released: datetime, moment: datetime | None = None) -> bool:
     """Кончились ли сутки ленты релиза: его день — дата выхода по Москве, и с 9:00 МСК следующего дня
     пост о нём не выходит и не пишется (next_post, compose.do_fresh; владелец 10.10.2026).

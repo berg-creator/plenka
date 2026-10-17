@@ -6,9 +6,15 @@ on:
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
+    inputs:
+      ear:
+        description: "Вместо проверок — проба ушей Gemini на битах каталога (python -m src.bity --ear)"
+        type: boolean
+        default: false
 
 jobs:
   health:
+    if: ${{ !inputs.ear }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -100,3 +106,31 @@ jobs:
       - name: Проверить, отвечают ли облака
         if: ${{ !cancelled() }}
         run: python -m src.oblako --probe
+
+  # Проба: слышит ли Gemini разницу между битами каталога (src/bity.py, ear). Здесь — потому что
+  # из России Gemini не отвечает. Только руками: бесплатная квота Gemini общая с постами канала.
+  # Ничего не пишет и не коммитит. Бит больше 20 МБ качает вход бота по токену заново:
+  # TELEGRAM_BOT_SESSION сюда не передаётся намеренно — ключ дежурства, открытый дважды, Telegram гасит.
+  ear:
+    if: ${{ inputs.ear }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Послушать биты
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: python -m src.bity --ear

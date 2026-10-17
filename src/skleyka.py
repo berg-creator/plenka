@@ -4657,6 +4657,42 @@ def _hush(parts: list[tuple[str, Path, str]], master: Path | None, work: Path) -
     return hushed
 
 
+LONGER = "Бит короче голоса на {over} с — повторил его с {start} по {end}, чтобы голосу хватило бита.\n"
+SPLICE = 0.02  # наложение на стыке повтора, секунды: без него на сильной доле щёлкает
+
+
+def _longer(parts: list[tuple[str, Path, str]], vocal: Path, beat: Path, rhythm: tuple[float, float],
+            work: Path) -> tuple[list[tuple[str, Path, str]], str]:
+    """Бит кончился, а голос поёт дальше — середина бита повторяется: (дорожки, строка человеку).
+    17.10.2026 трек ca367d: голос перенесён с песни на 2:48 на бит в 1:27, и последние 40 с
+    человек получил голым голосом. Повтор — с первой сильной доли (вступление не повторяется)
+    целыми фразами по четыре такта, концовка бита остаётся концовкой; дорожки бита режутся
+    одними стыками. Отказ хуже: бит человек выбрал сам, и короткий бит битмейкеры так и тянут.
+    Голос дальше конца бита меньше чем на APART — это последнее слово, а не разошедшийся трек."""
+    sung, played = _lines(_envelope(vocal, f"{FORMAT},")), _sound(beat)
+    if not sung or not played or (over := sung[-1][1] - played[-1][1]) <= APART:
+        return parts, ""
+    start, end, phrase = rhythm[1], played[-1][1], 16 * rhythm[0]
+    body = (end - 4 * rhythm[0] - start) // phrase * phrase
+    if body <= 0:
+        return parts, ""
+    cut, times = start + body, math.ceil(over / body)
+    print(f"  бит короче голоса на {over:.1f} с: {start:.2f}–{cut:.2f} с повторён {times} раз")
+    pieces = [f"atrim=end={cut:.3f}"] + [f"atrim=start={start - SPLICE:.3f}:end={cut:.3f}"] * times + [f"atrim=start={cut - SPLICE:.3f}"]
+    # Каждый кусок — своим входом, а не asplit: в ffmpeg 6.1 из Ubuntu 24.04 (на нём дежурство) acrossfade
+    # двух веток одного asplit обрывается с концом первой — 17.10.2026 бит в Actions вышел прежней длины.
+    graph = ("".join(f"[{k}:a]apad=whole_dur={end:.3f},{piece},asetpts=PTS-STARTPTS[p{k}];" for k, piece in enumerate(pieces))
+             + "".join(f"[{'p0' if k == 1 else f'j{k - 1}'}][p{k}]acrossfade=d={SPLICE}[j{k}];" for k in range(1, len(pieces))))
+    longer = []
+    for n, (name, path, part) in enumerate(parts):
+        if part not in VOCAL_SIDE:
+            _ffmpeg(*["-i", path] * len(pieces), "-filter_complex", graph.rstrip(";"), "-map", f"[j{len(pieces) - 1}]",
+                    *reels.VOICE_CODEC, work / f"longer{n}.wav")
+            path = work / f"longer{n}.wav"
+        longer.append((name, path, part))
+    return longer, LONGER.format(over=f"{over:.0f}", start=_minutes(start), end=_minutes(cut))
+
+
 # Замер записи — отбор заказов «🎧 Отдать звукорежиссёру» (владелец, 03.10.2026): первый же заказ пришёл
 # с голосом, который сведение не вытягивает, — работа сделана, а разницы с версией бота почти нет.
 # Отбирает бот, без владельца: сырой голос меряется, пока лежит на диске (run_job), числа едут
@@ -4989,6 +5025,10 @@ def run_job(spec_path: Path) -> int:
                     parts = [(name, _moved(path, shift, work / f"moved{n}.wav") if part in VOCAL_SIDE else path, part)
                              for n, (name, path, part) in enumerate(parts)]
                     vocal = _bus(parts, True, work / "vocal.wav")
+            parts, longer = _longer(parts, vocal, beat, rhythm, work)
+            if longer:
+                beat, note = _bus(parts, False, work / "beat.wav"), note + longer
+                timing["length"] = round(clips.probe_seconds(beat), 1)
             # Голос входит больше чем за такт до первого дропа — назвать дроп и дать его кнопкой.
             drop = timing["drops"][0] if timing["drops"] and voice < timing["drops"][0] - 4 * rhythm[0] else None
             if drop:
@@ -6902,6 +6942,18 @@ def _selftest() -> None:
         assert abs(clips.probe_seconds(tmp / "tempo0.wav") - 11 / 1.05) < 0.05
         paths, told, _ = swap([sung], 1.0, clicks(140), clicks(157), tmp)
         assert paths is None and "разница 12 %" in told and "129–151 BPM" in told, told
+        # Бит короче голоса (трек ca367d, 17.10.2026): середина бита повторяется целыми фразами,
+        # пока голосу не хватит бита, голос не тронут; за концом бита меньше APART — бит прежний.
+        drum, long_voice, short_voice = clicks(140), tmp / "long-voice.wav", tmp / "short-voice.wav"
+        _ffmpeg("-f", "lavfi", "-i", "aevalsrc='0.3*sin(2*PI*440*t)*between(t,2,35)':d=36", long_voice)
+        _ffmpeg("-f", "lavfi", "-i", "aevalsrc='0.3*sin(2*PI*440*t)*between(t,2,23)':d=24", short_voice)
+        band = [("бит.wav", drum, "бит"), ("вокал.wav", long_voice, "вокал")]
+        longer, line = _longer(band, long_voice, drum, grid(drum), tmp)
+        assert longer[1] == band[1] and line.startswith("Бит короче голоса на 15 с") \
+            and _sound(longer[0][1])[-1][1] >= 35 and len(_sound(longer[0][1])) == 1, (line, _sound(longer[0][1]))
+        assert abs(clips.probe_seconds(longer[0][1]) - 20 - 2 * 16 * grid(drum)[0]) < 0.05, clips.probe_seconds(longer[0][1])
+        assert _longer([band[0], ("вокал.wav", short_voice, "вокал")], short_voice, drum, grid(drum), tmp) \
+            == ([band[0], ("вокал.wav", short_voice, "вокал")], "")
 
         # Мастер рядом со стемами не звучит, но он — мерка конца бита: стемы после него гаснут,
         # длина файлов та же, голос не тронут; мастер, звучащий до конца, ничего не меняет.
@@ -7054,7 +7106,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, потолок пика — по готовому MP3, место голосу в бите — по недостаче до релизов, «грязно» — голос во всю полосу и перегруз под ним, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме и к одной громкости, бэк из коротких выкриков — эдлибом, "
-          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой; ноты автотюна — со слов человека (ручка key) и автора бита: имя файла и подпись каталога, буква без лада и слово — мимо, замер без уверенности — все полутона и подсказка назвать тональность; мягкость автотюна — три положения, проба плагина той же строкой — ок")
+          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, бит короче голоса — середина повтором, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой; ноты автотюна — со слов человека (ручка key) и автора бита: имя файла и подпись каталога, буква без лада и слово — мимо, замер без уверенности — все полутона и подсказка назвать тональность; мягкость автотюна — три положения, проба плагина той же строкой — ок")
 
 
 def talk_check() -> list[str]:
@@ -7199,6 +7251,9 @@ def main() -> int:
                 return 1
             swapped = dict(zip(side, moved))
             vocal, parts = swapped[vocal], [(part, swapped.get(path, path)) for part, path in parts]
+        if not any(part in INSTRUMENTS for part, _ in parts):
+            args.out.mkdir(parents=True, exist_ok=True)
+            beat =_longer([("", beat, "бит")], vocal, beat, grid(beat), args.out)[0][0][1]
         master = mix(vocal, beat, args.out, args.style, args.design, args.voice, args.echo, parts, args.like)
         compare(vocal, beat, master, args.out)
         movie = story(vocal, beat, master, args.out, grid(beat))

@@ -213,6 +213,8 @@ def shift() -> None:
     """
     import requests
 
+    if publish.held():  # config.HOLD_DAYS: ни срочной новости, ни прослушки
+        return
     token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     if not (token and repo):
         return
