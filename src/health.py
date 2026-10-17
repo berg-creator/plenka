@@ -103,7 +103,9 @@ def skleyka_alarm(data: dict) -> str:
         moment = state._parse(stamp)
         return moment is not None and state.now() - moment > timedelta(minutes=minutes)
 
-    drafts = sum(older(draft.get("at", ""), DRAFT_MINUTES + 30) for draft in data.get("drafts", {}).values())
+    # Заявка, ждущая подписки (skleyka._wall), стоит сутки законно — шаг за человеком.
+    drafts = sum(older(draft.get("at", ""), DRAFT_MINUTES + 30) for draft in data.get("drafts", {}).values()
+                 if not draft.get("wall"))
     jobs = sum("started" not in job and older(job.get("at", ""), 60) for job in data.get("jobs", []))
     if not drafts and not jobs:
         return ""

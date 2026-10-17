@@ -2021,6 +2021,20 @@ MAX_PARTS = 10
 # не приходит новых файлов. Тишина DRAFT_MINUTES — заявка закрыта.
 QUIET = 2
 DRAFT_MINUTES = 30
+# Подписка на канал — перед сведением, а не на входе (владелец, 17.10.2026): реклама 15–16.10 привела 72
+# человека, стену на входе прошли 46, а дорожки прислали шестеро — остальные уходили сразу после неё.
+# Приславший дорожки уже вложился и уйдёт реже. После готового трека не спросить: сводит машина дежурства,
+# её стирают каждый час, и держать готовый файл до подписки негде — пришлось бы сводить второй раз.
+# Заявка ждёт подписки WALL_HOURS: человек уходит на минуты сведения и видит просьбу не сразу.
+WALL_HOURS = 24
+WALL_TEXT = ("Дорожки на месте. Всё в боте <b>бесплатно</b> — достаточно подписаться на "
+             f'<a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.\n\n'
+             "Подпишись и нажми кнопку — сразу начну сводить.")
+WALL_AGAIN = "Подписки пока не вижу. Подпишись на канал и нажми ещё раз — дорожки ждут."
+WALL_GONE = "Подписки так и не увидел — заявку закрыл. Начать заново — /svedenie."
+WALL_KEY = [[{"text": "✅ Подписался", "callback_data": "s:sk:v"}]]
+# Счёт в service --sources: сколько заявок упёрлись в подписку и сколько из них ушли в сведение.
+WALL_COUNT = {"held": "ПОДПИСКА: перед сведением", "passed": "ПОДПИСКА: подписался перед сведением"}
 # Срок — в первом же вопросе о дорожке: до 30.09.2026 о нём узнавали только из EXPIRED.
 WAIT = f" Жду их {DRAFT_MINUTES} минут — потом заявка закроется."
 # Ссылкой на облако — для тех, кому гигабайт стемов на телефон не скачать (src/oblako.py).
@@ -2282,8 +2296,11 @@ def _stale(draft: dict) -> bool:
     """Срок вышел, и шаг был за человеком. Пока шаг за ботом — вопрос шага не задан, файл
     не подтверждён, после вопроса о звуке трек не встал в очередь, — заявка не протухает:
     03.10.2026 круг дежурства простоял 28 часов, и первый же рабочий закрыл шесть заявок,
-    среди них заявку со ссылкой, где всё пришло, и заявку с вокалом, где бот не спросил бит."""
-    owed = bool(draft.get("plan")) and (draft.get("asked") != draft["step"]
+    среди них заявку со ссылкой, где всё пришло, и заявку с вокалом, где бот не спросил бит.
+    Заявка, ждущая подписки (_wall), живёт WALL_HOURS."""
+    if draft.get("wall"):
+        return _age(draft["at"]) >= WALL_HOURS * 3600
+    owed =bool(draft.get("plan")) and (draft.get("asked") != draft["step"]
                                         or len(draft["files"]) > draft.get("acked", 0))
     return _age(draft["at"]) >= DRAFT_MINUTES * 60 and not owed
 
@@ -2345,7 +2362,7 @@ def start(chat_id: str | int, user_id: str | int, *, admin: bool = False, beat: 
     """/svedenie, кнопка меню и ссылка ?start=skleyka: две строки и выбор кнопкой.
     beat — бит ПЛЁНКИ (src/bity.py, «🎚 Свести с этим битом»): заявка «вокал + бит» с ним внутри,
     вопрос — сразу о голосе. Открытая заявка ещё ждёт бит (пришёл из «🔎 Нет бита») — бит ложится
-    в неё: новая заявка потеряла бы присланный голос. Подписку проверяет service."""
+    в неё: новая заявка потеряла бы присланный голос. Вход открыт всем, подписку спрашивает _queue."""
     chat_id, data = str(chat_id), load()
     draft = _draft(data, chat_id)
     if beat and draft and draft["plan"] and "бит" in draft["plan"][draft["step"]:] \
@@ -2724,8 +2741,25 @@ def _enqueue(data: dict, track: str, knobs: dict, tweak: bool = False, wish: str
     return MINUTES * len(data["jobs"]) + (0 if answer else LINK_MINUTES * len(data["tracks"][track].get("links", [])))
 
 
+def _wall(chat_id: str, draft: dict) -> bool:
+    """Не подписан на канал — заявка ждёт подписки, человеку просьба с «✅ Подписался»; True — в очередь нельзя.
+    Сломанная проверка (telegram.is_member) отвечает «подписан»: сведение важнее подписки."""
+    channel = config.secret("TELEGRAM_CHANNEL_ID", required=False)
+    if draft.get("admin") or not channel or telegram.is_member(channel, draft.get("user") or chat_id):
+        if draft.pop("wall", None):
+            _count(WALL_COUNT["passed"])
+        return False
+    telegram.send_message(chat_id, WALL_AGAIN if draft.get("wall") else WALL_TEXT, buttons=WALL_KEY)
+    if not draft.get("wall"):
+        draft["wall"] = True
+        _count(WALL_COUNT["held"])
+    return True
+
+
 def _queue(data: dict, chat_id: str, draft: dict) -> None:
-    """Все шаги пройдены — сведение в очередь, заявка закрыта."""
+    """Все шаги пройдены — сведение в очередь, заявка закрыта. Без подписки — ждёт её (_wall)."""
+    if _wall(chat_id, draft):
+        return
     track, files = secrets.token_hex(3), draft["files"]
     knobs = draft.get("knobs") or dict(KNOBS)
     data["tracks"][track] = {"chat": chat_id, "admin": draft.get("admin", False), "files": files,
@@ -2770,9 +2804,9 @@ def _round(data: dict, chat_id: str, draft: dict) -> bool:
         # Ссылка на облако — тоже дорожки: 03.10.2026 заявка со ссылкой пережила простой очереди
         # и закрылась молча, человек ждал трек весь вечер.
         if draft["files"] or draft.get("links"):
-            telegram.send_message(chat_id, EXPIRED)
+            telegram.send_message(chat_id, WALL_GONE if draft.get("wall") else EXPIRED)
         return True
-    if not plan or quiet < QUIET:
+    if draft.get("wall") or not plan or quiet < QUIET:
         return False
     step = draft["step"]
     have = [f for f in draft["files"] if step < len(plan) and f["r"] == plan[step]]
@@ -2964,6 +2998,10 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
     elif head == "y" and draft.get("asked") == "style":
         if code.isdigit() and int(code) < len(STYLES):
             draft["knobs"]["style"] = list(STYLES)[int(code)]
+        telegram.edit_markup(chat_id, message_id, None)
+        _queue(data, chat_id, draft)
+    elif head == "v" and draft.get("wall"):
+        # «✅ Подписался» под WALL_TEXT: подписка есть — в очередь, нет — просьба ещё раз.
         telegram.edit_markup(chat_id, message_id, None)
         _queue(data, chat_id, draft)
     elif head == "b":
@@ -6707,6 +6745,46 @@ def _selftest() -> None:
         invited(40, code)
         assert not load()["invited_by"], "сводивший по ссылке второй раз не приглашённый"
         assert not _limit(data, "7"), "бонус — трек сверх лимита"
+
+        # Подписка — перед сведением (владелец, 17.10.2026): заявка с дорожками без подписки ждёт её, просьба
+        # одна, круг дежурства молчит, «Подписался» без подписки — просьба ещё раз, с подпиской — в очередь;
+        # лимит до подписки не тратится, ждущая заявка живёт сутки, и сторож очереди её не считает.
+        from . import health
+        member: list[int] = []
+        stub_secret, real_member = config.secret, telegram.is_member
+        telegram.is_member = lambda channel, user: bool(member)
+        config.secret = lambda name, required=True: "@канал" if name == "TELEGRAM_CHANNEL_ID" else stub_secret(name, required=required)
+        try:
+            data = load()
+            jobs = len(data["jobs"])
+            data["drafts"]["90"] = {"user": "90", "admin": False, "at": state.iso(), "plan": ["вокал", "бит"], "step": 2,
+                                    "files": [{"r": "вокал", "n": "v.wav"}, {"r": "бит", "n": "b.wav"}], "asked": "style", "knobs": dict(KNOBS)}
+            _queue(data, "90", data["drafts"]["90"])
+            assert data["drafts"]["90"]["wall"] and len(data["jobs"]) == jobs and "90" not in data["used"], "без подписки — не в очередь"
+            assert sent[-1] == WALL_TEXT and keys[-1] == WALL_KEY == [[{"text": "✅ Подписался", "callback_data": f"{PREFIX}v"}]]
+            told = len(sent)
+            data["drafts"]["90"]["at"] = state.iso(state.now() - timedelta(minutes=DRAFT_MINUTES + 60))
+            assert not _round(data, "90", data["drafts"]["90"]) and len(sent) == told, "круг дежурства просьбу не повторяет"
+            assert _draft(data, "90") and not health.skleyka_alarm(data), "ждущая заявка живёт и тревоги не поднимает"
+            save(data)
+            callback(90, 90, "v", message_id=1)
+            assert sent[-1] == WALL_AGAIN and keys[-1] == WALL_KEY and len(load()["jobs"]) == jobs
+            member.append(1)
+            callback(90, 90, "v", message_id=2)
+            data = load()
+            assert "90" not in data["drafts"] and len(data["jobs"]) == jobs + 1 and data["used"]["90"] \
+                and sent[-1].startswith("Принял"), sent[-1]
+            day = state.read_json(service.SOURCES_FILE, {})[service._today()]
+            assert (day[WALL_COUNT["held"]], day[WALL_COUNT["passed"]]) == (1, 1), day
+            data["tracks"].pop(data["jobs"].pop()["track"])
+            data["used"].pop("90")
+            member.clear()
+            data["drafts"]["91"] = dict(data["drafts"].get("91", {}), user="91", admin=False, plan=["вокал", "бит"], step=2,
+                                        files=[{"r": "вокал"}], wall=True, at=state.iso(state.now() - timedelta(hours=WALL_HOURS + 1)))
+            assert _round(data, "91", data["drafts"]["91"]) and "91" not in data["drafts"] and sent[-1] == WALL_GONE
+            save(data)
+        finally:
+            config.secret, telegram.is_member = stub_secret, real_member
         start(7, 7)
         data = load()
         _queue(data, "7", data["drafts"]["7"])
