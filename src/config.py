@@ -164,6 +164,12 @@ BEAT_SOUNDS = DATA / "beat_sounds.json"
 # музыка утреннего бита берётся только из них. Оба файла пополняет Мак — замер и прослушивание есть только там.
 BEAT_SAMPLES = DATA / "beat_samples.json"
 BEAT_MUSIC = DATA / "beat_music.json"
+# Метки владельца звукам (src/metki.py, 17.10.2026): путь звука → «мимо» или «берём» с артистами и настроением. Страница
+# пишет черновик вне git: файл, тронутый в ~/ПЛЕНКА, после первой же отправки остановил бы её перемотку (pull --ff-only
+# отказывает и неотслеживаемому, и изменённому файлу, который несёт main) — а ею обновляется помощник на Маке. В main
+# черновик несёт `metki --push` под именем BEAT_TAGS, его читает сборка бита
+BEAT_TAGS = DATA / "beat_tags.json"
+BEAT_TAGS_DRAFT = DATA / "private" / "beat_tags.json"
 # Python, в котором стоит pedalboard: им Мак открывает Serum без FL и собирает свой пресет бита (src/serum.py).
 # Окружение лежит вне git и есть только на Маке; нет его — шаг пропускается строкой в записке к нотам.
 SERUM_PYTHON = Path(os.environ.get("SERUM_PYTHON") or ROOT / ".cache" / "serum-spike" / "venv" / "bin" / "python")

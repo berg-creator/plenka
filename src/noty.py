@@ -27,7 +27,11 @@ type beat'ов, приём мелодии — с третьего артиста
 и клэпа (`kit`: яркость, спад, шум — `zamer.kit`), библиотека — тембр каждого барабана (`tembr` в data/beat_sounds.json),
 и звук хэта и клэпа (снейра) утреннего бита — из ближайшей десятой части своего вида; список drums в data/beat_music.json
 не пуст — барабаны только из него. Бочку, 808, открытый хэт и перкуссию по звуку не сверяем: в смеси замер их
-не различает (`zamer.kit`). Отвергнуто: сверять цвет петли с цветом музыки образца — яркость стема demucs темнее чистой
+не различает (`zamer.kit`).
+Метки владельца (src/metki.py, data/beat_tags.json, 17.10.2026): он слушает звуки на странице по одному и ставит «мимо»
+или «берём» с артистами и настроением. «Мимо» выпадает отовсюду — из музыки, петель и барабанов (`approved`, `_kit`);
+барабаны «берём» — одобренные владельцем, и барабаны вида берутся только из них, когда таких от `KIT_OWNED`.
+Артист и настроение — порядок выбора для автора нот (`tag_card`, `noty --tags`), а не брак: меток пока ноль. Отвергнуто: сверять цвет петли с цветом музыки образца — яркость стема demucs темнее чистой
 петли в 0,49–0,81 раза (одна петля в восьми смесях), а регистр замера прыгает на октаву у одной петли в трёх тональностях.
 
 Главный формат — родная партитура FL (.fsc), а не MIDI. 01.10.2026 владелец собрал
@@ -234,6 +238,12 @@ KIT_WORDS = {"Hats": "хэта", "Claps": "клэпа"}
 # десятую часть у хэта в 11 пробах из 12, у клэпа — в 11 из 14; бита по этому правилу владелец ещё не слышал. Начнёт
 # браковать барабаны, которые на слух подходят, — расширить долю, а не снимать правило
 KIT_NEAR, KIT_MIN = .1, 3
+# Барабаны вида — только одобренные владельцем (метка «берём» на странице src/metki.py или список drums), когда их от десяти.
+# ponytail: расчёт, а не опыт. Ближайших берётся не меньше трёх (KIT_MIN): из десяти это треть — звук образца ещё выбирает;
+# из трёх-пяти утро каждый раз брало бы одни и те же, а образцу не нашлось бы близкого. Меньше — вид идёт как раньше,
+# всей библиотекой без «мимо»: иначе первые же две метки поставили бы сборку
+KIT_OWNED = 10
+ROLE_WORDS = {"Kicks": "бочка", "808s": "808", "Claps": "клэп и снейр", "Hats": "хэт", "Open Hats": "открытый хэт", "Percs": "перк"}
 # Сколько времени музыка молчит. У референсов она звучит 94% времени, у «Дифирамба» — 80%, у Lil Wayne
 # и 50 Cent — 54 и 71%, у «Фосфора» — 100% (замер 02.10.2026)
 QUIET = {"андер": .2, "пустота": .2}
@@ -1439,11 +1449,33 @@ def approved() -> tuple[set[str], set[str], set[str]]:
     """Звуки и петли музыки, которые владелец прослушал и одобрил (08.10.2026: «звуки все в целом норм»), и барабаны (`_kit`) —
     data/beat_music.json: одиночные звуки набора 13 и семь пресетов. Набор 12 оттуда убран 17.10.2026 — банк не куплен
     («кит я не покупал»): в бит на раздачу его нельзя. Синт-петли Trap набора 01 владелец 17.10.2026
-    пустил туда словами «возьми петли которые у нас уже есть в китах», не прослушав: отобраны по замеру (3–8 нот)."""
+    пустил туда словами «возьми петли которые у нас уже есть в китах», не прослушав: отобраны по замеру (3–8 нот).
+    Метки страницы (`tags`): «мимо» вычитается из всех трёх, барабан «берём» добавляется к барабанам."""
     from . import config, state
     data = state.read_json(config.BEAT_MUSIC, {})
     data = data if isinstance(data, dict) else {}
-    return tuple({_nfc(n) for n in data.get(key) or ()} for key in ("sounds", "loops", "drums"))
+    marks = tags()
+    no = {n for n, t in marks.items() if t.get("v") == "no"}
+    sounds, rings, drums = ({_nfc(n) for n in data.get(key) or ()} - no for key in ("sounds", "loops", "drums"))
+    return sounds, rings, drums | {n for n, t in marks.items() if t.get("v") == "yes" and kind(n)}
+
+
+def tags() -> dict[str, dict]:
+    """Метки владельца со страницы src/metki.py (data/beat_tags.json): путь звука → {"v": "yes"|"no", "like", "mood"}."""
+    from . import config, state
+    data = state.read_json(config.BEAT_TAGS, {})
+    return {_nfc(n): t for n, t in data.items() if isinstance(t, dict)} if isinstance(data, dict) else {}
+
+
+def artist_key(name: str) -> str:
+    """Имя артиста для сверки меток с образцом: регистр, «ё» и знаки не важны — в like образцов «Shh», «Shh...» и «Shh!»."""
+    return re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", name).casefold().replace("ё", "е"))
+
+
+def owned(k: str, drums: set[str] | None = None) -> set[str] | None:
+    """Одобренные владельцем барабаны вида k, когда их хватает на выбор (`KIT_OWNED`); иначе None — вид идёт как раньше."""
+    mine = {n for n in (approved()[2] if drums is None else drums) if kind(n) == k}
+    return mine if len(mine) >= KIT_OWNED else None
 
 
 def _palette(info: dict, tracks: dict[str, list[N]]) -> list[str]:
@@ -1508,21 +1540,26 @@ def nearest(his, k: str, among: set[str] | None = None, marks: dict | None = Non
 def _kit(info: dict) -> list[str]:
     """Барабаны утреннего бита — по звуку образца (владелец об «Отбое», 17.10.2026: «драмка будто вообще не подходит
     к этому биту»). Хэт и клэп (снейр) — из ближайших к удару образца по тембру (`KIT_NEAR`), когда замер образца его знает
-    (`kit`: только надёжное, `zamer.kit`); нет замера образца или звука — молчит. Список drums в data/beat_music.json
-    не пуст — барабаны (не 808) только из него, ближайшие — среди них. Бочку, 808, открытый хэт и перкуссию по звуку
-    не сверяет: замер их в смеси не различает. Заказ (order) сюда не заходит."""
-    allowed, marks = approved()[2], tembrs()
+    (`kit`: только надёжное, `zamer.kit`); нет замера образца или звука — молчит. Метка «мимо» (data/beat_tags.json) —
+    брак любому барабану и 808; одобренных барабанов вида от `KIT_OWNED` — вид только из них, ближайшие — среди них.
+    Бочку, 808, открытый хэт и перкуссию по звуку не сверяет: замер их в смеси не различает. Заказ (order) сюда не заходит."""
+    drums, marks = approved()[2], tembrs()
+    no = {n for n, t in tags().items() if t.get("v") == "no"}
     his = ((_picked(info) or {}).get("zamer") or {}).get("kit") or {}
     out = []
     for part, names in (info.get("sounds") or {}).items():
         for n in map(_nfc, _names(names)):
             k = kind(n)
-            if not k or k == "808s":
+            if not k:
                 continue
-            if allowed and n not in allowed:
-                out.append(f"{part}: барабан «{n}» — не из одобренных владельцем (data/beat_music.json, drums)")
+            mine = owned(k, drums)
+            if n in no:
+                out.append(f"{part}: барабан «{n}» — владелец пометил его «мимо» (data/beat_tags.json)")
+            elif mine and n not in mine:
+                out.append(f"{part}: барабан «{n}» — не из одобренных владельцем (data/beat_tags.json, drums в data/beat_music.json): "
+                           f"{ROLE_WORDS[k]} — только из них, их {len(mine)}")
             elif k in his and n in marks and kit_scale(k, marks):
-                ranked = nearest(his[k], k, allowed or None, marks)
+                ranked = nearest(his[k], k, mine or set(marks) - no, marks)
                 top = ranked[:max(KIT_MIN, math.ceil(KIT_NEAR * len(ranked)))]
                 if n not in top:
                     b, d, f = marks[n]
@@ -1533,20 +1570,47 @@ def _kit(info: dict) -> list[str]:
 
 
 def kit_card(sample: str) -> str:
-    """Ближайшие к барабанам образца звуки библиотеки (одобренные, когда список drums не пуст) — автору нот до сборки."""
+    """Ближайшие к барабанам образца звуки библиотеки (одобренные, когда их от `KIT_OWNED`; без «мимо») — автору нот до сборки."""
     row = next((r for r in samples() if r.get("id") == sample), None)
     if not row:
         return f"образца «{sample}» нет в data/beat_samples.json"
-    his, allowed, marks = (row.get("zamer") or {}).get("kit") or {}, approved()[2], tembrs()
+    his, drums, marks = (row.get("zamer") or {}).get("kit") or {}, approved()[2], tembrs()
+    no = {n for n, t in tags().items() if t.get("v") == "no"}
     if not his:
         return f"у образца «{sample}» нет замера барабанов (kit): правило молчит, барабаны — по разделу «Звуки, которые владелец ставит сам»"
     out = []
     for k, (b, d, f) in his.items():
-        ranked = nearest((b, d, f), k, allowed or None, marks)
+        ranked = nearest((b, d, f), k, owned(k, drums) or set(marks) - no, marks)
         top = max(KIT_MIN, math.ceil(KIT_NEAR * len(ranked)))
         out.append(f"{KIT_WORDS[k]} образца: яркость {b:g} Гц, спад {d:g} дБ, шум {f:g}; годятся {top} ближайших из {len(ranked)}, "
                    "первые десять:")
         out += [f"  {i}. {n} — {marks[n][0]:.0f} Гц, {marks[n][1]:g} дБ, {marks[n][2]:g}" for i, n in enumerate(ranked[:min(top, 10)], 1)]
+    return "\n".join(out)
+
+
+def tag_card(sample: str, mood: str | None = None) -> str:
+    """Помеченное владельцем (src/metki.py) под образец — автору нот до сборки, в порядке брифа: сначала с артистом образца
+    (его like) и настроением бита, затем «годится всем» (одобрено без артиста); дальше — остальное одобренное, его карточка
+    не печатает. Звук без отмеченного настроения годится любому: настроение владелец ставит не всегда. «Мимо» не печатается —
+    его бракует сборка."""
+    row = next((r for r in samples() if r.get("id") == sample), None)
+    if not row:
+        return f"образца «{sample}» нет в data/beat_samples.json"
+    yes = {n: t for n, t in tags().items() if t.get("v") == "yes" and (not mood or mood in (t.get("mood") or [mood]))}
+    if not yes:
+        return "меток владельца под это нет (data/beat_tags.json): бери одобренное, как раньше"
+    his = {artist_key(a) for a in row.get("like") or ()}
+    sounds, rings, _ = approved()
+
+    def what(n: str) -> str:
+        return "петля" if n in rings else "музыка" if n in sounds else ROLE_WORDS.get(kind(n) or "", "звук")
+
+    out = []
+    for title, names in ((f"с артистом образца ({', '.join(row.get('like') or ()) or 'нет'})",
+                          [n for n, t in yes.items() if his & {artist_key(a) for a in t.get("like") or ()}]),
+                         ("годится всем", [n for n, t in yes.items() if not t.get("like")])):
+        out.append(f"{title}{f', настроение «{mood}»' if mood else ''}: {len(names)}")
+        out += [f"  {what(n)} — {n}" for n in sorted(names, key=lambda n: (what(n), n))]
     return "\n".join(out)
 
 
@@ -2765,8 +2829,8 @@ def _checks() -> None:
     with mock.patch.object(config, "BEAT_MUSIC", Path("нет такого файла.json")):
         assert "data/beat_music.json пуст или не найден" in "\n".join(problems(base, demo()))
     # Барабаны по звуку образца (тембр у селфтеста свой: двенадцать хэтов, яркость через 500 Гц): хэт далеко от хэта образца —
-    # брак, близкий проходит; у образца без замера барабанов и у заказа правило молчит; список drums не пуст — барабан
-    # не из него брак, из него проходит
+    # брак, близкий проходит; у образца без замера барабанов и у заказа правило молчит; метка «мимо» — брак и 808;
+    # одобренных хэтов от KIT_OWNED — хэт не из них брак, из них проходит; одобренных меньше — хэт идёт как раньше
     hats, data = sorted(n for n in known() if kind(n) == "Hats")[:12], json.loads(config.BEAT_SOUNDS.read_text("utf-8"))
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
         config.BEAT_SOUNDS.write_text(json.dumps(data | {"tembr": {n: f"{6000 + 500 * i} 10 0.3 0.1" for i, n in enumerate(hats)}}),
@@ -2782,11 +2846,15 @@ def _checks() -> None:
         assert hat(base, hats[-1]) == "" and "далеко" not in hat(kitted | {"order": "барабаны как в X"}, hats[-1]), \
             "без замера образца и у заказа — молчит"
         assert kit_card("кит").splitlines()[1].endswith(f"{hats[0]} — 6000 Гц, 10 дБ, 0.3") and "нет замера" in kit_card("s140")
-        music = config.BEAT_MUSIC.read_text("utf-8")
-        config.BEAT_MUSIC.write_text(json.dumps(json.loads(music) | {"drums": [hats[1], base["sounds"]["клэп"]]}), encoding="utf-8")
+        bass = base["sounds"]["808"]
+        config.BEAT_TAGS.write_text(json.dumps({n: {"v": "yes"} for n in hats[1:4]} | {hats[4]: {"v": "no"}}), encoding="utf-8")
+        assert hat(kitted, hats[0]) == "" and "пометил его «мимо»" in hat(kitted, hats[4]), "три одобренных — хэт как раньше"
+        config.BEAT_TAGS.write_text(json.dumps({bass: {"v": "no"}}), encoding="utf-8")
+        assert f"808: барабан «{bass}» — владелец пометил его «мимо»" in hat(base, hats[0]), hat(base, hats[0])
+        config.BEAT_TAGS.write_text(json.dumps({n: {"v": "yes"} for n in hats[1:1 + KIT_OWNED]}), encoding="utf-8")
         assert f"хэт: барабан «{hats[0]}» — не из одобренных владельцем" in hat(kitted, hats[0]) and hat(kitted, hats[1]) == "", \
             hat(kitted, hats[1])
-        config.BEAT_MUSIC.write_text(music, encoding="utf-8")
+        config.BEAT_TAGS.unlink()
     # Заказ владельца образца не несёт, а звук музыки, петлю и свой пресет берёт откуда назвал владелец; бочка под каждой
     # нотой 808 — тоже не брак; прочее бракуется
     ordered = {k: v for k, v in looped.items() if k != "sample"} | {"order": "барабаны как в X, гитара как в Y"}
@@ -3051,6 +3119,13 @@ def selftest() -> None:
     пресет Sytrus и все замеренные петли."""
     from unittest import mock
     from . import config
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_TAGS", Path(tmp) / "tags.json"):
+        _selftest()          # метки владельца у селфтеста свои: настоящие пишет страница src/metki.py
+
+
+def _selftest() -> None:
+    from unittest import mock
+    from . import config
     z = {"hat_per_bar": 8, "kick_per_bar": 0, "b808_per_bar": 0}
     rows = [{"id": f"s{bpm}", "url": f"https://youtu.be/s{bpm}", "title": f"(free) a x b type beat — {bpm}", "like": ["A", "B"],
              "views": None, "bpm": bpm, "key": None, "zamer": z | {"bpm": bpm}, "note": ""} for bpm in (140, 170, 85, 135)]
@@ -3088,11 +3163,15 @@ def main() -> None:
     p.add_argument("--loop", metavar="СЛОВО", help="замер петель с этим словом в имени: ноты, опоры по тактам, вторая петля на перелом")
     p.add_argument("--bpm", type=int, help="с --loop: темп бита — сдвиг каждой петли под него и её ноты после сдвига")
     p.add_argument("--kit", metavar="ОБРАЗЕЦ", help="барабаны библиотеки, ближайшие по звуку к хэту и клэпу образца (id из data/beat_samples.json)")
+    p.add_argument("--tags", metavar="ОБРАЗЕЦ", help="помеченное владельцем (data/beat_tags.json) под артиста образца и «годится всем»")
+    p.add_argument("--mood", choices=MOODS, help="с --tags: настроение бита")
     a = p.parse_args()
     if a.selftest:
         selftest()
     elif a.kit:
         print(kit_card(a.kit))
+    elif a.tags:
+        print(tag_card(a.tags, a.mood))
     elif a.build:
         build(a.build, a.out or Path(tempfile.mkdtemp(prefix="noty-")), tuple(a.prev))
     elif a.send:
