@@ -48,7 +48,9 @@ from . import config, noty, state
 # Под кого делаем type beat'ы — верх спроса 17.10.2026 (`bity --demand`: рядовой ролик за месяц 1557, 1276, 958 и 625
 # просмотров, у следующих — 400 и меньше). Владелец их послушал: «все делаем с ними… теперь врубаюсь».
 # Свои рефы он на странице не держит — сборке нужна метка артиста образца; образцы под этих — NEXT.md, раздел 84.
-ARTISTS = ("Madk1d", "9mice", "Тёмный принц", "Saluki")
+# Западные корни русских артистов (bity.ROOTS): звук образцов утреннего бита — с запада (владелец 17.10.2026),
+# в like образца есть и корень, и русские имена, поэтому прежние метки под русских тоже работают.
+ARTISTS = ("Playboi Carti", "Don Toliver", "2hollis", "Kanye West")
 MOODS = ("злой", "кино", "обычный")
 ROLES = tuple(noty.ROLE_WORDS)      # порядок карточек барабанов: бочки, 808, клэп и снейр, хэт, открытый хэт, перки
 PORT = 8765
@@ -295,9 +297,9 @@ def selftest() -> None:
             assert ask(f"/f/{hat}{k}&path=KITS/13%20-%20X%20Kit/Hats/Hat%201.wav")[0] == 400 \
                 and ask(f"/f{k}&path=x")[0] == 400, "путь в запросе — отказ"
             # Решение пишется, «назад» его снимает; чужая карточка и чужой артист — отказ
-            assert ask("/tag" + k, {"id": hat, "v": "yes", "like": ["Saluki", "Madk1d"], "mood": ["злой"]})[0] == 200
+            assert ask("/tag" + k, {"id": hat, "v": "yes", "like": ["Kanye West", "Playboi Carti"], "mood": ["злой"]})[0] == 200
             saved = json.loads(config.BEAT_TAGS_DRAFT.read_text("utf-8"))
-            assert saved == {cards[hat]["path"]: {"v": "yes", "like": ["Madk1d", "Saluki"], "mood": ["злой"]}}, saved
+            assert saved == {cards[hat]["path"]: {"v": "yes", "like": ["Playboi Carti", "Kanye West"], "mood": ["злой"]}}, saved
             assert hat not in json.loads(ask("/cards" + k)[1])["pending"], "решённое не показывается"
             assert ask("/tag" + k, {"id": hat, "undo": True})[0] == 200 and json.loads(config.BEAT_TAGS_DRAFT.read_text("utf-8")) == {}
             assert hat in json.loads(ask("/cards" + k)[1])["pending"], "снятое — снова в очереди"
