@@ -305,7 +305,7 @@ def attach_track(message: dict, admin: str) -> str:
             # Под разбором вопрос уже задан вместе со ссылками на площадки (comments.seed).
             telegram.send_audio(thread["chat"], piece["full_track_file_id"],
                                 comments.ask(post, post.get("rubric", ""), "трек") if piece is post else "",
-                                reply_to=thread["message_id"], quiet=publish.hushed(thread["chat"]))
+                                reply_to=thread["message_id"], quiet=True)  # комментарии всегда без звука
         except telegram.TelegramError as exc:
             log.error("Трек к %s не встал в комментарии: %s", path.name, exc)
             return f"Трек к {name} не встал в комментарии: {exc}."

@@ -280,8 +280,9 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                    if (post.get("snippet") or post.get("video")) and not track else {})
         # Под тизером спрашиваем о новости, а не «как вам сниппет».
         about = ("snippet", "сниппет") if post.get("snippet") else (rubric, "ролик")
-        # Ночью ветка молчит, как и сам пост (publish.hushed): иначе звенит трек в комментарии.
-        quiet = publish.hushed(chat_id)
+        # Комментарии всегда без звука (владелец 17.10.2026): уведомление о каждом сообщении
+        # бота в ветке получает каждый, кто вступил в чат, — звук дня остаётся у самого поста.
+        quiet = True
         try:
             if track:
                 # Вопрос — подписью под первым плеером; у разбора их два, корень и наследник.
