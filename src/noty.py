@@ -233,7 +233,8 @@ LISTED = (("KITS/09 - Scene 2026 Kit", "**/*.wav"), ("KITS/10 - Кино Kit", "
 # и стёр бы его, а ночная задача набора 11 пропадания имён не терпит (`set11.verdict`)
 NATIVE = "Sytrus/"
 # Музыка петлёй. Папка Loops плоская: вид петли — приставка имени. Только MusicRadar — royalty-free по README набора.
-# Trap (17.10.2026) — синт-петли набора MusicRadar «trap samples» на 140: барабаны, бас, свисты и голос из него — не петли
+# Trap (17.10.2026) — синт-петли набора MusicRadar «trap samples» на 140: барабаны, бас, свисты и голос из него — не петли.
+# Из битов набора (`Trap - BeatNN_…`) петля — только топлайн: его владелец выбрал на слух в тот же день, прочее — бит целиком
 LOOPS = "KITS/01 - ASAP Rocky Kit/Loops"
 LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient", "Trap")
 # Набор 11 — звуки из сети: в него кладут только годное на раздачу, поэтому в список он идёт целиком. Петли — папка Loops
@@ -349,8 +350,16 @@ FLIPS = ("KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - а
 # по заказу: откуда набор 06, известно лишь из его README (MusicRadar SampleRadar), сам пак не сверен — раздавать ли бит
 # на этой петле, решает владелец. Темп — число перед «BPM», как у `FLIPS`; баса в петле нет, опоры тактов в замере случайны
 FITTED = ("KITS/06 - Bad Bunny Kit/Loops/Afrobeat - AB_GuitarA110E-01 - как в проекте 208 BPM.wav",)
-LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS, *FITTED))
-LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS, *FITTED)      # откуда петля вправе быть
+# Синт-петли наборов 07 и 03, которые владелец 17.10.2026 выбрал на слух из прослушки 103 петель: арпеджио B и C
+# из MusicRadar «8-bit bonanza» — каждое всеми 15 копиями (темпы 100–140, тональности A, C, E: с перегонкой ±2 полутона
+# они закрывают темпы образцов) — и Lo-Fi Synth Loop 01 и 04. Оба пака по README наборов — MusicRadar SampleRadar,
+# royalty-free, как Trap набора 01; на сайте сами паки не сверены. Именами, а не папкой: прочие петли наборов не слушаны,
+# а в наборе 03 рядом лежат петли Horrorcore с несверенной лицензией. Темп — число в имени, как у видов `LOOP_KINDS`
+PICKED = (*(f"KITS/07 - Crystal Castles Kit/Loops/8-Bit - CS_FMArp {arp}_{bpm}-{key}.wav"
+            for arp in "BC" for bpm in range(100, 141, 10) for key in "ACE"),
+          *(f"KITS/03 - SpaceGhostPurrp Kit/Loops/Lo-Fi - Synth Loop {n:02} (130BPM).wav" for n in (1, 4)))
+LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS, *FITTED, *PICKED))
+LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS, *FITTED, *PICKED)      # откуда петля вправе быть
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 # Переход — звук в пустом такте, аудиоклипом в плейлисте. Владелец 09.10.2026 доделал так утренний «Фонарь»: удары набора 13
 # в тактах 16, 32 и 48, где петля молчит, и подъезд — звук набора 14 задом наперёд, обрезанный границей такта 33; три из
@@ -858,13 +867,14 @@ def loop_bpm(name: str) -> int | None:
     видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои. У петли наборов 11 и 12
     (узнаётся по папке, поэтому имя нужно полное) темп — число перед «BPM»: «… Am 140 BPM» — 140, нет его — None.
     У двух петель набора 14 (`SHARED`) — последнее число имени, у петель из записи 1922 года (`FLIPS`) и гитары из проекта
-    владельца (`FITTED`) — как в наборе 11."""
+    владельца (`FITTED`) — как в наборе 11, у петель, выбранных на слух (`PICKED`), — как у видов набора 01."""
     stem = name.rsplit("/", 1)[-1]
     if name in SHARED:
         return int(re.findall(r"\d{2,3}", stem)[-1])
     if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")) or name in FLIPS + FITTED:
         return int(m[1]) if (m := re.search(r"(?<!\d)(\d{2,3})\s*BPM", stem, re.I)) else None
-    if not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS)) or re.search("Beat|Bass|Drum|Whoop|Vocal", stem):
+    if name not in PICKED and (not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS))
+                               or re.search(r"Beat(?!\d+_Topline)|Bass|Drum|Whoop|Vocal", stem)):
         return None
     return next((int(d) for d in re.findall(r"(?<!\d)\d{2,3}(?!\d)", stem) if 60 <= int(d) <= 200), None)
 
@@ -2542,6 +2552,9 @@ def _checks() -> None:
     assert loop_bpm("Acoustic Gtr - AC_12Str120A-01.wav") == 120 and loop_bpm("Country Crunk - K01AcouMix84C-02.wav") == 84
     assert not loop_bpm("Western Gtr - WW_AcouG_Chord-Amin.wav") and not loop_bpm("Country Crunk - K02Beat110-01.wav") \
         and not loop_bpm("Lex Luger - Strings140.wav"), "без темпа, барабаны и чужой набор — не петли"
+    assert loop_bpm("Trap - Beat08_Topline(140BPM).wav") == 140 and not loop_bpm("Trap - Beat08_Full(140BPM).wav") \
+        and [loop_bpm(n) for n in PICKED[:3] + PICKED[-1:]] == [100, 100, 100, 130] \
+        and not loop_bpm(PICKED[-1].replace("Loop 04", "Loop 02")), "топлайн Trap и петли, выбранные на слух"
     heard = loops()
     today = heard.get(f"{LOOPS}/Acoustic Gtr - AC_SixStr120B-01.wav", {})
     assert today.get("bars") == 4 and len(today["roots"]) == 4 and {"A", "B", "F#", "G#"} <= set(today["notes"]), \
