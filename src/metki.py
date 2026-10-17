@@ -59,12 +59,16 @@ MESSAGE = "звуки: метки владельца"
 LOCK = threading.Lock()             # одна запись черновика за раз: телефон и Мак могут нажать разом
 
 
-def deck(music: dict, library: set[str]) -> list[dict]:
+def deck(music: dict, library: set[str], rings=()) -> list[dict]:
     """Карточки по порядку: одобренные петли и звуки музыки (data/beat_music.json), затем барабаны и 808, которые сборка
     вправе взять (`noty.kind` — список библиотеки, кроме петель ударов), по ролям и внутри — по наборам. Бочку и 808
-    набора 11 бриф запрещает («бас слабый как и бочка», 06.10.2026) — их нет и здесь."""
+    набора 11 бриф запрещает («бас слабый как и бочка», 06.10.2026) — их нет и здесь. Между ними — замеренные петли
+    набора 11 (`rings`), ещё не одобренные: их «берём» пускает петлю в утренний бит (`noty.approved`), 17.10.2026."""
     rows = [{"path": n, "kind": "петля", "bpm": (r or {}).get("bpm") or noty.loop_bpm(n)} for n, r in (music.get("loops") or {}).items()]
     rows += [{"path": n, "kind": (r or {}).get("kind") or "звук"} for n, r in (music.get("sounds") or {}).items()]
+    have = {noty._nfc(row["path"]) for row in rows}
+    rows += [{"path": n, "kind": "петля", "bpm": noty.loop_bpm(n)} for n in sorted(rings)
+             if n.startswith(noty.NET + "/") and noty._nfc(n) not in have]
     drums = [n for n in library if noty.kind(n) in ROLES and not (n.startswith(noty.NET + "/") and noty.kind(n) in ("Kicks", "808s"))]
     rows += [{"path": n, "kind": noty.ROLE_WORDS[noty.kind(n)], "role": noty.kind(n)}
              for n in sorted(drums, key=lambda n: (ROLES.index(noty.kind(n)), n.split("/")[1], n))]
@@ -238,7 +242,7 @@ def lan() -> str | None:
 
 
 def run(port: int) -> None:
-    cards = deck(state.read_json(config.BEAT_MUSIC, {}), noty.known())
+    cards = deck(state.read_json(config.BEAT_MUSIC, {}), noty.known(), noty.loops())
     server = serve(cards, "0.0.0.0", port, noty.LIBRARY["KITS"])
     left = sum(1 for c in cards if c["path"] not in read_tags())
     print(f"карточек {len(cards)}, осталось {left}; метки — {config.BEAT_TAGS_DRAFT}")
@@ -268,8 +272,10 @@ def selftest() -> None:
                  "sounds": {"KITS/13 - X Kit/Oneshots/Lead (C4).wav": {"kind": "лид"}, "Serum/x.fxp": {"kind": "лид"}}}
         library = {"KITS/13 - X Kit/Hats/Hat 1.wav", "KITS/13 - X Kit/Kicks/Kick 1.wav", "KITS/11 - Сеть Kit/Kicks/Сеть - k.wav",
                    "KITS/11 - Сеть Kit/Percs/Сеть - p.wav", "KITS/13 - X Kit/Oneshots/Lead (C4).wav"}
-        cards = deck(music, library)
-        assert [c["kind"] for c in cards] == ["петля", "лид", "лид", "бочка", "хэт", "перк"], [c["kind"] for c in cards]
+        fresh = "KITS/11 - Сеть Kit/Loops/Сеть - Keys Am 90 BPM.wav"
+        cards = deck(music, library, {fresh, *music["loops"], "KITS/01 - A Kit/Loops/Trap - M(140BPM).wav"})
+        assert [c["kind"] for c in cards] == ["петля", "лид", "лид", "петля", "бочка", "хэт", "перк"], [c["kind"] for c in cards]
+        assert cards[3]["path"] == fresh and cards[3]["bpm"] == 90, "новая петля набора 11 — перед барабанами, с темпом"
         assert not cards[2]["audio"] and cards[0]["bpm"] == 140, "пресет не звучит, у петли темп"
         hat = next(c["id"] for c in cards if c["kind"] == "хэт")
         with mock.patch.object(config, "BEAT_TAGS_DRAFT", tmp / "draft.json"), mock.patch.object(config, "BEAT_TAGS", tmp / "tags.json"), \
