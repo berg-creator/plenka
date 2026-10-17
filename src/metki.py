@@ -309,12 +309,16 @@ def selftest() -> None:
             assert json.loads(ask("/push" + k, {})[1]) == {"line": "проба"}
             server.shutdown()
             server.server_close()
-            # Сборка: «мимо» выпадает из музыки, барабан «берём» — в одобренных
+            # Сборка: «мимо» выпадает из музыки, «берём» — в одобренных: барабан, петля и звук музыки
             lead, bad = "KITS/13 - X Kit/Oneshots/Lead (C4).wav", "KITS/13 - X Kit/Oneshots/Pad (C4).wav"
             config.BEAT_MUSIC.write_text(json.dumps({"sounds": {lead: {}, bad: {}}}), encoding="utf-8")
-            config.BEAT_TAGS.write_text(json.dumps({bad: {"v": "no"}, cards[hat]["path"]: {"v": "yes", "like": [], "mood": []}}), encoding="utf-8")
-            sounds, _, drums = noty.approved()
+            ring, keys = "KITS/11 - Сеть Kit/Loops/Keys 90BPM.wav", "KITS/13 - X Kit/Oneshots/Keys (C4).wav"
+            config.BEAT_TAGS.write_text(json.dumps({bad: {"v": "no"}, cards[hat]["path"]: {"v": "yes", "like": [], "mood": []},
+                                                    ring: {"v": "yes"}, keys: {"v": "yes"}}), encoding="utf-8")
+            with mock.patch.object(noty, "loops", lambda: {ring: {}}):
+                sounds, rings, drums = noty.approved()
             assert lead in sounds and bad not in sounds and cards[hat]["path"] in drums, (sounds, drums)
+            assert ring in rings and ring not in sounds and keys in sounds, "петля и звук «берём» — в одобренных"
             said = "\n".join(noty._palette({"tonal": ["мелодия"], "sounds": {"мелодия": bad}}, {"мелодия": []}))
             assert f"звук «{bad}» — не из одобренных" in said, said
             assert noty._palette({"tonal": ["мелодия"], "sounds": {"мелодия": lead}}, {"мелодия": []}) == []
@@ -346,7 +350,7 @@ def selftest() -> None:
                 "рабочая копия не тронута, временная убрана"
             assert push(tmp / "нет.json", work, send=False) == "меток ещё нет: отправлять нечего"
     print("метки: решение пишется и «назад» его снимает, решённое не показывается, без ключа — 403, путь в запросе и чужой номер — "
-          "отказ, «мимо» сборка не берёт, барабан «берём» — в одобренных, «Shh!» = «Shh», отправка доходит до коммита и не пушит")
+          "отказ, «мимо» сборка не берёт, «берём» — в одобренных (барабан, петля, звук), «Shh!» = «Shh», отправка доходит до коммита и не пушит")
 
 
 HTML = r"""<!doctype html><meta charset="utf-8"><title>Метки звуков</title>

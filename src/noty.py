@@ -1452,14 +1452,17 @@ def approved() -> tuple[set[str], set[str], set[str]]:
     data/beat_music.json: одиночные звуки набора 13 и семь пресетов. Набор 12 оттуда убран 17.10.2026 — банк не куплен
     («кит я не покупал»): в бит на раздачу его нельзя. Синт-петли Trap набора 01 владелец 17.10.2026
     пустил туда словами «возьми петли которые у нас уже есть в китах», не прослушав: отобраны по замеру (3–8 нот).
-    Метки страницы (`tags`): «мимо» вычитается из всех трёх, барабан «берём» добавляется к барабанам."""
+    Метки страницы (`tags`): «мимо» вычитается из всех трёх, «берём» добавляется — барабан к барабанам, замеренная петля
+    к петлям, остальное к звукам (17.10.2026: иначе прослушанные на странице петли набора 11 в бит не попадали)."""
     from . import config, state
     data = state.read_json(config.BEAT_MUSIC, {})
     data = data if isinstance(data, dict) else {}
     marks = tags()
     no = {n for n, t in marks.items() if t.get("v") == "no"}
     sounds, rings, drums = ({_nfc(n) for n in data.get(key) or ()} - no for key in ("sounds", "loops", "drums"))
-    return sounds, rings, drums | {n for n, t in marks.items() if t.get("v") == "yes" and kind(n)}
+    yes, ring = {n for n, t in marks.items() if t.get("v") == "yes"}, {_nfc(n) for n in loops()}
+    tune = {_nfc(n) for n in yes if not kind(n)}
+    return sounds | (tune - ring), rings | (tune & ring), drums | {n for n in yes if kind(n)}
 
 
 def tags() -> dict[str, dict]:
