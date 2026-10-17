@@ -516,8 +516,7 @@ WALL = "ПОДПИСКА: упёрся"  # счётчик service --sources
 def _subscribed(chat_id: str, user_id: str, admin: bool, retry: str = "") -> bool:
     """Подписан ли человек на канал; нет — говорит, что делать, и возвращает False.
 
-    За подписку здесь всё, кроме входа в СВЕДЕНИЕ (его стена — перед сведением, skleyka._wall):
-    и разборы, и отбор, и слежение. Слежение до 17.09.2026
+    За подписку здесь всё: и разборы, и отбор, и слежение. Слежение до 17.09.2026
     проверку обходило, и пришедший из ролика за концертами подписчиком канала
     не становился — а бот и есть то, чем ролик приводит в канал (GROWTH.md).
 
@@ -1448,8 +1447,8 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         if ref:
             # До проверки подписки: «Подписался» кода не несёт, и приглашение потерялось бы.
             skleyka.invited(chat_id, slug[1:17])
-        # Вход в СВЕДЕНИЕ открыт всем: подписку спрашивает само сведение, когда дорожки пришли (skleyka._wall).
-        skleyka.start(chat_id, user_id, admin=admin)
+        if _subscribed(chat_id, user_id, admin, retry="skleyka"):
+            skleyka.start(chat_id, user_id, admin=admin)
         return False
     if kind == "ocenka" or kind == "menu" and link == "ocenka":
         # ОЦЕНКА (src/ocenka.py) — за подписку, как всё в боте (владелец, 09.10.2026). Вход считается до
@@ -1831,7 +1830,7 @@ def handle_callback(query: dict, data: dict) -> None:
                              message_id=query.get("message", {}).get("message_id"), who=query.get("from", {}),
                              keyboard=(query.get("message", {}).get("reply_markup") or {}).get("inline_keyboard"),
                              text=query.get("message", {}).get("text") or "")
-        else:  # и «Подписался» под прежней стеной входа (s:skleyka) — тот же вход
+        elif _subscribed(chat_id, user_id, admin, retry="skleyka"):
             otbor.cancel(chat_id)
             skleyka.start(chat_id, user_id, admin=admin)
         return
