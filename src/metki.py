@@ -366,6 +366,9 @@ h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(-
 #play { display:flex; gap:6px; align-items:center }
 #play button { flex:1 }
 label { display:flex; align-items:center; gap:6px; color:var(--dim); font-size:14px }
+#who { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:14px; margin:6px 0 }
+#who span { flex-basis:100%; color:var(--dim); font-size:13px }
+a { color:var(--on) } h3 a { text-transform:none; letter-spacing:0; margin-left:8px }
 #out .no { background:#3a1612; border-color:var(--no) } #out .yes { background:#14301f; border-color:var(--yes) }
 #bot { margin-top:20px; border-top:1px solid var(--line); padding-top:12px; display:flex; gap:8px; align-items:center }
 #line { font-size:13px; color:var(--dim) }
@@ -375,9 +378,12 @@ label { display:flex; align-items:center; gap:6px; color:var(--dim); font-size:1
 <main>
   <div id="top"><span id="where"></span><span id="count"></span></div>
   <div id="kind"></div><div id="name"></div><div id="note"></div>
-  <div id="play"><button id="again">▶ повтор<kbd>пробел</kbd></button>
+  <div id="play"><button id="again">▶ повтор<kbd>пробел</kbd></button><button id="halt">■ стоп<kbd>esc</kbd></button>
     <label hidden id="underbox"><input type="checkbox" id="under"> под петлю</label><button hidden id="next" style="flex:0 0 48px">↻</button></div>
-  <h3>Артисты</h3><div class="row" id="artists"></div>
+  <h3>Артисты <a href="#" id="whois">кто это?</a></h3>
+  <div id="who" hidden><span>Имя — песни артиста на YouTube, в новой вкладке. Не знаешь артиста — не жми его:
+    хватит настроения или «годится всем».</span></div>
+  <div class="row" id="artists"></div>
   <h3>Настроение</h3><div class="row" id="moods"></div>
   <h3>Решение</h3>
   <div class="row" id="out">
@@ -491,11 +497,13 @@ document.addEventListener('keydown', e => {
   else if (m >= 0) toggle(mood, MOODS[m]);
   else if (e.code === 'ArrowLeft') decide('no'); else if (e.code === 'ArrowDown') decide('all');
   else if (e.code === 'ArrowRight') decide('yes'); else if (e.code === 'ArrowUp') skip();
-  else if (e.code === 'Backspace') back(); else if (e.code === 'Space') play();
+  else if (e.code === 'Backspace') back(); else if (e.code === 'Space') play(); else if (e.code === 'Escape') stop();
   else return;
   e.preventDefault();
 });
-$('again').onclick = play; $('under').onchange = play; $('next').onclick = () => { loopAt++; play(); };
+$('again').onclick = play; $('halt').onclick = stop;
+$('whois').onclick = e => { e.preventDefault(); $('who').hidden = !$('who').hidden; };
+ $('under').onchange = play; $('next').onclick = () => { loopAt++; play(); };
 $('push').onclick = async () => {
   $('line').textContent = 'отправляю…'; $('push').disabled = true;
   try { $('line').textContent = (await (await post('/push', {})).json()).line; } catch (e) { $('line').textContent = 'страница не ответила'; }
@@ -504,7 +512,10 @@ $('push').onclick = async () => {
 $('go').onclick = () => { ctx = new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); $('start').hidden = true; show(); };
 fetch(q('/cards')).then(r => { if (!r.ok) throw r.status; return r.json(); }).then(d => {
   C = d.cards; queue = d.pending; LOOPS = d.loops; ARTISTS = d.artists; MOODS = d.moods;
-  buttons('artists', ARTISTS, ART_HINT, () => like); buttons('moods', MOODS, MOOD_HINT, () => mood); render();
+  buttons('artists', ARTISTS, ART_HINT, () => like);
+  ARTISTS.forEach(v => { const a = document.createElement('a'); a.textContent = v; a.target = '_blank'; a.rel = 'noopener';
+    a.href = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(v); $('who').append(a); });
+  buttons('moods', MOODS, MOOD_HINT, () => mood); render();
 }).catch(e => { $('go').textContent = e === 403 ? 'нет ключа в адресе' : 'страница не отвечает'; $('go').disabled = true; });
 </script>
 """
