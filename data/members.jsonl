@@ -95,3 +95,6 @@
 {"at": "2026-10-17T07:21:41+00:00", "way": "in", "last": "/start skleyka", "last_hours": 13.4}
 {"at": "2026-10-17T07:38:34+00:00", "way": "in", "last": "s:skleyka", "last_hours": 0.0}
 {"at": "2026-10-17T08:20:15+00:00", "way": "in", "last": "/start skleyka", "last_hours": 0.0}
+{"at": "2026-10-17T08:26:12+00:00", "way": "in", "last": "/start", "last_hours": 0.0}
+{"at": "2026-10-17T08:26:53+00:00", "way": "out", "last": "s:skleyka", "last_hours": 0.0, "stay_hours": 0.0}
+{"at": "2026-10-17T08:29:37+00:00", "way": "out", "last": "s:skleyka", "last_hours": 1.1, "stay_hours": 1.1}
