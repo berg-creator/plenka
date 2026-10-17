@@ -45,8 +45,10 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import config, noty, state
 
-ARTISTS = ("Kai Angel", "9mice", "Madk1d", "Тёмный принц", "Платина", "Che", "Ginseng", "Fortuna 812", "Militantum", "Shh",
-           "Black Kray", "Lil Peep", "Yung Lean", "Playboi Carti", "Three 6 Mafia")
+# Рефы владельца (его топ 06–07.10.2026), чаще названные — первыми: «мне проще по своим рефам ориентироваться» (17.10).
+# Артисты type beat'ов спроса (Kai Angel, 9mice…) сняты — их он не всех знает; образцы под рефы — NEXT.md, раздел 84.
+ARTISTS = ("PureSnow", "A$AP Rocky", "Black Kray", "Lil Peep", "Chief Keef", "Lil Wayne", "Kanye West", "Playboi Carti",
+           "Yung Lean", "Yeat", "Young Thug", "Kid Cudi", "SpaceGhostPurrp", "Shadow Wizard Money Gang", "Платина")
 MOODS = ("злой", "кино", "обычный")
 ROLES = tuple(noty.ROLE_WORDS)      # порядок карточек барабанов: бочки, 808, клэп и снейр, хэт, открытый хэт, перки
 PORT = 8765
@@ -293,9 +295,9 @@ def selftest() -> None:
             assert ask(f"/f/{hat}{k}&path=KITS/13%20-%20X%20Kit/Hats/Hat%201.wav")[0] == 400 \
                 and ask(f"/f{k}&path=x")[0] == 400, "путь в запросе — отказ"
             # Решение пишется, «назад» его снимает; чужая карточка и чужой артист — отказ
-            assert ask("/tag" + k, {"id": hat, "v": "yes", "like": ["Shh", "Kai Angel"], "mood": ["злой"]})[0] == 200
+            assert ask("/tag" + k, {"id": hat, "v": "yes", "like": ["Yeat", "PureSnow"], "mood": ["злой"]})[0] == 200
             saved = json.loads(config.BEAT_TAGS_DRAFT.read_text("utf-8"))
-            assert saved == {cards[hat]["path"]: {"v": "yes", "like": ["Kai Angel", "Shh"], "mood": ["злой"]}}, saved
+            assert saved == {cards[hat]["path"]: {"v": "yes", "like": ["PureSnow", "Yeat"], "mood": ["злой"]}}, saved
             assert hat not in json.loads(ask("/cards" + k)[1])["pending"], "решённое не показывается"
             assert ask("/tag" + k, {"id": hat, "undo": True})[0] == 200 and json.loads(config.BEAT_TAGS_DRAFT.read_text("utf-8")) == {}
             assert hat in json.loads(ask("/cards" + k)[1])["pending"], "снятое — снова в очереди"
