@@ -4678,7 +4678,7 @@ def _longer(parts: list[tuple[str, Path, str]], vocal: Path, beat: Path, rhythm:
         return parts, ""
     cut, times = start + body, math.ceil(over / body)
     print(f"  бит короче голоса на {over:.1f} с: {start:.2f}–{cut:.2f} с повторён {times} раз")
-    pieces = [f"atrim=end={cut:.3f}"] + [f"atrim={start - SPLICE:.3f}:{cut:.3f}"] * times + [f"atrim=start={cut - SPLICE:.3f}"]
+    pieces = [f"atrim=end={cut:.3f}"] + [f"atrim=start={start - SPLICE:.3f}:end={cut:.3f}"] * times + [f"atrim=start={cut - SPLICE:.3f}"]
     graph = (f"[0:a]apad=whole_dur={end:.3f},asplit={len(pieces)}" + "".join(f"[s{k}]" for k in range(len(pieces))) + ";"
              + "".join(f"[s{k}]{piece},asetpts=PTS-STARTPTS[p{k}];" for k, piece in enumerate(pieces))
              + "".join(f"[{'p0' if k == 1 else f'j{k - 1}'}][p{k}]acrossfade=d={SPLICE}[j{k}];" for k in range(1, len(pieces))))
