@@ -4679,13 +4679,14 @@ def _longer(parts: list[tuple[str, Path, str]], vocal: Path, beat: Path, rhythm:
     cut, times = start + body, math.ceil(over / body)
     print(f"  бит короче голоса на {over:.1f} с: {start:.2f}–{cut:.2f} с повторён {times} раз")
     pieces = [f"atrim=end={cut:.3f}"] + [f"atrim=start={start - SPLICE:.3f}:end={cut:.3f}"] * times + [f"atrim=start={cut - SPLICE:.3f}"]
-    graph = (f"[0:a]apad=whole_dur={end:.3f},asplit={len(pieces)}" + "".join(f"[s{k}]" for k in range(len(pieces))) + ";"
-             + "".join(f"[s{k}]{piece},asetpts=PTS-STARTPTS[p{k}];" for k, piece in enumerate(pieces))
+    # Каждый кусок — своим входом, а не asplit: в ffmpeg 6.1 из Ubuntu 24.04 (на нём дежурство) acrossfade
+    # двух веток одного asplit обрывается с концом первой — 17.10.2026 бит в Actions вышел прежней длины.
+    graph = ("".join(f"[{k}:a]apad=whole_dur={end:.3f},{piece},asetpts=PTS-STARTPTS[p{k}];" for k, piece in enumerate(pieces))
              + "".join(f"[{'p0' if k == 1 else f'j{k - 1}'}][p{k}]acrossfade=d={SPLICE}[j{k}];" for k in range(1, len(pieces))))
     longer = []
     for n, (name, path, part) in enumerate(parts):
         if part not in VOCAL_SIDE:
-            _ffmpeg("-i", path, "-filter_complex", graph.rstrip(";"), "-map", f"[j{len(pieces) - 1}]",
+            _ffmpeg(*["-i", path] * len(pieces), "-filter_complex", graph.rstrip(";"), "-map", f"[j{len(pieces) - 1}]",
                     *reels.VOICE_CODEC, work / f"longer{n}.wav")
             path = work / f"longer{n}.wav"
         longer.append((name, path, part))
@@ -6950,6 +6951,7 @@ def _selftest() -> None:
         longer, line = _longer(band, long_voice, drum, grid(drum), tmp)
         assert longer[1] == band[1] and line.startswith("Бит короче голоса на 15 с") \
             and _sound(longer[0][1])[-1][1] >= 35 and len(_sound(longer[0][1])) == 1, (line, _sound(longer[0][1]))
+        assert abs(clips.probe_seconds(longer[0][1]) - 20 - 2 * 16 * grid(drum)[0]) < 0.05, clips.probe_seconds(longer[0][1])
         assert _longer([band[0], ("вокал.wav", short_voice, "вокал")], short_voice, drum, grid(drum), tmp) \
             == ([band[0], ("вокал.wav", short_voice, "вокал")], "")
 
