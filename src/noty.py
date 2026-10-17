@@ -64,8 +64,8 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 
 Музыка петлёй (владелец, 02.10.2026: «да», через день). Разбор его проектов показал, что музыку он делает
 гитарными петлями набора 01 через Gross Beat и Love Philter, а Serum почти не трогает. С 05.10 по 08.10.2026 обычный
-бит шёл петлёй по расписанию; теперь петлю (поле loop) утренний бит берёт только из одобренных и только в темпе
-образца. Темп петли берётся из имени файла, петля без темпа в имени в список не идёт.
+бит шёл петлёй по расписанию; теперь петлю (поле loop) утренний бит берёт только из одобренных и только под темп
+образца (`fit_loop`). Темп петли берётся из имени файла, петля без темпа в имени в список не идёт.
 Отвергнуто: брать любые петли набора — Lex Luger и прочее с archive.org лежат в той же папке без лицензии.
 
 Звуки из сети и заказ (владелец, 06.10.2026: брать свежие звуки из сети, а один бит сделать по его словам —
@@ -123,13 +123,21 @@ switch («вид»): «разом» — как с 05.10, после такта �
 на 120, без единой партии музыки, а тональность читалась с буквы в имени файла — си минор. Замер звука той петли:
 ноты C# E F# G G# A B, опоры тактов A A B F# — буква оказалась опорной нотой одного такта из четырёх, и мелодию
 по имени файла писать нельзя. Отсюда четыре правила, все числом:
-темп бита — ровно темп петли или вдвое выше, растяжки нет вовсе; ноты партий с высотой — из нот, которые в петле
+темп бита — темп петли или вдвое выше (с 17.10.2026 — с перегонкой, абзац ниже); ноты партий с высотой — из нот, которые в петле
 звучат (`zamer --loops` меряет петли на Маке, замер лежит в data/beat_sounds.json полем loops); поверх петли
 обязательна мелодия; перелом (поле switch, `_switch`) до 08.10.2026 был в каждом бите, теперь — когда он есть
 у образца. Дорожку петли
 на весь бит — повторы по сетке тактов, паузы из поля rests, после перелома вторая петля — Мак собирает сам
-(`loop_track`): темп совпадает точно, поэтому хватает стандартной библиотеки.
-Отвергнуто: растягивать петлю к темпу бита — в ffmpeg на Маке нет rubberband, а atempo на гитаре слышно.
+(`loop_track`).
+
+Петля под темп бита (владелец, 17.10.2026: «ты же можешь и растягивать петли, пускай даже питч меняется, ты же можешь
+подстроиться под новый»). До этого дня темп бита был ровно темпом петли или вдвое выше, и из одиннадцати утренних
+образцов петля в темпе нашлась двум. Теперь петля перегоняется, как клип в режиме Resample в FL — скорость вместе
+с высотой, — но на целое число полутонов (`fit_loop`), а остаток до темпа бита, не больше ±2,9 %, дотягивает atempo
+без смены высоты (`_refit`): так петля остаётся на нотах пианоролла. Сдвиг — не больше `LOOP_SHIFT` полутонов: при нём
+годны десять образцов из одиннадцати. Ноты, опоры и тоника петли в проверках и записке — уже после сдвига (`played`),
+полей паспорта не прибавилось: сдвиг однозначно следует из bpm и темпа петли.
+Отвергнуто: растягивать петлю целиком без смены высоты — в ffmpeg на Маке нет rubberband, а atempo на гитаре слышно.
 
 Бас, второй голос и свои звуки (владелец, 04.10.2026: «у баса мелодия и рисунок плохие», «контрмелодию не слышно
 совсем», «почему не используешь мои остальные киты»). 808 в тот день ходил по восьми ступеням, до шести высот в такте,
@@ -161,6 +169,7 @@ switch («вид»): «разом» — как с 05.10, после такта �
                                            одиночных звуков по заголовку WAV, заглушки iCloud не читаются (только Мак)
     python -m src.noty --gather            папка «00 - Сегодня»: ноты свежей ветки битов, её звуки и пресеты (только Мак)
     python -m src.noty --loop СЛОВО        что замер знает о петлях с этим словом в имени: ноты, опоры по тактам, чем сменить на переломе
+    python -m src.noty --loop СЛОВО --bpm 140   то же в бите на 140: сдвиг каждой петли, ноты и опоры после него
 
 Сетка — шестнадцатые: такт = 16, доля = 4.
 """
@@ -169,6 +178,7 @@ from __future__ import annotations
 import argparse
 import errno
 import json
+import math
 import os
 import random
 import re
@@ -248,6 +258,10 @@ NOTES = "C C# D D# E F F# G G# A A# B".split()
 LOOP_NOTES = (3, 8)
 LOOP_OFF = .1               # доля времени партии на нотах, которых в петле нет: проходящие можно, жить на них нельзя
 LOOP_COMMON = 3             # общих нот у двух петель одного бита: при трёх пара находится каждой годной петле (медиана 53)
+# Петля под темп бита (`fit_loop`): сдвиг высоты, который бит вправе с неё взять. ponytail: расчёт, а не опыт — на 17.10.2026
+# при 2 и 3 полутонах пар «образец — петля» одинаково (10 образцов из 11), а меньший сдвиг меньше портит тембр. Услышит
+# владелец «бурундука» или «тянучку» — опустить
+LOOP_SHIFT = 2
 # Перелом: где стоит и сколько тактов после него вправе повторять рисунки тактов до него — калибровка в `_switch`
 SWITCH_AT = (.5, .85)
 SWITCH_SAME = 1 / 3
@@ -330,7 +344,7 @@ FLIPS = ("KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - а
 # Гитара из проекта владельца под заказ на 12.10.2026 («скри на столе (там гитара - основа»; о темпе: «в целом можно и бпм
 # таким же экстримальным оставить (208)»): петля `Afrobeat - AB_GuitarA110E-01` набора 06, два такта на 110, перегнана на Маке
 # так же, как её подогнал FL в его проекте (режим клипа Resample — скорость вместе с высотой, 110 → 104): четыре такта на 208,
-# ми мажор стал ми-бемоль мажором. Правило «растяжки нет» цело: бит берёт готовый файл в своём темпе. Отвергнуто: держать
+# ми мажор стал ми-бемоль мажором. Бит берёт готовый файл в своём темпе — перегонки (`fit_loop`) у него нет. Отвергнуто: держать
 # высоту растяжкой — владельцу нравится то, что звучит в проекте, а там гитара ниже родной на 0,97 полутона. Только биту
 # по заказу: откуда набор 06, известно лишь из его README (MusicRadar SampleRadar), сам пак не сверен — раздавать ли бит
 # на этой петле, решает владелец. Темп — число перед «BPM», как у `FLIPS`; баса в петле нет, опоры тактов в замере случайны
@@ -872,6 +886,50 @@ def loops() -> dict[str, dict]:
     return out
 
 
+def fit_loop(tempo: float, bpm: float) -> tuple[int, float, int]:
+    """Как петля в темпе tempo встаёт в бит на bpm (владелец, 17.10.2026: «ты же можешь и растягивать петли, пускай даже
+    питч меняется»): (k, rest, f). f — сколько тактов бита занимает такт петли, 1 или 2 (бит вдвое быстрее); берётся тот,
+    где растягивать меньше. k — полутоны: петля ускоряется вместе с высотой, как клип в режиме Resample в FL, только
+    на целое число полутонов — иначе петля встала бы между нотами пианоролла. rest — что осталось растянуть без смены
+    высоты (atempo): не больше ±2,9 %. Годится при |k| ≤ `LOOP_SHIFT`."""
+    f = min((1, 2), key=lambda f: abs(math.log(bpm / (tempo * f))))
+    k = round(12 * math.log2(bpm / (tempo * f)))
+    return k, bpm / (tempo * f) / 2 ** (k / 12), f
+
+
+def semis(k: int) -> str:
+    """Сдвиг словами: «+1 полутон», «−2 полутона», «+5 полутонов»."""
+    return f"{k:+d}".replace("-", "−") + (" полутон" if abs(k) % 10 == 1 and abs(k) != 11 else
+                                         " полутона" if abs(k) % 10 in (2, 3, 4) and abs(k) not in (12, 13, 14) else " полутонов")
+
+
+def transposed(m: dict, k: int) -> dict:
+    """Замер петли, перегнанной на k полутонов: ноты, опоры, тоника и регистр слоёв склада сдвинуты. Темп, такты
+    и смены аккорда перегонка не меняет."""
+    if not k:
+        return m
+
+    def up(x: str) -> str:
+        return NOTES[(NOTES.index(x) + k) % 12]
+    tonic, *mode = m["key"].split()
+    out = m | {"notes": sorted(map(up, m["notes"]), key=NOTES.index), "roots": [up(x) for x in m["roots"]],
+               "key": " ".join([up(tonic), *mode])}
+    if "stack" in m:
+        out["stack"] = m["stack"] | {"layers": [x | {"span": x["span"] and (x["span"][0] + k, x["span"][1] + k)}
+                                                for x in m["stack"]["layers"]]}
+    return out
+
+
+def played(info: dict) -> dict[str, dict]:
+    """Петли бита — так, как они звучат в нём: замер каждой сдвинут на её полутоны (`fit_loop`), у второй петли свой
+    сдвиг. Все проверки и записка берут замер петли бита отсюда, а не из `loops()`: мелодия пишется под перегнанную
+    петлю. Темпа нет — замер как есть: о темпе скажет `_loop`."""
+    heard, bpm = loops(), info.get("bpm")
+    return {name: transposed(heard[name], fit_loop(loop_bpm(name), bpm)[0]
+                             if loop_bpm(name) and type(bpm) in (int, float) and bpm > 0 else 0)
+            for name in _pair(info) if name in heard}
+
+
 def chord(weights) -> int:
     """Корень ближайшего из 24 мажорных и минорных трезвучий по весам двенадцати нот от C; при равном счёте — то, чей
     корень весомее. Одна мерка на звук петли (`zamer.stack`) и на ноты своей музыки (`_stack`): смена аккорда — другой
@@ -883,7 +941,7 @@ def chord(weights) -> int:
 def _stacked(info: dict) -> dict | None:
     """Склад петли бита, если после перелома она молчит и музыку держат партии: одна петля-раскладка и такт перелома."""
     pair = _pair(info)
-    return loops().get(pair[0], {}).get("stack") if len(pair) == 1 and pair[0] in SHARED and _cut(info) is not None else None
+    return played(info).get(pair[0], {}).get("stack") if len(pair) == 1 and pair[0] in SHARED and _cut(info) is not None else None
 
 
 def _pair(info: dict) -> list[str]:
@@ -954,12 +1012,13 @@ def _halves(info: dict, tracks: dict[str, list[N]]) -> list[tuple[str, dict, dic
 
 
 def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
-    """Музыка петлёй: петля — из разрешённых и замерена по звуку, темп бита — ровно её темп или вдвое выше, поверх
-    неё мелодия, ноты партий — из нот петли, паузы петли — полем rests. Чем она обработана — словами в fx.
+    """Музыка петлёй: петля — из разрешённых и замерена по звуку, темп бита — её темп или вдвое выше с перегонкой
+    не дальше `LOOP_SHIFT` полутонов (`fit_loop`), поверх неё мелодия, ноты партий — из нот петли так, как она звучит
+    в бите (`played`), паузы петли — полем rests. Чем она обработана — словами в fx.
     Порог нот мимо (`LOOP_OFF`) — ориентир, а не замер: проходящая нота в шестнадцатую — не брак, жить на чужой
     ноте нельзя. Единственный бит петлёй (05.10.2026) его не проверяет: 808 там стоял на B, F#, E и A, все четыре
     в петле звучат. Начнёт браковать годное на слух — поднять порог или считать только ноты длиннее доли."""
-    heard, pair, out, end, good = loops(), _pair(info), [], info["bars"] * 16, {}
+    heard, pair, out, end, good = played(info), _pair(info), [], info["bars"] * 16, {}
     for word, name in zip(("loop", "switch, вторая петля"), pair):
         tempo, m = loop_bpm(name), heard.get(name)
         if not (name.startswith(LOOP_HOMES) and tempo and name in known()):
@@ -975,9 +1034,13 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         elif not LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1]:
             out.append(f"{word}: в петле звучат {len(m['notes'])} нот ({' '.join(m['notes'])}) — мелодию по ней не написать: "
                        f"бери петлю, где нот от {LOOP_NOTES[0]} до {LOOP_NOTES[1]}")
-        elif info.get("bpm") not in (tempo, tempo * 2):
-            out.append(f"{word}: темп бита {info.get('bpm')}, а петля в темпе {tempo} — бит ровно в её темпе или ровно "
-                       f"вдвое быстрее ({tempo} или {tempo * 2}): петлю не растягиваем")
+        elif not (type(bpm := info.get("bpm")) in (int, float) and bpm > 0 and abs(fit_loop(tempo, bpm)[0]) <= LOOP_SHIFT):
+            edge = 2 ** ((LOOP_SHIFT + .5) / 12)        # k округляется: ±2 полутона — это до ±2,5 полутона скорости
+            lo, hi, lo2, hi2 = (math.ceil(t / edge) if i % 2 == 0 else math.floor(t * edge)
+                                for i, t in enumerate((tempo, tempo, tempo * 2, tempo * 2)))
+            out.append(f"{word}: темп бита {bpm}, а петля в темпе {tempo} — бит берёт петлю со сдвигом высоты не больше "
+                       f"{LOOP_SHIFT} полутонов: ей годится темп бита {lo}–{hi} или вдвое быстрее, {lo2}–{hi2}; иначе — "
+                       f"петля в другом темпе (python3 -m src.noty --loop СЛОВО --bpm {bpm})")
         else:
             good[name] = m
     # Владелец, 06.10.2026, о гитарной петле под барабанами «Six Speed»: «петля совсем плоха и не в тему». В шести
@@ -1004,7 +1067,7 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     cut = _cut(info)
     if info.get("chops") is not None and pair:  # длина петли — в шестнадцатых бита: бит вдвое быстрее — петля вдвое длиннее
         tempo = loop_bpm(pair[0]) or info["bpm"]
-        out += _chops(info, good.get(pair[0], {}).get("bars", 8) * 16 * info["bpm"] // tempo)
+        out += _chops(info, good.get(pair[0], {}).get("bars", 8) * 16 * fit_loop(tempo, info["bpm"])[2])
     for i, name in enumerate(pair):             # до перелома ноты сверяются с первой петлёй, после — со второй
         lo, hi = ((cut or end, end) if i else (0, cut or end))
         allowed = {NOTES.index(x) for x in good.get(name, {}).get("notes", NOTES)}
@@ -1172,7 +1235,7 @@ def _switch(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     # пары в её темпе и тональности нет; «Фонарь» так и вышел): после перелома петля молчит, и музыку держат партии —
     # их и сверяем, как у бита без петли, а у раскладки ещё и по её складу (`_stack`)
     if loop and not ((info.get("order") or _pair(info)[0] in SHARED) and len(_pair(info)) < 2):
-        pair, heard = _pair(info), loops()
+        pair, heard = _pair(info), played(info)
         if len(pair) < 2:
             out.append("switch: у бита петлёй после перелома играет вторая петля — поле «петля» в switch")
         elif why := _twin(*pair, heard):
@@ -1345,7 +1408,8 @@ def _sample(info: dict, tracks: dict[str, list[N]]) -> list[str]:
 
 def approved() -> tuple[set[str], set[str]]:
     """Звуки и петли музыки, которые владелец прослушал и одобрил (08.10.2026: «звуки все в целом норм»), —
-    data/beat_music.json: одиночные звуки наборов 12 и 13 и петли набора 12. Синт-петли Trap набора 01 владелец 17.10.2026
+    data/beat_music.json: одиночные звуки набора 13 и семь пресетов. Набор 12 оттуда убран 17.10.2026 — банк не куплен
+    («кит я не покупал»): в бит на раздачу его нельзя. Синт-петли Trap набора 01 владелец 17.10.2026
     пустил туда словами «возьми петли которые у нас уже есть в китах», не прослушав: отобраны по замеру (3–8 нот)."""
     from . import config, state
     data = state.read_json(config.BEAT_MUSIC, {})
@@ -1430,15 +1494,24 @@ def _shared(info: dict) -> list[str]:
 
 
 def _loop_note(info: dict) -> list[str]:
-    """Что владельцу знать о петле: темп, готовая дорожка, ноты по замеру звука, паузы."""
-    pair, heard = _pair(info), loops()
+    """Что владельцу знать о петле: темп и перегонка, готовая дорожка, ноты по замеру звука, паузы."""
+    pair, heard = _pair(info), played(info)
     if not pair:
         return []
-    out = ["Музыка — петлёй, поверх неё мелодия. Петлю не растягивай: бит ровно в её темпе"
-           + (f" вдвое ({loop_bpm(pair[0])} → {info['bpm']}): такт петли — два такта бита" if info.get("bpm") != loop_bpm(pair[0]) else "")
-           + ". Дорожка «Петля — на весь бит.wav» в папке «Сегодня» уже расставлена по тактам, с паузами — поставь её с первого такта"
-           + ("; «Петля 2 — на весь бит.wav» — вторая петля, она играет после перелома и ставится тоже с первого такта"
-              if len(pair) > 1 else f"; с такта {_cut(info) // 16 + 1}, после перелома, она молчит" if _cut(info) else "") + "."]
+    out = ["Музыка — петлёй, поверх неё мелодия."]
+    for i, name in enumerate(pair):
+        if not loop_bpm(name):              # петля не из разрешённых — о ней уже сказал `_loop`
+            continue
+        k, rest, f = fit_loop(loop_bpm(name), info["bpm"])
+        how = [f"{semis(k)} (скорость вместе с высотой)"] if k else []
+        how += [f"растяжка на {(rest - 1) * 100:+.1f} %".replace(".", ",").replace("-", "−")] if abs(rest - 1) >= .0005 else []
+        out[0] += (f" {'Вторая петля' if i else 'Петля'}: {loop_bpm(name)} → {info['bpm']}"
+                   + (", такт петли — два такта бита" if f == 2 else "")
+                   + (f", перегнана: {' и '.join(how)} — растягивать её не нужно, ноты ниже — уже после сдвига." if how else
+                      ", без перегонки."))
+    out[0] += (" Дорожка «Петля — на весь бит.wav» в папке «Сегодня» уже расставлена по тактам, с паузами — поставь её с первого такта"
+               + ("; «Петля 2 — на весь бит.wav» — вторая петля, она играет после перелома и ставится тоже с первого такта"
+                  if len(pair) > 1 else f"; с такта {_cut(info) // 16 + 1}, после перелома, она молчит" if _cut(info) else "") + ".")
     if pair[0] in SHARED:
         out.append("В дорожке — музыка петли без баса её автора: он вычтен, низ ведёт твой 808. Сам файл петли лежит рядом: "
                    f"после первых восьми тактов в нём слои петли по отдельности, такты {SHARED[pair[0]] + 1}–{SHARED[pair[0]] + SHARED_BARS} — бас автора.")
@@ -1705,14 +1778,40 @@ def _attack(one, ch: int, sr: int, at: int, reach: int) -> int:
     return max(best - round(CHOP[0] * sr), 0) if loud(best) > 1.5 * (loud(best - win) + floor) else at
 
 
+def _refit(src: Path, dst: Path, k: int, rest: float) -> Path:
+    """Петля под темп бита (`fit_loop`) — файлом dst той же разрядности: asetrate ускоряет её вместе с высотой на k
+    полутонов, atempo дотягивает остаток без смены высоты. Длина — ровно исходная, делённая на скорость: atempo
+    ошибается на миллисекунды, а раскладку `SHARED` дальше режут по тактам. ffmpeg ищется в PATH, как у остального
+    кода на Маке: помощнику launchd путь к Homebrew кладёт `tracks.install`. Нет ffmpeg или он упал — ValueError,
+    как у негодного плана. Отвергнуто: растягивать всё atempo без смены высоты — на гитаре его слышно, а rubberband
+    в ffmpeg Homebrew нет; сдвиг на дробь полутона без atempo — петля встала бы между нотами пианоролла."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise ValueError("ffmpeg не найден — петлю не перегнать под темп бита")
+    with wave.open(str(src), "rb") as w:
+        width, sr, n = w.getsampwidth(), w.getframerate(), w.getnframes()
+    if width not in (2, 3):
+        raise ValueError(f"{width * 8} бит: читаются только 16 и 24")
+    rate, speed = round(sr * 2 ** (k / 12)), 2 ** (k / 12) * rest     # частота — целая: остаток её округления — в atempo
+    size = round(n / speed)
+    try:
+        subprocess.run([ffmpeg, "-v", "error", "-nostdin", "-y", "-i", str(src), "-af",
+                        f"asetrate={rate},aresample={sr},atempo={speed * sr / rate:.9f},apad=whole_len={size},atrim=end_sample={size}",
+                        "-c:a", f"pcm_s{width * 8}le", str(dst)], capture_output=True, check=True, timeout=300)
+    except subprocess.SubprocessError as e:
+        raise ValueError(f"ffmpeg не перегнал петлю: {(getattr(e, 'stderr', b'') or b'').decode(errors='replace').strip()[-200:]}")
+    return dst
+
+
 def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool = False,
                split: tuple[int, int] | None = None) -> None:
     """Петля на весь бит одним файлом (владелец, 05.10.2026: «может, ты мне дашь дорожку петли на весь трек сразу»).
     Длина — весь бит; повторы стоят по сетке тактов, а не встык по длине файла; в паузах (rests) тишина; первая петля
     играет до перелома, вторая — после, и обе дорожки ставятся с первого такта. Затухание и возврат (`FADE`) — внутри
-    самой паузы: атака первой ноты после неё цела. Темп бита равен темпу петли или вдвое выше — растяжки нет, поэтому
-    хватает стандартной библиотеки, а формат файла остаётся прежним. plan пришёл из make.py — это числа, а не пути:
-    файлы называет вызывающий. Не PCM 16/24 или план негоден — исключение, в папке остаётся просто копия петли.
+    самой паузы: атака первой ноты после неё цела. Петля не в темпе бита — сначала она перегоняется под него (`_refit`,
+    ffmpeg), дальше всё стандартной библиотекой, а формат файла остаётся прежним. plan пришёл из make.py — это числа,
+    а не пути: файлы называет вызывающий. Не PCM 16/24, план негоден или ffmpeg не перегнал петлю — исключение,
+    в папке остаётся просто копия петли.
     split — файл-раскладка (`SHARED`): тактов в петле и такт, с которого бас один; петля — первые такты файла минус
     бас автора, лежащий в нём отдельно; пик
     остатка поднят до `SHARED_PEAK`, конец петли гаснет к шву повтора.
@@ -1723,13 +1822,19 @@ def loop_track(src: Path, dst: Path, tempo: int | None, plan: dict, second: bool
     отразятся вниз. У электропиано их почти нет; зашипит на яркой петле — фильтр перед прореживанием."""
     bpm, bars, cut = float(plan["bpm"]), int(plan["bars"]), plan.get("switch")
     rests = [(float(a), float(b)) for a, b in plan.get("rests") or ()]
-    if not (tempo and bpm in (tempo, tempo * 2) and bars >= 1 and bars * 240 / bpm <= 600):
-        raise ValueError("темп петли и бита не сходятся или бит длиннее десяти минут")
-    with wave.open(str(src), "rb") as w:
-        ch, width, sr, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
-        if width not in (2, 3) or sys.byteorder != "little" or array("i").itemsize != 4:
-            raise ValueError(f"{width * 8} бит: читаются только 16 и 24")
-        one = _pcm(w.readframes(n), width)
+    if not (tempo and bpm > 0 and bars >= 1 and bars * 240 / bpm <= 600):
+        raise ValueError("у петли нет темпа или бит длиннее десяти минут")
+    k, rest, f = fit_loop(tempo, bpm)
+    if abs(k) > LOOP_SHIFT:
+        raise ValueError(f"петля на {tempo} в бит на {bpm:g} — сдвиг {semis(k)}, а можно не больше {LOOP_SHIFT}")
+    with tempfile.TemporaryDirectory() as tmp:
+        if k or rest != 1:              # петля не в темпе бита: перегнать, дальше она — петля в темпе bpm / f
+            src, tempo = _refit(src, Path(tmp) / "петля.wav", k, rest), bpm / f
+        with wave.open(str(src), "rb") as w:
+            ch, width, sr, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+            if width not in (2, 3) or sys.byteorder != "little" or array("i").itemsize != 4:
+                raise ValueError(f"{width * 8} бит: читаются только 16 и 24")
+            one = _pcm(w.readframes(n), width)
     if split:
         size, low = (round(b * 240 / tempo * sr) * ch for b in split)
         if len(one) < low + size:
@@ -1979,15 +2084,25 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     return f"{beat}: {done}" + (", вчерашний проект владельца сохранён рядом" if saved else "")
 
 
-def loop_card(word: str) -> str:
+def loop_card(word: str, bpm: int | None = None) -> str:
     """Что замер знает о петлях с этим словом в имени; петля одна — ещё и чем сменить её на переломе, у петли-раскладки —
-    её склад по слоям.
+    её склад по слоям. С bpm — как петли звучат в бите этого темпа (`fit_loop`, `transposed`): сдвиг, остаток растяжки,
+    ноты и опоры после сдвига; петля, которой сдвиг больше `LOOP_SHIFT`, помечена, в пару на перелом не идёт.
     Автору нот: звука он не слышит, и ноты петли — единственное, по чему пишутся мелодия и 808."""
-    heard = loops()
+    heard, shifts = loops(), {}
+    if bpm:
+        shifts = {name: fit_loop(loop_bpm(name), bpm) for name in heard if loop_bpm(name)}
+        heard = {name: transposed(m, shifts[name][0]) for name, m in heard.items() if name in shifts}
+
+    def fits(name: str) -> bool:
+        return not bpm or abs(shifts[name][0]) <= LOOP_SHIFT
 
     def line(name: str, first: str = "") -> str:      # first — первая петля бита: scale тогда собран для пары
-        m = heard[name]
-        return (f"{name} — {loop_bpm(name)} BPM, тактов {m['bars']}, ноты {' '.join(m['notes'])}, "
+        m, (k, rest, f) = heard[name], shifts.get(name, (0, 1, 1))
+        return (f"{name} — {loop_bpm(name)} BPM"
+                + (f" → {bpm}: сдвиг {semis(k)}, растяжка {(rest - 1) * 100:+.1f}%".replace("-", "−") + (", такт петли — два такта бита" if f == 2 else "")
+                   + ("" if fits(name) else f" — сдвиг больше {LOOP_SHIFT}: в этот бит не идёт") if bpm else "")
+                + f", тактов {m['bars']}, ноты {' '.join(m['notes'])}, "
                 f"опоры по тактам {' '.join(m['roots'])}, тоника {m['key']} ({m['sure']:.2f}), "
                 + (f"бит на обеих петлях — scale={_scale(heard, first, name)}" if first else f"scale={_scale(heard, name)}")
                 + ("" if LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1] else f" — нот не {LOOP_NOTES[0]}–{LOOP_NOTES[1]}: в бит не идёт"))
@@ -2011,9 +2126,10 @@ def loop_card(word: str) -> str:
     if len(fit) == 1:
         a = fit[0]
         pairs = sorted(((len(set(heard[a]["notes"]) & set(m["notes"])), name) for name, m in heard.items()
-                        if loop_bpm(name) == loop_bpm(a) and LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1]
-                        and not _twin(a, name, heard)), reverse=True)
-        out += ["", "Вторая петля на перелом — тот же темп, другой риф; впереди те, у кого больше общих нот:"]
+                        if (fits(name) if bpm else loop_bpm(name) == loop_bpm(a))
+                        and LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1] and not _twin(a, name, heard)), reverse=True)
+        out += ["", f"Вторая петля на перелом — {f'годная биту на {bpm} (ноты — после её сдвига)' if bpm else 'тот же темп'}, "
+                    "другой риф; впереди те, у кого больше общих нот:"]
         out += [f"общих {c}: {line(name, a)}" for c, name in pairs[:12]]
     return "\n".join(out) or "петель с таким словом в замере нет: python3 -m src.noty --loop Gtr"
 
@@ -2221,12 +2337,26 @@ def _checks() -> None:
         assert c[0] == 1 and c[32000] == 1 and c[127999] == 32000, "бит вдвое быстрее петли: петля идёт своим темпом"
         raw = bytes(range(256)) * 3
         assert _raw(_pcm(raw, 3), 3) == raw and _raw(_pcm(raw, 2), 2) == raw and _pcm(b"\xff\xff\xff", 3)[0] == -256, "24 бита — без потерь"
-        for bad in ({"bpm": 122, "bars": 8}, {"bpm": 120, "bars": 4000}, {"bars": 8}, {"bpm": 120, "bars": 8, "rests": [1]}):
+        # 90 при петле на 120 — сдвиг на −5 полутонов, больше `LOOP_SHIFT`: такой план дорожку не собирает
+        for bad in ({"bpm": 90, "bars": 8}, {"bpm": 120, "bars": 4000}, {"bars": 8}, {"bpm": 120, "bars": 8, "rests": [1]}):
             try:
                 loop_track(tmp / "loop.wav", tmp / "d.wav", 120, bad)
                 raise AssertionError(f"негодный план должен отказать: {bad}")
             except (ValueError, TypeError, KeyError):
                 pass
+        # Петля не в темпе бита (владелец, 17.10.2026: «ты же можешь и растягивать петли, пускай даже питч меняется»):
+        # синус 440 Гц, два такта на 120, в бит на 127,1 — +1 полутон и остаток atempo; дорожка — длиной бита, звучит
+        # 466 Гц. Только где есть ffmpeg: в Actions дорожку петли не собирают
+        if shutil.which("ffmpeg"):
+            with wave.open(str(tmp / "sine.wav"), "wb") as w:
+                w.setnchannels(1), w.setsampwidth(2), w.setframerate(8000)
+                w.writeframes(b"".join(round(9000 * math.sin(2 * math.pi * 440 * i / 8000)).to_bytes(2, "little", signed=True)
+                                       for i in range(32000)))
+            loop_track(tmp / "sine.wav", tmp / "h.wav", 120, {"bpm": 127.1, "bars": 8, "rests": []})
+            with wave.open(str(tmp / "h.wav"), "rb") as w:
+                n, h = w.getnframes(), array("h", w.readframes(w.getnframes()))
+            ups = sum(a < 0 <= b for a, b in zip(h[8000:40000], h[8001:40001]))        # переходы через ноль за 4 с
+            assert fit_loop(120, 127.1)[0] == 1 and n == round(8 * 240 / 127.1 * 8000) and abs(ups / 4 - 466.2) < 3, (n, ups / 4)
         # Нарезка петли (`chops`). Петля — два такта: нота с ходом громкости от начала, нота на 5 мс позже третьей доли,
         # нота на втором такте. В третьем такте бита вместо петли — три куска: вторая нота с первой доли (срез встал
         # на её начало, а не на сетку), первая нота октавой выше и она же задом наперёд; дальше дыра до конца такта
@@ -2401,8 +2531,14 @@ def _checks() -> None:
         "кино: остинато не молчит, в теме пять нот"
     assert "в мотиве 5" in "\n".join(sugar(paper | {"twist": "смена бита", "bars": 20},
                                              {"мелодия": [N(i * 12, 12, k) for i, k in enumerate((50, 53, 55, 57, 58))]}))
-    # Музыка петлёй: петля замерена по звуку, темп бита — ровно её или вдвое, поверх мелодия нотами петли, паузы —
-    # полем rests, после перелома — вторая петля другого рифа; чужая папка, чужой темп, ноты мимо петли — брак
+    # Музыка петлёй: петля замерена по звуку, темп бита — её или вдвое с перегонкой до `LOOP_SHIFT` полутонов, поверх
+    # мелодия нотами петли, паузы — полем rests, после перелома — вторая петля другого рифа; чужая папка, сдвиг больше
+    # двух полутонов, ноты мимо петли — брак
+    assert fit_loop(135, 140)[::2] == (1, 1) and abs(fit_loop(135, 140)[1] - .9788) < 1e-3 and fit_loop(85, 170) == (0, 1, 2) \
+        and fit_loop(140, 70) == (-12, 1, 1), "135 → 140: +1 полутон и −2,1 %; 85 → 170 — такт петли на два такта бита"
+    assert transposed({"bars": 1, "notes": ["C", "E", "B"], "roots": ["C", "B"], "key": "C мажор"}, 1) == \
+        {"bars": 1, "notes": ["C", "C#", "F"], "roots": ["C#", "C"], "key": "C# мажор"}, "сдвиг на полутон: C → C#, B → C"
+    assert (semis(1), semis(-2), semis(5), semis(12)) == ("+1 полутон", "−2 полутона", "+5 полутонов", "+12 полутонов")
     assert loop_bpm("Acoustic Gtr - AC_12Str120A-01.wav") == 120 and loop_bpm("Country Crunk - K01AcouMix84C-02.wav") == 84
     assert not loop_bpm("Western Gtr - WW_AcouG_Chord-Amin.wav") and not loop_bpm("Country Crunk - K02Beat110-01.wav") \
         and not loop_bpm("Lex Luger - Strings140.wav"), "без темпа, барабаны и чужой набор — не петли"
@@ -2428,13 +2564,16 @@ def _checks() -> None:
     solo = {k: v for k, v in looped.items() if k != "switch"}              # перелома у образца нет — петля одна на весь бит
     assert problems(solo, drums) == [] and "Перелом" not in about(solo) and "Вторая петля" not in about(solo), problems(solo, drums)
     note = about(looped)
-    assert "Петлю не растягивай: бит ровно в её темпе вдвое (85 → 170)" in note and f"• петля — {loop}" in note \
+    assert "Петля: 85 → 170, такт петли — два такта бита, без перегонки." in note and f"• петля — {loop}" in note \
         and f"• петля 2 — {two}" in note and "Петля молчит: такт 8, с 12.5 до 13" in note and "Перелом: с такта 9" in note, note
     assert f"Петля: звучат ноты {' '.join(heard[loop]['notes'])}; опора по её тактам — {' '.join(heard[loop]['roots'])}" in note \
         and "Вторая петля: звучат ноты" in note and "на слух не сверена" not in note, note
     assert _sounds(looped)["петля 2"] == two and "вторая половина" not in _when([(1, 5)]) and _when([(1, 5), (16, 17)]) == "такты 1–4, такт 16"
-    for bpm in (140, 172, 84):
-        assert "петлю не растягиваем" in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 85"
+    for bpm in (140, 60):           # петля на 85: 140 — это 170 на −3 полутона, 60 — 85 на −6
+        assert "сдвигом высоты не больше 2 полутонов: ей годится темп бита 74–98 или вдвое быстрее, 148–196" \
+            in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 85"
+    for bpm in (172, 84, 98):       # +0,2, −0,2 и +2,5 полутона — перегонка в пределах
+        assert "сдвигом высоты" not in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 85"
     for alien in ("KITS/01 - ASAP Rocky Kit/Loops/Lex Luger - Strings140.wav", loop.replace(LOOPS, "KITS/09 - Scene 2026 Kit")):
         assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": alien}, drums)), alien
     unheard = next(n for n in sorted(known()) if n.startswith(LOOPS) and loop_bpm(n) and n not in heard)
@@ -2517,7 +2656,7 @@ def _checks() -> None:
     assert "нет поля sample" in "\n".join(problems(ordered | {"order": ""}, drums)) and problems(ordered, drums) == [], problems(ordered, drums)
     assert problems(ordered | {"sounds": looped["sounds"] | {"мелодия": fxp}, "preset": {"мелодия": mine}}, drums) == [], "заказу список не указ"
     assert f"петля «{loop}»" in "\n".join(echoes(ordered, drums, looped, drums)), "а петля прошлого бита — повтор и у заказа"
-    assert "петлю не растягиваем" in "\n".join(problems(ordered | {"bpm": 140}, drums)), "заказ остальных правил не отменяет"
+    assert "сдвигом высоты не больше" in "\n".join(problems(ordered | {"bpm": 140}, drums)), "заказ остальных правил не отменяет"
     # Заказ «бит-брат трека» образец несёт: темп и рисунок сверяются с ним; утреннему биту образец заказа — брак
     twin = base | {"order": "собери бит брата", "sample": "брат"}
     assert problems(twin, demo()) == [], problems(twin, demo())
@@ -2641,6 +2780,14 @@ def _checks() -> None:
     bleed = "KITS/14 - 300 Subs Kit/Loops/BLEEDING G# MINOR 147.wav"
     assert (SHARED[gay], SHARED[bleed]) == (44, 29) and "такты 45–48 — бас автора" in "\n".join(_loop_note(morning)) \
         and "такты 30–33 — бас автора" in "\n".join(_loop_note(morning | {"loop": bleed, "bpm": 147})), "такт баса — свой у файла"
+    # Та же петля в бите на 140: перегнана на +1 полутон, и ноты партий сверяются уже с её сдвинутыми нотами — ноты,
+    # годные при 135, теперь мимо петли; записка называет сдвиг и ноты после него
+    up = transposed(heard[gay], 1)
+    assert not _loop(morning, share) and "на нотах, которых в петле нет" in "\n".join(_loop(morning | {"bpm": 140}, share)), \
+        _loop(morning | {"bpm": 140}, share)
+    said = "\n".join(_loop_note(morning | {"bpm": 140}))
+    assert "Петля: 135 → 140, перегнана: +1 полутон (скорость вместе с высотой) и растяжка на −2,1 %" in said \
+        and f"звучат ноты {' '.join(up['notes'])}; опора по её тактам — {' '.join(up['roots'])}" in said, said
     assert "два утра подряд нельзя" in "\n".join(echoes(morning, share, morning | {"loop": evil}, share)) \
         and "два утра подряд" not in "\n".join(echoes(morning, share, looped, drums)) \
         and "два утра подряд" not in "\n".join(echoes(shared, share, morning, share)), "blvckmorphine — не два утра подряд"
@@ -2800,6 +2947,7 @@ def main() -> None:
     p.add_argument("--net", action="store_true", help="ночной шаг: следующий источник из data/net_sources.json — в набор 11 (только Мак)")
     p.add_argument("--dry-run", action="store_true", help="с --net: что взял бы шаг, без загрузки звука и записи")
     p.add_argument("--loop", metavar="СЛОВО", help="замер петель с этим словом в имени: ноты, опоры по тактам, вторая петля на перелом")
+    p.add_argument("--bpm", type=int, help="с --loop: темп бита — сдвиг каждой петли под него и её ноты после сдвига")
     a = p.parse_args()
     if a.selftest:
         selftest()
@@ -2835,7 +2983,7 @@ def main() -> None:
         from . import set11
         print(set11.run(a.dry_run))
     elif a.loop:
-        print(loop_card(a.loop))
+        print(loop_card(a.loop, a.bpm))
     else:
         p.print_help()
 
