@@ -776,6 +776,8 @@ def publish_shift() -> None:
     Поломка выхода смену не роняет: бот важнее одного поста, следующий заход
     через PUSH_EVERY попробует снова.
     """
+    if publish.held():  # config.HOLD_DAYS: последним в ленте держится свой пост
+        return
     target = os.environ.get("PUBLISH_TARGET", "admin")
     # Бит недели — первым (bity.air, по понедельникам): так он забирает единственный звук дня
     # (publish.hushed); в воскресенье вечером тем же местом выходит итог недели (otbor.final).
