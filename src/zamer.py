@@ -557,7 +557,8 @@ def stack(y: np.ndarray, sr: int, bpm: float, cut: tuple[int, int]) -> dict:
         if rest is None:
             return out
         loud = c.sum((0, 1)) >= .0625 * np.percentile(c.sum((0, 1)), 90)
-        band = spec[(f >= 100) & (f < 8000)][:, loud]
+        frames = min(spec.shape[1], len(loud))      # CQT и STFT при иной длине слоя расходятся на кадр («wavwavwav», 17.10.2026)
+        band = spec[(f >= 100) & (f < 8000)][:, :frames][:, loud[:frames]]
         noise = np.median(np.exp(np.log(band + 1e-10).mean(0)) / (band.mean(0) + 1e-10)) > STACK_NOISE
         amp = np.sqrt(c.reshape(84, -1))
         voice = amp.copy()

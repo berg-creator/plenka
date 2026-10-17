@@ -12,6 +12,61 @@
    "taken": "06.10.2026 ночным шагом: 20 долгих нот секции скрипок с вибрато в Strings, 16 бит; две тихие отбор не пропустил"
   },
   {
+   "id": "musicradar-future-rave",
+   "name": "MusicRadar Future Rave",
+   "page": "https://www.musicradar.com/news/sampleradar-252-free-future-rave-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-future-rave-samples.zip",
+   "take": [{"folder": "Loops", "match": "/FR_[A-Za-z]+_(?P<bpm>160)-[ACDEG]\\.wav$"}],
+   "taken": "17.10.2026 под утренние биты на петле (Kai Angel, 9mice, MADK1D): синт-лиды 160 BPM, 15 синтов в двух тональностях — 30 файлов, 24 бит"
+  },
+  {
+   "id": "musicradar-ebm",
+   "name": "MusicRadar EBM",
+   "page": "https://www.musicradar.com/music-tech/samples/sampleradar-205-free-ebm-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/musicradar-sampleradar-EBM-samples.zip",
+   "take": [{"folder": "Loops", "match": "/EBM_(?:CarrionLead|HeimArp|OperArp|Glasswave|ClaySyn|CasiOperator|SawNoiser|BadVoice)_(?P<bpm>130|150)_[A-G]#?\\.wav$"}],
+   "taken": "в очереди ночного шага: мрачные арпы и лиды 130 и 150 BPM, 16 файлов"
+  },
+  {
+   "id": "musicradar-nasty-leads",
+   "name": "MusicRadar Nasty Leads",
+   "page": "https://www.musicradar.com/news/sampleradar-nasty-leads-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-nasty-leads-samples.zip",
+   "take": [{"folder": "Loops", "match": "/Nasty_Lead_Loops/NastyLead_Loop(?:0[1-9]|1[0-8]|2\\d|3[01])\\((?P<bpm>130)BPM\\)\\.wav$"}],
+   "taken": "в очереди ночного шага: грязные лиды 130 BPM, петли 1–31 без 19 (не в целых тактах) — 30 файлов"
+  },
+  {
+   "id": "musicradar-horrorscape",
+   "name": "MusicRadar Horrorscape",
+   "page": "https://www.musicradar.com/music-tech/samples/sampleradar-196-free-spooky-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-horrorscape-samples.zip",
+   "take": [{"folder": "Loops", "match": "/HT_(?:VideoOrgan|Piano|Cellos)_(?P<bpm>120|136)-[ACE]\\.wav$"}],
+   "taken": "в очереди ночного шага: орган, пианино и виолончели хоррор-саундтрека 120 и 136 BPM, 18 файлов; Glock и TubeBells не взяты — колокольчики сборка бракует как приторное"
+  },
+  {
+   "id": "musicradar-dubstep-05",
+   "name": "MusicRadar Dubstep 05",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-342-free-dubstep-samples-217768",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/Dubstep-kit-05-140bpm.zip",
+   "take": [{"folder": "Loops", "match": "/Synths n Keys/DS_(?:DubPi|Fizzer|TerrorMin)(?P<bpm>140)C-\\d+\\.wav$"}],
+   "taken": "в очереди ночного шага: синты и клавиши набора 05, 140 BPM, 15 файлов по 4 такта"
+  },
+  {
+   "id": "musicradar-industrial",
+   "name": "MusicRadar Industrial",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-500-free-industrial-samples-504614",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-industrial-samples.zip",
+   "take": [{"folder": "Loops", "match": "/(?:Lead Synth/Lines/LeadK02|Pad Synth/Lines/PadK02) (?P<bpm>140)(?:B|F#)-0[2-4]\\.wav$"},
+            {"folder": "Loops", "match": "/Organite/Lines/OrganiteK03 (?P<bpm>150)[AD]-\\d+\\.wav$"}],
+   "taken": "в очереди ночного шага: лиды и пэды 140 BPM, органит 150 BPM — 20 файлов; архив 490 МБ, у предела ARCHIVE_MB"
+  },
+  {
    "id": "musicradar-twisted-orchestra",
    "name": "MusicRadar Twisted Orchestra",
    "page": "https://www.musicradar.com/news/tech/sampleradar-300-free-twisted-orchestra-samples-260569",
