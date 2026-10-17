@@ -223,6 +223,162 @@
    "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
    "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-female-vocal-samples.zip",
    "taken": "06.10.2026 руками: 9 фраз в Vocals"
+  },
+  {
+   "id": "musicradar-tape-loops",
+   "name": "MusicRadar Tape Loops",
+   "page": "https://www.musicradar.com/news/sampleradar-tape-loops-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/sampleradar-tape-loops-samples.zip",
+   "take": [{"folder": "Loops", "match": "/TL_(?:PolyAnaSyn|TremStrings|PianoWarbler|ElecPiano|DigiSynth|ModuSynth|Mellotron|MonoSyn)_(?P<bpm>85)_[A-G]m?\\.wav$"},
+            {"folder": "Loops", "match": "/TL_(?:ElecPiano|Piano|Mellotron|PolySynth)_(?P<bpm>112)_[A-G]m?\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «дымка»: плёночные электропиано, пианино с плывущим строем, меллотрон, струнные и полисинты 85 и 112 BPM — в наборе петель: 17, 22 МБ"
+  },
+  {
+   "id": "musicradar-lofi-acoustic",
+   "name": "MusicRadar Lo-Fi Acoustic",
+   "page": "https://www.musicradar.com/news/sampleradar-free-lo-fi-acoustic-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/sampleradar-lo-fi-acoustic-sample-pack.zip",
+   "take": [{"folder": "Loops", "match": "/Piano/Loops/EPO Loop \\d+ \\((?P<bpm>120)BPM\\)\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «дымка»: петли лоу-фай электропиано EPO 120 BPM — в наборе петель: 23, 25 МБ"
+  },
+  {
+   "id": "musicradar-loved-up",
+   "name": "MusicRadar Loved-Up",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-307-free-loved-up-samples-250195",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-loved-up-samples.zip",
+   "take": [{"folder": "Loops", "match": "/Rhodes Piano/RhodesC(?P<bpm>74)C-\\d+\\.wav$"},
+            {"folder": "Loops", "match": "/Electric Piano/EPianoA(?P<bpm>82)E-\\d+\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «дымка»: родес 74 BPM и электропиано 82 BPM из соул-наборов — в наборе петель: 16, 25 МБ"
+  },
+  {
+   "id": "musicradar-city-nights",
+   "name": "MusicRadar City Nights",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-384-free-city-nights-samples-569490",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-city-nights-samples.zip",
+   "take": [{"folder": "Loops", "match": "/75bpm/(?:Synth n Keys|Guitar)/BLBC_(?:Rhodes|CokePad|TachePad|CleanGretsch)_(?P<bpm>75)[_-][A-G]\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «дымка»: родес, два пэда и чистая гитара Gretsch, 75 BPM — в наборе петель: 13, 19 МБ"
+  },
+  {
+   "id": "musicradar-guitar-drone",
+   "name": "MusicRadar Guitar Drone",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-216-free-guitar-drone-samples-627146",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-guitar-drone-samples.zip",
+   "take": [{"folder": "Loops", "match": "/DR_(?:LapSteelClean|LapCleanFX|GretschRing|GretschRingFX|CigarFlange|CigarFlangeFX)_(?P<bpm>140)-[A-G]\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «дымка»: гитарные дроны с флэнжером и кольцевой модуляцией, лэп-стил, 140 BPM — в наборе петель: 10, 4 МБ"
+  },
+  {
+   "id": "musicradar-psych-rock-synths",
+   "name": "MusicRadar Psych Rock Synths",
+   "page": "https://www.musicradar.com/news/sampleradar-free-psych-rock-synth-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/sampleradar-psych-rock-synths-sample-pack.zip",
+   "take": [{"folder": "Loops", "match": "/Synth-Keys Lines/(?P<bpm>75)bpm/PRS_(?:ElOrgan|Organ|MonoSynth)\\[75\\]-[A-G]\\d?\\.wav$"},
+            {"folder": "Loops", "match": "/Synth-Keys Lines/(?P<bpm>120)bpm/PRS_MTron(?:Pdls)?\\[120\\]-[A-G]\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «дымка»: психоделические органы и моносинт 75 BPM, меллотрон 120 BPM — в наборе петель: 4, 3 МБ"
+  },
+  {
+   "id": "musicradar-future-rave-140",
+   "name": "MusicRadar Future Rave",
+   "page": "https://www.musicradar.com/news/sampleradar-252-free-future-rave-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-future-rave-samples.zip",
+   "take": [{"folder": "Loops", "match": "/FR_[A-Za-z]+_(?P<bpm>140)-[ACDEG]\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «клуб»: синт-лиды future rave 140 BPM (160 BPM взяты раньше) — в наборе петель: 15, 13 МБ"
+  },
+  {
+   "id": "musicradar-euphoric-trance",
+   "name": "MusicRadar Euphoric Trance",
+   "page": "https://www.musicradar.com/news/sampleradar-free-euphoric-trance-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/sampleradar-old-school-euphoria-samples.zip",
+   "take": [{"folder": "Loops", "match": "^Old School Euphoria/\\d+bpm/OSE_[A-Za-z]+\\[(?P<bpm>132|140)\\]_[A-G]\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «клуб»: транс-арпеджио, струнные и стабы 132 и 140 BPM — в наборе петель: 16, 28 МБ"
+  },
+  {
+   "id": "musicradar-rave-synths",
+   "name": "MusicRadar Rave Synths",
+   "page": "https://www.musicradar.com/music-tech/samples/sampleradar-505-free-rave-synths-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-rave-synths-samples.zip",
+   "take": [{"folder": "Loops", "match": "^Rave Synths/Loops/(?:Synth|String|Piano)_\\d+\\((?P<bpm>130|135)BPM\\)\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «клуб»: рейв-синты, рейв-пианино и струнные 130 и 135 BPM — в наборе петель: 10, 6 МБ"
+  },
+  {
+   "id": "musicradar-instant-hooks",
+   "name": "MusicRadar Instant Hooks",
+   "page": "https://www.musicradar.com/news/sampleradar-instant-hooks-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/sampleradar-instant-hooks-samples.zip",
+   "take": [{"folder": "Loops", "match": "/Synths/140bpm/IH_[A-Za-z]+_(?P<bpm>140)-[A-G]\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «клуб»: синт-хуки 140 BPM — в наборе петель: 19, 11 МБ"
+  },
+  {
+   "id": "musicradar-00s-synths",
+   "name": "MusicRadar 00s Synths",
+   "page": "https://www.musicradar.com/news/sampleradar-00s-synth-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/sampleradar-00s-synth-samples.zip",
+   "take": [{"folder": "Loops", "match": "/(?:Arps|Pads and Polys)/140bpm/00s_[A-Za-z]+\\[(?P<bpm>140)\\]-[A-G]\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «клуб»: арпеджио и суперсо-пэды 140 BPM — в наборе петель: 7, 12 МБ"
+  },
+  {
+   "id": "musicradar-emo-112",
+   "name": "MusicRadar Emo",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-451-free-emo-samples-479864",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-emo-samples.zip",
+   "take": [{"folder": "Loops", "match": "/Kit05 112bpm/Lead Guitar/EMOK5LeadGuit[AB](?P<bpm>112)E-\\d+\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «грустный»: лид-гитары набора 05, 112 BPM, только минор по замеру (наборы 86 и 155 BPM взяты 06.10) — в наборе петель: 3, 2 МБ"
+  },
+  {
+   "id": "musicradar-songwriter",
+   "name": "MusicRadar Songwriter",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-235-free-songwriters-samples-284852",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-songwriter-samples.zip",
+   "take": [{"folder": "Loops", "match": "/Guitar/120bpm/SST_AgPatt(?P<bpm>120)[A-G]-0[1-4]\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «грустный»: акустическая гитара переборами 120 BPM, по четыре на тональность, только минор по замеру — в наборе петель: 6, 6 МБ"
+  },
+  {
+   "id": "musicradar-broken-piano",
+   "name": "MusicRadar Broken Piano",
+   "page": "https://www.musicradar.com/news/sampleradar-488-free-broken-piano-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-broken-piano-samples.zip",
+   "take": [{"folder": "Loops", "match": "/Loops/Loop \\d+ \\((?P<bpm>120)BPM\\)\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «грустный»: петли разбитого пианино 120 BPM, только минор по замеру — в наборе петель: 1, 1 МБ"
+  },
+  {
+   "id": "musicradar-emo-105",
+   "name": "MusicRadar Emo",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-451-free-emo-samples-479864",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-emo-samples.zip",
+   "take": [{"folder": "Loops", "match": "/Kit02 105bpm/Lead Guitar/EMOK2LeadGuit(?P<bpm>105)D-\\d+\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «грустный»: лид-гитары набора 02, 105 BPM, только минор по замеру — в наборе петель: 1, 1 МБ"
+  },
+  {
+   "id": "musicradar-songwriter-90",
+   "name": "MusicRadar Songwriter",
+   "page": "https://www.musicradar.com/news/tech/sampleradar-235-free-songwriters-samples-284852",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/musicradar-songwriter-samples.zip",
+   "take": [{"folder": "Loops", "match": "/Guitar/90bpm/SST_AgPatt(?P<bpm>90)[A-G]-\\d+\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «грустный»: акустическая гитара переборами 90 BPM, только минор по замеру — в наборе петель: 23, 31 МБ"
+  },
+  {
+   "id": "musicradar-lofi-acoustic-piano",
+   "name": "MusicRadar Lo-Fi Acoustic",
+   "page": "https://www.musicradar.com/news/sampleradar-free-lo-fi-acoustic-samples",
+   "terms": "royalty-free: в музыке — как угодно, раздавать файлы дальше нельзя",
+   "archive": "https://cdn.mos.musicradar.com/audio/samples/sampleradar-lo-fi-acoustic-sample-pack.zip",
+   "take": [{"folder": "Loops", "match": "/Piano/Loops/Piano Loop \\d+ \\((?P<bpm>100)BPM\\)\\.wav$"}],
+   "taken": "17.10.2026 руками под настроение «грустный»: лоу-фай пианино 100 BPM, только минор по замеру — в наборе петель: 4, 5 МБ"
   }
  ]
 }
