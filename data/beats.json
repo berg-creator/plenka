@@ -122,13 +122,13 @@
     "bpm": 85,
     "clip": "BAACAgIAAxkDAAIZlmrTK5rPpjPiDg4TlRNyrxyQFS-PAAIJrwACp8SYShnWy8fi-YKWPQQ",
     "day": "2026-10-17",
-    "file_id": "CQACAgIAAxkDAAIZlWrTK13euKgmwfl9719ewKmg3cLOAAIFrwACp8SYSgABGzLQJVxxfD0E",
+    "file_id": "BQACAgIAAxkDAAIZnWrTLJ-TwEjMMnHKz3Pkj3Q1Pib1AAISrwACp8SYSriwfoIf5b3gPQQ",
     "key": "Dm",
-    "kind": "audio",
-    "message": 6549,
-    "name": "Маска_MF_DOOM_85_Dm_prod_ПЛЁНКА.mp3",
+    "kind": "document",
+    "message": 6557,
+    "name": "Маска_MF_DOOM_85_Dm_prod_ПЛЁНКА.wav",
     "photo": 18087917,
-    "size": 6326469,
+    "size": 45540102,
     "title": "Маска",
     "video": true
   }
