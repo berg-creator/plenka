@@ -154,7 +154,8 @@ def hear(models: list[str], prompt: str, audio: Path, schema: dict) -> dict:
         candidate = (data.get("candidates") or [{}])[0]
         text = "".join(part.get("text", "") for part in candidate.get("content", {}).get("parts") or [])
         try:
-            return json.loads(text)
+            # Кто ответил — в ответ: квота у моделей своя, и балл запасной модели с баллом основной не сравнить.
+            return {**json.loads(text), "model": model}
         except json.JSONDecodeError:
             reason = data.get("promptFeedback", {}).get("blockReason") or candidate.get("finishReason")
             errors.append(f"{model}: неразборчивый ответ ({reason}): {text[:200]!r}")

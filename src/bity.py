@@ -1223,7 +1223,7 @@ def ear() -> int:
             heard += 1
             print(f"{beat_id:>2}  {beat['title']:<8} {said.get('score', '?'):>4}  "
                   f"{said.get('bpm', '?')}/{beat.get('bpm') or '?':<14} {said.get('verdict', '')}\n"
-                  f"    тип ({artists}): {said.get('fits', '')}\n"
+                  f"    модель: {said['model']}; тип ({artists}): {said.get('fits', '')}\n"
                   f"    дёшево/пусто: {said.get('cheap', '')}\n"
                   f"    не хватает: {said.get('missing', '')}")
     return 0 if heard else 1
