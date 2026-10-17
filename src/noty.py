@@ -1345,7 +1345,8 @@ def _sample(info: dict, tracks: dict[str, list[N]]) -> list[str]:
 
 def approved() -> tuple[set[str], set[str]]:
     """Звуки и петли музыки, которые владелец прослушал и одобрил (08.10.2026: «звуки все в целом норм»), —
-    data/beat_music.json: одиночные звуки наборов 12 и 13 и петли набора 12."""
+    data/beat_music.json: одиночные звуки наборов 12 и 13 и петли набора 12. Синт-петли Trap набора 01 владелец 17.10.2026
+    пустил туда словами «возьми петли которые у нас уже есть в китах», не прослушав: отобраны по замеру (3–8 нот)."""
     from . import config, state
     data = state.read_json(config.BEAT_MUSIC, {})
     data = data if isinstance(data, dict) else {}
