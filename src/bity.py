@@ -129,9 +129,9 @@ WIDTH, HEIGHT = 1920, 1080
 # владелец 02.10.2026. Невышедших фото меньше PHOTOS_LOW — строка владельцу под превью.
 PHOTO_BOX, WORD_FONT, WORD_WIDTH, WORD_SIZE, PHOTOS_LOW = (1440, HEIGHT), stories.FONTS / "Playfair.ttf", 0.74, (420, 120), 5
 # Настроение бита — последнее слово подписи («…, 142 Em, злой»), его же подсказывает записка нот (noty.MOODS).
-# Фото запаса несут своё полем mood (без поля — «обычный»), злому слово — рубленым Oswald 700: тёплый
+# Фото запаса несут своё полем mood (без поля — для бита без настроения), злому слово — рубленым Oswald 700: тёплый
 # портрет и книжная антиква читались добрыми, а у чужих type beat'ов пары кадр холодный (владелец, 03.10.2026).
-MOOD = re.compile(r",\s*(?P<mood>злой|кино|обычный)\s*$", re.IGNORECASE)
+MOOD = re.compile(r",\s*(?P<mood>злой|грустный|дымка|клуб)\s*$", re.IGNORECASE)
 WORD_FONTS = {"злой": (stories.FONTS / "Oswald.ttf", 700, 240)}  # шрифт, вес, кегль не больше: узкий Oswald в ширину
 # WORD_WIDTH вырастал до половины кадра и закрывал лицо
 # Запасной кадр config.BEAT_BACK: где у спин середина и на какой линии стоит имя в одну строку, сколько спина
@@ -652,7 +652,7 @@ def photo(beat: dict) -> dict | None:
 
 
 def _mood(item: dict) -> str:
-    return item.get("mood", "обычный")
+    return item.get("mood", "")
 
 
 def _picture(url: str) -> Image.Image:
@@ -1010,7 +1010,7 @@ def _selftest() -> None:
         # Значок: фото запаса 4:3 по центру чёрного кадра и белое слово названия; фото записано за битом
         # при приёме, следующему биту — следующее; сеть не трогается.
         assert load()["1"]["photo"] == 11 and photo({"title": "Новый"})["id"] == 22
-        assert photo({"title": "Новый", "mood": "злой"})["id"] == 33 and photo({"title": "Новый", "mood": "кино"}) is None
+        assert photo({"title": "Новый", "mood": "злой"})["id"] == 33 and photo({"title": "Новый", "mood": "клуб"}) is None
         frame = cover(load()["1"])
         assert frame.size == (WIDTH, HEIGHT) and frame.getpixel((100, 540)) == (0, 0, 0)
         assert frame.getpixel((960, 300)) == (90, 60, 40) and asked == ["https://photo/11"], asked

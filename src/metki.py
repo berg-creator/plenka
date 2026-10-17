@@ -51,7 +51,8 @@ from . import config, noty, state
 # Западные корни русских артистов (bity.ROOTS): звук образцов утреннего бита — с запада (владелец 17.10.2026),
 # в like образца есть и корень, и русские имена, поэтому прежние метки под русских тоже работают.
 ARTISTS = ("Playboi Carti", "Don Toliver", "2hollis", "Kanye West")
-MOODS = ("злой", "кино", "обычный")
+# Настроения — звуки западных корней (владелец 17.10.2026, вместо «злой, кино, обычный»: «обычный» о звуке не говорил).
+MOODS = ("злой", "грустный", "дымка", "клуб")
 ROLES = tuple(noty.ROLE_WORDS)      # порядок карточек барабанов: бочки, 808, клэп и снейр, хэт, открытый хэт, перки
 PORT = 8765
 MESSAGE = "звуки: метки владельца"
@@ -406,7 +407,7 @@ const q = p => p + '?k=' + encodeURIComponent(K);
 const post = (p, b) => fetch(q(p), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)});
 const $ = id => document.getElementById(id);
 const ART_KEYS = ['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9','Digit0','KeyQ','KeyW','KeyE','KeyR','KeyT'];
-const ART_HINT = '1234567890QWERT', MOOD_KEYS = ['KeyA','KeyS','KeyD'], MOOD_HINT = 'ASD';
+const ART_HINT = '1234567890QWERT', MOOD_KEYS = ['KeyA','KeyS','KeyD','KeyF'], MOOD_HINT = 'ASDF';
 const SEMI = [0, 0, 0, 3, 0, 0, -2, -2];        // 808: три высоты по долям двух тактов
 let C = [], queue = [], hist = [], LOOPS = [], ARTISTS = [], MOODS = [], loopAt = 0;
 let cur = null, like = new Set(), mood = new Set(), ctx = null, live = [], timer = null, busy = false;
