@@ -51,11 +51,23 @@ BEAT_CREDIT, и кнопкой «🎚 Свести с этим битом» от
     python -m src.bity --selftest
     python -m src.bity --video БИТ.wav --title "Kizaru x Toxi$ — Полёт, 140 Fm" --out ПАПКА   ролик, превью и тексты без Telegram
     python -m src.bity --demand [АРТИСТ ...]   под кого делать бит: сколько смотрят type beat'ы за месяц
+    python -m src.bity --ear   проба: балл Gemini на слух каждому биту каталога (только из Actions, health.yml)
+
+Проба --ear (17.10.2026) отвечает на вопрос владельца, может ли Gemini утром слушать
+собранный бит: прежде чем строить такой конвейер, надо знать, отличает ли модель
+на слух биты, которые владелец хвалил, от тех, что ругал. Бит из каталога — WAV
+30–50 МБ: больше 20 МБ Bot API не отдаёт, поэтому качает служебный вход бота, но
+входом по токену заново, без ключа дежурства (тот, открытый дважды, Telegram гасит).
+Gemini берёт вложение до 20 МБ, поэтому бит уходит MP3. Темп модель называет
+на слух, а в задании его нет: совпал с каталогом — она правда слушала. Ничего
+не пишет ни в канал, ни владельцу, ни в состояние; запуск только руками —
+бесплатная квота Gemini общая с постами канала.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import html
 import io
 import math
@@ -1155,6 +1167,68 @@ def _selftest() -> None:
           "бит на чужой петле (поле loop) — условия её автора вместо «бесплатно, и для релиза тоже», без free for profit — ок")
 
 
+EAR_PROMPT = """Ты — битмейкер и A&R: каждый день слушаешь type beat'ы на YouTube и честно говоришь,
+какой артист возьмёт, а какой пролистают. Перед тобой бит, выложенный как «{artists} type beat».
+Послушай его целиком.
+
+Оценивай строго, как соседей по выдаче YouTube:
+9–10 — на уровне лучших type beat'ов под этих артистов, артист взял бы сразу;
+7–8 — крепко, можно выкладывать;
+5–6 — средне, ничем не цепляет;
+3–4 — любительски: дёшево, пусто или приторно;
+1–2 — брак.
+Середина шкалы — для среднего бита, а не для любого. Не будь вежлив.
+
+Пиши по-русски и коротко, только о том, что слышно в этом звуке: никаких общих слов,
+которые подошли бы к любому биту.
+bpm — темп на слух, целым числом;
+fits — похоже ли это на звук этих артистов и чем;
+cheap — что звучит дёшево, приторно или пусто: какой звук, в какой части;
+missing — чего не хватает, чтобы бит взяли;
+verdict — одна фраза;
+score — балл от 1 до 10."""
+
+EAR_SCHEMA = {
+    "type": "object",
+    "properties": {name: {"type": "integer" if name in ("bpm", "score") else "string"}
+                   for name in ("bpm", "fits", "cheap", "missing", "verdict", "score")},
+    "required": ["bpm", "fits", "cheap", "missing", "verdict", "score"],
+}
+
+
+def ear() -> int:
+    """Проба --ear: каждому биту каталога — балл Gemini на слух, таблицей в лог."""
+    from .llm import gemini_models
+    from .providers import gemini
+
+    heard = 0
+    print(f"{'№':>2}  {'бит':<8} балл  темп слух/каталог  вердикт")
+    with tempfile.TemporaryDirectory(prefix="ear-") as tmp, contextlib.ExitStack() as stack:
+        client = None
+        for beat_id, beat in sorted(load().items(), key=lambda pair: int(pair[0])):
+            artists = " x ".join(beat["artists"])
+            raw = Path(tmp) / f"{beat_id}{Path(beat['name']).suffix.lower()}"
+            mp3 = Path(tmp) / f"{beat_id}-ear.mp3"
+            try:
+                if 0 < beat["size"] <= telegram.MAX_DOWNLOAD:
+                    raw.write_bytes(telegram.download_file(beat["file_id"]))
+                else:
+                    client = client or stack.enter_context(telegram.service_login())
+                    raw = telegram.fetch_big(client, beat["message"], raw)
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-b:a", "192k", str(mp3)], check=True)
+                said = gemini.hear(gemini_models(), EAR_PROMPT.format(artists=artists), mp3, EAR_SCHEMA)
+            except Exception as exc:  # проба: один бит не прошёл — остальные всё равно слушаются
+                print(f"{beat_id:>2}  {beat['title']:<8} пропуск: {exc}")
+                continue
+            heard += 1
+            print(f"{beat_id:>2}  {beat['title']:<8} {said.get('score', '?'):>4}  "
+                  f"{said.get('bpm', '?')}/{beat.get('bpm') or '?':<14} {said.get('verdict', '')}\n"
+                  f"    тип ({artists}): {said.get('fits', '')}\n"
+                  f"    дёшево/пусто: {said.get('cheap', '')}\n"
+                  f"    не хватает: {said.get('missing', '')}")
+    return 0 if heard else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Биты владельца: каталог, ссылка в боте, ролик для YouTube")
     parser.add_argument("--selftest", action="store_true", help="самопроверка без сети и Telegram")
@@ -1163,6 +1237,8 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=Path("bity-out"), help="папка для ролика и превью")
     parser.add_argument("--demand", nargs="*", metavar="АРТИСТ", help="под кого делать бит: сколько смотрят type beat'ы "
                         "за месяц под названных и под русскоязычных артистов канала на подъёме")
+    parser.add_argument("--ear", action="store_true", help="проба: балл Gemini на слух каждому биту каталога, "
+                        "таблицей в лог (только из Actions: из России Gemini не отвечает)")
     parser.add_argument("--render", help=argparse.SUPPRESS)  # так ролик запускает дежурство (tick)
     args = parser.parse_args()
     if args.selftest:
@@ -1170,6 +1246,8 @@ def main() -> int:
         return 0
     if args.render:
         return render(args.render)
+    if args.ear:
+        return ear()
     if args.demand is not None:
         local = [artist for artist in collect.load_artists() if artist.get("tier") in DEMAND_TIERS]
         if load():

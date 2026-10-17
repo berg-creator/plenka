@@ -101,6 +101,7 @@ python -m src.noty --loop SixStr120B-01   что замер знает о пет
 ~/.cache/whisper-venv/bin/python -m src.zamer --root ФАЙЛ…   на какой ноте записан одиночный звук: уверен — нота, не уверен — молчит (только Мак; так отобраны звуки набора 12)
 ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ --color   ещё и цвет музыки: яркость, регистр, атаки, смены аккорда, шум, верха (сравнение с референсами звука)
 ~/.cache/whisper-venv/bin/python -m src.zamer ФАЙЛ… --group ГРУППА --out zamer.json   замер чужих битов для скелетов prompts/beats.md (только Мак, demucs; раз в месяц — NEXT.md)
+python -m src.bity --ear               проба: балл Gemini на слух каждому биту каталога, что дёшево и чего не хватает, темп на слух — таблицей в лог; только из Actions (health.yml, вход ear), ничего не пишет
 python -m src.bity --demand [АРТИСТ ...]  под кого делать бит: сколько за месяц смотрят рядовой type beat под названных и под русскоязычных артистов на подъёме
 python -m src.bity --video БИТ --title "Kizaru x Toxi$ — Полёт, 140 Fm" --out ПАПКА  живой ролик 1920×1080, превью 1280×720 и тексты для YouTube, без Telegram
 python -m src.skleyka --beats Kizaru --bpm 142   то же в темпе голоса: BPM из описаний, чужой темп прочь
