@@ -140,7 +140,19 @@
    "dev_change_every": 4.0,
    "dev_drums_off": 14,
    "dev_bass_off": 11,
-   "dev_music_off": 1
+   "dev_music_off": 1,
+   "kit": {
+    "Claps": [
+     2835,
+     5.1,
+     0.385
+    ],
+    "Hats": [
+     9628,
+     8.0,
+     0.351
+    ]
+   }
   },
   "note": ""
  },
@@ -451,7 +463,19 @@
    "dev_change_every": 1.0,
    "dev_drums_off": 6,
    "dev_bass_off": 1,
-   "dev_music_off": 15
+   "dev_music_off": 15,
+   "kit": {
+    "Claps": [
+     3596,
+     12.5,
+     0.42
+    ],
+    "Hats": [
+     8620,
+     8.4,
+     0.228
+    ]
+   }
   },
   "note": ""
  },
@@ -597,7 +621,19 @@
    "dev_change_every": 8.0,
    "dev_drums_off": 18,
    "dev_bass_off": 12,
-   "dev_music_off": 2
+   "dev_music_off": 2,
+   "kit": {
+    "Claps": [
+     2867,
+     1.2,
+     0.415
+    ],
+    "Hats": [
+     9366,
+     16.4,
+     0.249
+    ]
+   }
   },
   "note": "автор темп и тональность не назвал, bpm — замер (on_grid 0.97)"
  },
@@ -733,7 +769,14 @@
    "dev_change_every": 16.0,
    "dev_drums_off": 34,
    "dev_bass_off": 2,
-   "dev_music_off": 2
+   "dev_music_off": 2,
+   "kit": {
+    "Claps": [
+     2804,
+     9.8,
+     0.366
+    ]
+   }
   },
   "note": ""
  },
@@ -898,7 +941,14 @@
    "dev_change_every": 3.0,
    "dev_drums_off": 19,
    "dev_bass_off": 2,
-   "dev_music_off": 0
+   "dev_music_off": 0,
+   "kit": {
+    "Hats": [
+     9923,
+     5.7,
+     0.376
+    ]
+   }
   },
   "note": "перемерено с подсказкой темпа 125 (автор): без неё замер давал 166.7, on_grid 0.38"
  },
@@ -1059,7 +1109,8 @@
    "dev_change_every": 2.0,
    "dev_drums_off": 7,
    "dev_bass_off": 13,
-   "dev_music_off": 4
+   "dev_music_off": 4,
+   "kit": {}
   },
   "note": "on_grid 0.47 ниже 0.6, темп взят по слову автора (замер совпал ровно); kick_per_bar=0 при low_per_bar=3: бочку замер не отделил от 808, а не 'бочки нет'"
  },
@@ -1214,7 +1265,14 @@
    "dev_change_every": 5.5,
    "dev_drums_off": 13,
    "dev_bass_off": 0,
-   "dev_music_off": 6
+   "dev_music_off": 6,
+   "kit": {
+    "Claps": [
+     2460,
+     2.8,
+     0.235
+    ]
+   }
   },
   "note": ""
  },
@@ -1343,7 +1401,19 @@
    "dev_change_every": 6.0,
    "dev_drums_off": 12,
    "dev_bass_off": 5,
-   "dev_music_off": 0
+   "dev_music_off": 0,
+   "kit": {
+    "Claps": [
+     3147,
+     4.6,
+     0.479
+    ],
+    "Hats": [
+     10139,
+     5.0,
+     0.328
+    ]
+   }
   },
   "note": "перемерено с подсказкой темпа 93 (автор): без неё замер давал 148.8, on_grid 0.41"
  },
@@ -1573,7 +1643,14 @@
    "dev_change_every": 1.0,
    "dev_drums_off": 12,
    "dev_bass_off": 21,
-   "dev_music_off": 8
+   "dev_music_off": 8,
+   "kit": {
+    "Claps": [
+     3059,
+     1.7,
+     0.475
+    ]
+   }
   },
   "note": "views — на 08.10 с самого ролика, не из поиска 07.10"
  },
@@ -1701,7 +1778,14 @@
    "dev_change_every": 24.0,
    "dev_drums_off": 1,
    "dev_bass_off": 4,
-   "dev_music_off": 3
+   "dev_music_off": 3,
+   "kit": {
+    "Claps": [
+     3009,
+     3.9,
+     0.42
+    ]
+   }
   },
   "note": "kick_per_bar=0 при low_per_bar=2: бочку замер не отделил от 808, а не 'бочки нет'; автор темп не назвал, bpm — замер; музыка шумная (col_air 0.19, шум 0.17), атака 197 мс — медленный пэд, 808 длиной 4.2; views — на 08.10 с самого ролика"
  },

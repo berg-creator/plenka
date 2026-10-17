@@ -56,6 +56,14 @@
 основной тон слышен в спектре — не сошлось хоть одно, ноты нет, и звук в список сборки не идёт.
 Отвергнуто: брать громчайший класс высот хромы — у аккорда и у колокола с негармоничными призвуками он тоже есть.
 
+Тембр барабанов (`--tembr`, `kit`, 17.10.2026; владелец об утреннем бите «Отбой»: «драмка будто вообще не подходит к этому
+биту»). Рисунок образца сверялся, звук — нет. Удар меряется тремя числами в полосе своей роли от пика огибающей (`_strike`):
+яркость, спад за 40 мс, шум; одиночный звук библиотеки (`tembr`) и удар в стеме барабанов образца (`kit`) — одной функцией.
+Проверка — 22 синтетические смеси: известные звуки библиотеки, петля и 808 → AAC 128 → demucs → удары по `measure` →
+на каком месте среди звуков своей роли оказался настоящий. Хэт и клэп находятся (`KIT_SPREAD`), бочка — нет (`kit`).
+Отвергнуто: мерить удар во всю полосу — бочка под хэтом давала хэту яркость 3–5 кГц вместо 9–10; доля низа и атака —
+с ними настоящий звук находился реже: низ бочки demucs отдаёт басу, а атаку ударов окно 5 мс не различает.
+
 Тяжёлое (demucs, librosa) есть только на Маке, как у src/quiz_ai.py, — запуск оттуда же:
 
     ~/.cache/whisper-venv/bin/python -m src.zamer --selftest             замер на синтетическом бите с известным рисунком
@@ -66,6 +74,7 @@
     ~/.cache/whisper-venv/bin/python -m src.zamer --loops                переписать замер петель в data/beat_sounds.json (только Мак)
     ~/.cache/whisper-venv/bin/python -m src.zamer --loops "11 - Сеть"    то же, но только петли с этим словом в имени: прочие не читаются
     ~/.cache/whisper-venv/bin/python -m src.zamer --root ФАЙЛ…           корневая нота одиночных звуков; «неуверенно» — в список не идёт
+    ~/.cache/whisper-venv/bin/python -m src.zamer --tembr                тембр барабанов и 808 списка в data/beat_sounds.json, поле tembr (только Мак)
 
 Чужой звук — только для замера: стемы пишутся во временную папку и удаляются сразу.
 """
@@ -105,6 +114,23 @@ ROOT_FUND = .1                             # доля основного тон�
 STACK_NOISE = .25                          # плоскостность спектра слоя в 100–8000 Гц: выше — шум, нот в слое нет
 STACK_TAIL = 40                            # хвост слоя — до стольких дБ ниже его уровня, в пустом такте после него
 DATALESS = 0x40000000                      # st_flags заглушки iCloud (SF_DATALESS): чтение повисло бы на скачивании
+# Тембр удара (`tembr`, `kit`) — в полосе своей роли, чтобы в смеси сосед не читался вместе с ударом: хэт выше 5 кГц не слышит
+# бочку под собой, клэп в 0,8–6 кГц — хэт поверх себя. Полосы и пороги — расчёт по 22 синтетическим смесям (известные звуки
+# библиотеки, петля, 808 → AAC 128 → demucs, 17.10.2026): в первых восьми клэп в полосе 1–16 кГц оказался в ближайшей
+# десятой части своих звуков в 3 смесях, в 0,8–6 кГц — в 5
+BANDS = {"Kicks": (30, 2000), "808s": (20, 2000), "Claps": (800, 6000), "Hats": (5000, 16000), "Open Hats": (5000, 16000),
+         "Percs": (200, 16000)}
+KIT_HITS = 8                               # ударов роли в окне меньше — тембра нет
+# Спад глубже 40 дБ за 40 мс — удар кончился: в смеси под ним всегда есть дно, а в файле — цифровой ноль (у 64 звуков до 185 дБ)
+KIT_DROP = 40
+# Разброс ударов (межквартильный) — не шире разброса звуков библиотеки той же роли. Шире — в полосе не один звук.
+# На синтетике с этим порогом и `KIT_ROOM` звук нашёлся в ближайшей десятой части своей роли у хэта в 11 пробах из 12,
+# у клэпа — в 11 из 14; без порогов — в 13 из 19 и 12 из 22. ponytail: синтетика сухая, у образца реверб и слои — проверит владелец
+KIT_SPREAD = 1.0
+# Между ударами роли (там, где до следующего больше 100 мс) полоса стихает хотя бы на столько дБ ниже пика удара. Иначе спад
+# не меряется: хэт тонет в реверберации, шуме или протёкшей музыке. В синтетике запас был от 17 дБ, у хэта образца
+# «ХВАТИТ» (F3P51musFE0) — 5: его тембр замер не пишет
+KIT_ROOM = 15
 
 
 def _run(*cmd) -> None:
@@ -378,6 +404,7 @@ def measure(drums: np.ndarray, bass: np.ndarray, other: np.ndarray, hint: float 
         # Кино (02.10.2026): остинато — соседние такты похожи по хроме; нарастание — мелодия к концу окна громче.
         # ponytail: окно 90 секунд, а не весь трек, и громкость, а не число слоёв — слои demucs не делит
         mel_same=round(float(sims[1]), 2), mel_rise=round(float(20 * np.log10((rise[-1] + 1e-9) / (rise[0] + 1e-9))), 1),
+        _hits=dict(Kicks=kt, Claps=strong, Hats=ht),       # секунды окна — для тембра (`kit`), в замер не идут
     )
 
 
@@ -430,6 +457,113 @@ def color(other: np.ndarray, bpm: float | None, bar0: float = 0.0) -> dict:
         out.update(col_notes_bar=round(len(hits) / (len(other) / SR / bar), 1),
                    col_chords_8=round(sum(a != b for a, b in zip(chords, chords[1:])) / max(len(chords) - 1, 1) * 8, 1))
     return out
+
+
+def _strike(band: np.ndarray, env: np.ndarray, peak: int, kind: str, room: float | None = None) -> list | None:
+    """Тембр одного удара от пика огибающей в полосе роли: яркость, спад за 40 мс, шум, длина до −30 дБ.
+    band — сигнал в полосе роли, env — его огибающая, peak — её пик, room — секунд до следующего удара (в смеси хвост
+    за ним не меряется: спада или длины тогда нет, None)."""
+    lo, hi = BANDS[kind]
+    db = 20 * np.log10(env[peak:len(env) if room is None else min(len(env), peak + int(room * SR))] / env[peak])
+    below = np.flatnonzero(db < -30)
+    a = band[max(0, peak - int(.002 * SR)):peak + int(.048 * SR)]
+    if len(a) < 256:
+        return None
+    f = np.fft.rfftfreq(len(a), 1 / SR)
+    inside = (f >= lo) & (f < hi)
+    spec = np.abs(np.fft.rfft(a * np.hanning(len(a))))[inside]
+    power = spec ** 2 + 1e-20
+    return [float((f[inside] * spec).sum() / (spec.sum() + 1e-12)),
+            min(float(-db[int(.04 * SR)]), KIT_DROP) if int(.045 * SR) < len(db) else None,
+            float(np.exp(np.log(power).mean()) / power.mean()),
+            float(below[0] / SR) if len(below) else None]
+
+
+def _banded(y: np.ndarray, kind: str) -> tuple[np.ndarray, np.ndarray]:
+    """Сигнал в полосе роли и его огибающая (среднеквадратичное в окне 5 мс, по значению на отсчёт)."""
+    from scipy.ndimage import uniform_filter1d
+    from scipy.signal import butter, sosfiltfilt
+    band = sosfiltfilt(butter(4, BANDS[kind], "bandpass", fs=SR, output="sos"), np.asarray(y, np.float64))
+    return band, np.sqrt(np.maximum(uniform_filter1d(band * band, int(.005 * SR)), 0) + 1e-20)
+
+
+def tembr(path: Path, kind: str) -> list | None:
+    """Тембр одиночного звука библиотеки (`_strike`) по первому удару файла, а не по самому громкому: у звука с эхом
+    громче бывает повтор. Длина — до трёх секунд. Тишина — None."""
+    import io
+    import librosa
+    import soundfile as sf
+    raw = Path(path).read_bytes()
+    # Часть Horrorcore набора 03 — Ogg Vorbis в обёртке WAV (метка формата 0x674F): так сохраняет FL, а libsndfile такой WAV
+    # не открывает — читается сам поток Ogg
+    y, sr = sf.read(io.BytesIO(raw[raw.find(b"OggS"):] if raw[20:22] == b"Og" else raw), dtype="float32", always_2d=True)
+    y = librosa.resample(y.mean(1), orig_sr=sr, target_sr=SR) if sr != SR else y.mean(1)
+    if not np.abs(y).max():
+        return None
+    y = np.r_[np.zeros(2048), y[:3 * SR], np.zeros(SR)]       # тишина по краям: фильтр полосы не съест удар
+    band, env = _banded(y, kind)
+    first = int(np.flatnonzero(env >= .1 * env.max())[0])
+    row = _strike(band, env, first + int(env[first:first + int(.03 * SR)].argmax()), kind)
+    return row and row[:3] + [min(row[3] or 3.0, 3.0)]        # не догас за три секунды — длина 3
+
+
+def kit(drums: np.ndarray, hits: dict) -> dict:
+    """Тембр барабанов образца: хэт и клэп (с ним — снейр: одна доля, одна полоса) — медиана ударов роли, которые нашёл
+    `measure`, кроме тех, где ближе 30 мс бьёт другая роль (бочка под хэтом читалась бы хэтом). drums — стем, моно.
+    Пишется только надёжное: ударов не меньше `KIT_HITS`, между ударами полоса стихает (`KIT_ROOM`) и разброс ударов
+    не шире разброса библиотеки (`KIT_SPREAD`) — иначе в полосе роли не один звук (слои, открытый хэт, перкуссия, реверб),
+    и медиана — ничей тембр.
+    Бочки здесь нет намеренно: на синтетике её звук нашёлся в ближайшей десятой части библиотеки в 8 пробах из 14,
+    а дальше всего промахивался на гудящих и тональных бочках («E808_BD», «Buzz Bass F#2», «Lo-Fi - C»): их низ demucs
+    отдаёт басу, и замер видит другую бочку. 808, открытый хэт и перкуссию замер от соседей не отделяет.
+    Без замера библиотеки (`noty.kit_scale`) — пусто."""
+    from . import noty
+    out = {}
+    for kind, others in (("Claps", ("Kicks",)), ("Hats", ("Kicks", "Claps"))):
+        scale = noty.kit_scale(kind)
+        times, near = np.asarray(hits[kind], float), np.sort(np.r_[[], *(hits[o] for o in others)])
+        every, (band, env), rows = np.sort(np.r_[times, near]), _banded(drums, kind), []
+        for t in times:
+            a, b = int((t - .01) * SR), int((t + .025) * SR)
+            if (len(near) and np.abs(near - t).min() < .03) or a < 0 or b + SR > len(drums):
+                continue
+            peak = a + int(env[a:b].argmax())
+            later = every[every > peak / SR + .02]
+            row = _strike(band, env, peak, kind, float(later[0] - peak / SR - .005) if len(later) else None)
+            if row and row[1] is not None:
+                rows.append([np.log(row[0]), row[1], np.log(row[2])])
+        rows = np.array(rows)
+        peaks = [env[int((t - .01) * SR):int((t + .025) * SR)].max() for t in times if .01 < t < len(drums) / SR - .025]
+        floor = [env[int(a * SR):int(b * SR)].min() for a, b in zip(times, times[1:]) if b - a > .1]
+        if not scale or len(rows) < KIT_HITS or not floor or 20 * np.log10(np.median(peaks) / np.median(floor)) < KIT_ROOM \
+                or ((np.percentile(rows, 75, 0) - np.percentile(rows, 25, 0)) > KIT_SPREAD * np.array(scale)).any():
+            continue
+        mid = np.median(rows, 0)
+        out[kind] = [round(float(np.exp(mid[0]))), round(float(mid[1]), 1), round(float(np.exp(mid[2])), 3)]
+    return out
+
+
+def drums() -> str:
+    """Тембр каждого барабана и 808 списка библиотеки → поле tembr в data/beat_sounds.json, строкой на звук. Заглушку
+    iCloud чтение скачивает — медленно, но один раз; не прочёлся файл — прежний замер остаётся."""
+    from . import config, noty
+    data = json.loads(config.BEAT_SOUNDS.read_text("utf-8"))
+    old, rows = data.get("tembr", {}), {}
+    for name in (n for n in data["sounds"] if noty.kind(n)):
+        try:
+            r = tembr(noty.LIBRARY["KITS"] / name.partition("/")[2], noty.kind(name))
+        except Exception:                   # битый файл — без замера, а не падение всего списка
+            r = None
+        row = f"{r[0]:.0f} {r[1]:.1f} {r[2]:.3f} {r[3]:.2f}" if r and r[1] is not None else old.get(name)
+        rows |= {name: row} if row else {}
+    about = ("тембр барабанов и 808 (zamer --tembr), числа через пробел: яркость, Гц — средняя частота спектра 50 мс от пика | "
+             "спад, дБ за 40 мс от пика (потолок 40: удар кончился) | шум — плоскость спектра, 0–1 | "
+             "длина до −30 дБ от пика, секунды (потолок 3). Всё — в полосе роли (zamer.BANDS): бочка 30–2000 Гц, 808 20–2000, клэп и снейр 800–6000, хэт и открытый хэт 5000–16000, "
+             "перкуссия 200–16000; так же меряются удары в стеме барабанов образца (поле kit его замера). "
+             "Имени нет — файл не прочёлся")
+    config.BEAT_SOUNDS.write_text(json.dumps(data | {"tembr_about": about, "tembr": rows}, ensure_ascii=False, indent=1) + "\n",
+                                  encoding="utf-8")
+    return f"барабанов замерено: {len(rows)}"
 
 
 def _cqt(y: np.ndarray, sr: int, tune: float) -> np.ndarray:
@@ -671,7 +805,7 @@ def sections(full: np.ndarray, sr: int, bpm: float, bar0: float) -> dict:
 
 
 def run(path: Path, hint: float | None = None, start: float | None = None, with_color: bool = False) -> dict:
-    """Замер файла: окно → demucs → рисунок; части — по всему файлу. with_color — ещё и цвет музыки."""
+    """Замер файла: окно → demucs → рисунок и тембр хэта и клэпа (`kit`); части — по всему файлу. with_color — ещё и цвет музыки."""
     import librosa
     import soundfile as sf
     with tempfile.TemporaryDirectory(prefix="zamer-") as tmp:
@@ -689,7 +823,7 @@ def run(path: Path, hint: float | None = None, start: float | None = None, with_
             stem["drums"] = np.stack([stem["drums"]] * 2)
         try:
             out = measure(stem["drums"], stem["bass"], stem["other"], hint)
-            out.update(sections(full, sr, out["bpm"], at + out["bar0"]))
+            out.update(sections(full, sr, out["bpm"], at + out["bar0"]), kit=kit(stem["drums"].mean(0), out.pop("_hits")))
         except SystemExit as e:                            # клэпа нет — рисунка нет, а цвет меряется и без такта
             if not with_color:
                 raise
@@ -786,6 +920,14 @@ def selftest() -> None:
     assert r["b808_per_bar"] == 3 and 3.5 <= r["b808_len"] <= 6 and r["b808_with_kick"] == 1, r
     assert 1.5 <= r["b808_slides_per_8"] <= 2.5 and r["hat_pan"] > 30 and r["swing"] is None, r
     assert r["mel_same"] > .95 and abs(r["mel_rise"]) < 1, r      # ровный тон: такты одинаковы, громкость не растёт
+    # Тембр ударов: хэт — шум 8–15 кГц, клэп — 1–5 кГц; удары разбросаны шире библиотеки — тембра нет
+    from unittest import mock
+    from . import noty
+    with mock.patch.object(noty, "kit_scale", lambda kind: [1, 20, 1]):
+        k = kit(drums.mean(0), r["_hits"])
+    assert 9000 < k["Hats"][0] < 13000 and 2000 < k["Claps"][0] < 4000 and k["Hats"][1] > k["Claps"][1], k
+    with mock.patch.object(noty, "kit_scale", lambda kind: [1e-3] * 3):
+        assert kit(drums.mean(0), r["_hits"]) == {}, "разброс шире библиотеки"
     from scipy.signal import resample_poly
     sec = sections(resample_poly(drums.sum(0) + bass + other, 1, 4), 11025, 150, r["bar0"])
     assert sec["intro_bars"] == 2 and sec["drops"] == 0 and sec["map"] == "...." + "#" * 32 + "....", sec
@@ -861,7 +1003,7 @@ def selftest() -> None:
     assert root(np.sin(2 * np.pi * 261.63 * one) + np.sin(2 * np.pi * 392 * one), SR) is None, \
         "квинта: общий период — до октавой ниже, а звука там нет"
     assert root(np.sin(2 * np.pi * np.cumsum(220 * 2 ** one) / SR), SR) is None, "высота съезжает на октаву — корня нет"
-    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, долгий суб нотой в такт, части, цвет музыки, ноты петли, петля-раскладка без баса автора, её склад по слоям и корень одиночного звука "
+    print("замер: темп, клэп, хэт с дробью, бочка, 808 со слайдом, тембр хэта и клэпа, долгий суб нотой в такт, части, цвет музыки, ноты петли, петля-раскладка без баса автора, её склад по слоям и корень одиночного звука "
           "на синтетике — в порядке")
 
 
@@ -877,6 +1019,7 @@ def main() -> None:
     p.add_argument("--loops", nargs="?", const="", metavar="СЛОВО",
                    help="замерить разрешённые петли библиотеки в data/beat_sounds.json; со словом — только петли с ним в имени (только Мак)")
     p.add_argument("--root", action="store_true", help="корневая нота одиночных звуков ФАЙЛ…: номер и имя ноты в FL или «неуверенно»")
+    p.add_argument("--tembr", action="store_true", help="тембр барабанов и 808 списка библиотеки → data/beat_sounds.json, поле tembr (только Мак)")
     p.add_argument("--selftest", action="store_true", help="проверить замер на синтетическом бите, без demucs")
     a = p.parse_args()
     if a.selftest:
@@ -885,6 +1028,8 @@ def main() -> None:
         return print(table(json.loads(a.table.read_text("utf-8"))))
     if a.loops is not None:
         return print(loops(a.loops))
+    if a.tembr:
+        return print(drums())
     if a.root:
         import librosa
         from .noty import NOTES

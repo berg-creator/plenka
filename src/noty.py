@@ -22,6 +22,13 @@ type beat'ов, приём мелодии — с третьего артиста
 меряются как раньше.
 Отвергнуто: сверять с образцом ноты мелодии — в замере их нет, и чужую мелодию не повторяем.
 Отвергнуто: оставить таблицы «на выбор» — выбор по таблицам и дал бит без образца.
+Барабаны по звуку образца (`_kit`, 17.10.2026). «Отбой» был братом образца по рисунку, а барабаны взял из наборов 03
+и Maxeyy, и владелец сказал: «драмка будто вообще не подходит к этому биту». Теперь замер образца несёт тембр хэта
+и клэпа (`kit`: яркость, спад, шум — `zamer.kit`), библиотека — тембр каждого барабана (`tembr` в data/beat_sounds.json),
+и звук хэта и клэпа (снейра) утреннего бита — из ближайшей десятой части своего вида; список drums в data/beat_music.json
+не пуст — барабаны только из него. Бочку, 808, открытый хэт и перкуссию по звуку не сверяем: в смеси замер их
+не различает (`zamer.kit`). Отвергнуто: сверять цвет петли с цветом музыки образца — яркость стема demucs темнее чистой
+петли в 0,49–0,81 раза (одна петля в восьми смесях), а регистр замера прыгает на октаву у одной петли в трёх тональностях.
 
 Главный формат — родная партитура FL (.fsc), а не MIDI. 01.10.2026 владелец собрал
 первый бит из MIDI и руками дорисовал то, чего MIDI не несёт: раскидал хэты по
@@ -184,6 +191,7 @@ import random
 import re
 import runpy
 import shutil
+import statistics
 import struct
 import subprocess
 import sys
@@ -215,6 +223,17 @@ MOODS = ("обычный", "злой", "кино")
 # от хэта шестнадцатыми (16) они отделяют, а дроби по мерке владельца (`_hat`) поверх сетки образца пропускают.
 # Начнут браковать бит, который на слух брат образца, — расширить допуск пары по первым трём таким битам, а не снимать её
 NEAR = (("хэт/такт", "hat_per_bar", .5, 2), ("бочка/такт", "kick_per_bar", .5, 1), ("808/такт", "b808_per_bar", .5, 1))
+# Барабаны по звуку образца (`_kit`, 17.10.2026; владелец об «Отбое»: «драмка будто вообще не подходит к этому биту», «нужно,
+# чтобы ты под нужный стиль нужный звук брал»). Вид удара — по папке звука: снейр сверяется с клэпом (одна доля, одна полоса
+# замера), Hihats и Openhats набора Maxeyy — с хэтом и открытым хэтом
+KIND = {"Kicks": "Kicks", "808s": "808s", "Hats": "Hats", "Hihats": "Hats", "Open Hats": "Open Hats", "Openhats": "Open Hats",
+        "Claps": "Claps", "Snares": "Claps", "Percs": "Percs"}
+KIT_WORDS = {"Hats": "хэта", "Claps": "клэпа"}
+# Звук партии — из ближайших к удару образца: десятая часть звуков этого вида (одобренных, когда список drums не пуст),
+# но не меньше трёх. ponytail: расчёт, а не опыт — на синтетике (zamer.KIT_SPREAD) настоящий звук попадал в ближайшую
+# десятую часть у хэта в 11 пробах из 12, у клэпа — в 11 из 14; бита по этому правилу владелец ещё не слышал. Начнёт
+# браковать барабаны, которые на слух подходят, — расширить долю, а не снимать правило
+KIT_NEAR, KIT_MIN = .1, 3
 # Сколько времени музыка молчит. У референсов она звучит 94% времени, у «Дифирамба» — 80%, у Lil Wayne
 # и 50 Cent — 54 и 71%, у «Фосфора» — 100% (замер 02.10.2026)
 QUIET = {"андер": .2, "пустота": .2}
@@ -706,7 +725,7 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                 if isinstance(info["preset"], dict)
                 and (part not in tracks or part not in info.get("tonal", ()) or any(w in part for w in SAMPLED))]
     if not info.get("order"):
-        out += _sample(info, tracks) + _palette(info, tracks)
+        out += _sample(info, tracks) + _palette(info, tracks) + _kit(info)
         if (_picked(info) or {}).get("order"):      # утром такой бит спорил бы со словами владельца о «Заело»: «пустовато»
             out.append(f"sample: образец «{info['sample']}» — только для заказа владельца (поле order его записи): "
                        "утренний бит берёт следующий из data/beat_samples.json")
@@ -1416,15 +1435,15 @@ def _sample(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     return out
 
 
-def approved() -> tuple[set[str], set[str]]:
-    """Звуки и петли музыки, которые владелец прослушал и одобрил (08.10.2026: «звуки все в целом норм»), —
+def approved() -> tuple[set[str], set[str], set[str]]:
+    """Звуки и петли музыки, которые владелец прослушал и одобрил (08.10.2026: «звуки все в целом норм»), и барабаны (`_kit`) —
     data/beat_music.json: одиночные звуки набора 13 и семь пресетов. Набор 12 оттуда убран 17.10.2026 — банк не куплен
     («кит я не покупал»): в бит на раздачу его нельзя. Синт-петли Trap набора 01 владелец 17.10.2026
     пустил туда словами «возьми петли которые у нас уже есть в китах», не прослушав: отобраны по замеру (3–8 нот)."""
     from . import config, state
     data = state.read_json(config.BEAT_MUSIC, {})
     data = data if isinstance(data, dict) else {}
-    return {_nfc(n) for n in data.get("sounds") or ()}, {_nfc(n) for n in data.get("loops") or ()}
+    return tuple({_nfc(n) for n in data.get(key) or ()} for key in ("sounds", "loops", "drums"))
 
 
 def _palette(info: dict, tracks: dict[str, list[N]]) -> list[str]:
@@ -1432,7 +1451,7 @@ def _palette(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     прослушав 210 звуков: «звуки все в целом норм»). Звук партии с высотой, кроме 808 и баса, и петля — из
     data/beat_music.json. Пресет Serum, свой пресет (поле preset) и звук по адресу из сети на такой партии — брак:
     их владелец не слышал. Барабаны и 808 идут по общему списку, заказ (order) сюда не заходит."""
-    sounds, rings = approved()
+    sounds, rings, _ = approved()
     if not (sounds or rings):
         return ["data/beat_music.json пуст или не найден: звуки музыки, одобренные владельцем, кладёт Мак — "
                 "без списка утренний бит не собрать"]
@@ -1447,6 +1466,88 @@ def _palette(info: dict, tracks: dict[str, list[N]]) -> list[str]:
             for field, word in (("preset", "свой пресет Serum"), ("net", "звук из сети"))
             for part in (info.get(field) if isinstance(info.get(field), dict) else ()) if part in music]
     return out
+
+
+def kind(name: str) -> str | None:
+    """Вид удара по папке звука: «…/Snares/…» — клэп (`KIND`). None — не барабан и не 808: пресет Serum в папке Percs
+    и петля ударов («E808_Loop_Hats_105-08» набора 01 лежит среди хэтов) — тембр её первого удара о ней ничего не говорит."""
+    if not name.startswith("KITS/") or "_Loop_" in name.rsplit("/", 1)[-1]:
+        return None
+    return next((KIND[p] for p in name.split("/")[1:-1] if p in KIND), None)
+
+
+def tembrs() -> dict[str, tuple[float, float, float]]:
+    """Тембр барабанов библиотеки (`zamer --tembr`, только Мак): имя → яркость Гц, спад дБ за 40 мс, шум 0–1."""
+    from . import config
+    data = json.loads(config.BEAT_SOUNDS.read_text("utf-8")).get("tembr", {}) if config.BEAT_SOUNDS.exists() else {}
+    return {_nfc(name): tuple(float(x) for x in row.split()[:3]) for name, row in data.items()}
+
+
+def _point(row) -> tuple[float, float, float]:
+    """Тембр в мерке расстояния: яркость и шум — логарифмом (вдвое ярче — одинаково далеко на любой высоте), спад — дБ."""
+    return math.log(row[0]), row[1], math.log(max(row[2], 1e-6))
+
+
+def kit_scale(k: str, marks: dict | None = None) -> list[float] | None:
+    """Разброс звуков вида k в библиотеке по каждой мерке: межквартильный, делённый на 1,35 (у нормального — сигма).
+    Им меряется расстояние, и им же замер решает, надёжен ли тембр образца (`zamer.kit`). Звуков меньше четырёх — None."""
+    rows = [_point(p) for name, p in (tembrs() if marks is None else marks).items() if kind(name) == k]
+    if len(rows) < 4:
+        return None
+    return [(q[2] - q[0]) / 1.35 or 1.0 for q in (statistics.quantiles(col, n=4, method="inclusive") for col in zip(*rows))]
+
+
+def nearest(his, k: str, among: set[str] | None = None, marks: dict | None = None) -> list[str]:
+    """Звуки вида k от ближнего к дальнему по тембру удара образца his (яркость, спад, шум); among — только из этих имён."""
+    marks = tembrs() if marks is None else marks
+    scale, me = kit_scale(k, marks), _point(his)
+    pool = [n for n in marks if kind(n) == k and (among is None or n in among)]
+    return sorted(pool, key=lambda n: math.dist([a / s for a, s in zip(_point(marks[n]), scale)], [a / s for a, s in zip(me, scale)]))
+
+
+def _kit(info: dict) -> list[str]:
+    """Барабаны утреннего бита — по звуку образца (владелец об «Отбое», 17.10.2026: «драмка будто вообще не подходит
+    к этому биту»). Хэт и клэп (снейр) — из ближайших к удару образца по тембру (`KIT_NEAR`), когда замер образца его знает
+    (`kit`: только надёжное, `zamer.kit`); нет замера образца или звука — молчит. Список drums в data/beat_music.json
+    не пуст — барабаны (не 808) только из него, ближайшие — среди них. Бочку, 808, открытый хэт и перкуссию по звуку
+    не сверяет: замер их в смеси не различает. Заказ (order) сюда не заходит."""
+    allowed, marks = approved()[2], tembrs()
+    his = ((_picked(info) or {}).get("zamer") or {}).get("kit") or {}
+    out = []
+    for part, names in (info.get("sounds") or {}).items():
+        for n in map(_nfc, _names(names)):
+            k = kind(n)
+            if not k or k == "808s":
+                continue
+            if allowed and n not in allowed:
+                out.append(f"{part}: барабан «{n}» — не из одобренных владельцем (data/beat_music.json, drums)")
+            elif k in his and n in marks and kit_scale(k, marks):
+                ranked = nearest(his[k], k, allowed or None, marks)
+                top = ranked[:max(KIT_MIN, math.ceil(KIT_NEAR * len(ranked)))]
+                if n not in top:
+                    b, d, f = marks[n]
+                    out.append(f"{part}: «{n}» далеко по звуку от {KIT_WORDS[k]} образца — яркость {b:.0f} Гц, спад {d:g} дБ, "
+                               f"шум {f:g} против {his[k][0]:g}, {his[k][1]:g} и {his[k][2]:g} (kit в data/beat_samples.json); "
+                               f"бери из ближайших {len(top)} (python -m src.noty --kit {info['sample']}): " + "; ".join(top[:3]))
+    return out
+
+
+def kit_card(sample: str) -> str:
+    """Ближайшие к барабанам образца звуки библиотеки (одобренные, когда список drums не пуст) — автору нот до сборки."""
+    row = next((r for r in samples() if r.get("id") == sample), None)
+    if not row:
+        return f"образца «{sample}» нет в data/beat_samples.json"
+    his, allowed, marks = (row.get("zamer") or {}).get("kit") or {}, approved()[2], tembrs()
+    if not his:
+        return f"у образца «{sample}» нет замера барабанов (kit): правило молчит, барабаны — по разделу «Звуки, которые владелец ставит сам»"
+    out = []
+    for k, (b, d, f) in his.items():
+        ranked = nearest((b, d, f), k, allowed or None, marks)
+        top = max(KIT_MIN, math.ceil(KIT_NEAR * len(ranked)))
+        out.append(f"{KIT_WORDS[k]} образца: яркость {b:g} Гц, спад {d:g} дБ, шум {f:g}; годятся {top} ближайших из {len(ranked)}, "
+                   "первые десять:")
+        out += [f"  {i}. {n} — {marks[n][0]:.0f} Гц, {marks[n][1]:g} дБ, {marks[n][2]:g}" for i, n in enumerate(ranked[:min(top, 10)], 1)]
+    return "\n".join(out)
 
 
 def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[str, list[N]]) -> list[str]:
@@ -2663,6 +2764,29 @@ def _checks() -> None:
     assert f"loop: петля «{unheard}» — не из одобренных владельцем" in "\n".join(problems(looped | {"loop": unheard}, drums))
     with mock.patch.object(config, "BEAT_MUSIC", Path("нет такого файла.json")):
         assert "data/beat_music.json пуст или не найден" in "\n".join(problems(base, demo()))
+    # Барабаны по звуку образца (тембр у селфтеста свой: двенадцать хэтов, яркость через 500 Гц): хэт далеко от хэта образца —
+    # брак, близкий проходит; у образца без замера барабанов и у заказа правило молчит; список drums не пуст — барабан
+    # не из него брак, из него проходит
+    hats, data = sorted(n for n in known() if kind(n) == "Hats")[:12], json.loads(config.BEAT_SOUNDS.read_text("utf-8"))
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
+        config.BEAT_SOUNDS.write_text(json.dumps(data | {"tembr": {n: f"{6000 + 500 * i} 10 0.3 0.1" for i, n in enumerate(hats)}}),
+                                      encoding="utf-8")
+        kitted = base | {"sample": "кит"}
+
+        def hat(info, name):
+            return "\n".join(problems(info | {"sounds": base["sounds"] | {"хэт": name}}, demo()))
+
+        assert hat(kitted, hats[2]) == "", hat(kitted, hats[2])
+        said = hat(kitted, hats[-1])
+        assert f"хэт: «{hats[-1]}» далеко по звуку от хэта образца — яркость 11500 Гц" in said and "бери из ближайших 3" in said, said
+        assert hat(base, hats[-1]) == "" and "далеко" not in hat(kitted | {"order": "барабаны как в X"}, hats[-1]), \
+            "без замера образца и у заказа — молчит"
+        assert kit_card("кит").splitlines()[1].endswith(f"{hats[0]} — 6000 Гц, 10 дБ, 0.3") and "нет замера" in kit_card("s140")
+        music = config.BEAT_MUSIC.read_text("utf-8")
+        config.BEAT_MUSIC.write_text(json.dumps(json.loads(music) | {"drums": [hats[1], base["sounds"]["клэп"]]}), encoding="utf-8")
+        assert f"хэт: барабан «{hats[0]}» — не из одобренных владельцем" in hat(kitted, hats[0]) and hat(kitted, hats[1]) == "", \
+            hat(kitted, hats[1])
+        config.BEAT_MUSIC.write_text(music, encoding="utf-8")
     # Заказ владельца образца не несёт, а звук музыки, петлю и свой пресет берёт откуда назвал владелец; бочка под каждой
     # нотой 808 — тоже не брак; прочее бракуется
     ordered = {k: v for k, v in looped.items() if k != "sample"} | {"order": "барабаны как в X, гитара как в Y"}
@@ -2916,7 +3040,8 @@ def _checks() -> None:
           "после перелома слоёв музыки не меньше половины её слоёв, аккорд меняется не вдвое реже, без склада в замере — молчок), "
           "длинный звук на коротких нотах — строка в записке, а не брак, без длины в списке молчит, длины — по заголовку WAV, "
           "FX наборов 13 и 14 в списке, переход — партия без нот: неизвестный звук, слой и такт за концом бита — брак, "
-          "свой пресет Serum (форма поля, сбор папки без плагина) — в порядке")
+          "свой пресет Serum (форма поля, сбор папки без плагина), барабаны по звуку образца (хэт далеко от хэта образца "
+          "и барабан не из одобренных — брак, близкий проходит, без замера образца и у заказа — молчок) — в порядке")
 
 
 def selftest() -> None:
@@ -2930,6 +3055,7 @@ def selftest() -> None:
     rows = [{"id": f"s{bpm}", "url": f"https://youtu.be/s{bpm}", "title": f"(free) a x b type beat — {bpm}", "like": ["A", "B"],
              "views": None, "bpm": bpm, "key": None, "zamer": z | {"bpm": bpm}, "note": ""} for bpm in (140, 170, 85, 135)]
     rows.append(rows[0] | {"id": "вдвое", "zamer": {"bpm": 70, "hat_per_bar": 16}})
+    rows.append(rows[0] | {"id": "кит", "zamer": z | {"bpm": 140, "kit": {"Hats": [6000, 10, .3]}}})     # тембр хэта образца
     # Образцы заказа «бит-брат трека»: у «брата» хэт ровный (дробь и триоли в пятой части тактов) и музыка молчит такт
     # из шестнадцати, у «дробного» дробь в половине тактов и музыки нет в четверти
     rows += [rows[0] | {"id": name, "order": "только для заказа", "zamer": z | {"bpm": 140, "hat_roll_bars": rolls, "hat_trip_bars": .1,
@@ -2961,9 +3087,12 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true", help="с --net: что взял бы шаг, без загрузки звука и записи")
     p.add_argument("--loop", metavar="СЛОВО", help="замер петель с этим словом в имени: ноты, опоры по тактам, вторая петля на перелом")
     p.add_argument("--bpm", type=int, help="с --loop: темп бита — сдвиг каждой петли под него и её ноты после сдвига")
+    p.add_argument("--kit", metavar="ОБРАЗЕЦ", help="барабаны библиотеки, ближайшие по звуку к хэту и клэпу образца (id из data/beat_samples.json)")
     a = p.parse_args()
     if a.selftest:
         selftest()
+    elif a.kit:
+        print(kit_card(a.kit))
     elif a.build:
         build(a.build, a.out or Path(tempfile.mkdtemp(prefix="noty-")), tuple(a.prev))
     elif a.send:
