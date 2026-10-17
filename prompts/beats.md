@@ -52,14 +52,20 @@ Serum 1 и звуки FL, а ты звука не слышишь: нотами �
 - **Образцы и петли на 17.10.2026** (утренние, без `order`; в скобках — сдвиг в полутонах):
   - `_TvFb-zpBzY` (132): «ghost», «nobody», «call at night» (0); Trap (−1);
   - `7MBrwSAZc9s` (140): Trap (0); «ghost», «nobody», «call at night», «wavwavwav» (+1); «3462», «BLEEDING», «FALLEN» (−1);
-  - `IjK77S3Etfs` и `4-_65GmkYB0` (134): «call at night», «wavwavwav», «ghost», «nobody» (0); Trap и «backdoor» (−1);
+  - `IjK77S3Etfs` (134): «call at night», «wavwavwav», «ghost», «nobody» (0); Trap и «backdoor» (−1);
   - `xGacO8R_PgA` (148): «3462», «BLEEDING», «FALLEN» (0); Trap (+1); «glow», «04566», «DECAY» (−1);
-  - `OcAt1oF5TyI` (150): «3462», «BLEEDING», «glow» (0); «04566», «DECAY» (−1); Trap и «backdoor» (+1);
-  - `pwVV-Khwlwo` и `A9CCiC2XknI` (125): «ghost», «nobody», «call at night», «wavwavwav» (−1); Trap (−2);
-  - `F3P51musFE0` и `03B6u8II7HM` (120): только «call at night», «wavwavwav», «ghost», «nobody» (−2) — Trap до 120 не
-    опустить (−3), поэтому утром после бита на петле blvckmorphine эти два образца не годятся;
-  - `VTgIjbmCpBs` (93) — не годен: ближайшие петли — на шесть полутонов; ждёт петли на 81–107.
-  Правило «образец одного из двух прошлых битов — брак» оставляет круг из десяти утр.
+  - `F3P51musFE0` (120): только «call at night», «wavwavwav», «ghost», «nobody» (−2) — Trap до 120 не
+    опустить (−3), поэтому утром после бита на петле blvckmorphine этот образец не годится;
+  - с 17.10.2026 западные (звук образца — с запада, NEXT.md, раздел 84), все пока не использованы, в порядке файла:
+    `_p7ukT1Rbwc` (160): «04566», «DECAY» (0); «3462», «BLEEDING», «glow» (+1); Trap, «FALLEN», «backdoor» (+2);
+    `dERO_lV-VGk` (146) и `ynnTMWPX8CY` (145): «3462», «BLEEDING», «FALLEN», «backdoor», Trap 143 (0); «call at night»,
+    «wavwavwav», Trap 140 (+1); «glow» (−1);
+    `xGqk07djP_g` (135): «ghost», «call at night», «wavwavwav» (0); «nobody» (+1); Trap, «3462», «BLEEDING», «FALLEN» (−1);
+    `v7P2xl9vjoE` (150): «3462», «BLEEDING», «glow» (0); «04566», «DECAY» (−1); Trap, «FALLEN», «backdoor» (+1);
+    `QPnXmEUP1LI`, `JRBDD4EH_2M` и `KbHGeNsuckA` (140): Trap и «backdoor» (0); «ghost», «nobody», «call at night»,
+    «wavwavwav» (+1); «3462», «BLEEDING», «FALLEN» (−1);
+    `Dwu8E-ynbVc` (125): «ghost», «nobody», «call at night», «wavwavwav» (−1); Trap и «backdoor» (−2).
+  Правило «образец одного из двух прошлых битов — брак» оставляет круг из четырнадцати утр.
 - **Поверх петли — своя мелодия** (правило 05.10.2026 в силе: «мелодии катастрофически не хватает в бите помимо
   петли»), барабаны и 808 — как раньше: по образцу и меркам владельца. Как писать — «Музыка петлёй» и, у раскладки
   blvckmorphine, «Склад петли».
