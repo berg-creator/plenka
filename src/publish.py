@@ -515,7 +515,9 @@ def send(post: dict, chat_id: str) -> dict | None:
     """Отправляет пост нужным методом: опрос, фото с текстом, плеер или текст.
 
     Возвращает сообщение, в котором лежит текст поста (_where): по нему
-    вышедший пост правится (edit). Опрос не правится — None.
+    вышедший пост правится (edit). Опрос не правится (review.DROP_ONLY), но номер
+    его сообщения нужен первому комментарию: по нему пересылка находит пост,
+    а под опросом по новости встают её ролики (comments.examples).
     """
     text = post.get("text", "").strip()
     rubric = post.get("rubric", "")
@@ -524,13 +526,13 @@ def send(post: dict, chat_id: str) -> dict | None:
     if rubric == "poll":
         payload = _poll_payload(text)
         if payload:
-            telegram.send_poll(
+            sent = telegram.send_poll(
                 chat_id,
                 payload["question"],
                 payload["options"],
                 anonymous=payload.get("is_anonymous", True),
             )
-            return
+            return _where(sent, "poll") if sent else None
         log.warning("Опрос не разобран — отправляю как обычный текст")
 
     # Мем — картинка с надписью на ней, а под фото подпись канала: это вторая

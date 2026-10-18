@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import random
 import re
@@ -75,6 +76,8 @@ def save_post(
     # который уйдёт в канал, — иначе просмотр очереди врёт.
     if rubric_key != "poll":  # опрос хранится как JSON, его трогать нельзя
         text = drop_channel_link(name_button(telegram.sanitize(text)))
+    else:
+        text, source = poll_source(text, (source or {}).get("news") or {})
 
     folder = folder or config.QUEUE
     folder.mkdir(parents=True, exist_ok=True)
@@ -129,6 +132,9 @@ def save_post(
         if links := publish.artist_ids(text, [*named, *(people if isinstance(people, list) else [])],
                                        src if src.get("kind") == "release" else None):
             post["links"] = links
+    elif src.get("outlet"):
+        # Под опросом по новости — её ролики первым комментарием, с именем издания (comments.examples).
+        post["outlet"] = src["outlet"]
     # Что послушать под разбором и новостью (владелец, 01.10.2026: «послушать нечего»):
     # треки идут тем же путём, что трек релиза, — запрос, YouTube, Mac, первый комментарий
     # (tracks.pieces). В самом посте их нет: пост остаётся одной плиткой.
@@ -149,6 +155,27 @@ def save_post(
         }
     state.write_json(path, post)
     return path
+
+
+def poll_source(text: str, news: dict[str, str]) -> tuple[str, dict]:
+    """JSON опроса без поля source и новость, по которой он написан: {url, outlet} или {}.
+
+    Владелец, 18.10.2026: опрос спросил о мэшапах на «Франсе», а самих мэшапов под ним
+    не было — отвечать не на что. Ролики лежат в посте издания, и пост опроса должен
+    помнить его адрес (source_url). Адрес выбирает модель, но только из поданного
+    списка (plan, poll_fresh): адреса не из списка она могла бы и выдумать — такой
+    отбрасывается, опрос остаётся без примеров. Поле из текста убирается: в text
+    лежит ровно то, что уйдёт в send_poll.
+    """
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text, {}
+    if not isinstance(data, dict) or "source" not in data:
+        return text, {}
+    url = data.pop("source")
+    found = {"url": url, "outlet": news[url]} if isinstance(url, str) and url in news else {}
+    return json.dumps(data, ensure_ascii=False, indent=2), found
 
 
 def _plain(value: object) -> str:
@@ -515,8 +542,11 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     polls = min(quota.get("poll", 0), polls_due()) if fresh["news"] or fresh["releases"] else 0
     for n in range(polls):
         # Новости делятся между опросами пачки, иначе оба спросят об одном.
+        share = fresh["news"][n::polls][:6]
+        # Исходник — адреса поданных новостей: по ним save_post сверяет, о какой спросил опрос.
         add("poll", {"artists": random.sample(fresh["artists"], min(12, len(fresh["artists"]))),
-                     "news": fresh["news"][n::polls][:6], "releases": fresh["releases"], "asked": asked}, {})
+                     "news": share, "releases": fresh["releases"], "asked": asked},
+            {"news": {row["url"]: row["outlet"] for row in share if row["url"]}})
 
     return jobs[:needed]
 
@@ -569,7 +599,7 @@ def poll_fresh(artists: list[dict]) -> dict:
         if (row.get("kind") == "news" and row.get("lang") == "ru" and row.get("outlet") in newcomers.SCENE_OUTLETS
                 and names & set(row.get("artists", []))):
             news.setdefault(row["title"], {"outlet": row["outlet"], "title": row["title"],
-                                           "summary": (row.get("summary") or "")[:300]})
+                                           "summary": (row.get("summary") or "")[:300], "url": row.get("url", "")})
         elif row.get("kind") == "release" and row.get("tracked") in names:
             title = row["title"].removesuffix(" - Single").removesuffix(" - EP")
             releases.setdefault(title.lower(), f'{row.get("artist") or row["tracked"]} — {title}')
@@ -1600,6 +1630,15 @@ def _selftest() -> int:
             fresh = poll_fresh(base)
             assert [row["title"] for row in fresh["news"]] == ["новость 1"] and fresh["releases"] == ["kizaru — Тест"], fresh
             assert "Скриптонит" in fresh["artists"] and not {"MF DOOM", "Кино", "Bones"} & set(fresh["artists"])
+            # Опрос помнит новость, по которой написан: адрес из поданных — в source_url, выдуманный — мимо.
+            source = next(job[3] for job in plan(40) if job[1] == "poll" and job[2]["news"])
+            assert source == {"news": {"https://x": "The Flow"}}, source
+            asked_json = '{"question": "Кто?", "options": ["А", "Б"], "source": "%s"}'
+            told = state.read_json(save_post("poll", asked_json % "https://x", source, folder=Path(tmp)), {})
+            made = state.read_json(save_post("poll", asked_json % "https://t.me/fake/1", source, folder=Path(tmp)), {})
+            assert told["source_url"] == "https://x" and told["outlet"] == "The Flow", told
+            assert made["source_url"] == "" and "outlet" not in made, made
+            assert "source" not in told["text"] and quality.poll(made["text"])["options"] == ["А", "Б"]
             assert [job[2]["asked"] for job in plan(40) if job[1] == "poll"] == [[]] * config.POLL_PER_WEEK
             state.write_json(config.QUEUE / "1-poll.json", {"text": '{"question": "Кто?", "options": ["А", "Б"]}'})
             state.write_json(config.POSTED_FILE, {"items": [

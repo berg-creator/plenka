@@ -50,6 +50,11 @@
 идут одни треки. В дежурстве этого прохода нет намеренно: он разовый, а состояние всё
 равно пишет Actions.
 
+Под опросом по новости вопроса нет — опрос сам способ высказаться, — а первым комментарием
+идёт ролик из поста издания (examples, владелец 18.10.2026: опрос о мэшапах на «Франсе»
+вышел без самих мэшапов, отвечать было не на что). Адрес новости пост помнит полем
+source_url (compose.poll_source), ролик качается тем же путём, что сниппет.
+
 Отключается одной строкой в src/config.py — COMMENT_SEED.
 """
 
@@ -258,7 +263,7 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
         post = last_post(origin_id(message))
     rubric = post.get("rubric", "")
     if rubric == "poll" or message.get("poll"):
-        return False
+        return examples(post, chat_id, message_id)
 
     # Полный трек от владельца уходит сюда же — плеером, с вопросом в подписи.
     # В ленте он занимал вторую плитку и делал вид поста плавающим (есть трек —
@@ -275,8 +280,7 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
     # владельца; не вышло и так — остаётся вопрос.
     source = post.get("source_url", "")
     with tempfile.TemporaryDirectory() as folder:
-        snippet = ((telegram_web.preview_video(source, Path(folder))
-                    or telegram_web.account_video(source, Path(folder)))
+        snippet = (video(source, Path(folder))
                    if (post.get("snippet") or post.get("video")) and not track else {})
         # Под тизером спрашиваем о новости, а не «как вам сниппет».
         about = ("snippet", "сниппет") if post.get("snippet") else (rubric, "ролик")
@@ -331,6 +335,36 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
             return False
 
     log.info("Первый комментарий под постом рубрики «%s»", rubric or "неизвестной")
+    return True
+
+
+def video(url: str, folder: Path) -> dict:
+    """Ролик поста издания: из превью, а большой (превью его не отдаёт) — аккаунтом владельца."""
+    return telegram_web.preview_video(url, folder) or telegram_web.account_video(url, folder)
+
+
+def examples(post: dict, chat_id: str, message_id: int) -> bool:
+    """Под опросом по новости — ролик из её поста ответом в ветку. True — ушёл.
+
+    Один ролик: альбома (sendMediaGroup) у бота нет, а показать, о чём спрашивают, хватит
+    и примера. В подписи имя издания, а не ссылка на его t.me: пост ведёт к нам.
+    Ролика нет — опрос остаётся как есть.
+    """
+    source = post.get("source_url", "")
+    if not source:
+        return False
+    with tempfile.TemporaryDirectory() as folder:
+        clip = video(source, Path(folder))
+        if not clip:
+            return False
+        try:
+            telegram.send_video_file(chat_id, clip["path"], f"Примеры — из ленты {post.get('outlet') or 'издания'}",
+                                     seconds=clip["seconds"], width=clip["width"], height=clip["height"],
+                                     reply_to=message_id, quiet=True)
+        except telegram.TelegramError as exc:
+            log.warning("Ролик под опросом не ушёл: %s", exc)
+            return False
+    log.info("Под опросом — ролик из %s", source)
     return True
 
 
@@ -541,6 +575,30 @@ def _selftest() -> None:
         heir["full_track_file_id"] = "H"
         assert seed(forwarded) and sent == [("трек", "R"), ("трек", "H")] and not written, (sent, written)
         state.write_json = real_write
+        # Опрос по новости: ролик её поста ответом в ветку, подпись — имя издания без ссылки.
+        sent.clear()
+        posted[0]["rubric"] = "poll"
+        snippet = {"message": {"chat": -200, "message_id": 200}, "source_url": "https://t.me/superslowflow/1",
+                   "outlet": "The Flow"}
+        clip = lambda url, folder: {"path": folder / "preview.mp4", "seconds": 11, "width": 576, "height": 768}
+        telegram_web.preview_video = clip
+        telegram.send_video_file = lambda chat, path, caption, reply_to=None, **_: sent.append(
+            (path.name, caption, reply_to))
+        asked = {**forwarded, "poll": {"question": "?"}}
+        assert seed(asked) and sent == [("preview.mp4", "Примеры — из ленты The Flow", 5)], sent
+        # Без адреса новости, без ролика и при отказе Telegram — ничего, и без исключения.
+        sent.clear()
+        snippet.pop("source_url")
+        assert not seed(asked) and not sent, sent
+        snippet["source_url"] = "https://t.me/superslowflow/1"
+        telegram_web.preview_video = telegram_web.account_video = lambda url, folder: {}
+        assert not seed(asked) and not sent, sent
+        telegram_web.preview_video = clip
+
+        def refused(*_, **__):
+            raise telegram.TelegramError("нет прав")
+        telegram.send_video_file = refused
+        assert not seed(asked)
     finally:
         telegram.send_audio, telegram.send_poll = real_audio, real_poll
         state.read_json = real_read
@@ -634,7 +692,7 @@ def _selftest() -> None:
         globals()["widget"], config.ARCHIVE = real_widget, real_archive
 
     print("первый комментарий: пост находится по номеру пересылки, сниппет уходит роликом, "
-          "под треком отбора опрос, его номер — в файле поста, "
+          "под треком отбора опрос, его номер — в файле поста, под опросом по новости — её ролик, "
           "под разбором — треки концов связи файлами или ссылками, "
           "вопрос пишется по посту, а брак ответа уводит в запасной набор; "
           "ветка старого поста читается со страницы виджета, треки под старым разбором — "
