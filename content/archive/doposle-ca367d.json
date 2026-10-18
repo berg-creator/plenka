@@ -1,0 +1,14 @@
+{
+  "comment": "Голос кого услышим следующим? Присылай запись — свожу в боте, без шагов.",
+  "height": 1920,
+  "message": {
+    "buttons": [],
+    "chat": -1003786155466,
+    "kind": "caption",
+    "message_id": 288
+  },
+  "rubric": "doposle",
+  "text": "<b>ДО И ПОСЛЕ</b>\n\nГолос — Сергей. С битом его свёл бот канала.\nЧто сделал бот: обрезал 45 с хвоста после конца бита; стиль «чисто» — голос сверху, немного воздуха.\n\n▸ Так же можно с твоей записью: <a href=\"https://t.me/plenka_fm_bot?start=skleyka_doposle\">СВЕДЕНИЕ</a>",
+  "video": "BAACAgIAAxkDAAIZ3GrTRF6w1pn8f5m9i555GM5uMhviAAJhqgACCbKYSpmw0mLk8NiDPQQ",
+  "width": 1080
+}

@@ -1289,6 +1289,12 @@
       "file": "pamyatka-golosovoe.json",
       "published_at": "2026-10-17T09:08:06+00:00",
       "rubric": "pamyatka"
+    },
+    {
+      "chat": "channel",
+      "file": "doposle-ca367d.json",
+      "published_at": "2026-10-18T06:08:54+00:00",
+      "rubric": "doposle"
     }
   ],
   "photos": [
