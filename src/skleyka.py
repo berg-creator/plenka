@@ -1482,6 +1482,29 @@ def _coded(master: Path) -> float:
     return peak
 
 
+# Лишний низ бита. Сведение бит не трогает, а оценка (src/ocenka.py) у 4 из 22 готовых треков бота нашла низ
+# до 100 Гц выше, чем у 9 релизов из 10, — на 0,9–6,6 дБ сверх границы; не хватало его у двух, и у одного из них
+# низа нет вовсе (замер 18.10.2026; владелец спросил, не поднимать ли низ бита). Поэтому только срез и только
+# превышения: граница — верх нормы low в data/mix_norms.json, там же, где её берёт оценка, — до неё, не к медиане,
+# ниже ничего не трогается. Полка на 100 Гц: на треке с +12,2 дБ −3 дБ полки убрали 2,8 дБ низа, а 100–300 Гц
+# сдвинулись на 0,4 — полка на 150 задевала их втрое сильнее. Поднимать низ не берёмся: под бит без суба
+# поднимается гул, а не 808.
+BASS_SHELF, BASS_SPARE = 100, 0.3  # частота полки, Гц; запас среза, дБ: полка добирает до 0,93 своей глубины
+
+
+def _bass(master: Path) -> str:
+    """Полка лишнего низа для мастера (с запятой) или пусто: замер — тот же, что у оценки готового трека."""
+    from . import ocenka  # ocenka импортирует этот модуль
+
+    top = (ocenka.load_norms().get("norms", {}).get("low") or [None, None])[1]
+    found = ocenka.gauge(master)
+    if top is None or not found or found["low"] <= top:
+        return ""
+    cut = top - found["low"] - BASS_SPARE
+    print(f"  низ бита: {found['low']:+.1f} дБ к середине, у релизов не выше {top:+.1f} — полка {cut:.1f} дБ")
+    return f"lowshelf=g={cut:.1f}:f={BASS_SHELF}:t=q:w=0.7,"
+
+
 def _master(total: Path, glue: str, master: Path, target: float = MASTER_LUFS) -> tuple[float, float, float]:
     """Мастер: низ в моно, склейка шины, клиппер и ограничитель до target LUFS —
     в master. Возвращает громкость, истинный пик и подъём.
@@ -1717,7 +1740,9 @@ def mix(vocal: Path, beat: Path, out: Path, style: str = "чисто", design: b
     for attempt in range(LIKE_PASSES + 1 if like else 1):
         source = _shape(total, gains, wide, work) if attempt else total
         level, peak, push = _master(source, _glue(source), master, target)
-        if not like:
+        if not like:  # у «как у артиста» низ ведёт референс
+            if shelf := _bass(master):
+                level, peak, push = _master(source, shelf + _glue(source), master, target)
             break
         ours, miss_sides = tone(master, FORMAT), their_sides - _sides(master)
         miss = {f: theirs[f] - ours[f] for f in TONE}
@@ -6177,6 +6202,11 @@ def _selftest() -> None:
         data = load()
         assert data["tracks"]["t1"]["agreed"]
         _selftest_doposle(tmp, data["tracks"]["t1"])
+        heavy, plain = tmp / "bass-heavy.wav", tmp / "bass-plain.wav"
+        _ffmpeg("-f", "lavfi", "-i", "anoisesrc=d=35:color=pink:amplitude=0.1", "-f", "lavfi", "-i", "sine=f=50:d=35",
+                "-filter_complex", "[1:a]volume=0.6[s];[0:a][s]amix=inputs=2:normalize=0", "-ac", 2, heavy)
+        _ffmpeg("-f", "lavfi", "-i", "anoisesrc=d=35:color=pink:amplitude=0.1", "-ac", 2, plain)
+        assert _bass(heavy).startswith("lowshelf=g=-") and _bass(plain) == "", "лишний низ убавляется, обычный — нет"
         # Молчит — кнопку снимает дежурство, когда звук протух: беззвучно и без следа.
         data["tracks"]["t9"] = {"chat": "9", "files": [], "knobs": dict(KNOBS), "tweaks": 0, "at": state.iso(),
                                 "done": "2026-09-27T12:00:00+00:00"}
