@@ -1295,6 +1295,12 @@
       "file": "doposle-ca367d.json",
       "published_at": "2026-10-18T06:08:54+00:00",
       "rubric": "doposle"
+    },
+    {
+      "chat": "channel",
+      "file": "20261017-080222-5598-poll.json",
+      "published_at": "2026-10-18T09:13:24+00:00",
+      "rubric": "poll"
     }
   ],
   "photos": [
