@@ -97,6 +97,7 @@ OCENKA_PER_DAY = 3
 # Нормы ОЦЕНКИ — где лежат 9 выпущенных релизов из 10: только числа, пересчёт — ocenka --norms на Маке.
 MIX_NORMS = DATA / "mix_norms.json"
 DOPOSLE_FILE = PRIVATE / "doposle.json"  # очередь роликов ДО И ПОСЛЕ с согласием на канал (skleyka._doposle_add)
+DOPOSLE_POSTS = PRIVATE / "doposle"  # пост ДО И ПОСЛЕ, ждущий «✅ В канал» владельца (skleyka.doposle_air)
 # Последнее действие человека в личке бота и время его вступления в канал (moderate.touched, member_row):
 # по ним строка открытого журнала MEMBERS_FILE говорит, чем ушедший пользовался последним. Здесь id — только тут.
 TOUCH_FILE = PRIVATE / "touch.json"

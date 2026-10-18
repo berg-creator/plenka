@@ -3026,6 +3026,12 @@ def _film(data: dict, chat_id: str, track_id: str, who: dict, message_id: int | 
 # хранилище (имени человека в открытом репозитории до выхода нет, как у отбора). Согласие без отметки —
 # старое, на «ролики» для владельца: в очередь оно не попало и не попадёт, в сомнении — не публиковать.
 DOPOSLE_EVERY = timedelta(days=3)
+# В канал ролик выходит только по «✅ В канал» владельца (18.10.2026): у Сергея, стиль «чисто», разницы
+# ДО и ПОСЛЕ не слышно, и пока пост висел, из канала ушёл подписчик. Голосом там был «audio [vocals].mp3» —
+# голос, вынутый из готовой песни: «как записал» уже был сведён, и сведению нечего было показать.
+# Порога по замеру нет: на шести треках разница (_heard) вышла 1,8–7,0 дБ, и голос из готовой песни дал
+# и 3,4, и 7,0 — число владелец видит в шапке карточки подсказкой, а решает ухом.
+DOPOSLE_CARD = "ДО И ПОСЛЕ · разница звука {heard} (у неслышного поста 18.10 — 3,4 дБ)"
 DOPOSLE_LABEL = "doposle"  # метка ссылки ?start=skleyka_doposle (service.SOURCES)
 DOPOSLE_ASK = "Голос кого услышим следующим? Присылай запись — свожу в боте, без шагов."
 DOPOSLE_POST = ("<b>ДО И ПОСЛЕ</b>\n\nГолос — {name}. С битом его свёл бот канала.\n{facts}"
@@ -3035,7 +3041,8 @@ DOPOSLE_FACTS = "Что сделал бот: {what}.\n\n"
 
 def _doposle_add(track_id: str, track: dict, who: dict) -> None:
     """Согласие на канал — в очередь выхода. Имя — как человек назвал себя в Telegram, без @ника;
-    брань и ссылки в имени — не публикуем, ролик остаётся владельцу."""
+    брань и ссылки в имени — не публикуем, ролик остаётся владельцу. heard — разница ДО и ПОСЛЕ
+    для шапки карточки владельцу (у треков до 18.10.2026 её нет)."""
     from . import otbor  # otbor импортирует этот модуль
 
     name = " ".join(filter(None, (who.get("first_name"), who.get("last_name"))))
@@ -3046,7 +3053,7 @@ def _doposle_add(track_id: str, track: dict, who: dict) -> None:
     queue = state.read_json(config.DOPOSLE_FILE, {"items": []})
     if all(item["track"] != track_id for item in queue["items"]):
         queue["items"].append({"track": track_id, "film": track["film"], "name": name[:60], "facts": facts,
-                               "channel": state.iso()})
+                               "heard": track.get("heard"), "channel": state.iso()})
         state.write_json(config.DOPOSLE_FILE, queue)
 
 
@@ -3063,27 +3070,33 @@ def doposle_post(item: dict) -> dict:
 
 
 def doposle_air() -> str:
-    """Следующий ролик очереди — в канал: не чаще раза в DOPOSLE_EVERY, не ночью, по одному, старое
-    согласие первым. Возвращает номер трека вышедшего или пустую строку. Выходят только записи с отметкой
-    channel; отметка выхода — файл content/archive/doposle-<трек>.json (он же не даёт выйти дважды).
-    Не вышло — отметка снимается, запись остаётся, следующий заход пробует снова. Во ВКонтакте не дублируется
-    (publish.crosspost_vk пропускает рубрики без обложки — проверено селфтестом)."""
+    """Следующий ролик очереди — владельцу на утверждение: в канал он выходит только его «✅ В канал»
+    (DOPOSLE_CARD). Не чаще раза в DOPOSLE_EVERY от прошлого выхода, не ночью, по одному, старое согласие
+    первым; пока прежний ждёт решения, новый не подаётся. Ждущий пост — config.DOPOSLE_POSTS/doposle-<трек>.json
+    в приватном хранилище: имя, которого владелец не выпустил, в открытый репозиторий не попадает. Кнопки — те же,
+    что у постов очереди (moderate.handle): «✅» выпускает через publish.to_channel, и пост ложится в
+    content/archive/ отметкой выхода (она же не даёт подать его снова), «🗑» удаляет. Возвращает номер трека
+    поданного или пустую строку. Не дошло — файл снимается, запись остаётся, следующий заход пробует снова.
+    Во ВКонтакте не дублируется (publish.crosspost_vk пропускает рубрики без обложки — проверено селфтестом)."""
     from . import publish
 
     posted = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
     last = max((item.get("published_at", "") for item in posted if item.get("rubric") == "doposle"), default="")
-    if publish.night(state.now()) or _age(last) < DOPOSLE_EVERY.total_seconds():
+    folder = config.DOPOSLE_POSTS
+    if publish.night(state.now()) or _age(last) < DOPOSLE_EVERY.total_seconds() or any(folder.glob("doposle-*.json")):
         return ""
     queue = state.read_json(config.DOPOSLE_FILE, {"items": []})
     for item in sorted(queue["items"], key=lambda item: item.get("channel", "")):
-        path = config.ARCHIVE / f"doposle-{item['track']}.json"
-        if not item.get("channel") or path.exists():
+        path = folder / f"doposle-{item['track']}.json"
+        if not item.get("channel") or (config.ARCHIVE / path.name).exists():
             continue
         post = doposle_post(item)
-        config.ARCHIVE.mkdir(parents=True, exist_ok=True)
+        folder.mkdir(parents=True, exist_ok=True)
         state.write_json(path, post)
+        heard = item.get("heard")
         try:
-            publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
+            publish.send_for_approval(post, path, config.secret("TELEGRAM_ADMIN_ID"), label=DOPOSLE_CARD.format(
+                heard="не замерена" if heard is None else f"{heard:g} дБ".replace(".", ",")))
         except Exception:
             path.unlink(missing_ok=True)
             raise
@@ -4382,7 +4395,7 @@ def _finish(data: dict, process: subprocess.Popen, job: dict, work: Path) -> Non
     if not track:
         return
     if result.get("ok"):
-        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix", "song", "take", "fixed") if result.get(key)},
+        track.update({key: result[key] for key in ("timing", "knobs", "film", "mix", "song", "take", "fixed", "heard") if result.get(key)},
                      done=state.iso())
         if result.get("keyed"):
             data["keys"][track["chat"]] = state.iso()
@@ -5061,7 +5074,7 @@ def run_job(spec_path: Path) -> int:
                 except Exception as exc:  # noqa: BLE001 — без приложения трек всё равно уходит
                     print(f"  сведение {spec['job']}: превью не собралось: {type(exc).__name__}")
             try:
-                movie = story(vocal, beat, master, work, rhythm)
+                movie, result["heard"] = story(vocal, beat, master, work, rhythm)
             except Exception as exc:  # noqa: BLE001 — без ролика трек всё равно уходит
                 print(f"  сведение {spec['job']}: ролик не собрался: {type(exc).__name__}")
                 movie = None
@@ -5299,8 +5312,18 @@ def story_cuts(length: float) -> tuple[float, float, float]:
     return do0, do1, do1 + max(1, round((STORY_TOTAL - STORY_OUTRO - do1) / length)) * length + STORY_OUTRO
 
 
-def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float, float]) -> Path:
-    """Ролик 9:16 на 12–15 с: ПОСЛЕ, ДО тем же местом трека дальше, снова ПОСЛЕ и концовка."""
+def _heard(before: Path, after: Path) -> float:
+    """Насколько ПОСЛЕ отличается от ДО на одном и том же месте трека, дБ: больший из сдвигов тембра
+    по октавам (tone — к полосе 1 кГц: громкость в ролике и так одна) и ширины, бока к середине.
+    Бок тише середины больше чем на 30 дБ считается за 30: у моно-бита разница вышла бы бесконечной."""
+    was, now = tone(before, FORMAT), tone(after, FORMAT)
+    wide = [max(side - mid, -30.0) for mid, side in (_channels(path, f"{FORMAT},{MS},")[:2] for path in (before, after))]
+    return round(max(*(abs(now[f] - was[f]) for f in TONE), abs(wide[1] - wide[0])), 1)
+
+
+def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float, float]) -> tuple[Path, float]:
+    """Ролик 9:16 на 12–15 с: ПОСЛЕ, ДО тем же местом трека дальше, снова ПОСЛЕ и концовка.
+    Возвращает ролик и разницу ДО и ПОСЛЕ на месте ДО (_heard), дБ."""
     do0, do1, total = story_cuts(rhythm[0])
     end0, loop0 = total - STORY_OUTRO, total - STORY_LOOP - 0.1  # переход кончается за 3 кадра до конца
     _, trace = reels.meter(master)
@@ -5319,6 +5342,7 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     _ffmpeg("-i", vocal, "-i", beat, "-filter_complex", raw_mix, *reels.VOICE_CODEC, before)
     _ffmpeg("-i", master, "-af", cut(a, b), *reels.VOICE_CODEC, after)
     (raw, peak), glued = loudness(before), loudness(after)[0]
+    heard = _heard(before, after)
     level = min(glued, raw + CEILING - peak)
     half = 0.0075  # полкроссфейда на стыке: 15 мс
     _ffmpeg("-i", vocal, "-i", beat, "-i", master, "-filter_complex",
@@ -5356,7 +5380,7 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
         code = proc.wait()
     if code:
         raise RuntimeError(f"ролик ДО/ПОСЛЕ: ffmpeg вернул {code}")
-    return out
+    return out, heard
 
 def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path, movie: Path | None,
           swap: bool = False, drop: float | None = None) -> dict:
@@ -5394,23 +5418,30 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
 
 
 def _selftest_doposle(tmp: Path, track: dict) -> None:
-    """ДО И ПОСЛЕ в канале: старое согласие не выходит никогда, новое — один раз и не чаще раза в три дня,
+    """ДО И ПОСЛЕ в канале: старое согласие не выходит никогда, новое — владельцу на утверждение с разницей
+    в шапке, в канал — только по его «✅», по одному и не чаще раза в три дня; «🗑» снимает насовсем,
     сбой отправки оставляет запись, подпись без фактов ничего не выдумывает, до выхода имени в content/ нет."""
     from unittest import mock
 
-    from . import publish
+    from . import moderate, publish
 
-    out, clock = [], [datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc)]  # 12:00 МСК
+    asked, out, clock = [], [], [datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc)]  # 12:00 МСК
+
+    def ask(post, path, chat, label=""):
+        asked.append((post, label))
+        assert path.exists() and path.parent == config.DOPOSLE_POSTS and chat == "1"
 
     def to_channel(post, path, chat):
         out.append(post)
-        assert path.exists() and post["rubric"] == "doposle" and post["video"] == "FILM1"
+        assert post["rubric"] == "doposle" and post["video"] == "FILM1"
         publish.record(post, path, "channel")
+        publish.archive(path)
 
     with mock.patch.object(config, "DOPOSLE_FILE", tmp / "doposle.json"), mock.patch.object(config, "ARCHIVE", tmp / "arch"), \
+            mock.patch.object(config, "DOPOSLE_POSTS", tmp / "wait"), \
             mock.patch.object(config, "POSTED_FILE", tmp / "posted.json"), mock.patch.object(state, "now", lambda: clock[0]), \
-            mock.patch.object(publish, "to_channel", to_channel):
-        old = dict(track, knobs=dict(KNOBS))
+            mock.patch.object(publish, "send_for_approval", ask), mock.patch.object(publish, "to_channel", to_channel):
+        old = dict(track, knobs=dict(KNOBS), heard=3.4)
         # Старое согласие: agreed без очереди — в канал ничего не идёт, сколько ни жди.
         assert doposle_air() == "" and not config.DOPOSLE_FILE.exists(), "старое согласие в канал не идёт"
         _doposle_add("t1", old, {"first_name": "Лил", "username": "lilpi"})
@@ -5420,30 +5451,37 @@ def _selftest_doposle(tmp: Path, track: dict) -> None:
         queue = state.read_json(config.DOPOSLE_FILE, {})["items"]
         assert [item["track"] for item in queue] == ["t1"] and queue[0]["name"] == "Лил" and queue[0]["channel"], \
             "один раз, без @ника; брань и пустое имя не в очереди"
-        assert not (tmp / "arch").exists(), "до выхода имени в content/ нет"
         clock[0] = datetime(2026, 10, 7, 0, 0, tzinfo=timezone.utc)  # 03:00 МСК
-        assert doposle_air() == "" and not out, "ночью не выходит"
+        assert doposle_air() == "" and not asked, "ночью владельцу не подаётся"
         clock[0] = datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc)
-        with mock.patch.object(publish, "to_channel", side_effect=telegram.TelegramError("сбой")):
+        with mock.patch.object(publish, "send_for_approval", side_effect=telegram.TelegramError("сбой")):
             try:
                 doposle_air()
                 raise AssertionError("сбой должен подняться")
             except telegram.TelegramError:
                 pass
         assert [item["track"] for item in state.read_json(config.DOPOSLE_FILE, {})["items"]] == ["t1"] \
-            and not (tmp / "arch" / "doposle-t1.json").exists(), "сбой: запись в очереди, отметки нет"
-        assert doposle_air() == "t1" and len(out) == 1 and not state.read_json(config.DOPOSLE_FILE, {})["items"]
-        text = out[0]["text"]
-        assert text.startswith("<b>ДО И ПОСЛЕ</b>\n\nГолос — Лил. ") and "?start=skleyka_doposle" in text and out[0]["comment"] \
+            and not any((tmp / "wait").glob("*.json")), "сбой: запись в очереди, ждущего поста нет"
+        assert doposle_air() == "t1" and len(asked) == 1 and not out and not state.read_json(config.DOPOSLE_FILE, {})["items"]
+        assert "разница звука 3,4 дБ" in asked[0][1] and not (tmp / "arch").exists(), \
+            "владельцу — с разницей в шапке, в канал и в content/ — ничего до его решения"
+        text = asked[0][0]["text"]
+        assert text.startswith("<b>ДО И ПОСЛЕ</b>\n\nГолос — Лил. ") and "?start=skleyka_doposle" in text and asked[0][0]["comment"] \
             and telegram.visible_len(text) <= telegram.MAX_CAPTION and "Что сделал бот: " in text, text
         assert not any(word in text.casefold() for word in ("звуч", "слыш", "сочн", "мощн")), "о звуке ни слова"
         bare = doposle_post({"name": "Лил", "film": "F", "facts": []})["text"]
         assert "Что сделал бот" not in bare and "Лил" in bare, "нет фактов — нет строки"
-        _doposle_add("t2", dict(old, fixed=["обрезал 2 с тишины в начале"]), {"first_name": "Ян"})
-        clock[0] += timedelta(days=2)
-        assert doposle_air() == "" and len(out) == 1, "чаще раза в три дня не выходит"
-        clock[0] += timedelta(days=1)
-        assert doposle_air() == "t2" and "обрезал 2 с тишины" in out[1]["text"] and doposle_air() == "", "по одному, дважды — нет"
+        _doposle_add("t2", {**{key: value for key, value in old.items() if key != "heard"},
+                            "fixed": ["обрезал 2 с тишины в начале"]}, {"first_name": "Ян"})
+        clock[0] += timedelta(days=3)
+        assert doposle_air() == "" and len(asked) == 1, "пока прежний ждёт решения, новый не подаётся"
+        assert moderate.handle("pub", "doposle-t1.json").startswith("Опубликовано") and len(out) == 1 \
+            and (tmp / "arch" / "doposle-t1.json").exists() and not any((tmp / "wait").glob("*.json")), "«✅» — в канал и в архив"
+        assert doposle_air() == "" and len(asked) == 1, "чаще раза в три дня не подаётся"
+        clock[0] += timedelta(days=3)
+        assert doposle_air() == "t2" and "обрезал 2 с тишины" in asked[1][0]["text"] and "не замерена" in asked[1][1]
+        assert moderate.handle("del", "doposle-t2.json") == "Удалил" and len(out) == 1 and doposle_air() == "", \
+            "«🗑» — ни в канал, ни владельцу снова"
 
 
 def _selftest() -> None:
@@ -7106,7 +7144,7 @@ def _selftest() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     print("skleyka: роли по имени и звуку, перевёрнутый канал бита — по низу, маршрут файлов, вопросы по шагам и галочки, справка ❓, звук заранее, "
           "переспрос после часа, ссылки на облако, стемы и master — мерка конца бита, контроль готового трека, потолок пика — по готовому MP3, место голосу в бите — по недостаче до релизов, «грязно» — голос во всю полосу и перегруз под ним, остановка бита — эхо последнего слова, имя по ведущему голосу, ручки кнопками и словами, «как у артиста», лимиты, отказы, эдлибы по панораме и к одной громкости, бэк из коротких выкриков — эдлибом, "
-          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, бит короче голоса — середина повтором, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой; ноты автотюна — со слов человека (ручка key) и автора бита: имя файла и подпись каталога, буква без лада и слово — мимо, замер без уверенности — все полутона и подсказка назвать тональность; мягкость автотюна — три положения, проба плагина той же строкой — ок")
+          "реферал за трек и звёзды, «отдать звукорежиссёру»: без готового трека — ни ника, ни счёта, задаток звёздами до заявки владельцу, возврат кнопкой — и по треку больше ни счёта, ни оплаты, внесённый задаток второй раз не принять, доплата без задатка — клиенту с куском; один раз и не всё: замер записи — шум, перегруз, нет верха, гул, превью и подпись звука, место голоса из приложения, порядок ДО/ПОСЛЕ и согласие на ролик, ДО И ПОСЛЕ в канале: старое согласие не идёт, новое — владельцу на «✅», раз в три дня и по одному, сбой оставляет запись, бесплатный бит: free for profit, кнопка на шаге бита, ответ — в поиск, в темпе голоса; перенос голоса: темп клика, вдвое, отказ за пределом, старый бит не в миксе, бит короче голоса — середина повтором, заявка снова после отказа, счётчик; тихая шина отзвука меряется; под треком две дороги в канал: «🎙» с номером трека и «💿», MP3 трека для канала — из записи, у старых записей — пересылкой; ноты автотюна — со слов человека (ручка key) и автора бита: имя файла и подпись каталога, буква без лада и слово — мимо, замер без уверенности — все полутона и подсказка назвать тональность; мягкость автотюна — три положения, проба плагина той же строкой — ок")
 
 
 def talk_check() -> list[str]:
@@ -7256,8 +7294,8 @@ def main() -> int:
             beat =_longer([("", beat, "бит")], vocal, beat, grid(beat), args.out)[0][0][1]
         master = mix(vocal, beat, args.out, args.style, args.design, args.voice, args.echo, parts, args.like)
         compare(vocal, beat, master, args.out)
-        movie = story(vocal, beat, master, args.out, grid(beat))
-        print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}, {movie}")
+        movie, heard = story(vocal, beat, master, args.out, grid(beat))
+        print(f"  готово: {master}, {args.out / 'do.mp3'}, {args.out / 'posle.mp3'}, {movie}; разница ДО и ПОСЛЕ {heard} дБ")
         return 0
     parser.print_help()
     return 0

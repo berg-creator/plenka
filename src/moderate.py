@@ -61,9 +61,10 @@ STUCK_FILE = config.DATA / "duty_alarm.json"
 
 def handle(action: str, post_id: str) -> str:
     """Выполняет действие над постом. Возвращает текст ответа для всплывашки."""
-    # Пост лежит в очереди, в срочных новостях (src/urgent.py) или ждёт выхода
-    # в отборе (src/otbor.py): кнопки под ними одинаковые, а папки разные.
-    path = next((folder / post_id for folder in (config.QUEUE, config.URGENT, config.OTBOR_POSTS)
+    # Пост лежит в очереди, в срочных новостях (src/urgent.py), ждёт выхода
+    # в отборе (src/otbor.py) или утверждения ДО И ПОСЛЕ (skleyka.doposle_air):
+    # кнопки под ними одинаковые, а папки разные.
+    path = next((folder / post_id for folder in (config.QUEUE, config.URGENT, config.OTBOR_POSTS, config.DOPOSLE_POSTS)
                  if (folder / post_id).exists()), config.QUEUE / post_id)
 
     if action == "skip":
