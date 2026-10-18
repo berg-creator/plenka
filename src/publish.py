@@ -528,7 +528,7 @@ def send(post: dict, chat_id: str) -> dict | None:
         if payload:
             sent = telegram.send_poll(
                 chat_id,
-                payload["question"],
+                poll_question(payload["question"]),
                 payload["options"],
                 anonymous=payload.get("is_anonymous", True),
             )
@@ -693,6 +693,20 @@ def send_for_approval(post: dict, path: Path, chat_id: str, label: str = "") -> 
 
 def _poll_payload(text: str) -> dict | None:
     return quality.poll(text)
+
+
+# Последнее предложение-вопрос после повода: «…рэперов. Как тебе такое «улучшение»?».
+_ASK = re.compile(r"(?<=[.!…»])\s+(?=[A-ZА-ЯЁ«][^.!?…\n]*\?$)")
+
+
+def poll_question(question: str) -> str:
+    """Сам вопрос — через пустую строку от повода (владелец, 18.10.2026: «для красоты»).
+
+    Перенос ставит код при выходе, а не модель: так он есть и у опросов, уже лежащих
+    в очереди. Telegram перенос в вопросе опроса хранит — проверено вживую.
+    Вопрос из одного предложения и с переносом от модели не трогается.
+    """
+    return question if "\n" in question else _ASK.sub("\n\n", question, count=1)
 
 
 def _selftest() -> None:
@@ -1008,6 +1022,11 @@ def _selftest() -> None:
     # Разбор и новость: что послушать лежит в комментариях всегда, файлом или ссылками.
     heard = track_note("Разбор.", {"listen": [{"artist": "Bones", "track": "HDMI"}]})
     assert heard == f"Разбор.\n\n{LISTEN_NOTE}" and track_note(heard, {"listen": [{}]}) == heard, heard
+    # Вопрос опроса — через пустую строку от повода; одно предложение и перенос модели не трогаются.
+    assert poll_question("Мэшапы на «Франсе». Как тебе такое «улучшение»?") == \
+        "Мэшапы на «Франсе».\n\nКак тебе такое «улучшение»?"
+    assert poll_question("Кто круче?") == "Кто круче?" and poll_question("А.\nБ?") == "А.\nБ?"
+
     print("площадки стримингов: все проверки прошли")
 
     # Имена артистов — ссылками на карточку в боте, только при выдаче (artist_links).
