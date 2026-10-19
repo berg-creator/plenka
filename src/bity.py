@@ -434,9 +434,21 @@ def week(moment: datetime | None = None) -> str:
     return (day - timedelta(days=day.weekday())).isoformat()
 
 
+REPEAT_GAP = 3  # столько последних вышедших битов в повтор не идут
+
+
 def _aired() -> dict[str, dict]:
     """Посты битов из архива по номеру бита: content/archive/beat-<номер>.json."""
     return {path.stem.removeprefix("beat-"): state.read_json(path, {}) for path in config.ARCHIVE.glob("beat-*.json")}
+
+
+def _repeat(catalog: dict, aired: dict) -> list[str]:
+    """Биты для повтора, первым — тот, что выйдет: самый взятый (меню, ссылка, «Свести»), но не из
+    REPEAT_GAP последних вышедших — иначе любимый бит выходил бы каждую неделю. Равные по счёту —
+    кто выходил давнее (sorted устойчив); вышедших не больше REPEAT_GAP — самый давний."""
+    again = sorted((beat_id for beat_id in catalog if aired.get(beat_id, {}).get("message")),
+                   key=lambda beat_id: aired[beat_id]["message"]["message_id"])
+    return sorted(again[:-REPEAT_GAP] or again[:1], key=lambda beat_id: -sum(catalog[beat_id].get("hits", {}).values()))
 
 
 def weekly(moment: datetime | None = None) -> str:
@@ -449,8 +461,8 @@ def air() -> str:
     """Бит недели — постом в канал: в понедельник с WEEK_HOUR_MSK по Москве, не ночью, один на неделю.
     Возвращает номер вышедшего бита или пустую строку.
 
-    Берётся бит каталога, который ещё не выходил, новый первым. Не выходивших нет — тот, что
-    выходил давнее всех: повтор лучше пустой недели. С последним новым владельцу уходит строка —
+    Берётся бит каталога, который ещё не выходил, новый первым. Не выходивших нет — повтор: самый
+    взятый из меню, по ссылке и «Свести», кроме REPEAT_GAP последних вышедших; повтор лучше пустой недели. С последним новым владельцу уходит строка —
     запас кончился. Понедельник пропущен целиком (дежурство стояло) — бита недели на этой неделе нет.
 
     Выходит сам, без кнопки владельцу: бит уже открыт всем в меню бота, решать тут нечего.
@@ -476,8 +488,7 @@ def air() -> str:
     if local.hour < WEEK_HOUR_MSK or publish.night(now) or not dated and (local.weekday() != WEEK_DAY or weekly(now)):
         return ""
     new = [beat_id for beat_id in catalog if beat_id not in aired]
-    again = sorted((beat_id for beat_id in catalog if aired.get(beat_id, {}).get("message")),
-                   key=lambda beat_id: aired[beat_id]["message"]["message_id"])
+    again = _repeat(catalog, aired)
     if not new and not again:
         return ""
     beat_id = dated or (new or again)[0]
@@ -1115,8 +1126,11 @@ def _selftest() -> None:
         assert monday(12, 20) == "" and weekly() == "", "понедельник, 23:00 по Москве: ночью бит не выходит"
         assert monday(12) == "1" and ", 140 BPM, Fm" in aired[1]["text"] and weekly() == "1"
         assert told == [LAST_NEW.format(title="Фары")], "ушёл последний новый бит — владельцу строка"
-        # Новых нет — повтор того, что выходил давнее всех; строка о запасе второй раз не уходит.
+        # Новых нет, вышедших меньше REPEAT_GAP — повтор того, что выходил давнее всех; строка о запасе второй раз не уходит.
         assert monday(19) == "2" and aired[2]["week"] == "2026-10-19" and len(told) == 1, aired[2]
+        posts = {str(n): {"message": {"message_id": n}} for n in range(1, 6)}
+        taken = {"1": {}, "2": {"menu": 5}, "3": {"mix": 1}, "4": {"menu": 9}, "5": {"menu": 9}}
+        assert _repeat({n: {"hits": hits} for n, hits in taken.items()}, posts) == ["2", "1"], "повтор — самый взятый, кроме трёх последних"
         # Файл бита, положенный руками (без сообщения канала): ни новым, ни повтором бит не выходит.
         save({**load(), "3": {"artists": ["Toxi$"], "title": "Ручной", "bpm": None, "key": ""}})
         state.write_json(config.ARCHIVE / "beat-3.json", {})
@@ -1169,7 +1183,7 @@ def _selftest() -> None:
           "кнопка — заявка с битом и его номером, «🔎 Нет бита» и без заявки, лимит, свои биты первыми, счётчик, счёт по номеру бита, "
           "значок — плёночный портрет со словом названия, без фото — спины, живой ролик в 50 МБ и превью, спрос по медиане без «ё», "
           "бит недели постом в канал: только в понедельник с 10:00 и не ночью, один на неделю, новый первым, запас кончился — "
-          "строка владельцу и повтор давнего, ручная отметка держит бит вне канала, сорванный выход возвращает отметку, "
+          "строка владельцу и повтор самого взятого, кроме трёх последних, ручная отметка держит бит вне канала, сорванный выход возвращает отметку, "
           "ролик бита (поле clip) в посте вместо значка, без ролика и при сбое — значок, "
           "бит с датой (поле day) — анонсом в свой день, без рамки недели и один раз, "
           "бит на чужой петле (поле loop) — условия её автора вместо «бесплатно, и для релиза тоже», без free for profit — ок")
