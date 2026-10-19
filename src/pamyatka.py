@@ -518,23 +518,18 @@ def took(released: datetime, moment: datetime | None = None) -> bool:
     return aired(datetime.combine(born, time(12), MSK)) or born.weekday() in config.PAMYATKA_DAYS and bool(pending())
 
 
-def air() -> str:
-    """Выход из дежурства (moderate.publish_shift): id вышедшей записи или пустая строка.
-    Не вышло — отметка снимается, и следующий заход пробует снова."""
+def air(target: str = "channel") -> str:
+    """Выход из дежурства (moderate.publish_shift): id вышедшей записи (при target admin — поданной владельцу
+    на «✅», publish.offer) или пустая строка. Не вышло — отметка снимается, и следующий заход пробует снова.
+    Не нажал владелец в свои сутки — запись не вышла и выйдет в следующий день рубрики: база идёт по порядку."""
     from . import publish, telegram
 
     left = pending()
     if not left or not due():
         return ""
     post = build(left[0])
-    path = config.ARCHIVE / f"{RUBRIC}-{post['id']}.json"
-    config.ARCHIVE.mkdir(parents=True, exist_ok=True)
-    state.write_json(path, post)
-    try:
-        publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
-    except Exception:
-        path.unlink(missing_ok=True)
-        raise
+    if not publish.offer(post, f"{RUBRIC}-{post['id']}.json", target):
+        return ""
     if len(left) == 1:
         try:
             telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), LAST.format(title=html.escape(post["title"])))
@@ -921,6 +916,19 @@ def _selftest() -> None:
             assert not (config.ARCHIVE / "pamyatka-c.json").exists() and day(), "сбой отправки снимает отметку"
             publish.to_channel = channel
             assert air() == "c" and [post["id"] for post in sent] == ["a", "b", "c"], "после сбоя — та же запись"
+            # PUBLISH_TARGET=admin: запись — владельцу кандидатом (publish.offer), в архив — только его «✅»;
+            # не нажал в свои сутки — та же запись в следующий день рубрики.
+            from unittest import mock
+
+            state.write_json(config.PAMYATKA_FILE, items + [{**items[0], "id": "d", "title": "запись d"}])
+            offered: list[str] = []
+            with mock.patch.object(config, "OFFERS", Path(tmp) / "offers"), mock.patch.object(
+                    publish, "send_for_approval", lambda post, path, chat, label="": offered.append(path.name)):
+                state.now = lambda: at("17T12:30")
+                assert air("admin") == "d" and air("admin") == "" and offered == ["pamyatka-d.json"] \
+                    and not (config.ARCHIVE / "pamyatka-d.json").exists() and len(sent) == 3, offered
+                state.now = lambda: at("21T12:30")
+                assert air("admin") == "d" and len(offered) == 2, "не нажал — та же запись в следующий день рубрики"
         finally:
             (state.now, config.ARCHIVE, config.POSTED_FILE, config.PAMYATKA_FILE, publish.to_channel, telegram.send_message,
              config.QUEUE, config.INBOX_FILE, compose.USED_FILE, compose.release_jobs, compose.do_now) = real

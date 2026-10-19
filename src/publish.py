@@ -32,7 +32,8 @@ def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = F
 
     skip_sent пропускает посты, уже ушедшие владельцу на утверждение
     (PUBLISH_TARGET=admin): пост остаётся в очереди, пока тот не нажмёт кнопку,
-    и ежечасный выход релиза слал ему один и тот же пост каждый час.
+    и ежечасный выход релиза слал ему один и тот же пост каждый час. Пост о релизе,
+    ушедший владельцу, протухает так же, как неотправленный.
 
     Решения владельца от 11.09.2026. Пост о релизе (config.RELEASE_RUBRICS)
     из обычной очереди не берётся: у него свой выход, раз в час по одному,
@@ -57,10 +58,10 @@ def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = F
     regular, ready = [], []
     for path in sorted(config.QUEUE.glob("*.json")):
         post = state.read_json(path, {})
-        if skip_sent and post.get("approval_sent_at"):
-            continue
+        sent = skip_sent and post.get("approval_sent_at")
         if post.get("rubric") not in config.RELEASE_RUBRICS:
-            regular.append(path)
+            if not sent:
+                regular.append(path)
             continue
         released = state._parse(post.get("released_at") or post.get("created_at") or "")
         if released is None or released.date() > now.date():
@@ -71,6 +72,8 @@ def next_post(releases: bool = False, dry_run: bool = False, skip_sent: bool = F
                         "убрал бы" if dry_run else "убран из очереди", path.name)
             if not dry_run:
                 path.unlink()
+            continue
+        if sent:  # ждёт кнопки владельца — после проверки срока: иначе протухший пост лежал бы в очереди вечно
             continue
         written = state._parse(post.get("created_at") or "") or now
         if post.get("full_track_file_id") or now - written >= wait or now - released >= max_age - wait:
@@ -174,10 +177,11 @@ def due(post: dict) -> bool:
         regular = sum(
             1 for item in items
             # Отбор (src/otbor.py), ролик (src/reels.py), бит недели (src/bity.py), её итог (otbor.final),
-            # совет недели (src/sovet.py) и ДО И ПОСЛЕ (skleyka.doposle_air) выходят мимо слотов
+            # совет недели (src/sovet.py), ДО И ПОСЛЕ (skleyka.doposle_air) и видео-мем владельца (moderate.meme_out)
+            # выходят мимо слотов
             # и обычному посту место не занимают. ПАМЯТКИ (src/pamyatka.py) в списке нет намеренно:
             # она выходит вместо поста о релизе и слот занимает так же, как занял бы он.
-            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "week", "sovet", "doposle")
+            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "week", "sovet", "doposle", "vmeme")
             and (moment := state._parse(item.get("published_at", "")))
             and feed_day(moment) == feed_day(now)
         )
@@ -228,6 +232,65 @@ def deliver(post: dict, path: Path, target: str) -> None:
         return
     send_for_approval(post, path, config.secret("TELEGRAM_ADMIN_ID"))
     state.write_json(path, {**state.read_json(path, {}), "approval_sent_at": state.iso()})
+
+
+def late(post: dict) -> bool:
+    """Опоздало ли решение владельца: кончились сутки ленты (feed_day), в которые ему подан кандидат
+    (поле offered_at, offer), а у поста о релизе — сутки его выхода (missed). Такой пост по «✅» не выходит:
+    бит понедельника во вторник — уже не бит недели, ПАМЯТКА среды в четверг — пост не своего дня."""
+    if offered := state._parse(post.get("offered_at", "")):
+        return feed_day(state.now()) > feed_day(offered)
+    released = state._parse(post.get("released_at") or post.get("created_at") or "")
+    return bool(post.get("rubric") in config.RELEASE_RUBRICS and released and missed(released))
+
+
+def waiting() -> bool:
+    """Ждёт ли решения владельца пост очереди, поданный ему в эти сутки ленты. При PUBLISH_TARGET=admin
+    следующий не подаётся, пока он не нажал: due и release_due считают вышедшее, а не поданное, и без этого
+    слали бы ему по посту каждые 10 минут. Решения нет до конца суток — завтра подаётся следующий."""
+    today = feed_day(state.now())
+    return any((sent := state._parse(state.read_json(path, {}).get("approval_sent_at", ""))) and feed_day(sent) == today
+               for path in config.QUEUE.glob("*.json"))
+
+
+def offer(post: dict, name: str, target: str, label: str = "") -> bool:
+    """Свой формат канала — бит недели, итог недели, совет, ПАМЯТКА, ДО И ПОСЛЕ — в канал (target channel)
+    или владельцу кандидатом с «✅ В канал / 🗑 Удалить» (admin; владелец 19.10.2026: «важнее делать интересно,
+    смешно, полезно и уникально, чем часто»). Путь один на все форматы: name — <рубрика>-<что>.json, им же
+    пост ложится в content/archive отметкой выхода. Возвращает, ушёл ли пост; False — кандидат этой рубрики
+    уже у владельца и ждёт его решения или удалён им сегодня.
+
+    В канал — как было у каждого формата: файл сразу в архив и publish.to_channel, сбой возвращает прежний
+    файл (повтор бита переписывает его) или снимает новый. Владельцу — в config.OFFERS с отметкой offered_at:
+    в архив и в канал пост попадает только «✅» (moderate.handle → to_channel), а его кнопка живёт до конца
+    суток ленты подачи (late). «🗑» файл не стирает, а метит declined: иначе следующий заход дежурства подал
+    бы тот же пост снова. Кандидат одной рубрики — один за раз, кандидаты старше недели стираются здесь же.
+    """
+    rubric, now = post["rubric"], state.now()
+    for path in config.OFFERS.glob("*.json"):
+        offered = state._parse(state.read_json(path, {}).get("offered_at", ""))
+        if offered and now - offered > timedelta(days=7):
+            path.unlink(missing_ok=True)
+        elif path.name.startswith(f"{rubric}-") and not late(state.read_json(path, {})):
+            return False
+    channel = target == "channel"
+    folder = config.ARCHIVE if channel else config.OFFERS
+    path = folder / name
+    before = state.read_json(path, {}) if path.exists() else None
+    folder.mkdir(parents=True, exist_ok=True)
+    state.write_json(path, post if channel else {**post, "offered_at": state.iso(), "label": label})
+    try:
+        if channel:
+            to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
+        else:
+            send_for_approval(post, path, config.secret("TELEGRAM_ADMIN_ID"), label)
+    except Exception:
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            state.write_json(path, before)
+        raise
+    return True
 
 
 def record(post: dict, path: Path, chat: str) -> None:
@@ -548,7 +611,8 @@ def send(post: dict, chat_id: str) -> dict | None:
         text = card.meme_text(post)
 
     # Ролик владельца (src/reels.py) — тем же файлом, что ушёл ему в личку, по file_id.
-    if rubric in ("reel", "doposle"):  # ДО И ПОСЛЕ — ролик артиста по file_id (skleyka.doposle_post)
+    # ДО И ПОСЛЕ — ролик артиста по file_id (skleyka.doposle_post), vmeme — видео-мем владельца (moderate.meme_out).
+    if rubric in ("reel", "doposle", "vmeme"):
         return _where(telegram.send_video_url(chat_id, post["video"], text, width=post.get("width", 0),
                                               height=post.get("height", 0), quiet=quiet), "caption")
 
@@ -643,7 +707,8 @@ def crosspost_vk(post: dict) -> None:
     # (otbor.build_post, поле mixed) лежит только под постом в Telegram: площадок у него нет,
     # и запись во ВКонтакте звала бы слушать то, чего там не услышать.
     # ПАМЯТКА, как и совет недели, зовёт в бота Telegram.
-    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle") or post.get("mixed"):
+    # Видео-мем владельца (vmeme) — ролик, его туда так же не залить.
+    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle", "vmeme") or post.get("mixed"):
         return
 
     # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
@@ -926,16 +991,16 @@ def _selftest() -> None:
         # Релиз прошлых суток ленты утром не выходит (missed, владелец 10.10.2026): вчерашний весомее свежего,
         # выход у обоих в 10:00 МСК, как ставит iTunes. В 8:30 — хвост его суток: он выходит и трека не ждёт,
         # до срока меньше окна. В 9:20 сутки ленты новые — он убран, выходит свежий.
-        late, new = config.QUEUE / "6-release.json", config.QUEUE / "9-release.json"
-        state.write_json(late, {"rubric": "release", "released_at": "2026-09-10T07:00:00+00:00",
+        yesterday, new = config.QUEUE / "6-release.json", config.QUEUE / "9-release.json"
+        state.write_json(yesterday, {"rubric": "release", "released_at": "2026-09-10T07:00:00+00:00",
                                 "created_at": "2026-09-11T05:20:00+00:00", "score": 99})
         state.write_json(new, {"rubric": "release", "released_at": "2026-09-11T07:00:00+00:00",
                                "created_at": "2026-09-11T03:00:00+00:00", "score": 1})
         state.now = lambda: datetime(2026, 9, 11, 5, 30, tzinfo=timezone.utc)
-        assert next_post(releases=True) == late, "ночью вчерашний релиз ещё выходит"
+        assert next_post(releases=True) == yesterday, "ночью вчерашний релиз ещё выходит"
         state.now = lambda: datetime(2026, 9, 11, 6, 20, tzinfo=timezone.utc)
-        assert next_post(releases=True, dry_run=True) == new and late.exists(), "сухой прогон очередь не трогает"
-        assert next_post(releases=True) == new and not late.exists(), "утром вчерашний релиз убран, выходит свежий"
+        assert next_post(releases=True, dry_run=True) == new and yesterday.exists(), "сухой прогон очередь не трогает"
+        assert next_post(releases=True) == new and not yesterday.exists(), "утром вчерашний релиз убран, выходит свежий"
         new.unlink()
         state.now = lambda: now
 
@@ -952,6 +1017,13 @@ def _selftest() -> None:
             deliver({"rubric": "meme", "text": "Текст."}, config.QUEUE / "1-meme.json", "admin")
         assert state.read_json(config.QUEUE / "1-meme.json", {}).get("approval_sent_at")
         assert next_post(skip_sent=True) is None
+        assert waiting(), "поданный сегодня ждёт кнопки — следующий владельцу не подаётся"
+        # Ушедший владельцу релиз протухает, как неотправленный, а «✅» после его суток ленты — опоздание (late).
+        stale = {"rubric": "release", "released_at": ago(hours=30), "created_at": ago(hours=29), "approval_sent_at": ago(hours=28)}
+        state.write_json(config.QUEUE / "7-release.json", stale)
+        assert late(stale) and not late(state.read_json(config.QUEUE / "8-release.json", {})) and not late({"rubric": "meme"})
+        next_post(releases=True, skip_sent=True)
+        assert not (config.QUEUE / "7-release.json").exists(), "протухший релиз у владельца — из очереди"
 
         # Выход релиза — не чаще раза в час: интервал считает журнал публикаций,
         # а не крон (его убрали из publish.yml, выпускает дежурство). Интервал и счёт

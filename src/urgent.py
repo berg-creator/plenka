@@ -222,11 +222,14 @@ def shift() -> None:
     for workflow, hours in config.SHIFT_HOURS_MSK.items():
         if not due([], hours):  # час ещё не настал — GitHub не спрашиваем
             continue
+        if workflow == "quiz.yml" and state.now().astimezone(compose.MSK).weekday() not in config.QUIZ_DAYS:
+            continue  # прослушка — раз в неделю и «где ИИ» по воскресеньям, а не каждый день
         api = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}"
         body = {"ref": os.environ.get("GITHUB_REF_NAME", "main")}
         if workflow == "quiz.yml":
             # Ручной запуск прослушки по умолчанию шлёт её владельцу — дежурство
-            # называет адрес само, тот же, куда выпускает посты.
+            # называет адрес само, тот же, куда выпускает посты: при admin загадка
+            # идёт владельцу кандидатом и выходит его «✅» (quiz.offer).
             body["inputs"] = {"target": os.environ.get("PUBLISH_TARGET", "admin")}
         try:
             response = requests.get(f"{api}/runs", params={"per_page": 5}, headers=headers, timeout=30)
@@ -354,8 +357,8 @@ def _selftest() -> int:
     with mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 7, 29, tzinfo=timezone.utc)):  # 10:29 МСК
         assert not due([], (10.5,))
 
-    # Дежурство в 15:05: сторис и срочное сегодня уже шли, годовщины и прослушка — нет.
-    # За круг уходит один запуск, прослушке называется адрес — иначе ушла бы владельцу.
+    # Дежурство во вторник в 15:05: сторис и срочное сегодня уже шли, годовщины и прослушка — нет.
+    # За круг уходит один запуск, прослушке называется адрес — иначе ушла бы владельцу; в среду прослушки нет.
     import contextlib, io
     asked_github, sent = [], []
     class Reply:
@@ -364,9 +367,10 @@ def _selftest() -> int:
         def json(self): return {"workflow_runs": self.runs}
     def get(url, **_):
         asked_github.append(url.split("/")[-2])
-        return Reply([] if url.split("/")[-2] in ("calendar.yml", "quiz.yml") else [{"created_at": "2026-09-16T11:30:00Z"}])
+        return Reply([] if url.split("/")[-2] in ("calendar.yml", "quiz.yml") else [{"created_at": "2026-09-15T11:30:00Z"}])
     env = {"GITHUB_TOKEN": "t", "GITHUB_REPOSITORY": "o/r", "GITHUB_REF_NAME": "main", "PUBLISH_TARGET": "channel"}
-    with (mock.patch.object(state, "now", lambda: datetime(2026, 9, 16, 12, 5, tzinfo=timezone.utc)),
+    clock = [datetime(2026, 9, 15, 12, 5, tzinfo=timezone.utc)]
+    with (mock.patch.object(state, "now", lambda: clock[0]),
           mock.patch.object(config, "SHIFT_HOURS_MSK", {**config.SHIFT_HOURS_MSK, "calendar.yml": (16,)}),
           mock.patch.dict(os.environ, env), mock.patch("requests.get", get),
           mock.patch("requests.post", lambda url, json, **_: sent.append((url.split("/")[-2], json)) or Reply()),
@@ -377,6 +381,10 @@ def _selftest() -> int:
         with mock.patch.object(config, "SHIFT_HOURS_MSK", config.SHIFT_HOURS_MSK | {"calendar.yml": (8,)}):
             shift()
         assert sent[1:] == [("calendar.yml", {"ref": "main"})], sent  # один запуск, прослушка ждёт следующего круга
+        clock[0] += timedelta(days=1)
+        asked_github.clear()
+        shift()
+        assert "quiz.yml" not in asked_github, asked_github  # среда — не день прослушки
 
     asked, used, saved = [], [], []
     def generate(rubric: str, payload: dict) -> dict:

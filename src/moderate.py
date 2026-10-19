@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import logging
 import os
@@ -32,7 +33,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -62,24 +63,41 @@ STUCK_FILE = config.DATA / "duty_alarm.json"
 def handle(action: str, post_id: str) -> str:
     """Выполняет действие над постом. Возвращает текст ответа для всплывашки."""
     # Пост лежит в очереди, в срочных новостях (src/urgent.py), ждёт выхода
-    # в отборе (src/otbor.py) или утверждения ДО И ПОСЛЕ (skleyka.doposle_air):
+    # в отборе (src/otbor.py) или «✅» владельца своим форматом канала (publish.offer):
     # кнопки под ними одинаковые, а папки разные.
-    path = next((folder / post_id for folder in (config.QUEUE, config.URGENT, config.OTBOR_POSTS, config.DOPOSLE_POSTS)
-                 if (folder / post_id).exists()), config.QUEUE / post_id)
+    def find() -> Path:
+        return next((folder / post_id for folder in (config.QUEUE, config.URGENT, config.OTBOR_POSTS, config.OFFERS)
+                     if (folder / post_id).exists()), config.QUEUE / post_id)
 
     if action == "skip":
         return "Оставил в очереди"
 
+    path = find()
     if not path.exists():
-        return "Поста уже нет в очереди"
+        # Загадку прослушки кладёт в приватное хранилище другой запуск (quiz.offer), и дерево смены может её
+        # ещё не знать: перед «поста нет» — свежий git.
+        push_state()
+        path = find()
+    if not path.exists():
+        return "Поста уже нет: вышел, удалён или опоздал"
 
     post = state.read_json(path, {})
 
     if action == "del":
-        path.unlink()
+        if path.parent == config.OFFERS:
+            # Файл остаётся с отметкой: иначе следующий заход дежурства подал бы тот же пост снова (publish.offer).
+            state.write_json(path, {**post, "declined": state.iso()})
+        else:
+            path.unlink()
         return "Удалил"
 
     if action == "pub":
+        if post.get("declined"):
+            return "Уже удалён"
+        if publish.late(post):
+            return "Опоздал: его сутки ленты кончились, пост не вышел"
+        if post.get("rubric") == "quiz":  # ответ загадки — не в открытый архив: у прослушки свой выход
+            return quiz.release(post, path)
         # Одно нажатие публикует на обеих площадках, и сообщение поста
         # запоминается для правок автопилота — тем же путём, что по расписанию.
         try:
@@ -87,9 +105,56 @@ def handle(action: str, post_id: str) -> str:
         except telegram.TelegramError as exc:
             log.error("Не удалось опубликовать %s: %s", post_id, exc)
             return f"Ошибка: {exc}"
+        if post.get("rubric") == "week":  # итог бита недели: победителю — весть, когда итог уже в канале
+            otbor.crown(post)
         return "Опубликовано в канал и ВК"
 
     return "Непонятная команда"
+
+
+# Видео-мем владельца (19.10.2026): видео в личку бота с подписью «мем …» — в ответ тот же ролик с остальной
+# подписью и «📺 В канал»; нажатие выпускает его через publish.to_channel по file_id, мимо слотов и ВКонтакте.
+MEME = "vmeme"
+_MEME = re.compile(r"мем\b[\s:.,—–-]*", re.IGNORECASE)
+
+
+def meme_wants(message: dict, admin: str) -> bool:
+    """Видео владельца в его личке с подписью, начинающейся словом «мем» (регистр не важен)."""
+    return (bool(message.get("video")) and bool(_MEME.match(message.get("caption") or ""))
+            and str(admin) == str(message.get("from", {}).get("id")) == str(message.get("chat", {}).get("id")))
+
+
+def meme_offer(message: dict, admin: str) -> None:
+    """Ответ на видео-мем: тот же файл, подпись без слова «мем» и кнопка «📺 В канал» с номером сообщения."""
+    caption = message.get("caption") or ""
+    video = message["video"]
+    telegram.send_video_url(admin, video["file_id"], html.escape(caption[_MEME.match(caption).end():].strip()),
+                            width=video.get("width", 0), height=video.get("height", 0),
+                            buttons=[[{"text": "📺 В канал", "callback_data": f"{MEME}:{message['message_id']}"}]])
+
+
+def meme_out(meme_id: str, message: dict) -> str:
+    """«📺 В канал» под видео-мемом: выходит ролик того сообщения, где нажали, один раз — отметка
+    content/archive/vmeme-<номер>.json, как у ролика (reels.to_channel). Не вышло — отметка снимается."""
+    if not meme_id.isdigit():
+        return "Непонятный мем"
+    path = config.ARCHIVE / f"{MEME}-{meme_id}.json"
+    if path.exists():
+        return "Уже в канале"
+    video = message.get("video") or {}
+    if not video.get("file_id"):
+        return "Не нашёл видео — пришли мем ещё раз"
+    post = {"rubric": MEME, "text": html.escape(message.get("caption") or ""), "video": video["file_id"],
+            "width": video.get("width", 0), "height": video.get("height", 0)}
+    config.ARCHIVE.mkdir(parents=True, exist_ok=True)
+    state.write_json(path, post)
+    try:
+        publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
+    except telegram.TelegramError as exc:
+        path.unlink(missing_ok=True)
+        log.error("Мем %s не вышел: %s", meme_id, exc)
+        return f"Ошибка: {exc}"
+    return "Мем в канале"
 
 
 # Звук этих кодеков Telegram играет плеером, и перекодировать его незачем:
@@ -553,6 +618,17 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
                         log.error("Бит не принят: %s", exc)
                 continue
 
+            # Видео-мем владельца (meme_wants): видео с подписью «мем …» — рядом с битом, раньше роликов,
+            # дорожек сведения и ОТБОРА: видео владельца ушло бы в любой из них.
+            if meme_wants(message, admin):
+                print("  видео-мем владельца")
+                if not args.dry_run:
+                    try:
+                        meme_offer(message, admin)
+                    except Exception as exc:  # noqa: BLE001 — сбой ответа не роняет дежурство
+                        log.error("Мем не принят: %s", exc)
+                continue
+
             # Ответ владельца на фразу ролика (src/reels.py): голосовое, аудио или видео —
             # дубль, фото или картинка файлом — кадр, «собери» — сборка, прочий
             # текст — правка черновика для Мака (reels.note). Раньше
@@ -734,13 +810,14 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
         # «📺 В канал» под роликом (src/reels.py): выходит видео того сообщения, где нажали.
         # «Всё ок» и «Исправить» под черновиком с Мака — записываются для Мака (reels.verdict).
         result = (reels.to_channel(post_id, message) if action == reels.CALLBACK
+                  else meme_out(post_id, message) if action == MEME
                   else reels.verdict(action, post_id, admin) if action in (reels.OK, reels.FIX)
                   else handle(action, post_id))
         telegram.answer_callback(query["id"], result)
         # Вышедший или удалённый пост — в git сразу, а не через десять минут:
         # ежечасный выход релизов (publish --releases) берёт очередь из git
         # и иначе выпустил бы тот же пост второй раз или удалённый.
-        if action in ("pub", "del", reels.CALLBACK, reels.OK, reels.FIX):
+        if action in ("pub", "del", reels.CALLBACK, MEME, reels.OK, reels.FIX):
             push_state()
 
         # Не вышло — кнопки остаются: нажать ещё раз проще, чем искать пост заново.
@@ -769,10 +846,11 @@ def publish_shift() -> None:
     Дежурство идёт почти без дыр и так публикует по кнопке и пушит состояние,
     а когда пора — считают publish.release_due и publish.due по журналу публикаций.
 
-    Сначала релиз: он свежий, а обычный пост вечнозелёный. Обычный пост — только
-    в канал: владельцу на утверждение журнал не пишется, и due слал бы ему
-    по посту каждые 10 минут. Крона у publish.yml больше нет: два публикатора
-    на одной очереди выпустили бы один пост дважды.
+    Сначала релиз: он свежий, а обычный пост вечнозелёный. При PUBLISH_TARGET=admin
+    (владелец 19.10.2026: каждый пост — по его «✅», кроме срочных) пост очереди подаётся
+    ему по одному: пока поданный сегодня ждёт кнопки, следующий не идёт (publish.waiting),
+    иначе due и release_due, считающие вышедшее, слали бы по посту каждые 10 минут.
+    Крона у publish.yml больше нет: два публикатора на одной очереди выпустили бы один пост дважды.
 
     Поломка выхода смену не роняет: бот важнее одного поста, следующий заход
     через PUSH_EVERY попробует снова.
@@ -780,47 +858,36 @@ def publish_shift() -> None:
     if publish.held():  # config.HOLD_DAYS: последним в ленте держится свой пост
         return
     target = os.environ.get("PUBLISH_TARGET", "admin")
+    # Свои форматы — при любом target: в канал сами или владельцу кандидатом на «✅» (publish.offer,
+    # владелец 19.10.2026). Подан — и в тот же заход больше ничего: два поста подряд в ленте ни к чему.
     # Бит недели — первым (bity.air, по понедельникам): так он забирает единственный звук дня
     # (publish.hushed); в воскресенье вечером тем же местом выходит итог недели (otbor.final).
-    # Следом в тот же заход ничего не выходит — два поста подряд в ленте ни к чему.
-    if target == "channel":
-        try:
-            if beat := bity.air() or otbor.final():
-                print(f"Выход бита недели: {beat} → {target}")
-                return
-        except Exception as exc:  # noqa: BLE001 — бит не держит выход остальных постов
-            log.error("Выход бита недели не удался: %s", exc)
-        try:  # СОВЕТ НЕДЕЛИ: по четвергам, после бита — второй звук в день ему не достаётся (publish.hushed)
-            from . import sovet
+    from . import pamyatka, sovet
 
-            if flaw := sovet.air():
-                print(f"Выход совета недели: {flaw} → {target}")
-                return
-        except Exception as exc:  # noqa: BLE001 — совет не держит выход остальных постов
-            log.error("Выход совета недели не удался: %s", exc)
-        try:  # ПАМЯТКА: по средам и субботам, вместо поста о релизе — его в эти сутки держит publish.release_due
-            from . import pamyatka
-
-            if memo := pamyatka.air():
-                print(f"Выход ПАМЯТКИ: {memo} → {target}")
-                return
-        except Exception as exc:  # noqa: BLE001 — памятка не держит выход остальных постов
-            log.error("Выход ПАМЯТКИ не удался: %s", exc)
-    if target == "channel":
+    for name, air in (("бита недели", lambda: bity.air(target) or otbor.final(target)),
+                      # СОВЕТ НЕДЕЛИ: по четвергам, после бита — второй звук в день ему не достаётся (publish.hushed)
+                      ("совета недели", lambda: sovet.air(target)),
+                      # ПАМЯТКА: по средам и субботам, вместо поста о релизе — его в эти сутки держит publish.release_due
+                      ("ПАМЯТКИ", lambda: pamyatka.air(target)),
+                      # ДО И ПОСЛЕ — только по «✅» владельца при любом target (skleyka.doposle_air)
+                      ("ДО И ПОСЛЕ", skleyka.doposle_air)):
         try:
-            if track := skleyka.doposle_air():
-                print(f"Выход ДО И ПОСЛЕ: трек {track} → {target}")
+            if done := air():
+                print(f"Выход {name}: {done} → {target}")
                 return
-        except Exception as exc:  # noqa: BLE001 — ролик не держит выход остальных постов
-            log.error("Выход ДО И ПОСЛЕ не удался: %s", exc)
+        except Exception as exc:  # noqa: BLE001 — формат не держит выход остальных постов
+            log.error("Выход %s не удался: %s", name, exc)
     try:
         otbor.shift(target)
     except Exception as exc:  # noqa: BLE001 — отбор не держит выход остальных постов
         log.error("Выход отбора не удался: %s", exc)
-    path = publish.next_post(releases=True, skip_sent=target == "admin") if publish.release_due() else None
+    admin = target != "channel"
+    if admin and publish.waiting():  # пост очереди у владельца и ждёт его кнопки — следующий не подаётся
+        return
+    path = publish.next_post(releases=True, skip_sent=admin) if publish.release_due() else None
     label = "Выход релиза"
-    if path is None and target == "channel":
-        path, label = publish.next_post(), "Выход поста"
+    if path is None:
+        path, label = publish.next_post(skip_sent=admin), "Выход поста"
         if path is not None and not publish.due(state.read_json(path, {})):
             path = None
     if path is None:
@@ -1397,12 +1464,20 @@ def _selftest() -> int:
     print("журнал канала: пришёл и ушёл — время и направление без id, часы с готового трека, чат обсуждений мимо; "
           "последнее действие в боте — меткой без текста и кодов, сколько пробыл в канале, сбой отметки разбор не роняет")
 
-    # Выход из дежурства: бит владельца первым и один; дальше релиз; обычный пост — только в канал и когда пора.
-    delivered = []
-    for release_due, due, target, beat in ((True, True, "channel", ""), (False, True, "channel", ""),
-                                           (False, False, "channel", ""), (False, True, "admin", "3"),
-                                           (True, True, "channel", "3")):
-        with (mock.patch.object(bity, "air", lambda: beat),
+    # Выход из дежурства: свой формат первым и один (при admin — владельцу, тем же вызовом); дальше релиз;
+    # обычный пост — когда пора; при admin пост очереди — по одному, пока поданный ждёт кнопки.
+    from . import pamyatka, sovet
+
+    delivered, airs = [], []
+    for release_due, due, target, beat, wait in ((True, True, "channel", "", False), (False, True, "channel", "", False),
+                                                 (False, False, "channel", "", False), (False, True, "admin", "3", False),
+                                                 (True, True, "channel", "3", False), (True, True, "admin", "", False),
+                                                 (False, True, "admin", "", False), (True, True, "admin", "", True)):
+        with (mock.patch.object(bity, "air", lambda to: airs.append(to) or beat),
+              mock.patch.object(otbor, "final", lambda to: ""), mock.patch.object(otbor, "shift", lambda to: None),
+              mock.patch.object(sovet, "air", lambda to: ""), mock.patch.object(pamyatka, "air", lambda to: ""),
+              mock.patch.object(skleyka, "doposle_air", lambda: ""),
+              mock.patch.object(publish, "waiting", lambda: wait),
               mock.patch.object(publish, "release_due", lambda: release_due),
               mock.patch.object(publish, "due", lambda post: due),
               mock.patch.object(publish, "next_post", lambda releases=False, **_: Path(f"{releases}.json")),
@@ -1411,8 +1486,65 @@ def _selftest() -> int:
               mock.patch.dict(os.environ, {"PUBLISH_TARGET": target}),
               contextlib.redirect_stdout(io.StringIO())):
             publish_shift()
-    assert delivered == [("True.json", "channel"), ("False.json", "channel")], delivered
-    print("выход из дежурства: бит владельца первым и один, дальше релиз, обычный пост — в канал по часам")
+    assert delivered == [("True.json", "channel"), ("False.json", "channel"), ("True.json", "admin"),
+                         ("False.json", "admin")], delivered
+    assert airs[3] == "admin", "свой формат при admin — владельцу, а не молча мимо"
+    print("выход из дежурства: свой формат первым и один, при admin — владельцу; дальше релиз, обычный пост — по часам, "
+          "владельцу — по одному")
+
+    # Кнопки под кандидатом (publish.offer): «✅» после своих суток ленты — «опоздал», «🗑» держит формат вне канала
+    # до конца суток, «✅» под загадкой — её выход без архива, под итогом недели — весть победителю после выхода.
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        clock = [datetime(2026, 10, 19, 8, 0, tzinfo=timezone.utc)]  # понедельник, 11:00 МСК
+        out, asked, crowned, freed = [], [], [], []
+        with (mock.patch.object(config, "OFFERS", root / "offers"), mock.patch.object(config, "ARCHIVE", root / "arch"),
+              mock.patch.object(config, "QUEUE", root / "queue"), mock.patch.object(config, "secret", lambda *a, **k: "1"),
+              mock.patch.object(state, "now", lambda: clock[0]),
+              mock.patch.object(publish, "send_for_approval", lambda post, path, chat, label="": asked.append(path.name)),
+              mock.patch.object(publish, "to_channel", lambda post, path, chat: out.append(post) or publish.archive(path)),
+              mock.patch.object(otbor, "crown", crowned.append),
+              mock.patch.object(quiz, "release", lambda post, path: freed.append(path.name) or "Загадка в канале")):
+            beat = {"rubric": "beat", "beat": "1", "text": "бит"}
+            assert publish.offer(beat, "beat-1.json", "admin") and asked == ["beat-1.json"] and not out
+            assert not publish.offer(beat, "beat-2.json", "admin") and len(asked) == 1, "кандидат рубрики — один за раз"
+            assert handle("del", "beat-1.json") == "Удалил" and not publish.offer(beat, "beat-1.json", "admin"), \
+                "«🗑» — в эти сутки не подаётся снова"
+            assert handle("pub", "beat-1.json") == "Уже удалён" and not out
+            clock[0] += timedelta(days=1)
+            assert publish.offer(beat, "beat-1.json", "admin") and len(asked) == 2, "назавтра — снова можно"
+            clock[0] += timedelta(days=1)
+            assert handle("pub", "beat-1.json").startswith("Опоздал") and not out, "позже своих суток — не выходит"
+            week = {"rubric": "week", "text": "итог", "winner": "w.json"}
+            assert publish.offer(week, "week-1.json", "admin") and handle("pub", "week-1.json").startswith("Опубликовано")
+            assert out == [{**week, "offered_at": state.iso(), "label": ""}] and (root / "arch" / "week-1.json").exists() \
+                and crowned and crowned[0]["winner"] == "w.json", "итог — в канал и в архив, весть — после выхода"
+            state.write_json(root / "offers" / "quiz-1.json", {"rubric": "quiz", "offered_at": state.iso(), "item": {}})
+            assert handle("pub", "quiz-1.json") == "Загадка в канале" and freed == ["quiz-1.json"] and len(out) == 1
+            assert not (root / "arch" / "quiz-1.json").exists(), "ответ загадки в открытый архив не идёт"
+    print("кандидат владельцу: «✅» в свои сутки — в канал, позже — «опоздал»; «🗑» держит формат до конца суток; "
+          "загадка — своим выходом без архива; итог недели — весть победителю после выхода")
+
+    # Видео-мем владельца: подпись «мем …» — только его видео в его личке; в ответ — тот же ролик без слова «мем»
+    # и «📺 В канал»; нажатие выпускает ролик по file_id один раз.
+    clip = {"file_id": "MEM", "width": 720, "height": 1280}
+    assert "видео-мем" in routed({"message_id": 5, "from": {"id": 1}, "chat": {"id": 1, "type": "private"},
+                                  "video": clip, "caption": "Мем: когда <бит> не свёлся"})
+    for other in ({"from": {"id": 2}, "chat": {"id": 2, "type": "private"}, "caption": "мем"},
+                  {"from": {"id": 1}, "chat": {"id": 1, "type": "private"}, "caption": "мемы недели"}):
+        assert not meme_wants({"video": clip, **other}, "1"), other
+    sent, out = [], []
+    with tempfile.TemporaryDirectory() as folder, \
+            mock.patch.object(config, "ARCHIVE", Path(folder)), mock.patch.object(config, "secret", lambda *a, **k: "-100"), \
+            mock.patch.object(telegram, "send_video_url", lambda chat, video, caption, **kw: sent.append((video, caption, kw))), \
+            mock.patch.object(publish, "to_channel", lambda post, path, chat: out.append(post) or state.write_json(path, post)):
+        meme_offer({"message_id": 5, "video": clip, "caption": "Мем: когда <бит> не свёлся"}, "1")
+        assert sent[0][:2] == ("MEM", "когда &lt;бит&gt; не свёлся") \
+            and sent[0][2]["buttons"][0][0]["callback_data"] == f"{MEME}:5", sent
+        pressed = {"video": clip, "caption": "когда <бит> не свёлся"}
+        assert meme_out("5", pressed) == "Мем в канале" and meme_out("5", pressed) == "Уже в канале" and len(out) == 1
+        assert out[0] == {"rubric": MEME, "text": "когда &lt;бит&gt; не свёлся", "video": "MEM", "width": 720, "height": 1280}
+    print("видео-мем владельца: «мем …» — только его видео, ответ без слова «мем» с «📺 В канал», выход один раз")
     return 0
 
 

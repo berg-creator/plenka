@@ -457,15 +457,17 @@ def weekly(moment: datetime | None = None) -> str:
     return next((beat_id for beat_id, post in _aired().items() if post.get("week") == monday), "")
 
 
-def air() -> str:
+def air(target: str = "channel") -> str:
     """Бит недели — постом в канал: в понедельник с WEEK_HOUR_MSK по Москве, не ночью, один на неделю.
-    Возвращает номер вышедшего бита или пустую строку.
+    Возвращает номер вышедшего бита (при target admin — поданного владельцу) или пустую строку.
 
     Берётся бит каталога, который ещё не выходил, новый первым. Не выходивших нет — повтор: самый
     взятый из меню, по ссылке и «Свести», кроме REPEAT_GAP последних вышедших; повтор лучше пустой недели. С последним новым владельцу уходит строка —
     запас кончился. Понедельник пропущен целиком (дежурство стояло) — бита недели на этой неделе нет.
 
-    Выходит сам, без кнопки владельцу: бит уже открыт всем в меню бота, решать тут нечего.
+    При PUBLISH_TARGET=admin (владелец 19.10.2026) бит идёт владельцу кандидатом и выходит его «✅»
+    (publish.offer); не нажал до конца суток ленты понедельника (9:00 вторника) — бита на этой неделе нет,
+    как при пропущенном понедельнике.
     Отметка о выходе — файл поста в content/archive, как у ролика (reels.to_channel): каталог
     ради неё не переписывается. Поле week поста — неделя, по нему бит недели узнаётся (weekly);
     повтор переписывает файл новым постом. Файл beat-<номер>.json, положенный руками, держит бит
@@ -492,21 +494,13 @@ def air() -> str:
     if not new and not again:
         return ""
     beat_id = dated or (new or again)[0]
-    beat, path = catalog[beat_id], config.ARCHIVE / f"beat-{beat_id}.json"
+    beat = catalog[beat_id]
     post = {"rubric": "beat", "beat": beat_id, "comment": POST_ASK, **({} if dated else {"week": week(now)}),
             "text": (ANNOUNCE if dated else POST).format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
                                 tempo=html.escape(_tempo(beat)), terms=_terms(beat),
                                 link=link(beat_id))}
-    config.ARCHIVE.mkdir(parents=True, exist_ok=True)
-    state.write_json(path, post)
-    try:
-        publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
-    except Exception:
-        if beat_id in aired:
-            state.write_json(path, aired[beat_id])
-        else:
-            path.unlink(missing_ok=True)
-        raise
+    if not publish.offer(post, f"beat-{beat_id}.json", target):
+        return ""
     if len(new) == 1 and not dated:
         try:
             telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), LAST_NEW.format(title=html.escape(beat["title"])))
@@ -1160,6 +1154,13 @@ def _selftest() -> None:
             and "до конца субботы" not in aired[-1]["text"] and link("5") in aired[-1]["text"], aired[-1]["text"]
         assert monday(7, 12, month=11) == "" and len(aired) == seen + 1 and len(told) == said, "анонс один, запас не тронут"
         assert monday(9, month=11) == "1" and aired[-1]["week"] == "2026-11-09", "в понедельник бит недели — другой"
+        # PUBLISH_TARGET=admin: бит — владельцу кандидатом (publish.offer), в канал и в архив — только его «✅»;
+        # следующий заход того же не подаёт.
+        offered: list[str] = []
+        with mock.patch.object(config, "OFFERS", tmp / "offers"), \
+                mock.patch.object(publish, "send_for_approval", lambda post, path, chat, label="": offered.append(path.name)):
+            clock[0], seen = datetime(2026, 11, 16, 8, 0, tzinfo=timezone.utc), len(aired)
+            assert air("admin") and air("admin") == "" and len(offered) == 1 and len(aired) == seen and weekly() == "", offered
         # Ролик бита (поле clip — file_id) встаёт в пост вместо значка; нет его или не ушёл — значок.
         went: list[str] = []
 

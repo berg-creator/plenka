@@ -209,7 +209,7 @@ def delete_message(chat_id: str | int, message_id: int) -> None:
 
 
 def copy_message(chat_id: str | int, from_chat_id: str | int, message_id: int, caption: str | None = None, *,
-                 reply_to: int | None = None) -> dict:
+                 reply_to: int | None = None, quiet: bool = False) -> dict:
     """Копия сообщения без «переслано от»: файл Telegram копирует у себя, не скачивая, —
     поэтому ни предел getFile в 20 МБ, ни предел загрузки в 50 МБ здесь не действуют.
     caption — новая подпись; None — как у оригинала."""
@@ -218,6 +218,8 @@ def copy_message(chat_id: str | int, from_chat_id: str | int, message_id: int, c
         payload.update(caption=clip(sanitize(caption), MAX_CAPTION), parse_mode="HTML")
     if reply_to is not None:
         payload["reply_parameters"] = json.dumps({"message_id": reply_to, "allow_sending_without_reply": True})
+    if quiet:
+        payload["disable_notification"] = True
     return _call("copyMessage", payload)
 
 
@@ -435,7 +437,7 @@ def edit_video(
 
 def send_video_url(
     chat_id: str, url: str, caption: str, *, reply_to: int | None = None, width: int = 0, height: int = 0,
-    quiet: bool = False,
+    quiet: bool = False, buttons: list[list[dict]] | None = None,
 ) -> dict:
     """Ролик по чужой ссылке или по file_id уже отправленного: файл забирает сам Telegram.
 
@@ -457,6 +459,8 @@ def send_video_url(
         payload["disable_notification"] = True
     if reply_to is not None:
         payload["reply_parameters"] = json.dumps({"message_id": reply_to})
+    if buttons:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": buttons})
     return _call("sendVideo", payload)
 
 

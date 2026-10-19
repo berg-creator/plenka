@@ -957,9 +957,10 @@ def shift(target: str) -> None:
     print(f"Выход отбора: {path.name} → {target}")
 
 
-def final() -> str:
+def final(target: str = "channel") -> str:
     """Итог бита недели — постом в канал: в воскресенье с FINAL_HOUR_MSK по Москве, не ночью, один
     на неделю. Возвращает «итог <понедельник>» или пусто. Зовёт дежурство (moderate.publish_shift).
+    При target admin итог идёт владельцу кандидатом (publish.offer), весть победителю — после его «✅» (crown).
 
     Треки недели — вышедшие посты отбора с полем week этой недели. Меньше WEEK_MIN — итога нет вовсе,
     молча. Голоса отдаёт только закрытие опроса (telegram.stop_poll), и счёт сразу ложится в файл поста
@@ -973,7 +974,7 @@ def final() -> str:
     Победителю — сообщение от бота, владельцу — строка с меткой чата, как у /vopros: его ответ на неё
     уходит победителю. Бесплатный заказ бот не заводит — владелец отдаёт его сам (skleyka --hand, «🎁»).
     """
-    from . import bity, skleyka
+    from . import bity
     from .compose import MSK
 
     now = state.now()
@@ -1036,23 +1037,31 @@ def final() -> str:
     post = {"rubric": "week", "week": monday, "text": text, "artist": won["artist"], "track": won["track"],
             "mixed": True, "kicker": f"{WEEK_KICKER} · ИТОГ", "comment": FINAL_ASK, "winner": won_path.name,
             "created_at": state.iso()}
-    state.write_json(mark, post)
-    try:
-        publish.to_channel(post, mark, config.secret("TELEGRAM_CHANNEL_ID"))
-    except Exception:
-        mark.unlink(missing_ok=True)
-        raise
-    chat = next((entry["chat"] for entry in load()["done"] if entry.get("file") == won_path.name), "")
-    name = html.escape(f"{won['artist']} — «{won['track']}»")
-    for whom, line in ((chat, WON.format(title=html.escape(won["track"]), link=links[0])),
-                       (admin, WON_OWNER.format(name=name, link=links[0],
-                                                tag=f"{skleyka.QUESTION_TAG}{chat}" if chat else WON_LOST))):
+    if not publish.offer(post, mark.name, target):
+        return ""
+    if target == "channel":
+        crown(post)
+    return f"итог {monday}"
+
+
+def crown(post: dict) -> None:
+    """Победителю — весть, владельцу — строка с меткой чата: только когда итог уже в канале — сразу
+    после выхода (final) или по «✅ В канал» владельца (moderate.handle). Раньше нельзя: удалённый
+    владельцем итог оставил бы победителю обещание бесплатного сведения."""
+    from . import skleyka
+
+    won = state.read_json(config.ARCHIVE / post["winner"], {})
+    link = f"https://t.me/{config.CHANNEL_HANDLE.lstrip('@')}/{won['message']['message_id']}"
+    chat = next((entry["chat"] for entry in load()["done"] if entry.get("file") == post["winner"]), "")
+    name = html.escape(f"{post['artist']} — «{post['track']}»")
+    for whom, line in ((chat, WON.format(title=html.escape(post["track"]), link=link)),
+                       (config.secret("TELEGRAM_ADMIN_ID"), WON_OWNER.format(
+                           name=name, link=link, tag=f"{skleyka.QUESTION_TAG}{chat}" if chat else WON_LOST))):
         try:
             if whom:
                 telegram.send_message(whom, line)
         except telegram.TelegramError as exc:  # итог уже вышел — несказанное слово его не отменяет
             log.warning("Весть об итоге бита недели не ушла: %s", exc)
-    return f"итог {monday}"
 
 
 def notify(data: dict) -> None:
@@ -1445,6 +1454,15 @@ def _selftest() -> None:
             assert last("10") == WON.format(title="Двор", link=urls[1]) and "бесплатно" in WON
             assert f"{skleyka.QUESTION_TAG}10" in last("900") and "обещано ручное сведение бесплатно" in last("900"), last("900")
             assert final() == "" and len(finals) == 1 and len(stops) == 4, "итог — один на неделю"
+            # PUBLISH_TARGET=admin: итог — владельцу кандидатом (publish.offer), в канал и в архив — только его «✅»,
+            # весть победителю — после выхода (crown, moderate.handle).
+            kept, heard, offered = mark.read_text(), len(said), []
+            mark.unlink()
+            with mock.patch.object(config, "OFFERS", Path(tmp) / "offers"), mock.patch.object(
+                    publish, "send_for_approval", lambda post, path, chat, label="": offered.append(path.name)):
+                assert final("admin") == "итог 2026-09-14" and final("admin") == "" and offered == [mark.name] \
+                    and not mark.exists() and len(finals) == 1 and len(said) == heard, offered
+            mark.write_text(kept)
             # Трек, не успевший выйти к итогу, в итог не идёт: после итога он — обычный пост отбора.
             assert not week_of(entry) and "week" not in build_post(entry)
 

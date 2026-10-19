@@ -35,7 +35,14 @@ src/moderate.py: второй опросчик воровал бы у него �
 как раньше, анонимной и без титулов: загадка без титула лучше загадки
 без вариантов.
 
-**Почему титул на следующий день.** Метка «знаток: Хаски» у угадавшего спалила
+**Раз в неделю и по «✅» владельца** (19.10.2026: «важнее делать интересно, смешно, полезно
+и уникально, чем часто»). Загадка выходит во вторник, «где ИИ» — в воскресенье (config.QUIZ_DAYS):
+вторник — единственный день без своего формата и без пика релизов. При PUBLISH_TARGET=admin загадка
+идёт владельцу с «✅ В канал» (offer), и выпускает её дежурство (release): отрывок — копией сообщения
+из лички, викторина — под пересылкой. Кандидат лежит в приватном хранилище, а не в content/archive:
+в нём ответ.
+
+**Почему титул к следующей загадке.** Метка «знаток: Хаски» у угадавшего спалила
 бы ответ всем, кто ещё листает комментарии. Поэтому следующий запуск сначала
 ставит метки за прошлую загадку и только потом загадывает новую, а голоса
 за старую после этого не в счёт: по меткам её угадает кто угодно. Кто угадал —
@@ -413,14 +420,19 @@ def award() -> int:
 # ─────────────────────────── отправка ───────────────────────────
 
 
-def _clip(target: str, item: dict, where: str) -> None:
+def _clip(target: str, item: dict, where: str) -> dict:
     from .publish import hushed  # звук в канале — у одного поста за сутки; publish здесь — своя функция
 
+    if item.get("copy"):
+        # По «✅» владельца (release): в канал — копия того сообщения, что ушло ему в личку, с подписью
+        # для канала. Видео «где ИИ» рендерил другой запуск, на диске дежурства его нет.
+        return telegram.copy_message(target, item["copy"]["chat"], item["copy"]["message_id"],
+                                     (quiz_ai.INTRO if item.get("kind") == "ai" else INTRO).format(where=where),
+                                     quiet=hushed(target))
     if item.get("video"):
-        telegram.send_video_file(target, Path(item["video"]), quiz_ai.INTRO.format(where=where),
-                                 seconds=item["seconds"], quiet=hushed(target))
-        return
-    telegram.send_audio(
+        return telegram.send_video_file(target, Path(item["video"]), quiz_ai.INTRO.format(where=where),
+                                        seconds=item["seconds"], quiet=hushed(target))
+    return telegram.send_audio(
         target,
         item["preview"],
         INTRO.format(where=where),
@@ -455,8 +467,9 @@ def _sync() -> None:
         _push_repo(config.PRIVATE, [RIDDLE.name], "прослушка: загадка")
 
 
-def to_channel(item: dict, channel: str, awarded: int) -> str:
-    """Отрывок — в канал, викторина — под ним в комментарии. Возвращает, где викторина."""
+def to_channel(item: dict, channel: str, awarded: int, wait: bool = True) -> str:
+    """Отрывок — в канал, викторина — под ним в комментарии. Возвращает, где викторина.
+    wait=False — зовёт само дежурство (release): опрос под пересылкой повесит оно же, ждать некого."""
     try:
         linked = telegram.get_chat(channel).get("linked_chat_id")
     except telegram.TelegramError as exc:
@@ -482,6 +495,10 @@ def to_channel(item: dict, channel: str, awarded: int) -> str:
     state.write_json(RIDDLE, riddle)
     _sync()
     _clip(channel, item, IN_COMMENTS)
+    if not wait:
+        # ponytail: пересылка в чат обсуждений не пришла — викторина не встанет, запасного выхода в канал
+        # здесь нет; понадобится — проверять pending на следующем круге дежурства.
+        return "в комментариях: повесит дежурство"
 
     deadline = time.monotonic() + WAIT
     while time.monotonic() < deadline:
@@ -635,7 +652,7 @@ def _selftest() -> int:
                 assert choose("channel") is artist and not told
             with mock.patch.object(quiz_ai, "sunday", return_value=True):
                 assert choose("channel") is artist and "пуст" in told.pop()
-                assert choose("admin") is artist and not told  # в личку по воскресеньям — как в будни
+                assert choose("admin") is artist and "пуст" in told.pop()  # владельцу — то же, что ушло бы в канал
                 state.write_json(root / quiz_ai.STOCK / "r1" / "round.json", {"made": "1", "ai": secret})
                 with mock.patch.object(ai_labels, "confirmed", return_value=False):
                     assert choose("channel") is artist and told.pop() and not quiz_ai.stock()
@@ -660,6 +677,26 @@ def _selftest() -> int:
         assert "Секретный" not in line and "Тайна" not in line and "ИИ —" not in line, line
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
             assert "Хаски" not in describe(artist)
+
+        # PUBLISH_TARGET=admin: загадка — владельцу с «✅ В канал» (offer), файл кандидата — в приватном хранилище;
+        # «✅» (release) — титулы, отрывок копией из лички с подписью канала, викторину повесит дежурство, кандидат стёрт.
+        calls: list[tuple] = []
+        tg = {"send_message": lambda chat, text, **kw: calls.append(("text", chat, kw.get("buttons"))) or {"message_id": 1},
+              "send_audio": lambda chat, audio, caption, **kw: calls.append(("audio", chat, caption)) or {"message_id": 9},
+              "send_quiz": lambda chat, *a, **kw: calls.append(("quiz", chat)) or {},
+              "copy_message": lambda chat, source, number, caption, **kw: calls.append(("copy", chat, source, number, caption)),
+              "get_chat": lambda chat: {"linked_chat_id": -200}}
+        with mock.patch.multiple(telegram, **tg), mock.patch.object(config, "OFFERS", root / "offers"), \
+                mock.patch.object(config, "secret", lambda *a, **k: "1"), \
+                mock.patch.dict(globals(), {"RIDDLE": riddle, "STATE_FILE": root / "used.json", "award": lambda: 2}):
+            name = offer(artist, "1")
+            saved = state.read_json(config.OFFERS / name, {})
+            assert saved["rubric"] == "quiz" and saved["item"]["copy"] == {"chat": "1", "message_id": 9} \
+                and calls[-1][2] == telegram.approval_buttons(name) and BELOW in calls[1][2], calls
+            assert release(saved, config.OFFERS / name).startswith("Загадка в канале") and not (config.OFFERS / name).exists()
+            assert calls[-1] == ("copy", "1", "1", 9, INTRO.format(where=IN_COMMENTS)), calls[-1]
+            pending = state.read_json(riddle, {})["pending"]
+            assert pending["awarded"] == 2 and pending["correct"] == 0 and "m" in state.read_json(root / "used.json", {})["used"]
     # Загадка не из свежего и не гостем: старая половина своих релизов, альбом раньше сингла.
     rows = [
         {"artist_ids": [1 if year else 2], "released_at": f"20{year:02d}-01-01", "track_count": count, "title": str(year)}
@@ -686,9 +723,9 @@ def _selftest() -> int:
 
 
 def choose(target: str | None, force_ai: bool = False) -> dict | None:
-    """Загадка на сегодня: в воскресенье в канал — «где ИИ», в остальные дни
-    и когда раунда нет — про артиста."""
-    if force_ai or (target == "channel" and quiz_ai.sunday()):
+    """Загадка на сегодня: в воскресенье — «где ИИ» (и владельцу кандидатом: в канал уйдёт она же),
+    в остальные дни и когда раунда нет — про артиста."""
+    if force_ai or (target and quiz_ai.sunday()):
         try:
             item = quiz_ai.item(state.read_json(RIDDLE, {}).get("ai_letter"))
             why = ("площадки не ответили на сверку меток ИИ" if quiz_ai.stock()
@@ -699,7 +736,7 @@ def choose(target: str | None, force_ai: bool = False) -> dict | None:
             item, why = None, f"видео не собралось ({type(exc).__name__}), подробности — запуском на Маке"
         if item:
             return item
-        if target == "channel":
+        if target:
             # Запас пополняет только Mac владельца: молча откатываться каждую неделю
             # значило бы потерять формат, не узнав почему.
             _tell_owner(f"«Где ИИ» сегодня не вышел, вместо него загадка про артиста: {why}.")
@@ -734,20 +771,64 @@ def _youtube(chat: str, item: dict) -> None:
                              seconds=item["youtube_seconds"])
 
 
-def _ai_done(item: dict) -> None:
+def _ai_done(item: dict, youtube: bool = True) -> None:
     """Раунд вышел: букву помним (следующий её не повторит), раунд — из запаса.
 
     Буква лежит в приватном quiz.json: в открытом data/quiz.json её прочли бы
-    раньше, чем проголосовали.
+    раньше, чем проголосовали. Папка раунда — по имени в запасе: по «✅» владельца
+    раунд стирает дежурство, а путь записал запуск викторины на другой машине.
+    YouTube-версия уже у владельца, когда загадка шла ему кандидатом (offer).
     """
     data = state.read_json(RIDDLE, {})
     data["ai_letter"] = item["correct"]
     state.write_json(RIDDLE, data)
-    shutil.rmtree(item["folder"], ignore_errors=True)
+    shutil.rmtree(config.PRIVATE / quiz_ai.STOCK / Path(item["folder"]).name, ignore_errors=True)
+    if not youtube:
+        return
     try:
         _youtube(config.secret("TELEGRAM_ADMIN_ID"), item)
     except (telegram.TelegramError, RuntimeError) as exc:
         log.warning("YouTube-версия владельцу не ушла: %s", exc)
+
+
+def offer(item: dict, admin: str) -> str:
+    """Загадка — владельцу кандидатом (PUBLISH_TARGET=admin, владелец 19.10.2026): отрывок или видео, викторина,
+    у «где ИИ» — YouTube-версия, и «✅ В канал / 🗑 Удалить» под ними. Кнопки — те же, что у постов
+    (moderate.handle, publish.offer), а файл — config.OFFERS/quiz-<день>.json в приватном хранилище:
+    в нём ответ, и в открытый content/archive он не идёт никогда. Возвращает имя файла."""
+    telegram.send_message(admin, "— — — <b>СЛЕПАЯ ПРОСЛУШКА</b> — — —")
+    clip = _clip(admin, item, BELOW)
+    _quiz(admin, item)
+    if item.get("youtube"):
+        _youtube(admin, item)
+    name = f"quiz-{state.iso()[:10]}.json"
+    config.OFFERS.mkdir(parents=True, exist_ok=True)
+    state.write_json(config.OFFERS / name, {"rubric": "quiz", "offered_at": state.iso(),
+                                             "item": {**item, "copy": {"chat": admin, "message_id": clip["message_id"]}}})
+    telegram.send_message(admin, f"Что делаем с загадкой?\n<i>В канал — до {config.QUIET_TO_HOUR}:00 завтрашнего утра.</i>",
+                          buttons=telegram.approval_buttons(name))
+    return name
+
+
+def release(post: dict, path: Path) -> str:
+    """«✅ В канал» под загадкой (moderate.handle): титулы за прошлую загадку, отрывок — копией из лички
+    владельца, викторина — под пересылкой в комментариях, как по расписанию раньше. Зовёт дежурство,
+    поэтому без ожидания (to_channel, wait=False). Кандидат стирается, а не уходит в архив: в нём ответ."""
+    try:
+        awarded = award()
+    except Exception as exc:  # noqa: BLE001 — титулы не повод остаться без загадки
+        log.error("Титулы не розданы: %s", exc)
+        awarded = 0
+    item = post["item"]
+    try:
+        where = to_channel(item, config.secret("TELEGRAM_CHANNEL_ID"), awarded, wait=False)
+    except telegram.TelegramError as exc:
+        log.error("Загадка не вышла: %s", exc)
+        return f"Ошибка: {exc}"
+    if item.get("kind") == "ai":
+        _ai_done(item, youtube=False)
+    path.unlink(missing_ok=True)
+    return f"Загадка в канале, викторина {where}"
 
 
 def main() -> int:
@@ -787,12 +868,8 @@ def main() -> int:
         return 0
 
     if args.target == "admin":
-        admin = config.secret("TELEGRAM_ADMIN_ID")
-        publish(item, admin)
-        if item.get("youtube"):
-            _youtube(admin, item)
-        _remember(item.get("mark"))
-        print("\nОтправлено: в личку.")
+        offer(item, config.secret("TELEGRAM_ADMIN_ID"))
+        print("\nОтправлено: в личку, в канал — по «✅ В канал».")
         return 0
 
     where = to_channel(item, config.secret("TELEGRAM_CHANNEL_ID"), awarded)

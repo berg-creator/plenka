@@ -130,22 +130,15 @@ def make(data: dict, moment: datetime | None = None) -> dict | None:
     return build(key, total, hits[key]) if key else None
 
 
-def air() -> str:
-    """Выход из дежурства (moderate.publish_shift): ключ брака вышедшего совета или пустая строка.
-    Не вышло — отметка снимается, и следующий заход пробует снова."""
+def air(target: str = "channel") -> str:
+    """Выход из дежурства (moderate.publish_shift): ключ брака вышедшего совета (при target admin — поданного
+    владельцу на «✅», publish.offer) или пустая строка. Не вышло — отметка снимается, и следующий заход
+    пробует снова."""
     from . import publish, skleyka
 
     post = make(skleyka.load())
-    if not post:
+    if not post or not publish.offer(post, f"sovet-{monday(state.now())}.json", target):
         return ""
-    path = config.ARCHIVE / f"sovet-{monday(state.now())}.json"
-    config.ARCHIVE.mkdir(parents=True, exist_ok=True)
-    state.write_json(path, post)
-    try:
-        publish.to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
-    except Exception:
-        path.unlink(missing_ok=True)
-        raise
     return post["flaw"]
 
 
@@ -214,6 +207,15 @@ def _selftest() -> None:
             except ZeroDivisionError:
                 pass
             assert not (Path(tmp) / f"sovet-{monday(thursday)}.json").exists(), "сбой отправки снимает отметку"
+            # PUBLISH_TARGET=admin: совет — владельцу кандидатом (publish.offer), в архив — только его «✅».
+            from unittest import mock
+
+            offered: list[str] = []
+            with mock.patch.object(config, "OFFERS", Path(tmp) / "offers"), mock.patch.object(
+                    publish, "send_for_approval", lambda post, path, chat, label="": offered.append(path.name)), \
+                    mock.patch.object(config, "secret", lambda *a, **k: "1"):
+                assert air("admin") == "noise" and air("admin") == "" and len(offered) == 1 \
+                    and not (Path(tmp) / f"sovet-{monday(thursday)}.json").exists(), offered
             state.now = lambda: thursday.replace(hour=23, minute=30)
             assert not due(), "ночью — молчит"
         finally:

@@ -3096,35 +3096,33 @@ def doposle_post(item: dict) -> dict:
 
 def doposle_air() -> str:
     """Следующий ролик очереди — владельцу на утверждение: в канал он выходит только его «✅ В канал»
-    (DOPOSLE_CARD). Не чаще раза в DOPOSLE_EVERY от прошлого выхода, не ночью, по одному, старое согласие
-    первым; пока прежний ждёт решения, новый не подаётся. Ждущий пост — config.DOPOSLE_POSTS/doposle-<трек>.json
-    в приватном хранилище: имя, которого владелец не выпустил, в открытый репозиторий не попадает. Кнопки — те же,
-    что у постов очереди (moderate.handle): «✅» выпускает через publish.to_channel, и пост ложится в
-    content/archive/ отметкой выхода (она же не даёт подать его снова), «🗑» удаляет. Возвращает номер трека
-    поданного или пустую строку. Не дошло — файл снимается, запись остаётся, следующий заход пробует снова.
+    (DOPOSLE_CARD) при любом PUBLISH_TARGET. Не чаще раза в DOPOSLE_EVERY от прошлого выхода, не ночью, по одному,
+    старое согласие первым; пока прежний ждёт решения, новый не подаётся. Ждущий пост — config.OFFERS/doposle-<трек>.json
+    в приватном хранилище: имя, которого владелец не выпустил, в открытый репозиторий не попадает. Путь — общий
+    для своих форматов (publish.offer): «✅» выпускает через publish.to_channel, и пост ложится в content/archive/
+    отметкой выхода (она же не даёт подать его снова), «🗑» снимает насовсем. Не нажал владелец в свои сутки ленты —
+    тот же ролик подаётся ему снова: согласие человека молча не пропадает. Возвращает номер трека поданного
+    или пустую строку. Не дошло — файл снимается, запись остаётся, следующий заход пробует снова.
     Во ВКонтакте не дублируется (publish.crosspost_vk пропускает рубрики без обложки — проверено селфтестом)."""
     from . import publish
 
     posted = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
     last = max((item.get("published_at", "") for item in posted if item.get("rubric") == "doposle"), default="")
-    folder = config.DOPOSLE_POSTS
-    if publish.night(state.now()) or _age(last) < DOPOSLE_EVERY.total_seconds() or any(folder.glob("doposle-*.json")):
+    if publish.night(state.now()) or _age(last) < DOPOSLE_EVERY.total_seconds():
         return ""
+    for path in sorted(config.OFFERS.glob("doposle-*.json")):
+        post = state.read_json(path, {})
+        if publish.late(post) and not post.get("declined") and publish.offer(post, path.name, "admin", post.get("label", "")):
+            return path.stem.removeprefix("doposle-")
     queue = state.read_json(config.DOPOSLE_FILE, {"items": []})
     for item in sorted(queue["items"], key=lambda item: item.get("channel", "")):
-        path = folder / f"doposle-{item['track']}.json"
-        if not item.get("channel") or (config.ARCHIVE / path.name).exists():
+        name = f"doposle-{item['track']}.json"
+        if not item.get("channel") or (config.ARCHIVE / name).exists():
             continue
-        post = doposle_post(item)
-        folder.mkdir(parents=True, exist_ok=True)
-        state.write_json(path, post)
         heard = item.get("heard")
-        try:
-            publish.send_for_approval(post, path, config.secret("TELEGRAM_ADMIN_ID"), label=DOPOSLE_CARD.format(
-                heard="не замерена" if heard is None else f"{heard:g} дБ".replace(".", ",")))
-        except Exception:
-            path.unlink(missing_ok=True)
-            raise
+        if not publish.offer(doposle_post(item), name, "admin", label=DOPOSLE_CARD.format(
+                heard="не замерена" if heard is None else f"{heard:g} дБ".replace(".", ","))):
+            return ""
         queue["items"] = [other for other in queue["items"] if other["track"] != item["track"]]
         state.write_json(config.DOPOSLE_FILE, queue)
         return item["track"]
@@ -5454,7 +5452,7 @@ def _selftest_doposle(tmp: Path, track: dict) -> None:
 
     def ask(post, path, chat, label=""):
         asked.append((post, label))
-        assert path.exists() and path.parent == config.DOPOSLE_POSTS and chat == "1"
+        assert path.exists() and path.parent == config.OFFERS and chat == "1"
 
     def to_channel(post, path, chat):
         out.append(post)
@@ -5463,7 +5461,7 @@ def _selftest_doposle(tmp: Path, track: dict) -> None:
         publish.archive(path)
 
     with mock.patch.object(config, "DOPOSLE_FILE", tmp / "doposle.json"), mock.patch.object(config, "ARCHIVE", tmp / "arch"), \
-            mock.patch.object(config, "DOPOSLE_POSTS", tmp / "wait"), \
+            mock.patch.object(config, "OFFERS", tmp / "wait"), \
             mock.patch.object(config, "POSTED_FILE", tmp / "posted.json"), mock.patch.object(state, "now", lambda: clock[0]), \
             mock.patch.object(publish, "send_for_approval", ask), mock.patch.object(publish, "to_channel", to_channel):
         old = dict(track, knobs=dict(KNOBS), heard=3.4)
@@ -5498,15 +5496,19 @@ def _selftest_doposle(tmp: Path, track: dict) -> None:
         assert "Что сделал бот" not in bare and "Лил" in bare, "нет фактов — нет строки"
         _doposle_add("t2", {**{key: value for key, value in old.items() if key != "heard"},
                             "fixed": ["обрезал 2 с тишины в начале"]}, {"first_name": "Ян"})
-        clock[0] += timedelta(days=3)
         assert doposle_air() == "" and len(asked) == 1, "пока прежний ждёт решения, новый не подаётся"
+        clock[0] += timedelta(days=1)
+        assert moderate.handle("pub", "doposle-t1.json").startswith("Опоздал") and not out, "после своих суток — не выходит"
+        assert doposle_air() == "t1" and len(asked) == 2 and "3,4 дБ" in asked[1][1], "без решения — владельцу снова тот же"
         assert moderate.handle("pub", "doposle-t1.json").startswith("Опубликовано") and len(out) == 1 \
             and (tmp / "arch" / "doposle-t1.json").exists() and not any((tmp / "wait").glob("*.json")), "«✅» — в канал и в архив"
-        assert doposle_air() == "" and len(asked) == 1, "чаще раза в три дня не подаётся"
+        assert doposle_air() == "" and len(asked) == 2, "чаще раза в три дня не подаётся"
         clock[0] += timedelta(days=3)
-        assert doposle_air() == "t2" and "обрезал 2 с тишины" in asked[1][0]["text"] and "не замерена" in asked[1][1]
+        assert doposle_air() == "t2" and "обрезал 2 с тишины" in asked[2][0]["text"] and "не замерена" in asked[2][1]
         assert moderate.handle("del", "doposle-t2.json") == "Удалил" and len(out) == 1 and doposle_air() == "", \
             "«🗑» — ни в канал, ни владельцу снова"
+        clock[0] += timedelta(days=2)
+        assert doposle_air() == "" and len(asked) == 3, "удалённый не возвращается и назавтра"
 
 
 def _selftest() -> None:
