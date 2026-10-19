@@ -1301,6 +1301,12 @@
       "file": "20261017-080222-5598-poll.json",
       "published_at": "2026-10-18T09:13:24+00:00",
       "rubric": "poll"
+    },
+    {
+      "chat": "channel",
+      "file": "beat-2.json",
+      "published_at": "2026-10-19T07:01:16+00:00",
+      "rubric": "beat"
     }
   ],
   "photos": [
