@@ -864,13 +864,15 @@ def publish_shift() -> None:
     # владелец 19.10.2026). Подан — и в тот же заход больше ничего: два поста подряд в ленте ни к чему.
     # Бит недели — первым (bity.air, по понедельникам): так он забирает единственный звук дня
     # (publish.hushed); в воскресенье вечером тем же местом выходит итог недели (otbor.final).
-    from . import pamyatka, sovet
+    from . import dohita, pamyatka, sovet
 
     for name, air in (("бита недели", lambda: bity.air(target) or otbor.final(target)),
                       # СОВЕТ НЕДЕЛИ: по четвергам, после бита — второй звук в день ему не достаётся (publish.hushed)
                       ("совета недели", lambda: sovet.air(target)),
                       # ПАМЯТКА: по средам и субботам, вместо поста о релизе — его в эти сутки держит publish.release_due
                       ("ПАМЯТКИ", lambda: pamyatka.air(target)),
+                      # ДО ХИТА: по пятницам (src/dohita.py)
+                      ("ДО ХИТА", lambda: dohita.air(target)),
                       # ДО И ПОСЛЕ — только по «✅» владельца при любом target (skleyka.doposle_air)
                       ("ДО И ПОСЛЕ", skleyka.doposle_air)):
         try:
@@ -1469,7 +1471,7 @@ def _selftest() -> int:
 
     # Выход из дежурства: свой формат первым и один (при admin — владельцу, тем же вызовом); дальше релиз;
     # обычный пост — когда пора; при admin пост очереди — по одному, пока поданный ждёт кнопки.
-    from . import pamyatka, sovet
+    from . import dohita, pamyatka, sovet
 
     delivered, airs = [], []
     for release_due, due, target, beat, wait in ((True, True, "channel", "", False), (False, True, "channel", "", False),
@@ -1479,6 +1481,7 @@ def _selftest() -> int:
         with (mock.patch.object(bity, "air", lambda to: airs.append(to) or beat),
               mock.patch.object(otbor, "final", lambda to: ""), mock.patch.object(otbor, "shift", lambda to: None),
               mock.patch.object(sovet, "air", lambda to: ""), mock.patch.object(pamyatka, "air", lambda to: ""),
+              mock.patch.object(dohita, "air", lambda to: ""),
               mock.patch.object(skleyka, "doposle_air", lambda: ""),
               mock.patch.object(publish, "waiting", lambda: wait),
               mock.patch.object(publish, "release_due", lambda: release_due),

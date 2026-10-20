@@ -72,10 +72,16 @@ Gemini на бесплатном ключе отвечает 429, а подпи�
 и вышло седьмым постом про Мемфис; и дописывать второй трек старым связям — они
 рассказаны, а рассказанная связь второго поста не получит.
 
+Четвёртый вид — герои ДО ХИТА (src/dohita.py, владелец 20.10.2026): как артист из СНГ на пике пробился
+к первому хиту. Тем же путём, что связи: --dohita говорит, нужен ли герой (в запасе меньше двух
+невышедших), рутина приносит полем dohita строки поста с адресом и дословной цитатой к каждой,
+а берёт запись код — форму без сети проверяет dohita.shape, страницы и Deezer при применении dohita.unproven.
+
     python -m src.review --check content/review/20260912-0835.json    проверка без сети
     python -m src.review --apply content/review/20260912-0835.json --dry-run
     python -m src.review --voices                                     кому рутина ищет мнение, без сети
     python -m src.review --lineage                                    нужна ли новая связь ОТКУДА НОГИ, без сети
+    python -m src.review --dohita                                     нужен ли новый герой ДО ХИТА, без сети
     python -m src.review --selftest
 """
 
@@ -98,9 +104,9 @@ ACTIONS = ("rewrite", "drop")
 DROP_ONLY = ("meme", "poll")
 # Посты, собранные шаблоном без модели, не правятся никогда: выдумать в них нечего, а испортить есть что —
 # в ПАМЯТКЕ (src/pamyatka.py) цитаты закона стоят слово в слово, в ОТБОРЕ имя и название написал сам артист,
-# подпись видео-мема (vmeme, moderate.meme_out) — сам владелец.
+# подпись видео-мема (vmeme, moderate.meme_out) — сам владелец, а в ДО ХИТА (src/dohita.py) у каждой строки своя цитата.
 # Правка такого поста — пропуск, а не порок файла: годные правки рядом применяются.
-TEMPLATE = ("pamyatka", "sovet", "beat", "week", "doposle", "otbor", "vmeme", "how")
+TEMPLATE = ("pamyatka", "sovet", "beat", "week", "doposle", "otbor", "vmeme", "how", "dohita")
 
 ID_FORMAT = re.compile(r"\d{8}-\d{4}")
 # Путь приходит из ветки, то есть снаружи: только файл очереди или архива, без «../».
@@ -490,20 +496,26 @@ def check(review, name: str = "") -> tuple[list[str], dict[int, str]]:
     или цитата), а на свежем main — обычная гонка, и правка просто не нужна.
     """
     if not (isinstance(review, dict) and all(isinstance(review.get(field, []), list)
-                                            for field in ("edits", "voices", "lineage"))):
-        return ['файл правок — объект {"edits": [...], "voices": [...], "lineage": [...]}'], {}
+                                            for field in ("edits", "voices", "lineage", "dohita"))):
+        return ['файл правок — объект {"edits": [...], "voices": [...], "lineage": [...], "dohita": [...]}'], {}
     edits, voices, links = review.get("edits", []), review.get("voices", []), review.get("lineage", [])
     errors: list[str] = []
     skipped: dict[int, str] = {}
     if name and not ID_FORMAT.fullmatch(name):
         errors.append(f"имя файла «{name}»: ГГГГММДД-ЧЧММ, например 20260912-0835")
-    # Пустой lineage — годный файл: связь искали и не нашли, и проход надо запомнить.
-    if not edits and not voices and "lineage" not in review:
+    # Пустой lineage или dohita — годный файл: искали и не нашли, и проход надо запомнить.
+    if not edits and not voices and "lineage" not in review and "dohita" not in review:
         errors.append("edits и voices пусты — без выдумок и мнений файл не пушится")
     sites = trusted()
     errors += [f"связь {index + 1}: {wrong}" for index, link in enumerate(links) if (wrong := _link_shape(link, sites))]
     if len(links) > config.LINEAGE_PER_WEEK:
         errors.append(f"связей больше {config.LINEAGE_PER_WEEK} — столько за проход не берём")
+    from . import dohita  # здесь: dohita берёт отсюда _words и trusted
+
+    heroes = review.get("dohita", [])
+    errors += [f"герой {index + 1}: {wrong}" for index, hero in enumerate(heroes) if (wrong := dohita.shape(hero, sites))]
+    if len(heroes) > config.DOHITA_MIN_PENDING:
+        errors.append(f"героев больше {config.DOHITA_MIN_PENDING} — столько за проход не берём")
     shapes = [_voice_shape(voice) for voice in voices]
     errors += [f"мнение {index + 1}: {wrong}" for index, wrong in enumerate(shapes) if wrong]
     if not any(shapes) and len({_voice_key(voice) for voice in voices}) > VOICES_PER_RUN:
@@ -584,6 +596,10 @@ def apply(review, name: str, dry_run: bool) -> int:
         _voices(review["voices"], dry_run)
     if "lineage" in review:
         _links(review["lineage"], dry_run)
+    if "dohita" in review:
+        from . import dohita
+
+        dohita.take(review["dohita"], dry_run)
     return 1 if failed else 0
 
 
@@ -946,6 +962,9 @@ def main() -> int:
     parser.add_argument("--lineage", action="store_true",
                         help="нужна ли ОТКУДА НОГИ новая связь: строка JSON — сколько искать, каким сайтам "
                              "верим и кто уже рассказан; пусто — не искать. Без сети")
+    parser.add_argument("--dohita", action="store_true",
+                        help="нужен ли ДО ХИТА новый герой: строка JSON — сколько искать, каким сайтам верим "
+                             "и кто уже был; пусто — не искать. Без сети")
     parser.add_argument("--selftest", action="store_true",
                         help="правка, снятие, отказ на битом тексте и правка вышедшего поста — без сети")
     args = parser.parse_args()
@@ -972,6 +991,12 @@ def main() -> int:
             print(json.dumps({"need": need, "sites": trusted(), "taken": sorted({n for n in names if n}),
                               "told": [f"{link.get('ancestor', '')} → {link.get('modern', '')}"
                                        for link in base["links"]]}, ensure_ascii=False))
+        return 0
+    if args.dohita:
+        from . import dohita
+
+        if need := dohita.need():
+            print(json.dumps({"need": need, "sites": trusted(), "taken": dohita.taken()}, ensure_ascii=False))
         return 0
     if not (args.check or args.apply):
         parser.print_help()
@@ -1017,8 +1042,15 @@ def main() -> int:
             print(f"  ! связь «{name}»: --lineage пуст — связь сейчас не нужна, применение её пропустит")
         elif _link_artists(link) & taken:
             print(f"  ! связь «{name}»: артист уже есть в taken из --lineage — применение её пропустит")
+    from . import dohita
+
+    for hero in review.get("dohita", []):
+        if not dohita.need():
+            print(f"  ! герой «{hero['artist']}»: --dohita пуст — герой сейчас не нужен, применение его пропустит")
+        elif hero["artist"] in dohita.taken():
+            print(f"  ! герой «{hero['artist']}»: уже есть в taken из --dohita — применение его пропустит")
     print(f"Правки {path.name} годны: переписать {actions.count('rewrite')}, снять {actions.count('drop')}, "
-          f"мнений {len(voices)}, связей {len(review.get('lineage', []))}.")
+          f"мнений {len(voices)}, связей {len(review.get('lineage', []))}, героев {len(review.get('dohita', []))}.")
     return 0
 
 

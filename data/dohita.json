@@ -1,0 +1,44 @@
+{
+  "heroes": [
+    {
+      "id": "74526042",
+      "by": "hand",
+      "added_at": "2026-10-20T00:00:00+00:00",
+      "artist": "Toxi$",
+      "deezer_id": 74526042,
+      "term": "три года",
+      "lines": [
+        {
+          "text": "В магазинах — с конца 2019-го. Начинал на английском, на русский перешёл по совету Big Baby Tape.",
+          "sources": [
+            {"url": "https://api.deezer.com/artist/74526042/albums", "quote": "Welcome Slime, 2019-11-24"},
+            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "Сначала он записывал песни на английском языке"},
+            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "Big Baby Tape, который посоветовал Смелянскому записывать песни на русском языке"}
+          ]
+        },
+        {
+          "text": "Залетел в 2023-м кружочками в телеграме: танцевал под свой трек. «Я клянусь, я просто вайбил, я не думал, что это разлетится». По его словам, за полтора месяца канал вырос с тысячи до 150 тысяч.",
+          "sources": [
+            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "Видео рэпера завирусились в 2023 году, что дало рост популярности и его трекам"},
+            {"url": "https://daily.afisha.ru/music/26066-toxi-mayot-skriptonit-i-ne-tolko-10-glavnyh-albomov-etogo-leta/", "quote": "именно в этом году нашел ключ к успеху — кружочки в телеграме"},
+            {"url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram", "quote": "Трек, который у меня первым завирусился в ТГ, под который я танцевал — под свой трек."},
+            {"url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram", "quote": "Я клянусь, я просто вайбил, я не думал, что это разлетится"},
+            {"url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram", "quote": "И у меня за полтора месяца от тысячи подписчиков до 150 тысяч стукнуло."},
+            {"url": "https://the-flow.ru/new-flow/vol8-toxis", "quote": "В этом ему помог телеграм-канал"}
+          ]
+        }
+      ],
+      "quote": {"text": "Три года мне понадобилось, чтобы наступить на разные грабли", "url": "https://the-flow.ru/new-flow/vol8-toxis"},
+      "after": [
+        {
+          "text": "В 2026-м TikTok разнёс видео, где он без автотюна поёт Nobody, — 4-е место в мировом чарте Genius.",
+          "sources": [
+            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "TikTok-лента заполнилась видео с рэпером Toxi$, который без автотюна в домашней обстановке исполняет песню"},
+            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "напевает текст песни Nobody"},
+            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "в марте Nobody заняла четвертое место в мировом чарте Genius"}
+          ]
+        }
+      ]
+    }
+  ]
+}

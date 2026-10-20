@@ -178,11 +178,11 @@ def due(post: dict) -> bool:
         regular = sum(
             1 for item in items
             # Отбор (src/otbor.py), ролик (src/reels.py), бит недели (src/bity.py), её итог (otbor.final),
-            # совет недели (src/sovet.py), ДО И ПОСЛЕ (skleyka.doposle_air) и видео-мем владельца (moderate.meme_out)
-            # выходят мимо слотов
+            # совет недели (src/sovet.py), ДО И ПОСЛЕ (skleyka.doposle_air), видео-мем владельца (moderate.meme_out)
+            # и ДО ХИТА (src/dohita.py) выходят мимо слотов
             # и обычному посту место не занимают. ПАМЯТКИ (src/pamyatka.py) в списке нет намеренно:
             # она выходит вместо поста о релизе и слот занимает так же, как занял бы он.
-            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "week", "sovet", "doposle", "vmeme")
+            if item.get("rubric") not in ("news", "otbor", "reel", "beat", "week", "sovet", "doposle", "vmeme", "dohita")
             and (moment := state._parse(item.get("published_at", "")))
             and feed_day(moment) == feed_day(now)
         )
@@ -752,8 +752,10 @@ def crosspost_vk(post: dict) -> None:
     # (otbor.build_post, поле mixed) лежит только под постом в Telegram: площадок у него нет,
     # и запись во ВКонтакте звала бы слушать то, чего там не услышать.
     # ПАМЯТКА, как и совет недели, зовёт в бота Telegram.
-    # Видео-мем владельца (vmeme) — ролик, его туда так же не залить. «Как сделан» (how) зовёт за битом в бота.
-    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle", "vmeme", "how") or post.get("mixed"):
+    # Видео-мем владельца (vmeme) — ролик, его туда так же не залить. «Как сделан» (how) зовёт за битом в бота,
+    # ДО ХИТА (dohita) — в ОТБОР бота.
+    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle", "vmeme", "how", "dohita") \
+            or post.get("mixed"):
         return
 
     # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
