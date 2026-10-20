@@ -181,7 +181,18 @@ def _hits(artist: dict) -> set[str]:
         return set()
 
 
-def decoys(target: dict, artists: list[dict], count: int = OPTIONS - 1) -> list[str]:
+def _near(artist: dict) -> list[int]:
+    """Похожие на артиста по Deezer. Не ответил — пусто, и артист не загадывается."""
+    if not artist.get("deezer_id"):
+        return []
+    try:
+        return deezer.related(artist["deezer_id"])
+    except Exception:  # noqa: BLE001 — ни имени, ни адреса в лог: по ним читается ответ
+        log.info("Deezer не ответил: похожих нет")
+        return []
+
+
+def decoys(target: dict, artists: list[dict], count: int = OPTIONS - 1, near: list[int] | None = None) -> list[str]:
     """Ложные варианты — соседи по сцене на языке ответа, а не кто попало.
 
     Если подставить кого попало, викторина решается методом исключения:
@@ -190,16 +201,23 @@ def decoys(target: dict, artists: list[dict], count: int = OPTIONS - 1) -> list[
     Поэтому берём только тех, у кого с загаданным общая метка сцены, общий язык
     и общий голос (поле `voice` базы: `f` — женский, без поля — мужской): женщину
     среди мужчин слышно сразу — и ответом, и лишним вариантом.
+    Одной метки сцены мало (владелец 20.10.2026: Guf, Toxi$, Слава КПСС и Oxxxymiron —
+    «прям очевидна»): под «ru-rap» двадцать лет сцены, и эпоха звука вычёркивает лишних
+    сразу. Поэтому загадка берёт из своих по метке только похожих по Deezer (`near`,
+    ближние первыми); без `near` — отсев по метке, `pick` им прикидывает, кого пробовать.
     Не набралось трёх — вернётся меньше, и артист не загадывается (`pick`).
     """
     tags = set(target.get("tags", []))
     kin = [
-        a["name"] for a in artists
+        a for a in artists
         if a["name"] != target["name"] and _ru(a) == _ru(target)
         and a.get("voice") == target.get("voice") and tags & set(a.get("tags", []))
     ]
-    random.shuffle(kin)
-    return kin[:count]
+    if near is None:
+        random.shuffle(kin)
+    else:
+        kin = sorted((a for a in kin if a.get("deezer_id") in near), key=lambda a: near.index(a["deezer_id"]))
+    return [a["name"] for a in kin[:count]]
 
 
 def pick() -> dict | None:
@@ -224,7 +242,10 @@ def pick() -> dict | None:
             continue
 
         old = deep(releases, artist["itunes_id"])[:RELEASES]
-        hits = _hits(artist) if old else set()
+        kin = decoys(artist, artists, near=_near(artist)) if old else []
+        if len(kin) < OPTIONS - 1:
+            continue
+        hits = _hits(artist)
         for release in old:
             album_id = itunes.album_id_from_url(release.get("url", ""))
             if not album_id:
@@ -246,7 +267,7 @@ def pick() -> dict | None:
                 if mark in used:
                     continue
 
-                options = decoys(artist, artists) + [artist["name"]]
+                options = kin + [artist["name"]]
                 random.shuffle(options)
                 return {
                     "artist": artist["name"],
@@ -738,6 +759,10 @@ def _selftest() -> int:
     # Женский голос среди мужских слышно сразу: ни ответом, ни лишним вариантом он к ним не идёт.
     scene[1]["voice"] = "f"
     assert "Б" not in decoys(scene[0], scene) and decoys(scene[1], scene) == []
+    # Загадка берёт похожих по Deezer, ближних первыми; чужой голос и чужая сцена мимо и среди похожих.
+    for i, a in enumerate(scene):
+        a["deezer_id"] = i
+    assert decoys(scene[0], scene, near=[4, 3, 1, 2]) == ["Г", "В"]
     print("прослушка: все проверки прошли")
     return 0
 
