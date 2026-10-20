@@ -1624,6 +1624,7 @@ def main() -> int:
     if args.render:
         return render(args.render)
     if args.how:
+        config.load_dotenv()   # с Мака: ключи бота — в .env, как у skleyka --hand
         return how_send(args.how, args.dry_run)
     if args.ear:
         return ear()
