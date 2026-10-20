@@ -11,34 +11,142 @@
         {
           "text": "В магазинах — с конца 2019-го. Начинал на английском, на русский перешёл по совету Big Baby Tape.",
           "sources": [
-            {"url": "https://api.deezer.com/artist/74526042/albums", "quote": "Welcome Slime, 2019-11-24"},
-            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "Сначала он записывал песни на английском языке"},
-            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "Big Baby Tape, который посоветовал Смелянскому записывать песни на русском языке"}
+            {
+              "url": "https://api.deezer.com/artist/74526042/albums",
+              "quote": "Welcome Slime, 2019-11-24"
+            },
+            {
+              "url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml",
+              "quote": "Сначала он записывал песни на английском языке"
+            },
+            {
+              "url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml",
+              "quote": "Big Baby Tape, который посоветовал Смелянскому записывать песни на русском языке"
+            }
           ]
         },
         {
           "text": "Залетел в 2023-м кружочками в телеграме: танцевал под свой трек. «Я клянусь, я просто вайбил, я не думал, что это разлетится». По его словам, за полтора месяца канал вырос с тысячи до 150 тысяч.",
           "sources": [
-            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "Видео рэпера завирусились в 2023 году, что дало рост популярности и его трекам"},
-            {"url": "https://daily.afisha.ru/music/26066-toxi-mayot-skriptonit-i-ne-tolko-10-glavnyh-albomov-etogo-leta/", "quote": "именно в этом году нашел ключ к успеху — кружочки в телеграме"},
-            {"url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram", "quote": "Трек, который у меня первым завирусился в ТГ, под который я танцевал — под свой трек."},
-            {"url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram", "quote": "Я клянусь, я просто вайбил, я не думал, что это разлетится"},
-            {"url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram", "quote": "И у меня за полтора месяца от тысячи подписчиков до 150 тысяч стукнуло."},
-            {"url": "https://the-flow.ru/new-flow/vol8-toxis", "quote": "В этом ему помог телеграм-канал"}
+            {
+              "url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml",
+              "quote": "Видео рэпера завирусились в 2023 году, что дало рост популярности и его трекам"
+            },
+            {
+              "url": "https://daily.afisha.ru/music/26066-toxi-mayot-skriptonit-i-ne-tolko-10-glavnyh-albomov-etogo-leta/",
+              "quote": "именно в этом году нашел ключ к успеху — кружочки в телеграме"
+            },
+            {
+              "url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram",
+              "quote": "Трек, который у меня первым завирусился в ТГ, под который я танцевал — под свой трек."
+            },
+            {
+              "url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram",
+              "quote": "Я клянусь, я просто вайбил, я не думал, что это разлетится"
+            },
+            {
+              "url": "https://the-flow.ru/features/chto-s-golosom-u-toxi-i-kak-vzletet-v-telegram",
+              "quote": "И у меня за полтора месяца от тысячи подписчиков до 150 тысяч стукнуло."
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol8-toxis",
+              "quote": "В этом ему помог телеграм-канал"
+            }
           ]
         }
       ],
-      "quote": {"text": "Три года мне понадобилось, чтобы наступить на разные грабли", "url": "https://the-flow.ru/new-flow/vol8-toxis"},
+      "quote": {
+        "text": "Три года мне понадобилось, чтобы наступить на разные грабли",
+        "url": "https://the-flow.ru/new-flow/vol8-toxis"
+      },
       "after": [
         {
           "text": "В 2026-м TikTok разнёс видео, где он без автотюна поёт Nobody, — 4-е место в мировом чарте Genius.",
           "sources": [
-            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "TikTok-лента заполнилась видео с рэпером Toxi$, который без автотюна в домашней обстановке исполняет песню"},
-            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "напевает текст песни Nobody"},
-            {"url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml", "quote": "в марте Nobody заняла четвертое место в мировом чарте Genius"}
+            {
+              "url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml",
+              "quote": "TikTok-лента заполнилась видео с рэпером Toxi$, который без автотюна в домашней обстановке исполняет песню"
+            },
+            {
+              "url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml",
+              "quote": "напевает текст песни Nobody"
+            },
+            {
+              "url": "https://www.gazeta.ru/style/22602325/mem-vozmi-telefon-detka.shtml",
+              "quote": "в марте Nobody заняла четвертое место в мировом чарте Genius"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "129513512",
+      "by": "auto",
+      "added_at": "2026-10-20T14:42:56+00:00",
+      "artist": "Icegergert",
+      "deezer_id": 129513512,
+      "term": "два года",
+      "lines": [
+        {
+          "text": "Из военной системы ушёл сам: суворовское училище, год в академии связи. В медиа появился в 2023-м.",
+          "sources": [
+            {
+              "url": "https://the-flow.ru/new-flow/vol9-icegergert",
+              "quote": "Я поступил в Военную академию связи имени Буденного. Год служил, был старшиной роты, выпускником училища, в сборной академии по спорту."
+            },
+            {
+              "url": "https://daily.afisha.ru/music/31164-charty-vseh-nashih-podrug-v-icegergert-obvese-kak-on-stal-glavnym-reperom-rossii-2026/",
+              "quote": "Появление Айсгергерта в медиа в 2023 году началось с противоречий."
+            }
+          ]
+        },
+        {
+          "text": "На Gazgolder попал поездкой в Москву с рэпером С4: «За один день мы заехали сразу на три лейбла». Подписание издание назвало карьерным трамплином.",
+          "sources": [
+            {
+              "url": "https://the-flow.ru/new-flow/vol9-icegergert",
+              "quote": "А как попал — это была поездка в Москву вместе с Федором С4."
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol9-icegergert",
+              "quote": "За один день мы заехали сразу на три лейбла."
+            },
+            {
+              "url": "https://daily.afisha.ru/music/31164-charty-vseh-nashih-podrug-v-icegergert-obvese-kak-on-stal-glavnym-reperom-rossii-2026/",
+              "quote": "Подписание на Gazgolder не только принесло Айсгергерту поддержку Басты и отлучило от «МВД-рэпа», но и стало, как выяснилось, огромным карьерным трамплином."
+            }
+          ]
+        },
+        {
+          "text": "Первый большой хит — «Her Loss» к 2025-му, потом «Наследство» со Sky Rae, которую он вывел на большую сцену.",
+          "sources": [
+            {
+              "url": "https://daily.afisha.ru/music/31164-charty-vseh-nashih-podrug-v-icegergert-obvese-kak-on-stal-glavnym-reperom-rossii-2026/",
+              "quote": "К 2025 году у Гергерта были фиты с Брутто и Бастой и первый большой хит «Her Loss»"
+            },
+            {
+              "url": "https://daily.afisha.ru/music/31164-charty-vseh-nashih-podrug-v-icegergert-obvese-kak-on-stal-glavnym-reperom-rossii-2026/",
+              "quote": "сначала он вывел на большую сцену малоизвестную к тому моменту рэп-артистку Sky Rae, зачитав с ней трек «Наследство», ставший большим хитом"
+            }
+          ]
+        }
+      ],
+      "quote": {
+        "text": "Амбиции душили. Хотелось музыкой заниматься, хотелось танцевать, хотелось петь.",
+        "url": "https://the-flow.ru/new-flow/vol9-icegergert"
+      },
+      "after": [
+        {
+          "text": "2025-й закончил с 9 млн месячных слушателей в «Яндекс Музыке» и «Взлётом года» в «VK Музыке».",
+          "sources": [
+            {
+              "url": "https://daily.afisha.ru/music/31164-charty-vseh-nashih-podrug-v-icegergert-obvese-kak-on-stal-glavnym-reperom-rossii-2026/",
+              "quote": "2025-й Гергерт закончил абсолютным триумфатором: он пробил 9 млн месячных слушателей в «Яндекс Музыке», обогнав в жанре всех, включая коллегу по неопацанскому рэпу Макана и своего же начальника по лейблу Басту, и взял «Взлет года» в «VK Музыке»."
+            }
           ]
         }
       ]
     }
-  ]
+  ],
+  "searched_at": "2026-10-20T14:42:56+00:00"
 }
