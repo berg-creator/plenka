@@ -56,7 +56,7 @@ BEAT_CREDIT, и кнопкой «🎚 Свести с этим битом» от
 
 Пост «Как сделан» (--how, 20.10.2026) — для битмейкеров, когда в канале осталось только своё: факты
 берутся из проекта FL, который владелец сохранил для бита, а не из утренних нот — бит он доводит руками.
-Шаблон, а не модель: модель проекта не видела, и каждая её фраза о звуке была бы выдумкой (how_lines).
+Шаблон, а не модель: модель проекта не видела, и каждая её фраза о звуке была бы выдумкой (how_hook).
 
 Проба --ear (17.10.2026) отвечает на вопрос владельца, может ли Gemini утром слушать
 собранный бит: прежде чем строить такой конвейер, надо знать, отличает ли модель
@@ -833,15 +833,15 @@ def render(beat_id: str) -> int:
 # --- КАК СДЕЛАН: бит из проекта владельца ---------------------------------------
 # Владелец 20.10.2026: в канале только своё, и пост для битмейкеров — «Как сделан бит недели». Факты — из проекта FL,
 # который он сохранил для этого бита (how_project), а не из утренних нот make.py: бит он доводит в FL руками, и вышедший
-# бит от наброска отличается. Пост — шаблоном, без модели, как ПАМЯТКА и совет недели: строка — факт проекта словами
-# битмейкера (плагин, ячейка, такт), нет факта — нет строки, оценок звука нет вовсе. Проект читает только Мак (--how),
+# бит от наброска отличается. Пост — шаблоном, без модели, как ПАМЯТКА и совет недели: один приём из проекта, который
+# повторит любой битмейкер (плагин и ячейка, без тактов), и MIDI в подарок; оценок звука нет вовсе. Первый вариант
+# перечислял до шести приёмов с тактами и долями — владелец 20.10.2026: «слишком много текста и не оч попсовый пост». Проект читает только Мак (--how),
 # он же шлёт пост владельцу в личку с «📺 В канал»; выпускает нажатие дежурство (how_out).
 HOW = "how"
-HOW_HEAD = "🎚 <b>КАК СДЕЛАН «{title}»</b>\n{artists} type beat{tempo}"
+HOW_HEAD = "🎚 <b>Секрет бита «{title}»</b>"
 HOW_CALL = "🎚 Забрать бит в боте"  # строка-ссылка до 28 знаков, как призывы ПАМЯТКИ: длиннее рвётся на телефоне
 HOW_MIDI = "🎹 MIDI «{title}»: 808 и мелодия — так, как они стоят в проекте"
-HOW_LINES = (3, 6)       # строк-приёмов: меньше трёх — поста нет, больше шести — не дочитывают
-HOW_PARTS = 2            # приёмов одной дорожки в строке
+HOW_GIFT = "🎹 MIDI 808 и мелодии — в комментариях ↓"
 # Дорожки микшера и паттерны сборки проекта (flp.today) зовутся по роли — по этим именам роль и узнаётся.
 DRUMS = ("808", "бочка", "клэп", "хэт", "открытый хэт", "перк")
 
@@ -902,12 +902,6 @@ def _move(got: dict, i: int, slot: int) -> str:
             else f"{name} с автоматизацией")
 
 
-def _track(got: dict, role: str, who: str = "", lead: str = "") -> str:
-    i = _ins(got, role)
-    parts = [lead] * bool(lead) + [m for s in sorted(got["inserts"][i]["slots"]) if (m := _move(got, i, s))] if i is not None else []
-    return f"{who or role} — " + "; ".join(parts[:HOW_PARTS]) if parts else ""
-
-
 def _bass(got: dict) -> str:
     """808: звук, набор, если он лежит в своей папке KITS, и сайдчейн от бочки."""
     i, kick = _ins(got, "808"), _ins(got, "бочка")
@@ -924,56 +918,25 @@ def _bass(got: dict) -> str:
     return "808 — " + ", ".join(parts) if parts else ""
 
 
-def _gaps(got: dict) -> str:
-    """Провалы: доли внутри бита, где нет ни одного клипа барабанов и 808."""
-    spans = sorted((a, b) for p in got["patterns"].values() if (p["name"] or "").casefold() in DRUMS for a, b, _ in p.get("at", ()))
-    holes, end = [], None
-    for a, b in spans:
-        if end is not None and a - end >= 1 and a == int(a) and end == int(end):
-            holes.append((end, a))
-        end = b if end is None else max(end, b)
-    when = _when(holes)
-    bass = any((p["name"] or "").casefold() == "808" and p.get("at") for p in got["patterns"].values())
-    return f"провалы — {when}: молчат барабаны" + " и 808" * bass if when else ""
-
-
-def _list(bars: list[int]) -> str:
-    return f"в такт{'ах' if len(bars) > 1 else 'е'} " + (", ".join(map(str, bars[:-1])) + " и " if len(bars) > 1 else "") + str(bars[-1])
-
-
-def _split(got: dict) -> int | None:
-    return next((bar for bar, name in got["markers"] if "перелом" in name.casefold()), None)
-
-
-def _fx(got: dict) -> str:
-    """Переходы: аудиоклипы, кроме дорожки петли, — где стоят, и какие задом наперёд подъезжают к такту."""
-    ahead, back = set(), set()
-    for c in got["channels"]:
-        if c["kind"] == "аудиоклип" and "петл" not in f"{c['name']} {c['sound']}".casefold():
-            for a, b in c.get("at", ()):
-                (back.add(round(b / 4) + 1) if c.get("back") else ahead.add(int(a // 4) + 1))
-    split = _split(got)
-    line = f"FX {_list(sorted(ahead))}" + (f" (перед переломом на {split}-м)" if split and split - 1 in ahead else "") if ahead else ""
-    line += ("; " if line else "") + ", ".join(f"к {bar}-му" for bar in sorted(back)) + " — FX задом наперёд" if back else ""
-    return f"переходы — {line}" if line else ""
-
-
-def how_lines(beat: dict, got: dict) -> list[str]:
-    """Строки-приёмы поста по разбору проекта: каждая — факт из него, порядок — что битмейкеру интереснее."""
+def how_hook(got: dict) -> str:
+    """Приём поста — один: ячейка Gross Beat под автоматизацией (хэт первым — его дробь битмейкеры и крутят), иначе
+    пресет мелодии, иначе звук 808 с набором. Слот без клипа автоматизации — не приём (_move). Нет ничего — поста нет."""
+    for role in ("хэт", "808", "петля", "мелодия", "бочка", "клэп", "мастер"):
+        i = _ins(got, role)
+        for slot in sorted(got["inserts"][i]["slots"]) if i is not None else ():
+            cell = got.get("gross", {}).get((i, slot), ("",))[0]
+            if cell and cell != "Empty" and _move(got, i, slot):
+                return f"{role.capitalize()} — Gross Beat, ячейка «{cell}»"
     melody = _ins(got, "мелодия")
-    lead = next((f"{c['plugin']}, пресет «{c['preset']}»" for c in got["channels"]
-                 if melody is not None and c["insert"] == melody and c.get("preset")), "")
-    split = _split(got)
-    lines = [_bass(got), _track(got, "хэт"), _gaps(got), _fx(got), _track(got, "мелодия", lead=lead),
-             _track(got, "петля", who=" ".join(filter(None, ("петля", beat.get("loop"))))), _track(got, "мастер"),
-             f"перелом — с {split}-го такта" if split and "перелом" not in _fx(got) else ""]
-    return [line[0].upper() + line[1:] for line in lines if line][:HOW_LINES[1]]
+    return next((f"Мелодия — {c['plugin']}, пресет «{c['preset']}»" for c in got["channels"]
+                 if melody is not None and c["insert"] == melody and c.get("preset")), "") or _bass(got)
 
 
-def how_text(beat_id: str, beat: dict, lines: list[str]) -> str:
-    return (HOW_HEAD.format(title=html.escape(beat["title"]), artists=html.escape(" x ".join(beat["artists"])),
-                            tempo=html.escape(_tempo(beat)))
-            + "\n\n" + "\n".join(f"• {html.escape(line)}" for line in lines) + f'\n\n<a href="{link(beat_id)}">{HOW_CALL}</a>')
+def how_text(beat_id: str, beat: dict, hook: str, midi: bool) -> str:
+    """Заголовок, приём, бит одной строкой, MIDI — только если файл есть, и ссылка на бит."""
+    return (HOW_HEAD.format(title=html.escape(beat["title"])) + f"\n{html.escape(hook)}.\n\n"
+            + html.escape(f"{' x '.join(beat['artists'])} type beat{_tempo(beat)}") + f"\n{HOW_GIFT}" * midi
+            + f'\n\n<a href="{link(beat_id)}">{HOW_CALL}</a>')
 
 
 def how_midi(got: dict, bpm: int, path: Path) -> dict[str, int]:
@@ -1017,16 +980,16 @@ def how_send(beat_id: str, dry_run: bool) -> int:
         if c["plugin"] and c["name"] and (factory / c["plugin"]).is_dir() \
                 and any(f.stem == c["name"] for f in (factory / c["plugin"]).rglob("*.fst")):
             c["preset"] = c["name"]
-    lines = how_lines(beat, got)
-    text = how_text(beat_id, beat, lines)
+    hook = how_hook(got)
     print(f"Проект: {path}\n  FL {got['version']}, в работе {got['hours']:g} ч, {got['bpm']:g} BPM\n")
-    print(re.sub(r"<[^>]+>", "", html.unescape(text)) + f"\n  (ссылка последней строки: {link(beat_id)})\n")
-    bad = [why for why, wrong in ((f"строк-приёмов {len(lines)} — меньше {HOW_LINES[0]}", len(lines) < HOW_LINES[0]),
-                                  (f"подпись {telegram.visible_len(text)} знаков — больше {telegram.MAX_CAPTION}",
-                                   telegram.visible_len(text) > telegram.MAX_CAPTION)) if wrong]
     with tempfile.TemporaryDirectory(prefix="how-") as tmp:
         midi = Path(tmp) / f"{beat['title']} — 808 и мелодия.mid"
         counts = how_midi(got, beat.get("bpm") or round(got["bpm"]), midi)
+        text = how_text(beat_id, beat, hook, bool(counts))
+        print(re.sub(r"<[^>]+>", "", html.unescape(text)) + f"\n  (ссылка последней строки: {link(beat_id)})\n")
+        bad = [why for why, wrong in (("приёма в проекте нет: ни ячейки Gross Beat, ни пресета мелодии, ни 808", not hook),
+                                      (f"подпись {telegram.visible_len(text)} знаков — больше {telegram.MAX_CAPTION}",
+                                       telegram.visible_len(text) > telegram.MAX_CAPTION)) if wrong]
         print("MIDI: " + (", ".join(f"{role} — {n} нот" for role, n in counts.items()) if counts else "партий 808 и мелодии нет — без файла"))
         if bad:
             print("Не отправлено:\n" + "\n".join(f"  {why}" for why in bad))
@@ -1119,27 +1082,19 @@ def _how_test() -> None:
                                  "at": [(0.0, 40.0, 0.0), (48.0, 100.0, 40.0)]}}}
 
     beat = {"title": "Пыль", "artists": ["Kai Angel", "9mice"], "bpm": 140, "key": "Fm", "loop": "blvckmorphine"}
-    want = ["808 — «808 #1» из Afterlife Kit, сайдчейн от бочки в Fruity Limiter",
-            "Хэт — Gross Beat, ячейка «Chaos 5», только в такте 8",
-            "Провалы — в такте 16: молчат барабаны и 808",
-            "Переходы — FX в такте 32 (перед переломом на 33-м); к 33-му — FX задом наперёд",
-            "Мелодия — Sytrus, пресет «Another fat saw»; Fruity Delay 3 только в тактах 16 и 32",
-            "Петля blvckmorphine — Fruity Love Philter плавно уходит в тактах 1–8"]
-    assert how_lines(beat, fake()) == want, how_lines(beat, fake())          # седьмая (мастер, такт 1) — за пределом строк
-    no808 = {**fake(), "inserts": {i: x for i, x in fake()["inserts"].items() if i != 1}}
-    assert how_lines(beat, no808)[-1] == "Мастер — Gross Beat только в такте 1", how_lines(beat, no808)
-    # Нет факта — нет строки: без посыла бочки — без сайдчейна, без клипов автоматизации — без приёмов, без окон
-    # паттернов — без провалов, без маркера — без перелома, пустой разбор — ни строки
+    assert how_hook(fake()) == "Хэт — Gross Beat, ячейка «Chaos 5»", how_hook(fake())
+    # Нет факта — нет приёма: без клипов автоматизации ячейка не приём — пресет мелодии, без него — 808, пусто — пусто
     bare = {**fake(), "duck": [], "links": [], "markers": [], "patterns": {}}
-    assert how_lines(beat, bare) == ["808 — «808 #1» из Afterlife Kit", "Переходы — FX в такте 32; к 33-му — FX задом наперёд",
-                                     "Мелодия — Sytrus, пресет «Another fat saw»"], how_lines(beat, bare)
-    assert how_lines(beat, {"markers": [], "channels": [], "links": [], "inserts": {}, "duck": [], "patterns": {}}) == []
+    assert how_hook(bare) == "Мелодия — Sytrus, пресет «Another fat saw»", how_hook(bare)
+    assert how_hook({**bare, "channels": [c for c in bare["channels"] if not c.get("preset")]}) == "808 — «808 #1» из Afterlife Kit"
+    assert how_hook({"markers": [], "channels": [], "links": [], "inserts": {}, "duck": [], "patterns": {}}) == ""
     cut = fake()
     cut["channels"][0]["sound"] = "%FLStudioUserData%/KITS/00 - 20261009 Пыль/808 — 808 #1.wav"        # папка бита: набор не назван
-    cut["channels"][6]["on"] = [(56.0, 63.9), (66.0, 90.0)]                                             # кривая сложнее тактов
-    assert how_lines(beat, cut)[:2] == ["808 — «808 #1», сайдчейн от бочки в Fruity Limiter", "Хэт — Gross Beat, ячейка «Chaos 5» с автоматизацией"]
-    text = how_text("7", beat, how_lines(beat, fake()))
-    assert text.startswith("🎚 <b>КАК СДЕЛАН «Пыль»</b>\nKai Angel x 9mice type beat, 140 BPM, Fm\n\n• 808 — ")
+    assert _bass(cut) == "808 — «808 #1», сайдчейн от бочки в Fruity Limiter", _bass(cut)
+    text = how_text("7", beat, how_hook(fake()), True)
+    assert text == ("🎚 <b>Секрет бита «Пыль»</b>\nХэт — Gross Beat, ячейка «Chaos 5».\n\nKai Angel x 9mice type beat, 140 BPM, Fm\n"
+                    f'{HOW_GIFT}\n\n<a href="{link("7")}">{HOW_CALL}</a>'), text
+    assert HOW_GIFT not in how_text("7", beat, "x", False), "MIDI нет — нет и обещания"
     assert text.endswith(f'\n\n<a href="{link("7")}">{HOW_CALL}</a>') and len(HOW_CALL) <= 28, "призыв — одной строкой-ссылкой"
     assert telegram.visible_len(text) <= telegram.MAX_CAPTION
     assert not re.search(r"тёмн|темн|жирн|кача|мощн|сочн|атмосфер|мрачн|плотн|агрессив|красив|крут|звучит", text.casefold()), "оценок звука нет"
@@ -1152,7 +1107,7 @@ def _how_test() -> None:
     # Кнопка «📺 В канал»: подпись — обратно в HTML по разметке Telegram, значок — по file_id, только в личке владельца, один раз
     plain = html.unescape(re.sub(r"<[^>]+>", "", text))
     at = lambda part: len(plain[:plain.index(part)].encode("utf-16-le")) // 2
-    marks = [{"type": "bold", "offset": at("КАК"), "length": len("КАК СДЕЛАН «Пыль»")},
+    marks = [{"type": "bold", "offset": at("Секрет"), "length": len("Секрет бита «Пыль»")},
              {"type": "text_link", "offset": at(HOW_CALL), "length": len(HOW_CALL.encode("utf-16-le")) // 2, "url": link("7")}]
     pressed = {"chat": {"id": 1}, "photo": [{"file_id": "small"}, {"file_id": "BIG"}], "caption": plain, "caption_entities": marks}
     out, shots = [], []
@@ -1170,7 +1125,7 @@ def _how_test() -> None:
         with mock.patch.object(telegram, "send_photo", lambda chat, photo, caption, **kw: shots.append((photo, caption)) or {"message_id": 3, "chat": {"id": -100}}):
             assert publish.send(out[0], "-100")["kind"] == "caption" and shots == [("BIG", text)], shots
     assert HOW in config.OWN_RUBRICS, "своё: в потолок ленты о чужом не идёт"
-    print("bity --how: строки только из разбора проекта — нет факта, нет строки, не больше шести, оценок звука нет; "
+    print("bity --how: один приём из разбора проекта — ячейка Gross Beat, иначе пресет мелодии, иначе 808, нет факта — нет поста, оценок звука нет, MIDI обещан только при файле; "
           "подпись в лимите, призыв одной строкой-ссылкой; MIDI 808 и мелодии по окнам клипов; «📺 В канал» — только "
           "в личке владельца, значок по file_id, разметка подписи цела, второй раз не выпускает")
 
