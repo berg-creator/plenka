@@ -66,6 +66,9 @@ def main() -> int:
 
         if args.dry_run:
             continue
+        if not config.OUTSIDE_PER_DAY:  # годовщина — пост о чужом: не вышел бы (publish.room), так и не пишем
+            print("  посты о чужом выключены (config.OUTSIDE_PER_DAY = 0) — пост не пишу")
+            continue
 
         result = compose.generate_checked("legend", event)
         if result["skip"] or not result["text"]:

@@ -455,6 +455,9 @@ def plan(needed: int) -> list[tuple[str, str, dict, dict]]:
     Посты о релизах сюда не входят — их пишет do_fresh при находке.
     Рубрики, которые сырья не требуют (мемы, опросы), генерируются из базы артистов.
     """
+    # Все рубрики очереди — о чужом: при config.OUTSIDE_PER_DAY = 0 пачка пуста, и в модель не уходит ни токена.
+    if not config.OUTSIDE_PER_DAY:
+        return []
     inbox = load_inbox_unused()
     artists = state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]
     # Связь рассказывается один раз (владелец, 01.10.2026): база тасовалась без оглядки
@@ -846,7 +849,7 @@ def do_submit(needed: int) -> int:
 
     jobs = plan(needed)
     if not jobs:
-        print("Нечего генерировать: inbox пуст. Сначала запусти сбор.")
+        print("Нечего генерировать: inbox пуст (сначала запусти сбор) или посты о чужом выключены (config.OUTSIDE_PER_DAY = 0).")
         return 0
 
     try:
@@ -922,7 +925,7 @@ def do_now(count: int, jobs: list[tuple[str, str, dict, dict]] | None = None) ->
     # план уже составлен, второй раз тасовать рубрики незачем.
     jobs = plan(count) if jobs is None else jobs
     if not jobs:
-        print("Нечего генерировать: inbox пуст.")
+        print("Нечего генерировать: inbox пуст или посты о чужом выключены (config.OUTSIDE_PER_DAY = 0).")
         return 0
 
     created, used, subtext_done = 0, [], []
@@ -1007,6 +1010,9 @@ def do_fresh(dry_run: bool) -> int:
     """
     from . import pamyatka
 
+    if not config.OUTSIDE_PER_DAY:  # владелец 20.10.2026: в канале только своё — о чужих релизах не пишем
+        print("О свежих релизах не пишу: посты о чужом выключены (config.OUTSIDE_PER_DAY = 0).")
+        return 0
     if dry_run:
         # Поиск мнений в сети тратит суточную квоту генератора и пишет data/web_voice.json.
         web_voice.ENABLED = False
@@ -1160,6 +1166,9 @@ def do_ask_tracks() -> int:
     Под разбором и новостью треки свои (tracks.pieces): запрос на каждый, выхода поста
     они не держат — без файла в комментарии встают ссылки на площадки (comments.seed).
     """
+    if not config.OUTSIDE_PER_DAY:  # треки нужны постам о чужом, а они выключены — Mac не качает зря
+        print("Треков не прошу: посты о чужом выключены (config.OUTSIDE_PER_DAY = 0).")
+        return 0
     admin = config.secret("TELEGRAM_ADMIN_ID")
     asked = 0
     # Срочная новость выходит мимо очереди, и трек названного в ней релиза просить больше
@@ -1223,6 +1232,13 @@ def _selftest() -> int:
     а заодно рушит последнюю строку поста. Релиза: чужой фит под именем гостя
     врёт ещё громче. Запуск: python -m src.compose --selftest
     """
+    from unittest import mock
+
+    # Посты о чужом выключены (config.OUTSIDE_PER_DAY = 0): пачка пуста, о релизах не пишем, треков не просим —
+    # ни модели, ни Telegram.
+    with mock.patch.object(config, "OUTSIDE_PER_DAY", 0), mock.patch.dict(globals(), {"generate_checked": lambda *a: 1 / 0}), \
+            mock.patch.object(config, "secret", lambda *a, **k: 1 / 0):
+        assert plan(40) == [] and do_now(5) == 0 and do_fresh(False) == 0 and do_ask_tracks() == 0
     # Брак описи не губит пост о релизе: модель упёрлась в «16 треков» —
     # причина уходит в повтор, а выходит последняя попытка без строки описи.
     seen: list[dict] = []
@@ -1658,7 +1674,7 @@ def do_dry_run(needed: int) -> int:
     jobs = plan(needed)
     print(f"\nВ очереди сейчас: {queue_size()}. Нужно добрать: {needed}.\n")
     if not jobs:
-        print("Заданий нет — inbox пуст. Запусти `python -m src.collect`.")
+        print("Заданий нет — inbox пуст (запусти `python -m src.collect`) или посты о чужом выключены (config.OUTSIDE_PER_DAY = 0).")
         return 0
     for _, rubric_key, payload, _ in jobs:
         title = payload.get("subject") or payload.get("title") or payload.get("modern") or "—"
@@ -1699,7 +1715,11 @@ def main() -> int:
     needed = max(0, config.QUEUE_TARGET - queue_size())
 
     if args.selftest:
-        return _selftest()
+        # Механику постов о чужом проверяем включённой; выключатель config.OUTSIDE_PER_DAY = 0 — в самом селфтесте.
+        from unittest import mock
+
+        with mock.patch.object(config, "OUTSIDE_PER_DAY", 1):
+            return _selftest()
     if args.memes:
         return do_memes(args.memes)
     if args.ask_tracks:

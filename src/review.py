@@ -244,7 +244,10 @@ def voices_wanted(rows: list[dict], used: set[str], cache: dict, artists: dict[s
 
 
 def _wanted() -> dict[str, dict]:
-    """voices_wanted по файлам состояния: {ключ: релиз}."""
+    """voices_wanted по файлам состояния: {ключ: релиз}. Посты о чужом выключены (config.OUTSIDE_PER_DAY = 0) —
+    пусто: мнения нужны постам о релизах, а их не пишут, и рутина не ищет зря."""
+    if not config.OUTSIDE_PER_DAY:
+        return {}
     rows = list(state.read_jsonl(config.INBOX_FILE))
     artists = {a["name"]: a for a in state.read_json(config.ARTISTS_FILE, {"artists": []})["artists"]}
     found = voices_wanted(rows, set(state.read_json(config.USED_INBOX_FILE, [])),
@@ -314,7 +317,8 @@ def lineage_need(base: dict) -> int:
         moment = state._parse(stamp or "")
         return moment is not None and now - moment < timedelta(**span)
 
-    if within(base.get("searched_at"), hours=config.LINEAGE_RETRY_HOURS):
+    # ОТКУДА НОГИ — пост о чужом: при config.OUTSIDE_PER_DAY = 0 его не пишут, и связи искать незачем.
+    if not config.OUTSIDE_PER_DAY or within(base.get("searched_at"), hours=config.LINEAGE_RETRY_HOURS):
         return 0
     links, done = base.get("links", []), state.told_links()
     untold = sum(link.get("id") not in done for link in links)
@@ -630,6 +634,10 @@ def _selftest() -> None:
     import tempfile
     from unittest import mock
 
+    # Посты о чужом выключены (config.OUTSIDE_PER_DAY = 0): рутине искать нечего — ни мнений, ни связей.
+    with mock.patch.object(config, "OUTSIDE_PER_DAY", 0):
+        assert _wanted() == {} and lineage_need({"links": []}) == 0
+
     from . import publish, telegram
     from .sources import web_voice
 
@@ -943,7 +951,11 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.selftest:
-        _selftest()
+        # Механику постов о чужом проверяем включённой; выключатель config.OUTSIDE_PER_DAY = 0 — в самом селфтесте.
+        from unittest import mock
+
+        with mock.patch.object(config, "OUTSIDE_PER_DAY", 1):
+            _selftest()
         print("Правка, снятие, отказ на битом тексте, правка вышедшего поста в канале, пост шаблоном (ПАМЯТКА) не правится, "
               "мнения о релизах — форма, список и сверка со страницей; новые связи — чужой сайт, "
               "число не из цитаты, цитаты нет на странице, повтор артиста, трек не тот: все проверки прошли.")

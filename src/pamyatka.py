@@ -945,7 +945,11 @@ def main() -> None:
     parser.add_argument("--read", metavar="ЧАТ", help=argparse.SUPPRESS)  # процесс проверки текста: его запускает дежурство
     args = parser.parse_args()
     if args.selftest:
-        return _selftest()
+        # Механику постов о чужом проверяем включённой; выключатель config.OUTSIDE_PER_DAY = 0 — в самом селфтесте.
+        from unittest import mock
+
+        with mock.patch.object(config, "OUTSIDE_PER_DAY", 1):
+            return _selftest()
     if args.probe:
         return 1 if probe() > len(PROBES) // 10 else 0
     if args.read:

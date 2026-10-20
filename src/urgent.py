@@ -220,6 +220,8 @@ def shift() -> None:
         return
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
     for workflow, hours in config.SHIFT_HOURS_MSK.items():
+        if workflow == "urgent.yml" and not config.OUTSIDE_PER_DAY:
+            continue  # посты о чужом выключены (владелец 20.10.2026): срочной новости и сниппета нет вовсе
         if not due([], hours):  # час ещё не настал — GitHub не спрашиваем
             continue
         if workflow == "quiz.yml" and state.now().astimezone(compose.MSK).weekday() not in config.QUIZ_DAYS:
@@ -253,7 +255,7 @@ def shift() -> None:
 def run(limit: int, dry_run: bool, target: str) -> int:
     # Потолок ленты (config.POSTS_PER_DAY, OUTSIDE_PER_DAY): мест нет — модель не зовём, новости остаются в inbox.
     if not dry_run and (limit < 1 or not publish.room("news")):
-        print("Мест в ленте нет: срочная новость сегодня не пишется, модель не вызывалась.")
+        print("Мест в ленте нет или посты о чужом выключены: срочная новость не пишется, модель не вызывалась.")
         return 0
     # Отброшенная моделью новость места не занимает: берём следующую, пока
     # не выйдет limit постов. Попыток втрое больше — столько запуск и тратил,
@@ -337,7 +339,18 @@ def _selftest() -> int:
     """Сниппет и сцена раньше свежей западной новости; отброшенная моделью
     уступает место следующей, и выходит ровно limit постов."""
     from pathlib import Path
+    from datetime import datetime, timezone
     from unittest import mock
+
+    # Посты о чужом выключены (config.OUTSIDE_PER_DAY = 0): дежурство не зовёт urgent.yml вовсе, модель не зовётся.
+    with (mock.patch.object(config, "OUTSIDE_PER_DAY", 0), mock.patch.object(publish, "taken", lambda: []),
+          mock.patch.object(compose, "generate_checked", lambda *a: 1 / 0)):
+        assert run(1, False, "channel") == 0
+        with (mock.patch.object(state, "now", lambda: datetime(2026, 9, 15, 11, 5, tzinfo=timezone.utc)),
+              mock.patch.object(config, "SHIFT_HOURS_MSK", {"urgent.yml": (14,)}),
+              mock.patch.dict(os.environ, {"GITHUB_TOKEN": "t", "GITHUB_REPOSITORY": "o/r"}),
+              mock.patch("requests.get", lambda *a, **k: 1 / 0)):
+            shift()
 
     items = [
         {"fingerprint": "west", "source": "rss", "released_at": "2026-09-12T19:00", "score": 80},
@@ -475,7 +488,11 @@ def main() -> int:
     parser.add_argument("--selftest", action="store_true", help="порядок срочного и замена отброшенной — без сети")
     args = parser.parse_args()
     if args.selftest:
-        return _selftest()
+        # Механику постов о чужом проверяем включённой; выключатель config.OUTSIDE_PER_DAY = 0 — в самом селфтесте.
+        from unittest import mock
+
+        with mock.patch.object(config, "OUTSIDE_PER_DAY", 1):
+            return _selftest()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
