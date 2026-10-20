@@ -264,6 +264,9 @@ INTRO = GAP = 8             # и подряд: вступлением — до 8
 HIGH = 77                   # F6: выше неё «Фосфор» держал мелодию 56% времени, «Фары» — 19%
 # Колокольчик, шкатулка и плак на мелодии — по имени звука: «Bell - Crystal Eye» и «Pluck - Chosen» стояли в «Фосфоре»
 SWEET = ("bell", "music box", "pluck", "glock", "chime", "celest", "kalimba", "toy", "колокол", "шкатул", "арф")
+# Звуки, которые владелец сам поставил на музыку утреннего бита в своём проекте FL, — одобрены его рукой (`approved`),
+# и слово в имени им не указ (`sugar`): «LEAD - Phazing Bell» по промеру плагином тёмный — 2,1 кГц, верхов 0,4%
+CHOSEN = {"Serum/User/Monosounds - Starter/Leads/LEAD - Phazing Bell.fxp": "мелодия «Витрины», 20.10.2026"}
 # Библиотека владельца на Маке. Путь звука в паспорте — «KITS/…» или «Serum/…»
 LIBRARY = {"KITS": Path.home() / "Documents" / "Image-Line" / "FL Studio" / "KITS",
            "Serum": Path("/Library/Audio/Presets/Xfer Records/Serum Presets/Presets")}
@@ -1318,7 +1321,8 @@ def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         high = sum(n.ln for n in notes if n.key >= HIGH) / sum(n.ln for n in notes)
         if high > .25:
             out.append(f"{name}: {high:.0%} времени на F6 и выше — наверху не дольше четверти, главный регистр ниже C6")
-        sweet = [s for s in _names((info.get("sounds") or {}).get(name, ())) if any(w in _nfc(s).lower().replace("cowbell", "") for w in SWEET)]      # ковбелл — не колокольчик
+        sweet = [s for s in _names((info.get("sounds") or {}).get(name, ())) if _nfc(s) not in CHOSEN
+                 and any(w in _nfc(s).lower().replace("cowbell", "") for w in SWEET)]      # ковбелл — не колокольчик
         if sweet and ("мелод" in name or median(n.key for n in notes) >= 72):
             out.append(f"{name}: звук «{sweet[0]}» — колокольчик, шкатулка или плак наверху; бери тёмное семейство")
     # Аккорд такта — классы высот партий гармонии. Один-два аккорда или петля в 1–2 такта дают не больше двух
@@ -1527,7 +1531,7 @@ def approved() -> tuple[set[str], set[str], set[str]]:
     sounds, rings, drums = ({_nfc(n) for n in data.get(key) or ()} - no for key in ("sounds", "loops", "drums"))
     yes, ring = {n for n, t in marks.items() if t.get("v") == "yes"}, {_nfc(n) for n in loops()}
     tune = {_nfc(n) for n in yes if not kind(n)}
-    return sounds | (tune - ring), rings | (tune & ring), drums | {n for n in yes if kind(n)}
+    return sounds | (tune - ring) | (set(CHOSEN) - no if data else set()), rings | (tune & ring), drums | {n for n in yes if kind(n)}
 
 
 def tags() -> dict[str, dict]:
@@ -2894,6 +2898,9 @@ def _checks() -> None:
         assert f"мелодия: звук «{alien}» — не из одобренных владельцем" in said, said
     assert problems(base | {"sounds": dict.fromkeys(base["sounds"], own[-1]) | {"мелодия": min(known())}}, demo()) == [], \
         "барабаны и 808 — по общему списку"
+    chosen = next(iter(CHOSEN))     # звук, который владелец сам поставил на мелодию: одобрен, и «Bell» в имени — не брак
+    assert chosen in known() and problems(base | {"sounds": base["sounds"] | {"мелодия": chosen}}, demo()) == [], \
+        problems(base | {"sounds": base["sounds"] | {"мелодия": chosen}}, demo())
     # Sytrus заводским пресетом: в списке библиотеки его нет и не должно быть, а одобрен владельцем один — остальные утром брак
     for name, why in (("Another fat saw", ""), ("Чужой", "мелодия: звук «Sytrus/Чужой» — не из одобренных владельцем")):
         said = "\n".join(problems(base | {"sounds": base["sounds"] | {"мелодия": NATIVE + name}}, demo()))
