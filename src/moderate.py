@@ -809,15 +809,17 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
         message = query.get("message", {})
         # «📺 В канал» под роликом (src/reels.py): выходит видео того сообщения, где нажали.
         # «Всё ок» и «Исправить» под черновиком с Мака — записываются для Мака (reels.verdict).
+        # «📺 В канал» под постом «Как сделан» с Мака (bity.how_send): выходит пост того сообщения, где нажали.
         result = (reels.to_channel(post_id, message) if action == reels.CALLBACK
                   else meme_out(post_id, message) if action == MEME
+                  else bity.how_out(post_id, message, admin) if action == bity.HOW
                   else reels.verdict(action, post_id, admin) if action in (reels.OK, reels.FIX)
                   else handle(action, post_id))
         telegram.answer_callback(query["id"], result)
         # Вышедший или удалённый пост — в git сразу, а не через десять минут:
         # ежечасный выход релизов (publish --releases) берёт очередь из git
         # и иначе выпустил бы тот же пост второй раз или удалённый.
-        if action in ("pub", "del", reels.CALLBACK, MEME, reels.OK, reels.FIX):
+        if action in ("pub", "del", reels.CALLBACK, MEME, bity.HOW, reels.OK, reels.FIX):
             push_state()
 
         # Не вышло — кнопки остаются: нажать ещё раз проще, чем искать пост заново.

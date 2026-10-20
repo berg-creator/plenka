@@ -100,7 +100,7 @@ DROP_ONLY = ("meme", "poll")
 # в ПАМЯТКЕ (src/pamyatka.py) цитаты закона стоят слово в слово, в ОТБОРЕ имя и название написал сам артист,
 # подпись видео-мема (vmeme, moderate.meme_out) — сам владелец.
 # Правка такого поста — пропуск, а не порок файла: годные правки рядом применяются.
-TEMPLATE = ("pamyatka", "sovet", "beat", "week", "doposle", "otbor", "vmeme")
+TEMPLATE = ("pamyatka", "sovet", "beat", "week", "doposle", "otbor", "vmeme", "how")
 
 ID_FORMAT = re.compile(r"\d{8}-\d{4}")
 # Путь приходит из ветки, то есть снаружи: только файл очереди или архива, без «../».

@@ -269,7 +269,7 @@ POSTS_PER_DAY = 2
 OUTSIDE_PER_DAY = 0
 # Своё — форматы канала и то, что выпускает сам владелец; любая другая рубрика — о чужом: релиз и вердикт,
 # пост очереди (config.RUBRICS, годовщина) и срочная новость со сниппетом (рубрика news).
-OWN_RUBRICS = ("beat", "week", "sovet", "pamyatka", "doposle", "otbor", "quiz", "reel", "vmeme")
+OWN_RUBRICS = ("beat", "week", "sovet", "pamyatka", "doposle", "otbor", "quiz", "reel", "vmeme", "how")
 
 # ПАМЯТКА (src/pamyatka.py) — пост-совет артисту вместо поста о релизе, а не вдобавок: в её сутки
 # ленты релиз не выходит (publish.release_due), и постов в день больше не становится (владелец

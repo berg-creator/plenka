@@ -656,6 +656,11 @@ def send(post: dict, chat_id: str) -> dict | None:
         return _where(telegram.send_video_url(chat_id, post["video"], text, width=post.get("width", 0),
                                               height=post.get("height", 0), quiet=quiet), "caption")
 
+    # «Как сделан» (bity.how_out): значок бита — тем же файлом, что ушёл владельцу в личку, по file_id (поле shot,
+    # а не photo: photo — отпечаток для сверки «одно фото дважды», а значки битов похожи намеренно, как щиты ПАМЯТКИ).
+    if rubric == "how":
+        return _where(telegram.send_photo(chat_id, post["shot"], text, quiet=quiet), "caption")
+
     # Бит владельца (bity.air): значок бита кадром, ссылка на бота — в тексте. Имена артистов
     # ссылками на карточки здесь не становятся: ссылка в посте одна — за битом.
     if rubric == "beat":
@@ -747,8 +752,8 @@ def crosspost_vk(post: dict) -> None:
     # (otbor.build_post, поле mixed) лежит только под постом в Telegram: площадок у него нет,
     # и запись во ВКонтакте звала бы слушать то, чего там не услышать.
     # ПАМЯТКА, как и совет недели, зовёт в бота Telegram.
-    # Видео-мем владельца (vmeme) — ролик, его туда так же не залить.
-    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle", "vmeme") or post.get("mixed"):
+    # Видео-мем владельца (vmeme) — ролик, его туда так же не залить. «Как сделан» (how) зовёт за битом в бота.
+    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle", "vmeme", "how") or post.get("mixed"):
         return
 
     # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
