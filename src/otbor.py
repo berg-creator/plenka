@@ -953,8 +953,9 @@ def shift(target: str) -> None:
         data["done"].append({field: application[field] for field in ("chat", "at", "key", "reel")}
                             | {"file": path.name} | ({"beat": application["beat"]} if application.get("beat") else {}))
         save(data)
-    publish.deliver(post, path, target)
-    print(f"Выход отбора: {path.name} → {target}")
+    # Места в ленте нет (publish.room) — файл остаётся в config.OTBOR_POSTS и выйдет следующим заходом.
+    if publish.deliver(post, path, target):
+        print(f"Выход отбора: {path.name} → {target}")
 
 
 def final(target: str = "channel") -> str:

@@ -181,7 +181,18 @@ def _hits(artist: dict) -> set[str]:
         return set()
 
 
-def decoys(target: dict, artists: list[dict], count: int = OPTIONS - 1) -> list[str]:
+def _near(artist: dict) -> list[int]:
+    """Похожие на артиста по Deezer. Не ответил — пусто, и артист не загадывается."""
+    if not artist.get("deezer_id"):
+        return []
+    try:
+        return deezer.related(artist["deezer_id"])
+    except Exception:  # noqa: BLE001 — ни имени, ни адреса в лог: по ним читается ответ
+        log.info("Deezer не ответил: похожих нет")
+        return []
+
+
+def decoys(target: dict, artists: list[dict], count: int = OPTIONS - 1, near: list[int] | None = None) -> list[str]:
     """Ложные варианты — соседи по сцене на языке ответа, а не кто попало.
 
     Если подставить кого попало, викторина решается методом исключения:
@@ -190,16 +201,23 @@ def decoys(target: dict, artists: list[dict], count: int = OPTIONS - 1) -> list[
     Поэтому берём только тех, у кого с загаданным общая метка сцены, общий язык
     и общий голос (поле `voice` базы: `f` — женский, без поля — мужской): женщину
     среди мужчин слышно сразу — и ответом, и лишним вариантом.
+    Одной метки сцены мало (владелец 20.10.2026: Guf, Toxi$, Слава КПСС и Oxxxymiron —
+    «прям очевидна»): под «ru-rap» двадцать лет сцены, и эпоха звука вычёркивает лишних
+    сразу. Поэтому загадка берёт из своих по метке только похожих по Deezer (`near`,
+    ближние первыми); без `near` — отсев по метке, `pick` им прикидывает, кого пробовать.
     Не набралось трёх — вернётся меньше, и артист не загадывается (`pick`).
     """
     tags = set(target.get("tags", []))
     kin = [
-        a["name"] for a in artists
+        a for a in artists
         if a["name"] != target["name"] and _ru(a) == _ru(target)
         and a.get("voice") == target.get("voice") and tags & set(a.get("tags", []))
     ]
-    random.shuffle(kin)
-    return kin[:count]
+    if near is None:
+        random.shuffle(kin)
+    else:
+        kin = sorted((a for a in kin if a.get("deezer_id") in near), key=lambda a: near.index(a["deezer_id"]))
+    return [a["name"] for a in kin[:count]]
 
 
 def pick() -> dict | None:
@@ -224,7 +242,10 @@ def pick() -> dict | None:
             continue
 
         old = deep(releases, artist["itunes_id"])[:RELEASES]
-        hits = _hits(artist) if old else set()
+        kin = decoys(artist, artists, near=_near(artist)) if old else []
+        if len(kin) < OPTIONS - 1:
+            continue
+        hits = _hits(artist)
         for release in old:
             album_id = itunes.album_id_from_url(release.get("url", ""))
             if not album_id:
@@ -246,7 +267,7 @@ def pick() -> dict | None:
                 if mark in used:
                     continue
 
-                options = decoys(artist, artists) + [artist["name"]]
+                options = kin + [artist["name"]]
                 random.shuffle(options)
                 return {
                     "artist": artist["name"],
@@ -467,6 +488,14 @@ def _sync() -> None:
         _push_repo(config.PRIVATE, [RIDDLE.name], "прослушка: загадка")
 
 
+def _logged() -> None:
+    """Загадка вышла — строка в журнал публикаций: по нему считает потолок ленты (publish.room, владелец
+    20.10.2026). Файла в архиве у неё нет и не будет — ответ лежит только в приватном хранилище."""
+    from . import publish as feed  # publish здесь — уже имя функции выхода отрывка
+
+    feed.record({"rubric": "quiz"}, Path(f"quiz-{state.iso()[:10]}.json"), "channel")
+
+
 def to_channel(item: dict, channel: str, awarded: int, wait: bool = True) -> str:
     """Отрывок — в канал, викторина — под ним в комментарии. Возвращает, где викторина.
     wait=False — зовёт само дежурство (release): опрос под пересылкой повесит оно же, ждать некого."""
@@ -477,6 +506,7 @@ def to_channel(item: dict, channel: str, awarded: int, wait: bool = True) -> str
         linked = None
     if not linked:
         publish(item, channel)
+        _logged()
         _remember(item.get("mark"))
         return "в канале: чата обсуждений нет"
 
@@ -495,6 +525,7 @@ def to_channel(item: dict, channel: str, awarded: int, wait: bool = True) -> str
     state.write_json(RIDDLE, riddle)
     _sync()
     _clip(channel, item, IN_COMMENTS)
+    _logged()
     if not wait:
         # ponytail: пересылка в чат обсуждений не пришла — викторина не встанет, запасного выхода в канал
         # здесь нет; понадобится — проверять pending на следующем круге дежурства.
@@ -687,6 +718,7 @@ def _selftest() -> int:
               "copy_message": lambda chat, source, number, caption, **kw: calls.append(("copy", chat, source, number, caption)),
               "get_chat": lambda chat: {"linked_chat_id": -200}}
         with mock.patch.multiple(telegram, **tg), mock.patch.object(config, "OFFERS", root / "offers"), \
+                mock.patch.object(config, "POSTED_FILE", root / "posted.json"), \
                 mock.patch.object(config, "secret", lambda *a, **k: "1"), \
                 mock.patch.dict(globals(), {"RIDDLE": riddle, "STATE_FILE": root / "used.json", "award": lambda: 2}):
             name = offer(artist, "1")
@@ -697,6 +729,15 @@ def _selftest() -> int:
             assert calls[-1] == ("copy", "1", "1", 9, INTRO.format(where=IN_COMMENTS)), calls[-1]
             pending = state.read_json(riddle, {})["pending"]
             assert pending["awarded"] == 2 and pending["correct"] == 0 and "m" in state.read_json(root / "used.json", {})["used"]
+            # Вышедшая загадка — в журнале публикаций: по нему считает потолок ленты (publish.room).
+            assert [i["rubric"] for i in state.read_json(config.POSTED_FILE, {})["items"]] == ["quiz"]
+            # Мест нет (два поста за сутки ленты) — загадки нет: ни трека, ни титулов, ни кандидата владельцу.
+            from . import publish as feed
+            import contextlib, io, sys
+            with mock.patch.object(feed, "taken", lambda: ["beat", "quiz"]), \
+                    mock.patch.object(sys, "argv", ["quiz", "--target", "admin"]), \
+                    mock.patch.dict(globals(), {"choose": lambda *a: 1 / 0}), contextlib.redirect_stdout(io.StringIO()):
+                assert main() == 0
     # Загадка не из свежего и не гостем: старая половина своих релизов, альбом раньше сингла.
     rows = [
         {"artist_ids": [1 if year else 2], "released_at": f"20{year:02d}-01-01", "track_count": count, "title": str(year)}
@@ -718,6 +759,10 @@ def _selftest() -> int:
     # Женский голос среди мужских слышно сразу: ни ответом, ни лишним вариантом он к ним не идёт.
     scene[1]["voice"] = "f"
     assert "Б" not in decoys(scene[0], scene) and decoys(scene[1], scene) == []
+    # Загадка берёт похожих по Deezer, ближних первыми; чужой голос и чужая сцена мимо и среди похожих.
+    for i, a in enumerate(scene):
+        a["deezer_id"] = i
+    assert decoys(scene[0], scene, near=[4, 3, 1, 2]) == ["Г", "В"]
     print("прослушка: все проверки прошли")
     return 0
 
@@ -848,6 +893,13 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
+
+    # Потолок ленты (publish.room): мест нет — загадки сегодня нет ни в канале, ни у владельца кандидатом.
+    from . import publish as feed
+
+    if args.target and not feed.room("quiz"):
+        print("Мест в ленте нет: загадка сегодня не выходит.")
+        return 0
 
     # Сначала титулы за прошлую загадку: под новой напишем, скольким досталось.
     awarded = 0

@@ -137,7 +137,8 @@ def hushed(chat_id: str | int) -> bool:
         return True
     if str(chat_id) != config.secret("TELEGRAM_CHANNEL_ID", required=False):
         return False
-    items = state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
+    # Прослушка выходит без звука всегда и звук дня не забирает: в журнал она пишется ради потолка ленты (room).
+    items = [item for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", []) if item.get("rubric") != "quiz"]
     last = state._parse(items[-1].get("published_at", "")) if items else None
     return bool(last and feed_day(last) == feed_day(now))
 
@@ -168,8 +169,8 @@ def due(post: dict) -> bool:
     """
     from .compose import MSK
 
-    posted = state.read_json(config.POSTED_FILE, {"items": []})
-    items = posted.get("items", [])
+    # Прослушка в журнале (с 20.10.2026) — только ради потолка ленты (room): ни слота, ни интервала она не держит.
+    items = [item for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", []) if item.get("rubric") != "quiz"]
     if post.get("rubric") != "legend":
         now = state.now().astimezone(MSK)
         if night(now):
@@ -221,17 +222,22 @@ def release_due() -> bool:
     return True
 
 
-def deliver(post: dict, path: Path, target: str) -> None:
+def deliver(post: dict, path: Path, target: str) -> bool:
     """Отправка готового поста — одна на публикатор по расписанию и дежурство.
 
     В канал пост уходит насовсем, владельцу — на утверждение и с отметкой
     в файле: без неё следующий выход подал бы ему тот же пост снова.
+    Места в сутках ленты нет (room) — не уходит никуда, файл остаётся как был; возвращает, ушёл ли пост.
     """
+    if not room(post.get("rubric", "")):
+        log.info("Мест в ленте нет: %s сегодня не выходит", path.name)
+        return False
     if target == "channel":
         to_channel(post, path, config.secret("TELEGRAM_CHANNEL_ID"))
-        return
+        return True
     send_for_approval(post, path, config.secret("TELEGRAM_ADMIN_ID"))
     state.write_json(path, {**state.read_json(path, {}), "approval_sent_at": state.iso()})
+    return True
 
 
 def late(post: dict) -> bool:
@@ -253,6 +259,36 @@ def waiting() -> bool:
                for path in config.QUEUE.glob("*.json"))
 
 
+def taken() -> list[str]:
+    """Рубрики постов, занявших место в эти сутки ленты (feed_day): вышедшие в канал (журнал публикаций,
+    прослушку туда пишет quiz.to_channel) и поданные владельцу, ждущие его «✅»: пост очереди и отбора
+    с approval_sent_at (deliver), свой формат и загадка в config.OFFERS (offer, quiz.offer). Удалённое
+    «🗑» места не держит: пост очереди стёрт, кандидат помечен declined."""
+    day = feed_day(state.now())
+
+    def today(stamp: str | None) -> bool:
+        moment = state._parse(stamp or "")
+        return bool(moment and feed_day(moment) == day)
+
+    rubrics = [item.get("rubric", "") for item in state.read_json(config.POSTED_FILE, {"items": []}).get("items", [])
+               if item.get("chat") == "channel" and today(item.get("published_at"))]
+    for path in [*config.QUEUE.glob("*.json"), *config.OTBOR_POSTS.glob("*.json"), *config.OFFERS.glob("*.json")]:
+        post = state.read_json(path, {})
+        if today(post.get("approval_sent_at") or post.get("offered_at")) and not post.get("declined"):
+            rubrics.append(post.get("rubric", ""))
+    return rubrics
+
+
+def room(rubric: str) -> bool:
+    """Есть ли сегодня место посту этой рубрики: всего не больше config.POSTS_PER_DAY, о чужом — не больше
+    config.OUTSIDE_PER_DAY (владелец 20.10.2026). Нет места — формат ведёт себя как при пропуске: свой
+    придёт в свой следующий заход, релиз протухнет по своим правилам, пост очереди подождёт завтра."""
+    rubrics = taken()
+    if len(rubrics) >= config.POSTS_PER_DAY:
+        return False
+    return rubric in config.OWN_RUBRICS or sum(r not in config.OWN_RUBRICS for r in rubrics) < config.OUTSIDE_PER_DAY
+
+
 def offer(post: dict, name: str, target: str, label: str = "") -> bool:
     """Свой формат канала — бит недели, итог недели, совет, ПАМЯТКА, ДО И ПОСЛЕ — в канал (target channel)
     или владельцу кандидатом с «✅ В канал / 🗑 Удалить» (admin; владелец 19.10.2026: «важнее делать интересно,
@@ -265,8 +301,12 @@ def offer(post: dict, name: str, target: str, label: str = "") -> bool:
     в архив и в канал пост попадает только «✅» (moderate.handle → to_channel), а его кнопка живёт до конца
     суток ленты подачи (late). «🗑» файл не стирает, а метит declined: иначе следующий заход дежурства подал
     бы тот же пост снова. Кандидат одной рубрики — один за раз, кандидаты старше недели стираются здесь же.
+    Места в сутках ленты нет (room) — тоже False: формат попробует в следующий заход.
     """
     rubric, now = post["rubric"], state.now()
+    if not room(rubric):
+        log.info("Мест в ленте нет: %s сегодня не подаётся", name)
+        return False
     for path in config.OFFERS.glob("*.json"):
         offered = state._parse(state.read_json(path, {}).get("offered_at", ""))
         if offered and now - offered > timedelta(days=7):
@@ -616,6 +656,11 @@ def send(post: dict, chat_id: str) -> dict | None:
         return _where(telegram.send_video_url(chat_id, post["video"], text, width=post.get("width", 0),
                                               height=post.get("height", 0), quiet=quiet), "caption")
 
+    # «Как сделан» (bity.how_out): значок бита — тем же файлом, что ушёл владельцу в личку, по file_id (поле shot,
+    # а не photo: photo — отпечаток для сверки «одно фото дважды», а значки битов похожи намеренно, как щиты ПАМЯТКИ).
+    if rubric == "how":
+        return _where(telegram.send_photo(chat_id, post["shot"], text, quiet=quiet), "caption")
+
     # Бит владельца (bity.air): значок бита кадром, ссылка на бота — в тексте. Имена артистов
     # ссылками на карточки здесь не становятся: ссылка в посте одна — за битом.
     if rubric == "beat":
@@ -707,8 +752,8 @@ def crosspost_vk(post: dict) -> None:
     # (otbor.build_post, поле mixed) лежит только под постом в Telegram: площадок у него нет,
     # и запись во ВКонтакте звала бы слушать то, чего там не услышать.
     # ПАМЯТКА, как и совет недели, зовёт в бота Telegram.
-    # Видео-мем владельца (vmeme) — ролик, его туда так же не залить.
-    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle", "vmeme") or post.get("mixed"):
+    # Видео-мем владельца (vmeme) — ролик, его туда так же не залить. «Как сделан» (how) зовёт за битом в бота.
+    if post.get("rubric") in ("poll", "reel", "beat", "sovet", "pamyatka", "doposle", "vmeme", "how") or post.get("mixed"):
         return
 
     # У релиза и новости картинка — обложка по ссылке. У разбора и мема ссылки
@@ -929,6 +974,8 @@ def _selftest() -> None:
             assert not hushed("@канал"), "пост в час ночи — хвост вчерашнего дня"
             posted()
             assert not hushed("@канал")
+            posted(("quiz", ago(minutes=5)))
+            assert not hushed("@канал") and due({"rubric": "meme"}), "прослушка в журнале не забирает ни звук дня, ни слот"
             sent.clear()
             send({**post, "rubric": "release"}, "@канал")
             posted(("release", ago(minutes=1)))
@@ -1013,7 +1060,8 @@ def _selftest() -> None:
         assert next_post(releases=True, skip_sent=True) is None
         assert next_post(releases=True).name == "8-release.json"  # в канал он всё равно пойдёт
         assert next_post(skip_sent=True).name == "1-meme.json"
-        with mock.patch.dict(os.environ, {"TELEGRAM_ADMIN_ID": "0"}):
+        # Поданный релиз 8 уже держит место о чужом — потолок здесь раздвинут, он проверяется ниже.
+        with mock.patch.dict(os.environ, {"TELEGRAM_ADMIN_ID": "0"}), mock.patch.object(config, "OUTSIDE_PER_DAY", 2):
             deliver({"rubric": "meme", "text": "Текст."}, config.QUEUE / "1-meme.json", "admin")
         assert state.read_json(config.QUEUE / "1-meme.json", {}).get("approval_sent_at")
         assert next_post(skip_sent=True) is None
@@ -1052,8 +1100,44 @@ def _selftest() -> None:
         # ни дневные слоты не съедают (26.09.2026 лента из-за них молчала весь день).
         posted(("release", ago(hours=17)), ("release", ago(hours=16)), ("verdict", ago(hours=15)))
         assert release_due() and due({"rubric": "meme"})
+
+        # Потолок ленты (владелец 20.10.2026): за сутки ленты не больше config.POSTS_PER_DAY, о чужом — не больше
+        # OUTSIDE_PER_DAY. Ждущий кнопки кандидат место занимает, ночной пост — вчерашних суток, «📺» владельца
+        # (to_channel напрямую) не держит ничто. Числа — как решил владелец: селфтест проверяет именно их.
+        cap = Path(tmp.name) / "cap"
+        with (mock.patch.multiple(config, QUEUE=cap / "queue", OFFERS=cap / "offers", OTBOR_POSTS=cap / "otbor",
+                                  ARCHIVE=cap / "archive", POSTS_PER_DAY=2, OUTSIDE_PER_DAY=1),
+              mock.patch.dict(os.environ, {"TELEGRAM_ADMIN_ID": "0", "TELEGRAM_CHANNEL_ID": "0", "VK_TOKEN": ""}),
+              # Сама отправка проверена выше; globals(), а не «src.publish»: под -m модуль живёт как __main__.
+              mock.patch.dict(globals(), {"send": lambda post, chat: None})):
+            def channel(*items: tuple[str, str]) -> None:
+                state.write_json(config.POSTED_FILE, {"items": [
+                    {"rubric": r, "published_at": t, "chat": "channel"} for r, t in items]})
+
+            meme, beat = config.QUEUE / "1-meme.json", {"rubric": "beat", "text": "Бит."}
+            state.write_json(meme, {"rubric": "meme", "text": "Текст."})
+            channel(("beat", ago(hours=3)), ("otbor", ago(hours=2)))
+            assert not deliver(state.read_json(meme, {}), meme, "channel") and not offer(beat, "beat-1.json", "channel"), \
+                "третий пост за сутки не выходит"
+            assert not deliver(state.read_json(meme, {}), meme, "admin") and "approval_sent_at" not in state.read_json(meme, {}), \
+                "и владельцу не подаётся, файл не тронут"
+            channel(("release", ago(hours=3)))
+            assert not room("meme") and not room("news") and room("pamyatka"), "второй чужой — нет, своё на второе место — да"
+            channel(("release", ago(hours=17)), ("news", ago(hours=16)))  # 01:00 и 02:00 МСК — хвост вчерашних суток
+            assert room("meme"), "ночной пост до 9:00 — в счёте вчерашнего дня"
+            channel()
+            assert deliver(state.read_json(meme, {}), meme, "admin") and not room("verdict") and room("beat"), \
+                "поданный владельцу пост о чужом ждёт кнопки и место держит"
+            assert offer(beat, "beat-1.json", "admin") and not room("sovet"), "ждущий свой кандидат — тоже"
+            meme.unlink()  # «🗑» под постом очереди стирает файл — место свободно
+            assert room("sovet") and room("meme")
+            channel(("beat", ago(hours=3)), ("news", ago(hours=2)))
+            vmeme = config.ARCHIVE / "vmeme-5.json"
+            state.write_json(vmeme, {"rubric": "vmeme", "text": "Мем."})
+            to_channel({"rubric": "vmeme", "text": "Мем."}, vmeme, "0")
+            assert taken().count("vmeme") == 1, "«📺» владельца выходит и при полном дне и идёт в счёт"
         print("выходы релизов: сутки, окно на трек, вчерашний утром не выходит, лимит в день, звук в канале — у одного поста за сутки, обычный слот уступает, "
-              "бит недели и её итог — мимо слотов")
+              "бит недели и её итог — мимо слотов; потолок: два поста за сутки ленты, о чужом — один, ждущий кандидат в счёте, «📺» владельца проходит")
     finally:
         (card.cover, telegram.send_photo, telegram.send_photo_file, telegram.send_audio,
          telegram.send_message, state.now, config.QUEUE, config.ARCHIVE, config.POSTED_FILE) = real
@@ -1273,13 +1357,14 @@ def main() -> int:
               "или сутки отданы релизам.")
         return 0
 
-    if args.target == "channel":
-        deliver(post, path, "channel")
+    if not deliver(post, path, args.target):
+        print(f"Мест в ленте нет: сегодня уже {len(taken())} из {config.POSTS_PER_DAY} или о чужом — "
+              f"{config.OUTSIDE_PER_DAY} (config.POSTS_PER_DAY, OUTSIDE_PER_DAY).")
+    elif args.target == "channel":
         print(f"Опубликовано в канал: {path.name}. Осталось в очереди: {len(list(config.QUEUE.glob('*.json')))}")
     else:
         # В личку пост уходит с кнопками решения и остаётся в очереди,
         # пока ты не нажмёшь «В канал» или «Удалить».
-        deliver(post, path, "admin")
         print(f"Отправлено на утверждение: {path.name}")
 
     return 0

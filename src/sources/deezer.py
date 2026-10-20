@@ -142,6 +142,12 @@ def top_tracks(artist_id: int, limit: int = 25) -> list[str]:
     return [item.get("title", "") for item in (data or {}).get("data", [])]
 
 
+def related(artist_id: int) -> list[int]:
+    """Похожие артисты по Deezer, ближние первыми: Deezer отдаёт двадцать."""
+    data = get_json(f"{BASE}/artist/{artist_id}/related", min_interval=MIN_INTERVAL)
+    return [item["id"] for item in (data or {}).get("data", []) if item.get("id")]
+
+
 def recent_releases(artist_id: int, limit: int = 5) -> list[dict]:
     data = get_json(
         f"{BASE}/artist/{artist_id}/albums",

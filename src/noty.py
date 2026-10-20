@@ -249,9 +249,24 @@ ROLE_WORDS = {"Kicks": "бочка", "808s": "808", "Claps": "клэп и сне
 # Сколько времени музыка молчит. У референсов она звучит 94% времени, у «Дифирамба» — 80%, у Lil Wayne
 # и 50 Cent — 54 и 71%, у «Фосфора» — 100% (замер 02.10.2026)
 QUIET = {"андер": .2, "пустота": .2}
+# Не минимализм — верхняя граница пустоты утреннего бита (`_dense`; владелец 20.10.2026 о «Витрине»: «слишком минималистик»,
+# 07.10 о «Заело» — «пустовато», 12.10 о «Качелях» — «как будто пустоват микс бита»). С QUIET не спорит: та меряет свои
+# партии без петли, а андеру и пустоте с их 20% до LOUD остаётся окно. ponytail: расчёт, а не опыт — по одному
+# похваленному биту, архиву владельца и замеру образцов. «Фонарь» («сейчас бит звучит круто»): музыка с петлёй молчит 6%
+# времени, без барабанов 10 тактов из 72 (14%) — вступление 8 и провал 2. Архив владельца (prompts/beats.md, «Архив ПК»):
+# вступление без барабанов — 4 такта, иначе 8; часть без барабанов — 4–8 тактов. Образцы (dev_map; demucs тихого слоя
+# не слышит, и молчание у него завышено): музыка молчит до 11% у 10 из 15, больше четверти — у 4; провал после вступления
+# до 9 тактов — у 12 из 15. «Витрина»: музыка молчит 37%, провал 12 тактов, без барабанов 21%; «Жалюзи» (19.10) — 44%.
+# Начнёт браковать бит, который владелец назовёт плотным, — сдвинуть порог по нему, а не снимать проверку
+LOUD = .25                  # музыка — петля без rests и свои партии с хвостом пресета — молчит не дольше четверти бита
+DRY = .2                    # тактов без барабанов — не больше пятой части бита
+INTRO = GAP = 8             # и подряд: вступлением — до 8 тактов, дальше часть без барабанов — до 8
 HIGH = 77                   # F6: выше неё «Фосфор» держал мелодию 56% времени, «Фары» — 19%
 # Колокольчик, шкатулка и плак на мелодии — по имени звука: «Bell - Crystal Eye» и «Pluck - Chosen» стояли в «Фосфоре»
 SWEET = ("bell", "music box", "pluck", "glock", "chime", "celest", "kalimba", "toy", "колокол", "шкатул", "арф")
+# Звуки, которые владелец сам поставил на музыку утреннего бита в своём проекте FL, — одобрены его рукой (`approved`),
+# и слово в имени им не указ (`sugar`): «LEAD - Phazing Bell» по промеру плагином тёмный — 2,1 кГц, верхов 0,4%
+CHOSEN = {"Serum/User/Monosounds - Starter/Leads/LEAD - Phazing Bell.fxp": "мелодия «Витрины», 20.10.2026"}
 # Библиотека владельца на Маке. Путь звука в паспорте — «KITS/…» или «Serum/…»
 LIBRARY = {"KITS": Path.home() / "Documents" / "Image-Line" / "FL Studio" / "KITS",
            "Serum": Path("/Library/Audio/Presets/Xfer Records/Serum Presets/Presets")}
@@ -737,7 +752,7 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                 if isinstance(info["preset"], dict)
                 and (part not in tracks or part not in info.get("tonal", ()) or any(w in part for w in SAMPLED))]
     if not info.get("order"):
-        out += _sample(info, tracks) + _palette(info, tracks) + _kit(info)
+        out += _sample(info, tracks) + _palette(info, tracks) + _kit(info) + _dense(info, tracks)
         if (_picked(info) or {}).get("order"):      # утром такой бит спорил бы со словами владельца о «Заело»: «пустовато»
             out.append(f"sample: образец «{info['sample']}» — только для заказа владельца (поле order его записи): "
                        "утренний бит берёт следующий из data/beat_samples.json")
@@ -1306,7 +1321,8 @@ def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
         high = sum(n.ln for n in notes if n.key >= HIGH) / sum(n.ln for n in notes)
         if high > .25:
             out.append(f"{name}: {high:.0%} времени на F6 и выше — наверху не дольше четверти, главный регистр ниже C6")
-        sweet = [s for s in _names((info.get("sounds") or {}).get(name, ())) if any(w in _nfc(s).lower().replace("cowbell", "") for w in SWEET)]      # ковбелл — не колокольчик
+        sweet = [s for s in _names((info.get("sounds") or {}).get(name, ())) if _nfc(s) not in CHOSEN
+                 and any(w in _nfc(s).lower().replace("cowbell", "") for w in SWEET)]      # ковбелл — не колокольчик
         if sweet and ("мелод" in name or median(n.key for n in notes) >= 72):
             out.append(f"{name}: звук «{sweet[0]}» — колокольчик, шкатулка или плак наверху; бери тёмное семейство")
     # Аккорд такта — классы высот партий гармонии. Один-два аккорда или петля в 1–2 такта дают не больше двух
@@ -1339,18 +1355,71 @@ def sugar(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     # Нота длится ещё и «звучит» своего пресета Serum — сколько он после ноты держится выше −12 дБ. Это мерка,
     # которой снята пустота референсов (`zamer.color`), а не хвост до −60 дБ: тем половина пресетов (от 1,5 с)
     # закрыла бы любую паузу короче такта, и порог QUIET мерил бы уже не то, с чего он снят
-    heard, named = measured(), info.get("sounds") or {}
-    ring = {name: max((heard[s][3] for s in map(_nfc, _names(named.get(name, ()))) if s in heard), default=0)
-            * info.get("bpm", 0) / 15 for name in music}                                # секунды → шестнадцатые
-    quiet = till = 0
-    for a, b in sorted((n.pos, n.pos + n.ln + ring[name]) for name, notes in music.items() for n in notes) + [(end, end)]:
-        quiet, till = quiet + (a - till if a - till >= 4 else 0), max(till, b)
+    ring = _ring(info, music)
+    quiet = _silent([(n.pos, n.pos + n.ln + ring[name]) for name, notes in music.items() for n in notes], end)
     need = QUIET.get(info.get("color"), .1)
     if (z := _brother(info)).get("dev_bars"):       # заказ-брат: музыка молчит не меньше, чем у его образца (тактов из всех)
         need = min(need, round((z.get("dev_music_off") or 0) / z["dev_bars"], 2))
     if music and not kino and quiet / end < need:
         out.append(f"музыка молчит {quiet / end:.0%} времени — нужно не меньше {need:.0%}: такты и полтакта, где её нет вовсе"
                    + ("; нота считается с хвостом пресета — «звучит» в data/beat_sounds.json" if any(ring.values()) else ""))
+    return out
+
+
+def _ring(info: dict, music: dict[str, list[N]]) -> dict[str, float]:
+    """Сколько шестнадцатых партия ещё звучит после ноты — «звучит» её пресета Serum (`measured`)."""
+    heard, named = measured(), info.get("sounds") or {}
+    return {name: max((heard[s][3] for s in map(_nfc, _names(named.get(name, ()))) if s in heard), default=0)
+            * info.get("bpm", 0) / 15 for name in music}                                # секунды → шестнадцатые
+
+
+def _silent(spans, end: float) -> float:
+    """Шестнадцатых, где не звучит ни один отрезок spans: паузы от доли и длиннее — щель короче закроет хвост звука."""
+    quiet = till = 0
+    for a, b in sorted(spans) + [(end, end)]:
+        quiet, till = quiet + (a - till if a - till >= 4 else 0), max(till, b)
+    return quiet
+
+
+def _dense(info: dict, tracks: dict[str, list[N]]) -> list[str]:
+    """Утренний бит без пустот (владелец 20.10.2026 о «Витрине»: «слишком минималистик»; там автор дословно переписал
+    карту состава образца — `dev_map`, снятую по стемам demucs, а demucs тихого слоя не слышит, и его «музыка молчит»
+    часто значит «музыка тихая»). Карта говорит, где меняется состав, но не даёт права молчать.
+    Музыка — дорожка петли (весь бит без rests; петля-раскладка — до перелома: после него она молчит) и свои партии
+    с хвостом пресета, как в `sugar`; молчит не дольше `LOUD` бита. Такт без хэта, бочки и клэпа — такт без барабанов:
+    таких не больше `DRY` бита, подряд — вступлением до `INTRO`, дальше до `GAP`. У бита на петле своих партий от двух."""
+    bars, end = info["bars"], info["bars"] * 16
+    music = {name: flat(notes) for name, notes in tracks.items()
+             if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED)}
+    ring = _ring(info, music)
+    spans = [(n.pos, n.pos + n.ln + ring[name]) for name, notes in music.items() for n in notes]
+    if _pair(info):
+        stop, at = _cut(info) if _stacked(info) else end, 0
+        rests = [r for r in info.get("rests") or () if isinstance(r, (list, tuple)) and len(r) == 2
+                 and all(isinstance(x, (int, float)) for x in r)]            # негодные паузы бракует `_loop`
+        for a, b in sorted(((a - 1) * 16, (b - 1) * 16) for a, b in rests) + [(stop, stop)]:
+            spans += [(at, min(a, stop))] if a > at else []
+            at = max(at, b)
+    # Петля и одна мелодия — то, что владелец назвал «слишком минималистик». Партии меряются за весь бит: у петли-раскладки
+    # с переломом вторая входит, где петля замолчала (так в «Фонаре»); что «поверх петли» до трёх — `_loop`
+    out = [f"loop: своих партий музыки, кроме 808, — {len(music)}, у бита на петле их не меньше двух разного дела: "
+           "мелодия-хук и тело (пэд под петлёй) или яркий слой на слабые доли"] if _pair(info) and len(music) < 2 else []
+    if (quiet := _silent(spans, end)) > LOUD * end:
+        out.append(f"музыка молчит {quiet / end:.0%} времени — не больше {LOUD:.0%}: где у образца музыка молчит, у тебя "
+                   "она тише и реже (петля под фильтром, одна партия из трёх), а не выключена; паузы петли — короче")
+    live = {int(n.pos // 16) for name, notes in tracks.items() if any(w in name for w in ("хэт", "бочка", "клэп", "снейр"))
+            and "открыт" not in name for n in notes}
+    row = "".join("x" if b in live else "." for b in range(bars))
+    lead = len(row) - len(row.lstrip("."))
+    if (dry := row.count(".")) > DRY * bars:
+        out.append(f"без барабанов {dry} из {bars} тактов — не больше {DRY:.0%} бита: где у образца барабаны молчат, "
+                   "оставь хэт, бочку-перк или клэп через такт")
+    if lead > INTRO:
+        out.append(f"вступление без барабанов — такты 1–{lead}, а можно не дальше такта {INTRO}: дальше входит хотя бы хэт")
+    if gaps := [m for m in re.finditer(r"\.+", row) if m.start() > 0 and len(m.group()) > GAP]:
+        m = max(gaps, key=lambda m: len(m.group()))
+        out.append(f"барабаны молчат подряд с такта {m.start() + 1} по {m.end()} — часть без барабанов не длиннее {GAP} тактов: "
+                   "в долгой части без барабанов у образца оставь хэт или перк")
     return out
 
 
@@ -1462,7 +1531,7 @@ def approved() -> tuple[set[str], set[str], set[str]]:
     sounds, rings, drums = ({_nfc(n) for n in data.get(key) or ()} - no for key in ("sounds", "loops", "drums"))
     yes, ring = {n for n, t in marks.items() if t.get("v") == "yes"}, {_nfc(n) for n in loops()}
     tune = {_nfc(n) for n in yes if not kind(n)}
-    return sounds | (tune - ring), rings | (tune & ring), drums | {n for n in yes if kind(n)}
+    return sounds | (tune - ring) | (set(CHOSEN) - no if data else set()), rings | (tune & ring), drums | {n for n in yes if kind(n)}
 
 
 def tags() -> dict[str, dict]:
@@ -2389,7 +2458,8 @@ def _checks() -> None:
         (tmp / "beat").mkdir()
         one = min(known())                          # любой звук из списка: имена в нём меняет только Мак владельца
         # Пробный бит: 16 тактов, с девятого — другой: клэп с 8 уходит на 4 и 12, хэт и мелодия — другим рисунком;
-        # такты 8 и 16 пустые. Высоты — доводами: петлям ниже нужны ноты из их замера
+        # такты 8 и 16 пустые. Высоты — доводами: петлям ниже нужны ноты из их замера. Ноты мелодии встык: музыка утром
+        # молчит не дольше `LOUD`, и короткие ноты с паузами браковались бы как пустой бит
         code = ("from src.noty import N, glide, hits, roll, spread\n"
                 "def compose(low=29, keys=(65, 68, 72, 67), same=False):\n"
                 "    def half(a, b):\n"
@@ -2398,8 +2468,8 @@ def _checks() -> None:
                 "            'хэт': spread(half('x.x.x.x.x.x.x.x.', 'x..x..x.x..x..x.')),\n"
                 "            'клэп': half('........x.......', '....x.......x...') + roll(108, 4, 16),\n"
                 "            'перк': half('......x.x.......', '..x...........x.'),\n"
-                "            'мелодия': [N(x * 16 + p, 2, keys[i]) for x in range(16) if x % 8 != 7\n"
-                "                        for p, i in (((0, 0), (6, 1)) if x < 8 or same else ((2, 2), (10, 3)))]}\n")
+                "            'мелодия': [N(x * 16 + p, ln, keys[i]) for x in range(16) if x % 8 != 7\n"
+                "                        for p, ln, i in (((0, 6, 0), (6, 8, 1)) if x < 8 or same else ((2, 8, 2), (10, 6, 3)))]}\n")
         base = dict(title="A x B — Тест", bpm=140, key="Fm", scale=[5, 7, 8, 10, 0, 1, 3], bars=16, sample="s140", like="A x B",
                      parts="игра 1–8, перелом 9–16", tricks=["x"], tonal=["808", "мелодия"], mood="злой",
                      fx={"808": "Fruity Fast Dist", "мелодия": "без обработки"},
@@ -2738,11 +2808,14 @@ def _checks() -> None:
     off = next(k for k in range(12) if NOTES[k] not in heard[loop]["notes"] + heard[two]["notes"])
     keys = (60 + pcs[0], 60 + pcs[1], 60 + pcs[2], 60 + pcs[1])
     drums = demo(24 + pcs[0], keys)
+    # тело под петлёй: у утреннего бита на петле своих партий от двух (`_dense`); такты 8 и 16 молчат, как мелодия
+    drums["пэд"] = [N(x * 16, 16, 48 + pcs[0]) for x in range(16) if x % 8 != 7]
     looped = base | dict(bpm=170, sample="s170", scale=sorted({NOTES.index(x) for x in heard[loop]["notes"] + heard[two]["notes"]}),
-                          loop=loop, rests=[(8, 9), (12.5, 13)],
+                          loop=loop, rests=[(8, 9), (12.5, 13)], tonal=["808", "мелодия", "пэд"],
                           switch={"такт": 9, "петля": two, "переход": "такт тишины, вторая петля входит с первой доли"},
                           sounds=dict.fromkeys(drums, min(known())),
-                          fx={"808": "Fruity Fast Dist", "мелодия": "без обработки", "петля": "Gross Beat", "петля 2": "Gross Beat"})
+                          fx={"808": "Fruity Fast Dist", "мелодия": "без обработки", "пэд": "без обработки",
+                              "петля": "Gross Beat", "петля 2": "Gross Beat"})
     assert problems(looped, drums) == [] and problems(looped | {"bpm": 85, "sample": "s85"}, drums) == [], problems(looped, drums)
     solo = {k: v for k, v in looped.items() if k != "switch"}              # перелома у образца нет — петля одна на весь бит
     assert problems(solo, drums) == [] and "Перелом" not in about(solo) and "Вторая петля" not in about(solo), problems(solo, drums)
@@ -2825,6 +2898,9 @@ def _checks() -> None:
         assert f"мелодия: звук «{alien}» — не из одобренных владельцем" in said, said
     assert problems(base | {"sounds": dict.fromkeys(base["sounds"], own[-1]) | {"мелодия": min(known())}}, demo()) == [], \
         "барабаны и 808 — по общему списку"
+    chosen = next(iter(CHOSEN))     # звук, который владелец сам поставил на мелодию: одобрен, и «Bell» в имени — не брак
+    assert chosen in known() and problems(base | {"sounds": base["sounds"] | {"мелодия": chosen}}, demo()) == [], \
+        problems(base | {"sounds": base["sounds"] | {"мелодия": chosen}}, demo())
     # Sytrus заводским пресетом: в списке библиотеки его нет и не должно быть, а одобрен владельцем один — остальные утром брак
     for name, why in (("Another fat saw", ""), ("Чужой", "мелодия: звук «Sytrus/Чужой» — не из одобренных владельцем")):
         said = "\n".join(problems(base | {"sounds": base["sounds"] | {"мелодия": NATIVE + name}}, demo()))
@@ -2965,8 +3041,11 @@ def _checks() -> None:
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
         laid()
         assert problems(shared, share) == [] and "stack" not in loops()[gay], problems(shared, share)
-        # Утренний бит (17.10.2026) берёт раскладку тоже и после перелома тоже вправе обойтись без второй петли
-        assert problems(shared | {"order": "", "sample": "s135"}, share) == [], problems(shared | {"order": "", "sample": "s135"}, share)
+        # Утренний бит (17.10.2026) берёт раскладку тоже и после перелома тоже вправе обойтись без второй петли; своих
+        # партий у него от двух (`_dense`) — вторая, пэд, входит после перелома, где петля молчит, как в «Фонаре»
+        morning, body = more("пэд") | {"order": "", "sample": "s135"}, share | {"пэд": pad((59, 66))}
+        assert problems(morning, body) == [], problems(morning, body)
+        assert "своих партий музыки, кроме 808, — 1" in "\n".join(problems(shared | {"order": "", "sample": "s135"}, share))
         four = share | {name: pad((59, 66), (64, 71)) for name in ("пэд", "остинато", "тень")}
         assert "от одной до трёх" in "\n".join(problems(more("пэд", "остинато", "тень"), four)), "без склада партий музыки — до трёх"
         laid(1)
@@ -3030,8 +3109,9 @@ def _checks() -> None:
     with tempfile.TemporaryDirectory() as tmp:          # сборка бита петлёй отдаёт Маку план дорожки и обе петли
         tmp = Path(tmp)
         (tmp / "petlya").mkdir()
-        (tmp / "petlya" / "make.py").write_text(
-            f"INFO = {looped | {'net': {'перк': wav}}!r}\n" + code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}"), encoding="utf-8")
+        laid = code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}") + (     # и пэд, как у `looped`
+            f"_bare = compose\ndef compose():\n    return _bare() | {{'пэд': [N(x * 16, 16, {48 + pcs[0]}) for x in range(16) if x % 8 != 7]}}\n")
+        (tmp / "petlya" / "make.py").write_text(f"INFO = {looped | {'net': {'перк': wav}}!r}\n" + laid, encoding="utf-8")
         archive = build(tmp / "petlya", tmp / "out")
         assert json.loads(archive.with_suffix(".loop.json").read_text("utf-8")) == {"bpm": 170, "bars": 16, "rests": [[8, 9], [12.5, 13]],
                                                                                     "switch": 9}
@@ -3039,8 +3119,7 @@ def _checks() -> None:
         assert json.loads(archive.with_suffix(".net.json").read_text("utf-8")) == {"перк": wav} and _net(tmp / "нет.json", tmp) == [], \
             "адреса звуков из сети — Маку отдельным файлом; нет файла — качать нечего"
         (tmp / "odna").mkdir()                       # бит петлёй без перелома: план дорожки — одна петля на весь бит
-        (tmp / "odna" / "make.py").write_text(
-            f"INFO = {solo!r}\n" + code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}"), encoding="utf-8")
+        (tmp / "odna" / "make.py").write_text(f"INFO = {solo!r}\n" + laid, encoding="utf-8")
         assert json.loads(build(tmp / "odna", tmp / "out").with_suffix(".loop.json").read_text("utf-8"))["switch"] is None
     # Перелом — только когда он есть у образца: бит без него проходит. Назван — стоит на стыке частей во второй половине,
     # после него другие каркас, хэт и музыка, а партии 808 и хэта те же
@@ -3068,10 +3147,13 @@ def _checks() -> None:
     # и концовка — другой бит. Те же 808 или мелодия на смене, другой клэп на смене, те же барабаны в концовке — брак
     def stairs(low=(29, 32, 36, 29), at=((0, 6), (2, 10), (4, 12), (8, 14)), clap=(8, 8, 8, 4)):
         seg = [(b, b // 4) for b in range(16) if b % 8 != 7]
+        tune = [(b * 16 + p, k) for b, s in seg for p, k in zip(at[s], (72, 67) if s == 3 else (65, 68))]
         return {"808": [n for b, s in seg for n in glide(b * 16, 12, low[s], low[s] + 12, at=10, over=2)],
                 "хэт": spread([n for b, s in seg for n in hits(b * 16, "x..x..x.x..x..x." if s == 3 else "x.x.x.x.x.x.x.x.")]),
                 "клэп": [N(b * 16 + clap[s], 1, vel=90 + b % 4 * 5) for b, s in seg],
-                "мелодия": [N(b * 16 + p, 2, k) for b, s in seg for p, k in zip(at[s], (72, 67) if s == 3 else (65, 68))]}
+                # нота тянется до следующей, но не дольше полутакта: утром музыка молчит не дольше `LOUD`, а до перелома —
+                # не меньше 10% (`sugar`)
+                "мелодия": [N(a, min(b - a, 8), k) for (a, k), (b, _) in zip(tune, tune[1:] + [(tune[-1][0] + 2, 0)])]}
 
     stepped = base | {"parts": "куплет 1–4, припев 5–8, куплет 9–12, концовка 13–16",
                       "switch": {"вид": "ступенями", "смены": [5, 9], "такт": 13, "переход": "обрыв на последней доле"}}
@@ -3086,6 +3168,25 @@ def _checks() -> None:
                     ({"смены": [5, 13]}, "поле «смены»"), ({"вид": "плавно"}, "не из списка: разом, ступенями")):
         assert why in "\n".join(problems(stepped | {"switch": stepped["switch"] | sw}, stairs())), (sw, why)
     assert problems(stepped | {"switch": stepped["switch"] | {"вид": "разом"}}, stairs()) == [], "«разом» смен не проверяет"
+    # Не минимализм (владелец 20.10.2026 о «Витрине»: «слишком минималистик»): плотный пробный бит проходит; музыка молчит
+    # треть бита, барабаны молчат девять тактов подряд или девять тактов вступления, у бита на петле одна своя партия — брак;
+    # бит по заказу этими мерками не меряется
+    plain, full = {k: v for k, v in base.items() if k != "switch"}, demo(same=True)
+
+    def cut(names, lo, hi):         # такты lo–hi (счёт с нуля) без этих партий
+        return {k: [n for n in v if not (k in names and lo * 16 <= n.pos < hi * 16)] for k, v in full.items()}
+
+    assert _dense(plain, full) == [] and _dense(looped, drums) == [], (_dense(plain, full), _dense(looped, drums))
+    said = "\n".join(_dense(plain, cut(("мелодия",), 1, 6)))
+    assert "музыка молчит" in said and "не больше 25%" in said, said
+    said = "\n".join(_dense(plain, cut(("хэт", "клэп"), 2, 11)))
+    assert "барабаны молчат подряд с такта 3 по 11" in said and "без барабанов 10 из 16 тактов" in said, said
+    assert "подряд" not in "\n".join(_dense(plain, cut(("хэт", "клэп"), 2, 7))), "часть без барабанов в 6 тактов — норма владельца"
+    assert "вступление без барабанов — такты 1–9" in "\n".join(_dense(plain, cut(("хэт", "клэп"), 0, 9)))
+    assert "своих партий музыки, кроме 808, — 1" in "\n".join(_dense(looped, {k: v for k, v in drums.items() if k != "пэд"}))
+    lazy = cut(("хэт", "клэп", "мелодия"), 0, 9)
+    assert not any(w in "\n".join(problems(plain | {"order": "x"}, lazy)) for w in ("не больше 25%", "без барабанов", "вступление")), \
+        problems(plain | {"order": "x"}, lazy)
     card = loop_card("SixStr120B-01")
     assert "тактов 4" in card and "опоры по тактам" in card and "Вторая петля на перелом" in card and "общих" in card, card
     assert mixed.rsplit("/", 1)[-1] not in card and "12Str120E-01" in card, "подсказка не предлагает пару, которую сборка забракует"
@@ -3100,7 +3201,7 @@ def _checks() -> None:
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, один бит — один образец (брат образца проходит; чужой темп, неизвестный id, "
           "образец прошлого бита и хэт далеко от образца — брак; заказ без образца проходит; заказ-брат с образцом сверяется с ним, утром образец заказа — брак, "
           "хэт по кругу и музыка без пауз проходят только у заказа, чей образец сам так устроен), музыка только одобренными звуками "
-          "(чужой звук, пресет Serum и звук из сети на музыке — брак), сладкое — брак, сухое проходит, мелодия и петля прошлого бита — "
+          "(чужой звук, пресет Serum и звук из сети на музыке — брак), сладкое — брак, сухое проходит, пустой утренний бит (музыка молчит дольше четверти, долгий провал барабанов, на петле одна своя партия) — брак, плотный и заказ проходят, мелодия и петля прошлого бита — "
           "повтор, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), перелом — когда он есть у образца: «разом» "
           "(другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка меняются), "
           "дорожка петли на весь бит, звуки по списку и папка «Сегодня», "

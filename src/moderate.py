@@ -809,15 +809,17 @@ def process(updates: list[dict], limits: dict, admin: str, dry_run: bool, offset
         message = query.get("message", {})
         # «📺 В канал» под роликом (src/reels.py): выходит видео того сообщения, где нажали.
         # «Всё ок» и «Исправить» под черновиком с Мака — записываются для Мака (reels.verdict).
+        # «📺 В канал» под постом «Как сделан» с Мака (bity.how_send): выходит пост того сообщения, где нажали.
         result = (reels.to_channel(post_id, message) if action == reels.CALLBACK
                   else meme_out(post_id, message) if action == MEME
+                  else bity.how_out(post_id, message, admin) if action == bity.HOW
                   else reels.verdict(action, post_id, admin) if action in (reels.OK, reels.FIX)
                   else handle(action, post_id))
         telegram.answer_callback(query["id"], result)
         # Вышедший или удалённый пост — в git сразу, а не через десять минут:
         # ежечасный выход релизов (publish --releases) берёт очередь из git
         # и иначе выпустил бы тот же пост второй раз или удалённый.
-        if action in ("pub", "del", reels.CALLBACK, MEME, reels.OK, reels.FIX):
+        if action in ("pub", "del", reels.CALLBACK, MEME, bity.HOW, reels.OK, reels.FIX):
             push_state()
 
         # Не вышло — кнопки остаются: нажать ещё раз проще, чем искать пост заново.
@@ -893,7 +895,8 @@ def publish_shift() -> None:
     if path is None:
         return
     try:
-        publish.deliver(state.read_json(path, {}), path, target)
+        if not publish.deliver(state.read_json(path, {}), path, target):  # потолок ленты (publish.room)
+            return
     except telegram.TelegramError as exc:
         log.error("%s не удался (%s): %s", label, path.name, exc)
         return
@@ -1500,7 +1503,8 @@ def _selftest() -> int:
         out, asked, crowned, freed = [], [], [], []
         with (mock.patch.object(config, "OFFERS", root / "offers"), mock.patch.object(config, "ARCHIVE", root / "arch"),
               mock.patch.object(config, "QUEUE", root / "queue"), mock.patch.object(config, "secret", lambda *a, **k: "1"),
-              mock.patch.object(state, "now", lambda: clock[0]),
+              # Журнал — свой: настоящий за 19.10.2026 полон, и потолок ленты (publish.room) не пустил бы кандидата.
+              mock.patch.object(config, "POSTED_FILE", root / "posted.json"), mock.patch.object(state, "now", lambda: clock[0]),
               mock.patch.object(publish, "send_for_approval", lambda post, path, chat, label="": asked.append(path.name)),
               mock.patch.object(publish, "to_channel", lambda post, path, chat: out.append(post) or publish.archive(path)),
               mock.patch.object(otbor, "crown", crowned.append),

@@ -310,6 +310,10 @@ def seed(message: dict, refresh: Callable[[], None] | None = None) -> bool:
                 telegram.send_video_file(chat_id, snippet["path"], ask(post, *about),
                                          seconds=snippet["seconds"], width=snippet["width"],
                                          height=snippet["height"], reply_to=message_id, quiet=quiet)
+            elif post.get("midi"):
+                # «Как сделан» (bity.how_out): MIDI 808 и мелодии — копией файла из лички владельца, пост остаётся одной плиткой.
+                telegram.copy_message(chat_id, post["midi"]["chat"], post["midi"]["message_id"], post.get("comment", ""),
+                                      reply_to=message_id, quiet=quiet)
             elif rubric in config.RELEASE_RUBRICS and post.get("file"):
                 # Трек ещё придёт: запоминаем ветку, туда он и встанет первым.
                 path = config.ARCHIVE / post["file"]

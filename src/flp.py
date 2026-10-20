@@ -101,7 +101,7 @@ Sytrus — родной генератор FL: владелец 09.10.2026 са�
                                         по расчёту пиков громкая дорожка уходит под потолок, сумма на мастере — тоже,
                                         если мастер не держит мягкий клиппер последним слотом; окна плагинов закрыты
     python -m src.flp --read ФАЙЛ.flp   что в проекте: каналы и звуки, где стоят аудиоклипы, паттерны, клипы, дорожки микшера, сайдчейн и моно, срезы эквалайзера,
-                                        числа расширителя стерео, открытые окна плагинов
+                                        числа расширителя стерео, ячейки Gross Beat, открытые окна плагинов
 """
 from __future__ import annotations
 
@@ -527,7 +527,7 @@ def _shut(v: bytes) -> bytes:
 def read(data: bytes) -> dict:
     """Проект обратно — своим разбором: то, что сверяет селфтест и печатает --read."""
     out = {"bpm": 0.0, "channels": [], "patterns": {}, "clips": [], "markers": [], "inserts": {}, "links": [], "duck": [], "mono": [],
-           "eq": {}, "wide": {}, "owner": [], "open": [], "version": "", "title": "", "created": None, "hours": None}
+           "eq": {}, "wide": {}, "gross": {}, "owner": [], "open": [], "version": "", "title": "", "created": None, "hours": None}
     text = lambda v: v.decode("utf-16-le").rstrip("\0")
     ch = pat = plug = name = None
     state = b""
@@ -597,7 +597,11 @@ def read(data: bytes) -> dict:
             for k in range(0, len(v) - 13, step):
                 pos, base, idx, ln, track = struct.unpack("<IHHIH", v[k:k + 14])
                 out["clips"].append(("паттерн" if idx > base else "канал", idx - base if idx > base else idx, ln, TRACKS - 1 - track))
-                if idx < len(out["channels"]):          # где стоит клип канала — в долях от начала бита
+                if idx > base and (p := out["patterns"].get(idx - base)) is not None:
+                    # окно паттерна: место и конец в долях от начала бита и откуда в самом паттерне (−1 — с начала);
+                    # у паттерна это целые тики (снято 20.10.2026 с «Фонаря» владельца), у аудиоклипа — другое
+                    p.setdefault("at", []).append((pos / 96, (pos + ln) / 96, max(struct.unpack_from("<i", v, k + 24)[0], 0) / 96))
+                elif idx < len(out["channels"]):        # где стоит клип канала — в долях от начала бита
                     out["channels"][idx].setdefault("at", []).append((pos / 96, (pos + ln) / 96))
         elif e == 148:
             out["markers"].append([n // BAR + 1, ""])
@@ -617,6 +621,9 @@ def read(data: bytes) -> dict:
                 out["wide"][(ins, n)] = struct.unpack("<6i", state)
             if state in (SHAPE[1], PHILTER[1]):                         # настройки владельца из «Фонаря» — байт в байт
                 out["owner"].append((ins, n))
+            if plug == "Gross Beat" and (bank := _bank(state)):          # выбранные ячейки: время и громкость (`_cell`)
+                t, vol = struct.unpack_from("<ii", state, 4)
+                out["gross"][(ins, n)] = tuple(bank[k] if 0 <= k < 72 else "" for k in (t, 36 + vol))
             out["inserts"][ins]["slots"][n], plug = plug, None
             if cut := proq.read(state[state.find(b"FFBS"):]):       # эквалайзер: полосы из куска состояния в обёртке
                 out["eq"][(ins, n)] = cut
@@ -711,21 +718,27 @@ def _factory(plugin: str, state: bytes, root: Path = PRESETS[1].with_name("Gener
     return next((f.stem for f in sorted((root / plugin).rglob("*.fst")) if state in f.read_bytes()), "") if plugin and state else ""
 
 
-def _cell(state: bytes, name: str) -> bytes | None:
-    """Gross Beat: ячейка банка по имени — выбранной. После шапки в состоянии 72 ячейки, 36 времени и 36 громкости:
-    имя с байтом длины, 23 байта, число точек, точки по 24 байта, хвост 20 — проход кончается ровно в конце состояния
-    (сверено на банках Momentary, Patterns, Repeater, Stutter, Turntablist). Выбранные ячейки — числа по смещениям 4
-    (время) и 8 (громкость). None — банк не разобрался или имени в нём нет: состояние остаётся как в пресете.
-    ponytail: начало ищется по первой ячейке «Empty»; банки без неё (Default, Flanging, Pitch shifter) не разбираются."""
+def _bank(state: bytes) -> list[str] | None:
+    """Gross Beat: имена 72 ячеек банка как есть (устройство — у `_cell`); None — банк не разобрался."""
     at, names = state.find(b"\x05Empty"), []
     while 0 <= at < len(state) - 28 and len(names) < 72:
         ln = state[at]
         n = int.from_bytes(state[at + 24 + ln:at + 28 + ln], "little")
         if ln > 30 or not 1 <= n <= 4000:
             break
-        names.append(_norm(state[at + 1:at + 1 + ln].decode("latin1")))
+        names.append(state[at + 1:at + 1 + ln].decode("latin1"))
         at += ln + 48 + 24 * n
-    if len(names) != 72 or at != len(state) or not _norm(name) or _norm(name) not in names:
+    return names if len(names) == 72 and at == len(state) else None
+
+
+def _cell(state: bytes, name: str) -> bytes | None:
+    """Gross Beat: ячейка банка по имени — выбранной. После шапки в состоянии 72 ячейки, 36 времени и 36 громкости:
+    имя с байтом длины, 23 байта, число точек, точки по 24 байта, хвост 20 — проход кончается ровно в конце состояния
+    (сверено на банках Momentary, Patterns, Repeater, Stutter, Turntablist). Выбранные ячейки — числа по смещениям 4
+    (время) и 8 (громкость). None — банк не разобрался или имени в нём нет: состояние остаётся как в пресете.
+    ponytail: начало ищется по первой ячейке «Empty»; банки без неё (Default, Flanging, Pitch shifter) не разбираются."""
+    names = [_norm(x) for x in _bank(state) or ()]
+    if not _norm(name) or _norm(name) not in names:
         return None
     k = names.index(_norm(name))
     return state[:4 + 4 * (k // 36)] + _int(k % 36, 4) + state[8 + 4 * (k // 36):]
@@ -1340,7 +1353,7 @@ def selftest() -> None:
             assert b"CcnK\0\0\0\x09FPCh-svoy" in ch[3]["state"], "длина в заголовке fxp — без первых восьми байт, иначе Serum откроется с Init"
             assert ch[3]["plugin"] == "Fruity Wrapper" and "своя группа отсечки у каждого" in line, line
             same = sorted(notes)                                    # ноты партии — те же: место, длина, высота, сила, панорама, слайд
-            assert got["patterns"][1] == {"name": "808", "notes": {0: same}} and got["patterns"][2]["notes"] == {1: same, 2: same}
+            assert got["patterns"][1] == {"name": "808", "notes": {0: same}, "at": [(0, 404, 0)]} and got["patterns"][2]["notes"] == {1: same, 2: same}
             assert got["clips"] == [("паттерн", 1, 101 * BAR, 0), ("паттерн", 2, 101 * BAR, 1), ("паттерн", 3, 101 * BAR, 2),
                                     ("канал", 4, BAR, 3), ("канал", 5, 101 * BAR, 4)], got["clips"]
             assert got["markers"] == [[1, "вступление"], [9, "игра"]], got["markers"]
@@ -1394,6 +1407,7 @@ def selftest() -> None:
             assert "хэт: Pro-Q 4 — срез низа 350 Гц" in line and "мелодия: Pro-Q 4 — срез низа 150 Гц" in line and "выстави сам: 808" not in line, line
             # Gross Beat — банк пресета с выбранной ячейкой; клип ведёт mix его слота: 1 в названных тактах, конец — по концу бита
             assert half in data and b"gross-default" not in data, "в слоте — пресет с ячейкой «1/2 Speed»"
+            assert got["gross"] == {(4, 2): ("1/2 Speed", "Empty")}, got["gross"]      # ячейка читается обратно (bity --how)
             assert got["links"] == [{"clip": 5, "mix": True, "insert": 4, "slot": 2}], got["links"]
             assert ch[5]["on"] == [(4, 8), (10, 12), (356, 404)], ch[5]["on"]
             assert "каналов 5" in line and "808 — 27" in line and "Эффектов в слотах — 12" in line, line
@@ -1635,6 +1649,7 @@ def main() -> None:
                   + (", ".join(f"{s + 1} {p}" + (f" ({proq.say(got['eq'][i, s])})" if (i, s) in got["eq"] else "")
                                + (" (разведение {2} из 96, сдвиг фазы {3} из 512, панорама {0} из 128)".format(*got["wide"][i, s])
                                   if (i, s) in got["wide"] else "")
+                               + (" (ячейка «{}»)".format(got["gross"][i, s][0]) if (i, s) in got["gross"] else "")
                                + (" (настройки владельца из «Фонаря»)" if (i, s) in got["owner"] else "")
                                for s, p in x["slots"].items()) or "пусто") + f"; идёт в {x['to']}"
                   + (", моно" if i in got["mono"] else "")

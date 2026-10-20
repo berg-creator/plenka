@@ -220,12 +220,19 @@ def shift() -> None:
         return
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
     for workflow, hours in config.SHIFT_HOURS_MSK.items():
+        if workflow == "urgent.yml" and not config.OUTSIDE_PER_DAY:
+            continue  # посты о чужом выключены (владелец 20.10.2026): срочной новости и сниппета нет вовсе
         if not due([], hours):  # час ещё не настал — GitHub не спрашиваем
             continue
         if workflow == "quiz.yml" and state.now().astimezone(compose.MSK).weekday() not in config.QUIZ_DAYS:
             continue  # прослушка — раз в неделю и «где ИИ» по воскресеньям, а не каждый день
         api = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}"
         body = {"ref": os.environ.get("GITHUB_REF_NAME", "main")}
+        if workflow == "urgent.yml" and not publish.room("news"):
+            # Потолок ленты (publish.room): сам заход urgent.yml приватного хранилища не видит — ни своих
+            # кандидатов у владельца, ни отбора — и посчитал бы место, которого нет. Сбор и посты о релизах
+            # в нём идут как шли, без новости: модель её не пишет.
+            body["inputs"] = {"count": "0"}
         if workflow == "quiz.yml":
             # Ручной запуск прослушки по умолчанию шлёт её владельцу — дежурство
             # называет адрес само, тот же, куда выпускает посты: при admin загадка
@@ -246,6 +253,10 @@ def shift() -> None:
 
 
 def run(limit: int, dry_run: bool, target: str) -> int:
+    # Потолок ленты (config.POSTS_PER_DAY, OUTSIDE_PER_DAY): мест нет — модель не зовём, новости остаются в inbox.
+    if not dry_run and (limit < 1 or not publish.room("news")):
+        print("Мест в ленте нет или посты о чужом выключены: срочная новость не пишется, модель не вызывалась.")
+        return 0
     # Отброшенная моделью новость места не занимает: берём следующую, пока
     # не выйдет limit постов. Попыток втрое больше — столько запуск и тратил,
     # когда брал три новости сразу.
@@ -328,7 +339,18 @@ def _selftest() -> int:
     """Сниппет и сцена раньше свежей западной новости; отброшенная моделью
     уступает место следующей, и выходит ровно limit постов."""
     from pathlib import Path
+    from datetime import datetime, timezone
     from unittest import mock
+
+    # Посты о чужом выключены (config.OUTSIDE_PER_DAY = 0): дежурство не зовёт urgent.yml вовсе, модель не зовётся.
+    with (mock.patch.object(config, "OUTSIDE_PER_DAY", 0), mock.patch.object(publish, "taken", lambda: []),
+          mock.patch.object(compose, "generate_checked", lambda *a: 1 / 0)):
+        assert run(1, False, "channel") == 0
+        with (mock.patch.object(state, "now", lambda: datetime(2026, 9, 15, 11, 5, tzinfo=timezone.utc)),
+              mock.patch.object(config, "SHIFT_HOURS_MSK", {"urgent.yml": (14,)}),
+              mock.patch.dict(os.environ, {"GITHUB_TOKEN": "t", "GITHUB_REPOSITORY": "o/r"}),
+              mock.patch("requests.get", lambda *a, **k: 1 / 0)):
+            shift()
 
     items = [
         {"fingerprint": "west", "source": "rss", "released_at": "2026-09-12T19:00", "score": 80},
@@ -385,6 +407,15 @@ def _selftest() -> int:
         asked_github.clear()
         shift()
         assert "quiz.yml" not in asked_github, asked_github  # среда — не день прослушки
+    # Потолок ленты (publish.room): мест нет — заход urgent.yml идёт ради сбора, но новость не пишет (count 0).
+    sent.clear()
+    with (mock.patch.object(state, "now", lambda: datetime(2026, 9, 15, 11, 5, tzinfo=timezone.utc)),
+          mock.patch.object(config, "SHIFT_HOURS_MSK", {"urgent.yml": (14,)}), mock.patch.object(publish, "taken", lambda: ["news"]),
+          mock.patch.dict(os.environ, env), mock.patch("requests.get", lambda url, **_: Reply()),
+          mock.patch("requests.post", lambda url, json, **_: sent.append((url.split("/")[-2], json)) or Reply()),
+          contextlib.redirect_stdout(io.StringIO())):
+        shift()
+    assert sent == [("urgent.yml", {"ref": "main", "inputs": {"count": "0"}})], sent
 
     asked, used, saved = [], [], []
     def generate(rubric: str, payload: dict) -> dict:
@@ -408,6 +439,13 @@ def _selftest() -> int:
         run(1, False, "admin")
     assert asked == ["snippet", "scene"] and used == ["snippet", "snippet-big", "scene"], (asked, used)
     assert saved == [[{"artist": "Quavo", "track": "Lead", "seconds": 181, "url": "https://www.deezer.com/album/1"}]], saved
+    # Мест нет: два поста за сутки или один о чужом — модель не зовётся, новости остаются в inbox.
+    asked.clear()
+    for full in (["beat", "otbor"], ["release"]):
+        with (mock.patch.object(publish, "taken", lambda: full), mock.patch.object(compose, "generate_checked", generate),
+              mock.patch.dict(globals(), {"fresh_news": lambda hours: items}), contextlib.redirect_stdout(io.StringIO())):
+            assert run(1, False, "channel") == 0
+    assert not asked, asked
     # Тот же факт из другого издания: модель видит вышедший заголовок о тех же артистах,
     # давний и чужой ей не показываются.
     import tempfile
@@ -450,7 +488,11 @@ def main() -> int:
     parser.add_argument("--selftest", action="store_true", help="порядок срочного и замена отброшенной — без сети")
     args = parser.parse_args()
     if args.selftest:
-        return _selftest()
+        # Механику постов о чужом проверяем включённой; выключатель config.OUTSIDE_PER_DAY = 0 — в самом селфтесте.
+        from unittest import mock
+
+        with mock.patch.object(config, "OUTSIDE_PER_DAY", 1):
+            return _selftest()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
