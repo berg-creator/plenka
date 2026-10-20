@@ -172,9 +172,10 @@ def _selftest() -> None:
     assert pick(6, {"noise": 3, "clip": 2}, last="noise") == "clip" and pick(6, {"noise": 3}, last="noise") == "", "повтор уступает"
 
     real, saved_load = state.now, skleyka.load
-    saved = config.ARCHIVE, publish.to_channel
+    saved = config.ARCHIVE, config.POSTED_FILE, publish.to_channel
     with tempfile.TemporaryDirectory() as tmp:
-        config.ARCHIVE = Path(tmp)
+        # Журнал — свой: настоящий за 08.10.2026 полон, и потолок ленты (publish.room) не пустил бы совет.
+        config.ARCHIVE, config.POSTED_FILE = Path(tmp), Path(tmp) / "posted.json"
         os.environ.setdefault("TELEGRAM_CHANNEL_ID", "-1")
         sent = []
         publish.to_channel = lambda post, path, chat: sent.append(post)
@@ -220,7 +221,7 @@ def _selftest() -> None:
             assert not due(), "ночью — молчит"
         finally:
             state.now, skleyka.load = real, saved_load
-            config.ARCHIVE, publish.to_channel = saved
+            config.ARCHIVE, config.POSTED_FILE, publish.to_channel = saved
     print("sovet: самопроверка пройдена")
 
 

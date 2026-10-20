@@ -893,7 +893,8 @@ def publish_shift() -> None:
     if path is None:
         return
     try:
-        publish.deliver(state.read_json(path, {}), path, target)
+        if not publish.deliver(state.read_json(path, {}), path, target):  # потолок ленты (publish.room)
+            return
     except telegram.TelegramError as exc:
         log.error("%s не удался (%s): %s", label, path.name, exc)
         return
@@ -1500,7 +1501,8 @@ def _selftest() -> int:
         out, asked, crowned, freed = [], [], [], []
         with (mock.patch.object(config, "OFFERS", root / "offers"), mock.patch.object(config, "ARCHIVE", root / "arch"),
               mock.patch.object(config, "QUEUE", root / "queue"), mock.patch.object(config, "secret", lambda *a, **k: "1"),
-              mock.patch.object(state, "now", lambda: clock[0]),
+              # Журнал — свой: настоящий за 19.10.2026 полон, и потолок ленты (publish.room) не пустил бы кандидата.
+              mock.patch.object(config, "POSTED_FILE", root / "posted.json"), mock.patch.object(state, "now", lambda: clock[0]),
               mock.patch.object(publish, "send_for_approval", lambda post, path, chat, label="": asked.append(path.name)),
               mock.patch.object(publish, "to_channel", lambda post, path, chat: out.append(post) or publish.archive(path)),
               mock.patch.object(otbor, "crown", crowned.append),

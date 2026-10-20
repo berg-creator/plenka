@@ -467,6 +467,14 @@ def _sync() -> None:
         _push_repo(config.PRIVATE, [RIDDLE.name], "прослушка: загадка")
 
 
+def _logged() -> None:
+    """Загадка вышла — строка в журнал публикаций: по нему считает потолок ленты (publish.room, владелец
+    20.10.2026). Файла в архиве у неё нет и не будет — ответ лежит только в приватном хранилище."""
+    from . import publish as feed  # publish здесь — уже имя функции выхода отрывка
+
+    feed.record({"rubric": "quiz"}, Path(f"quiz-{state.iso()[:10]}.json"), "channel")
+
+
 def to_channel(item: dict, channel: str, awarded: int, wait: bool = True) -> str:
     """Отрывок — в канал, викторина — под ним в комментарии. Возвращает, где викторина.
     wait=False — зовёт само дежурство (release): опрос под пересылкой повесит оно же, ждать некого."""
@@ -477,6 +485,7 @@ def to_channel(item: dict, channel: str, awarded: int, wait: bool = True) -> str
         linked = None
     if not linked:
         publish(item, channel)
+        _logged()
         _remember(item.get("mark"))
         return "в канале: чата обсуждений нет"
 
@@ -495,6 +504,7 @@ def to_channel(item: dict, channel: str, awarded: int, wait: bool = True) -> str
     state.write_json(RIDDLE, riddle)
     _sync()
     _clip(channel, item, IN_COMMENTS)
+    _logged()
     if not wait:
         # ponytail: пересылка в чат обсуждений не пришла — викторина не встанет, запасного выхода в канал
         # здесь нет; понадобится — проверять pending на следующем круге дежурства.
@@ -687,6 +697,7 @@ def _selftest() -> int:
               "copy_message": lambda chat, source, number, caption, **kw: calls.append(("copy", chat, source, number, caption)),
               "get_chat": lambda chat: {"linked_chat_id": -200}}
         with mock.patch.multiple(telegram, **tg), mock.patch.object(config, "OFFERS", root / "offers"), \
+                mock.patch.object(config, "POSTED_FILE", root / "posted.json"), \
                 mock.patch.object(config, "secret", lambda *a, **k: "1"), \
                 mock.patch.dict(globals(), {"RIDDLE": riddle, "STATE_FILE": root / "used.json", "award": lambda: 2}):
             name = offer(artist, "1")
@@ -697,6 +708,15 @@ def _selftest() -> int:
             assert calls[-1] == ("copy", "1", "1", 9, INTRO.format(where=IN_COMMENTS)), calls[-1]
             pending = state.read_json(riddle, {})["pending"]
             assert pending["awarded"] == 2 and pending["correct"] == 0 and "m" in state.read_json(root / "used.json", {})["used"]
+            # Вышедшая загадка — в журнале публикаций: по нему считает потолок ленты (publish.room).
+            assert [i["rubric"] for i in state.read_json(config.POSTED_FILE, {})["items"]] == ["quiz"]
+            # Мест нет (два поста за сутки ленты) — загадки нет: ни трека, ни титулов, ни кандидата владельцу.
+            from . import publish as feed
+            import contextlib, io, sys
+            with mock.patch.object(feed, "taken", lambda: ["beat", "quiz"]), \
+                    mock.patch.object(sys, "argv", ["quiz", "--target", "admin"]), \
+                    mock.patch.dict(globals(), {"choose": lambda *a: 1 / 0}), contextlib.redirect_stdout(io.StringIO()):
+                assert main() == 0
     # Загадка не из свежего и не гостем: старая половина своих релизов, альбом раньше сингла.
     rows = [
         {"artist_ids": [1 if year else 2], "released_at": f"20{year:02d}-01-01", "track_count": count, "title": str(year)}
@@ -848,6 +868,13 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config.load_dotenv()
+
+    # Потолок ленты (publish.room): мест нет — загадки сегодня нет ни в канале, ни у владельца кандидатом.
+    from . import publish as feed
+
+    if args.target and not feed.room("quiz"):
+        print("Мест в ленте нет: загадка сегодня не выходит.")
+        return 0
 
     # Сначала титулы за прошлую загадку: под новой напишем, скольким досталось.
     awarded = 0
