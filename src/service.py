@@ -102,6 +102,9 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            # про бит «free» — список битов. Сам раздел и каждую открытую запись считает _memo — подписями
            # pamyatka.OPENED и pamyatka.label, как «БИТ ПЛЁНКИ: выдан».
            pamyatka.RUBRIC: "ПАМЯТКА, ссылка из поста канала", "bity_pamyatka": "БИТЫ, пост ПАМЯТКА",
+           # Открытый сайт бота (src/sajt.py): человек пришёл из поиска. Метка — на раздел, куда ведёт ссылка,
+           # слово «сайт» в подписи — общее: --sources | grep сайт.
+           "skleyka_sajt": "СВЕДЕНИЕ, сайт", "bity_sajt": "БИТЫ, сайт", "pamyatka_sajt": "ПАМЯТКА, сайт",
            "ad": "реклама, канал не распознан"}
 # Платный пост ведёт в ДВОЙНИКА ссылкой ?start=ad_<канал> (NEXT.md, задача 39): имя канала
 # и есть метка, поэтому их не перечислить наперёд — пускаем по форме, мусор ложится в «ad».
@@ -1498,8 +1501,9 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         if _subscribed(chat_id, user_id, admin, retry="bity"):
             bity.listing(chat_id)
         return False
-    if kind == "pamyatka" or kind == "menu" and body == pamyatka.RUBRIC:
+    if kind == "pamyatka" or kind == "menu" and (body == pamyatka.RUBRIC or link == pamyatka.RUBRIC and body in SOURCES):
         # ПАМЯТКА — справочник без модели и без подписки: текст после команды не разбирается.
+        # ?start=pamyatka_<место> из SOURCES — тот же вход со своей меткой (сайт — pamyatka_sajt).
         if kind == "menu":
             count_source(body)
         _memo(chat_id)
@@ -2375,7 +2379,8 @@ def _selftest() -> None:
             real_llm, llm._generate = llm._generate, lambda *a, **kw: asked_llm.append(a)
             try:
                 first = pamyatka.screen()
-                for n, text in enumerate(("/pamyatka", "/памятка что с моим битом?", f"/start {pamyatka.RUBRIC}"), 10):
+                for n, text in enumerate(("/pamyatka", "/памятка что с моим битом?", f"/start {pamyatka.RUBRIC}",
+                                          f"/start {pamyatka.RUBRIC}_sajt"), 10):
                     say(text, n)
                     assert replies[-1] == first, text
                 door = pamyatka.PICK.rstrip(":")
@@ -2400,7 +2405,7 @@ def _selftest() -> None:
                     press(f"{pamyatka.PICK}{old}")
                     assert replies[-1] == first, old
                 day = state.read_json(SOURCES_FILE, {})[_today()]
-                assert (day[pamyatka.RUBRIC], day[pamyatka.OPENED], day[pamyatka.label(memo)]) == (1, 4, 1), day
+                assert (day[pamyatka.RUBRIC], day["pamyatka_sajt"], day[pamyatka.OPENED], day[pamyatka.label(memo)]) == (1, 1, 5, 1), day
                 assert not asked_llm and pamyatka.PICK.startswith(CALLBACK_PREFIX) and COMMANDS["pamyatka"] == COMMANDS["памятка"]
                 assert "77701" not in SOURCES_FILE.read_text() and "55501" not in SOURCES_FILE.read_text()
             finally:

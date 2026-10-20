@@ -1,0 +1,56 @@
+name: Сайт
+
+# Открытый сайт бота (src/sajt.py) на GitHub Pages: главная о СВЕДЕНИИ и страницы ПАМЯТКИ из данных
+# репозитория. Состояние не пишет, поэтому группа state-write ему не нужна — своя, pages: два выкладывания
+# подряд не дерутся, а ожидающее вытесняет более старое, и выходит свежее.
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/sajt.py
+      - data/pamyatka.json
+      - data/hand_examples.json
+      - assets/sajt/**
+      - .github/workflows/sajt.yml
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Проверить и собрать
+        run: |
+          python -m src.sajt --selftest
+          python -m src.sajt --build _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
