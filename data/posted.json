@@ -1325,6 +1325,12 @@
       "file": "20261020-110403-2366-news.json",
       "published_at": "2026-10-20T11:04:14+00:00",
       "rubric": "news"
+    },
+    {
+      "chat": "channel",
+      "file": "pamyatka-prava.json",
+      "published_at": "2026-10-21T09:54:54+00:00",
+      "rubric": "pamyatka"
     }
   ],
   "photos": [
