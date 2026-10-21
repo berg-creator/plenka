@@ -63,7 +63,7 @@ FONTS = "https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&displa
 # content из их <meta>. Пусто — тега нет.
 VERIFY = {"yandex-verification": "", "google-site-verification": ""}
 # Метки ссылок в бота: раздел, куда ведёт ссылка, + «_sajt». Каждая стоит в service.SOURCES — сверяет селфтест.
-START = {"skleyka": "skleyka_sajt", "bity": "bity_sajt", pamyatka.RUBRIC: "pamyatka_sajt"}
+START = {"skleyka": "skleyka_sajt", "bity": "bity_sajt", "ocenka": "ocenka_sajt", pamyatka.RUBRIC: "pamyatka_sajt"}
 LAW_ONLY = ("slova", "zamysel", "shtraf")  # записи о «запрете слов»: только текст закона, как в боте
 GENRES = ("тёмный звук", "фонк", "эмо-рэп", "дрейн")  # канал жанрами не описываем (CLAUDE.md)
 
@@ -103,6 +103,8 @@ def page(path: str, title: str, description: str, body: str, player: bool = Fals
     up = "../" * path.count("/")
     home = up or "./"
     meta = "".join(f'<meta name="{name}" content="{esc(value)}">\n' for name, value in VERIFY.items() if value)
+    # Открытый раздел подсвечен в шапке: сама страница раздела — «page», запись ПАМЯТКИ — «true» (она внутри раздела).
+    here = ' aria-current="page"' if path in ("", "pamyatka/") else ' aria-current="true"'
     script = ("<script>if(window.AudioContext||window.webkitAudioContext)document.documentElement.className='js'</script>\n"
               f'<script src="{up}player.js" defer></script>\n') if player else ""
     return f"""<!doctype html>
@@ -129,9 +131,9 @@ def page(path: str, title: str, description: str, body: str, player: bool = Fals
 {script}</head>
 <body>
 <header class="top"><div class="wrap bar">
-<a class="brand" href="{home}"><img src="{up}icon.png" alt="" width="32" height="32">ПЛЁНКА</a>
-<nav><a href="{home}">Сведение</a><a href="{up}pamyatka/">Памятка</a></nav>
-<a class="go" href="{bot('skleyka')}">🎛 Свести<span class="wide"> бесплатно</span></a>
+<a class="brand" href="{home}" aria-label="ПЛЁНКА"><img src="{up}icon.png" alt="" width="32" height="32"><span>ПЛЁНКА</span></a>
+<nav><a href="{home}"{here if path == "" else ""}>Сведение</a><a href="{up}pamyatka/"{here if path.startswith("pamyatka/") else ""}>Памятка</a></nav>
+<a class="go" href="{bot('skleyka')}"><span class="ico">🎛</span><span>Свести<span class="wide"> бесплатно</span></span></a>
 </div></header>
 <main>
 {body}
@@ -139,7 +141,7 @@ def page(path: str, title: str, description: str, body: str, player: bool = Fals
 <footer><div class="wrap">
 <p>ПЛЁНКА — музыкальный канал <a href="https://t.me/{config.CHANNEL_HANDLE.lstrip('@')}">{config.CHANNEL_HANDLE}</a>
 и бот <a href="{bot('skleyka')}">{config.BOT_HANDLE}</a> в Telegram.</p>
-<p><a href="{home}">Сведение</a> · <a href="{up}pamyatka/">Памятка артиста</a></p>
+<p><a href="{home}">Сведение</a> · <a href="{up}pamyatka/">Памятка артиста</a> · <a href="{bot('bity')}">Биты</a> · <a href="{bot('ocenka')}">Оценка трека</a></p>
 </div></footer>
 </body>
 </html>
@@ -147,8 +149,11 @@ def page(path: str, title: str, description: str, body: str, player: bool = Fals
 
 
 def button(href: str, words: str, small: str = "") -> str:
+    """Кнопка в бота. Значок в начале строки — отдельно: в узком шрифте пробел за ним пропадал."""
     tail = f'<span class="small">{esc(small)}</span>' if small else ""
-    return f'<p class="cta"><a class="button" href="{href}">{esc(words)}</a>{tail}</p>'
+    icon, _, rest = words.partition(" ")
+    label = f'<span class="ico">{esc(icon)}</span> <span>{esc(rest)}</span>' if rest and not icon[0].isalnum() else esc(words)
+    return f'<p class="cta"><a class="button" href="{href}">{label}</a>{tail}</p>'
 
 
 PLAY = ('<svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5v14l11-7z"/>'
@@ -201,12 +206,12 @@ def home() -> str:
 </div></div></section>""" if pairs else ""
     body = f"""<section class="hero wrap">
 <div class="hero-text">
-<h1>Свести голос с битом бесплатно — в Telegram</h1>
+<h1>Свести голос с битом <em>бесплатно</em> — в Telegram</h1>
 <p class="lead">СВЕДЕНИЕ — бот ПЛЁНКИ: присылаешь вокал и бит, получаешь готовый трек. Автоматом, за несколько минут.</p>
 {button(bot('skleyka'), '🎛 Свести бесплатно — в Telegram')}
-<p class="note">Бот сводит подписчикам канала {config.CHANNEL_HANDLE}: без подписки он попросит подписаться. {free}</p>
 </div>
 {main}
+<p class="note hero-note">Бот сводит подписчикам канала {config.CHANNEL_HANDLE}: без подписки он попросит подписаться. {free}</p>
 </section>
 <section class="block"><div class="wrap">
 <h2>Как это работает</h2>
@@ -249,7 +254,7 @@ vocal, beat, adlib, bass, kick… или по-русски.</p></details>
 <h2>Ещё в боте</h2>
 <ul class="doors">
 <li><a href="{bot('bity')}"><b>🎚 БИТЫ</b><span>Биты ПЛЁНКИ, бесплатно, можно в релиз.</span></a></li>
-<li><div><b>📏 ОЦЕНКА</b><span>Пришли готовый трек: бот замерит его и скажет, чем он отличается от выпущенных релизов.</span></div></li>
+<li><a href="{bot('ocenka')}"><b>📏 ОЦЕНКА</b><span>Пришли готовый трек: бот замерит его и скажет, чем он отличается от выпущенных релизов.</span></a></li>
 <li><a href="pamyatka/"><b>⚖️ ПАМЯТКА</b><span>Права на бит и трек, запись голоса и что в законе о «запрете слов»: цитаты закона.</span></a></li>
 </ul>
 {button(bot('skleyka'), '🎛 Свести трек в боте')}
@@ -272,13 +277,14 @@ def _sources(items: list[str]) -> str:
 def memo(item: dict, items: list[dict]) -> str:
     """Запись ПАМЯТКИ: вопрос, запись тем же текстом, что в боте, источники, оговорка о юристе у записей
     о правах (в боте она — над их списком) и одна строка в бота — своя строка записи или призыв раздела.
-    Сбоку на компьютере — остальные вопросы той же темы: колонка для чтения узкая, и место справа пустовало."""
+    Сбоку на компьютере — все вопросы той же темы, открытый подсвечен: колонка для чтения узкая, и место справа пустовало."""
     door = item.get("start", "").partition("_")[0]
     words, where = (item["bot"], door) if item.get("bot") and door in START else (pamyatka.CALL, pamyatka.RUBRIC)
     text = "".join(f"<p>{esc(part)}</p>" for part in item["text"])
     note = f'<p class="note">{esc(pamyatka.NOTE)}</p>' if item.get("topic") == pamyatka.LAW else ""
-    near = "".join(f'<li><a href="../{other["id"]}/">{esc(other.get("ask") or other["title"])}</a></li>'
-                   for other in items if other.get("topic") == item.get("topic") and other["id"] != item["id"])
+    here = ' aria-current="page"'
+    near = "".join(f'<li><a href="../{other["id"]}/"{here if other is item else ""}>{esc(other.get("ask") or other["title"])}</a></li>'
+                   for other in items if other.get("topic") == item.get("topic"))
     body = f"""<div class="wrap memo"><article class="read">
 <p class="kicker"><a href="../">ПАМЯТКА</a> · {esc(pamyatka.TOPICS.get(item.get('topic'), ''))}</p>
 <h1>{esc(item.get('ask') or item['title'])}</h1>
@@ -290,7 +296,7 @@ def memo(item: dict, items: list[dict]) -> str:
 {button(bot(where), words, f'Telegram-бот {config.BOT_HANDLE}')}
 <p class="back"><a href="../">← Все вопросы ПАМЯТКИ</a></p>
 </article>
-<aside class="near"><h2>{esc(pamyatka.TOPICS.get(item.get('topic'), 'ПАМЯТКА'))}: ещё вопросы</h2><ul class="list">{near}</ul></aside>
+<aside class="near"><h2>{esc(pamyatka.TOPICS.get(item.get('topic'), 'ПАМЯТКА'))}</h2><ul class="list">{near}</ul></aside>
 </div>"""
     title = f"{item.get('ask') or item['title']} — ПАМЯТКА артиста | ПЛЁНКА"
     return page(f"pamyatka/{item['id']}/", title, describe(" ".join(item["text"])), body)
@@ -339,10 +345,12 @@ p{margin:0 0 14px}
 .lead{font-size:19px;line-height:1.5;max-width:34em}
 .note,.small,.sub{color:var(--soft);font-size:15px}
 .cta{margin:26px 0 14px}
-.button,.go{display:inline-block;background:var(--gold);color:var(--on-gold);font-family:var(--head);font-weight:600;
-text-decoration:none;border-radius:14px;transition:background .15s}
+.button,.go{display:inline-flex;align-items:center;gap:10px;background:var(--gold);color:var(--on-gold);font-family:var(--head);
+font-weight:600;text-decoration:none;border-radius:14px;transition:background .15s,transform .1s}
+.ico{line-height:1}
 .button{font-size:21px;padding:15px 26px;line-height:1.2}
 .button:hover,.go:hover{background:#ffc66e}
+.button:active,.go:active{background:#e89d2f;transform:translateY(1px)}
 .small{display:block;margin-top:10px}
 .top{position:sticky;top:0;z-index:5;background:rgba(23,21,27,.92);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
 border-bottom:1px solid var(--line)}
@@ -351,10 +359,14 @@ border-bottom:1px solid var(--line)}
 font-family:var(--head);font-weight:700;font-size:23px;letter-spacing:.05em}
 .brand img{border-radius:50%}
 nav{display:flex;gap:22px}
-nav a{color:var(--soft);text-decoration:none}
+nav a{color:var(--soft);text-decoration:none;padding:6px 0;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
 nav a:hover{color:var(--text)}
-.go{font-size:17px;padding:8px 16px;white-space:nowrap}
+nav a[aria-current]{color:var(--text);border-bottom-color:var(--gold)}
+.go{font-size:17px;padding:8px 16px;white-space:nowrap;gap:7px}
+h1 em{font-style:normal;color:var(--gold);background:linear-gradient(90deg,var(--rose),var(--gold));
+-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .hero{display:grid;gap:26px;padding-top:26px;padding-bottom:48px}
+.hero-note{margin:0}
 .hero .cta{margin-top:22px}
 .block{border-top:1px solid var(--line);padding:56px 0}
 .steps{list-style:none;margin:0;padding:0;display:grid;gap:14px;counter-reset:step}
@@ -364,22 +376,26 @@ color:var(--gold);margin-bottom:14px}
 .steps b{display:block;font-size:19px;margin-bottom:4px}
 .sub{margin-top:-10px;margin-bottom:22px}
 .styles{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.styles li{border:1px solid var(--line);border-radius:16px;padding:16px 18px}
+.styles li{border-top:2px solid var(--line);padding:14px 2px 0}
 .styles b{display:block;font-family:var(--head);font-weight:600;font-size:26px;line-height:1.2}
 .styles span{color:var(--soft)}
 .faq details{border-bottom:1px solid var(--line)}
 .faq details:first-child{border-top:1px solid var(--line)}
 summary{list-style:none;cursor:pointer;position:relative;padding:18px 44px 18px 0}
 summary::-webkit-details-marker{display:none}
-summary h3{font-size:19px;font-weight:650;line-height:1.35}
+summary h3{font-size:19px;font-weight:650;line-height:1.35;transition:color .15s}
+summary:hover h3{color:var(--gold)}
 summary::after{content:"+";position:absolute;right:6px;top:10px;font-family:var(--head);font-size:32px;line-height:1;
 color:var(--gold);transition:transform .2s}
 details[open] summary::after{transform:rotate(45deg)}
 details p{max-width:44em;padding-bottom:8px}
 .doors{list-style:none;margin:0;padding:0;display:grid;gap:12px}
-.doors a,.doors div{display:block;height:100%;border:1px solid var(--line);border-radius:16px;padding:18px 20px;color:var(--text);text-decoration:none}
-.doors a:hover{border-color:var(--gold)}
+.doors a{display:block;height:100%;border:1px solid var(--line);border-radius:16px;padding:18px 20px;color:var(--text);
+text-decoration:none;transition:border-color .15s,background-color .15s}
+.doors a:hover,.doors a:active{border-color:var(--gold);background-color:var(--panel)}
 .doors b{display:block;font-family:var(--head);font-weight:600;font-size:22px;margin-bottom:4px}
+.doors b::after{content:"→";float:right;color:var(--dim);transition:color .15s,transform .15s}
+.doors a:hover b::after{color:var(--gold);transform:translateX(3px)}
 .doors span{color:var(--soft)}
 .paid{padding:8px 0 64px}
 .paid-box{background:var(--paid);border:1px solid var(--paid-line);border-radius:26px;padding:26px 18px;display:grid;gap:24px}
@@ -406,11 +422,13 @@ transition:border-color .3s;min-width:0}
 .ab-play{flex:none;width:52px;height:52px;border-radius:50%;border:0;background:var(--text);color:var(--bg);cursor:pointer;
 display:grid;place-items:center}
 .ab-play svg{width:24px;height:24px;fill:currentColor}
+.ab-play:hover{background:#fff}.ab-play:active{transform:scale(.95)}
 .ab-play .i-pause,.is-playing .ab-play .i-play{display:none}
 .is-playing .ab-play .i-pause{display:inline}
 .ab-switch{display:inline-flex;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--bg)}
 .ab-switch button{border:0;background:none;color:var(--soft);font-family:var(--head);font-weight:600;font-size:17px;
 padding:7px 16px;border-radius:999px;cursor:pointer;transition:color .3s,background-color .3s}
+.ab-switch button:hover{color:var(--text)}
 .ab-switch [data-side=do][aria-pressed=true]{background-color:#4c4754;color:var(--text)}
 .ab-switch [data-side=posle][aria-pressed=true]{background:linear-gradient(90deg,var(--rose),var(--gold));color:var(--on-gold)}
 .ab-hint{font-size:14px;color:var(--soft)}
@@ -433,20 +451,23 @@ section.wrap>.read{padding-top:28px}
 .topic h2{font-size:28px;margin:28px 0 8px}
 .list{list-style:none;margin:0;padding:0}
 .list a{display:block;padding:11px 0;border-bottom:1px solid var(--line);color:var(--text);text-decoration:none}
-.list a:hover{color:var(--gold)}
+.list a:hover,.list a:active{color:var(--gold)}
+.near .list a[aria-current]{color:var(--gold);font-weight:600;box-shadow:inset 3px 0 var(--gold);padding-left:12px}
 .near h2{font-size:24px;margin-bottom:6px}
 .near .list a{font-size:16px;padding:9px 0}
 .near{padding-bottom:48px}
 section.wrap>.cta{margin:40px 0 64px}
 footer{border-top:1px solid var(--line);color:var(--soft);font-size:15px;padding:28px 0 44px}
 footer a{color:var(--soft)}
-@media (max-width:520px){nav a:first-child,.go .wide{display:none}.bar{gap:16px}.ab-hint{flex-basis:100%}
-.hero{gap:18px;padding-top:22px}.lead{font-size:18px}.hero .cta{margin:18px 0 10px}.hero .note{font-size:14px;margin:0}
+@media (max-width:520px){.go .wide{display:none}.bar{gap:14px}nav{gap:14px}nav a{font-size:16px}.ab-hint{flex-basis:100%}
+.hero{gap:18px;padding-top:22px}.lead{font-size:18px}.hero .cta{margin:18px 0 0}.hero .note{font-size:14px}
+.button{font-size:18px;padding:14px 20px}
 .ab-word{font-size:40px}.ab canvas{height:92px;margin-top:8px}.ab-ctrl{margin-top:10px}}
 @media (min-width:700px){.wrap{padding-left:32px;padding-right:32px}.styles{grid-template-columns:repeat(4,minmax(0,1fr))}
 .doors{grid-template-columns:repeat(3,minmax(0,1fr))}.paid-box{padding:40px}}
-@media (min-width:900px){.hero{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:64px;
-padding-top:72px;padding-bottom:96px}.ab{padding:22px 24px 24px}.ab canvas{height:150px}
+@media (min-width:900px){.hero{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"text ab" "note ab";gap:0 64px;
+padding-top:72px;padding-bottom:96px}.hero-text{grid-area:text;align-self:end}.hero>.ab{grid-area:ab;align-self:center}
+.hero-note{grid-area:note;margin-top:4px}.ab{padding:22px 24px 24px}.ab canvas{height:150px}
 .steps{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.block{padding:80px 0}
 .split{display:grid;grid-template-columns:300px minmax(0,1fr);gap:64px}
 .paid-box{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:56px;padding:56px;align-items:start}
@@ -454,6 +475,7 @@ padding-top:72px;padding-bottom:96px}.ab{padding:22px 24px 24px}.ab canvas{heigh
 .topics{display:block;columns:2;column-gap:56px}.topic{break-inside:avoid}.topic h2{margin-top:0;padding-top:28px}
 .memo{display:grid;grid-template-columns:minmax(0,720px) minmax(0,1fr);gap:72px;align-items:start}
 .near{position:sticky;top:90px;padding-top:40px}}
+@media (max-width:430px){.brand span{display:none}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 """
 
@@ -711,6 +733,8 @@ def _selftest() -> None:
             assert not [genre for genre in GENRES if genre in low], f"канал жанрами не описываем: {path}"
             assert config.SKLEYKA_HAND_ENGINEER not in text, f"ник звукорежиссёра — только в боте: {path}"
             assert f'class="go" href="{bot("skleyka")}"' in text, f"кнопка «Свести» — в шапке каждой страницы: {path}"
+            lit = re.findall(r'<a [^>]*aria-current="[^"]+">([^<]+)</a>', re.search(r"<nav>.+?</nav>", text)[0])
+            assert lit == ["Сведение" if path == "" else "Памятка"], f"в шапке подсвечен открытый раздел: {path}: {lit}"
             # Ссылки: внутренние ведут на файлы сборки, в бота — метками сайта, известными service.SOURCES.
             for link in re.findall(r'(?:href|src|data-do|data-posle)="([^"]+)"', text):
                 if link.startswith(f"https://t.me/{config.BOT_HANDLE.lstrip('@')}"):
@@ -732,6 +756,8 @@ def _selftest() -> None:
         assert players[0] == tuple(f"zvuk/{name}" for name in MAIN) and len(players) == 1 + len(examples()), players
         assert home_text.index('class="ab"') < home_text.index('class="block"') < home_text.index('class="paid"'), \
             "главный пример — в первом экране, звукорежиссёр — отдельным блоком внизу"
+        doors = re.search(r'<ul class="doors">(.+?)</ul>', home_text, re.S)[1]
+        assert doors.count("<li><a href=") == doors.count("<li>") == 3, "карточки «Ещё в боте» — все ссылки, подсвечиваются одинаково"
         assert home_text.count("<audio") == 2 * len(players), "без скрипта — два обычных <audio> на плеер"
         assert 'src="player.js"' in home_text and all(word in (out / "player.js").read_text()
                                                       for word in ("decodeAudioData", "audioSession", "aria-pressed"))
@@ -743,6 +769,7 @@ def _selftest() -> None:
             assert (esc(pamyatka.NOTE) in text) == (item["topic"] == pamyatka.LAW), f"оговорка о юристе — у прав: {item['id']}"
             assert len(re.findall(r'class="button"', text)) == 1, f"одна строка в бота: {item['id']}"
             line = re.search(r'class="button"[^>]*>(.+?)</a>', text)[1]
+            line = re.sub(r"<[^>]+>", "", line)
             assert len(html.unescape(line)) <= pamyatka.LINE_MAX, f"строка в бота длиннее строки телефона: {line}"
             if item["id"] in LAW_ONLY:
                 article = re.search(r"<article[^>]*>(.+)</article>", text, re.S)[1]

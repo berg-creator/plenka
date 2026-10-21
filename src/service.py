@@ -105,6 +105,7 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            # Открытый сайт бота (src/sajt.py): человек пришёл из поиска. Метка — на раздел, куда ведёт ссылка,
            # слово «сайт» в подписи — общее: --sources | grep сайт.
            "skleyka_sajt": "СВЕДЕНИЕ, сайт", "bity_sajt": "БИТЫ, сайт", "pamyatka_sajt": "ПАМЯТКА, сайт",
+           "ocenka_sajt": "ОЦЕНКА, сайт",
            # ДО ХИТА (src/dohita.py) зовёт прислать свой трек: метка из SOURCES сразу открывает ОТБОР.
            "otbor_dohita": "ОТБОР, пост ДО ХИТА",
            "ad": "реклама, канал не распознан"}
@@ -1461,6 +1462,8 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         # проверки; «Подписался» несёт хвост «:ok» — второй раз тот же вход не считается.
         # Файл после этого идёт в оценку, а не в отбор, — отметку ставит start, ловит дежурство.
         count_source(ocenka.OPENED)
+        if kind == "menu" and body in SOURCES:
+            count_source(body)  # ?start=ocenka_sajt — пришёл с сайта
         if _subscribed(chat_id, user_id, admin, retry="ocenka:ok"):
             ocenka.start(chat_id, admin=admin)
         return False
