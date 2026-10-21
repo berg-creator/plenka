@@ -15,6 +15,10 @@
 редакция 48, последняя правка — 214-ФЗ от 07.07.2025). «Что делать» —
 практический вывод, а не цитата. Текст — шаблоном, без модели: норму, пересказанную своими словами,
 уже не проверить по статье. Базу пополняют руками.
+Вид поста (владелец 21.10.2026: «начать памятку с простого объяснения, а потом уже подробности»,
+заголовок — понятный): заголовком вопрос записи (ask, им же подписан щит), под ним простой ответ (short),
+потом «Что делать» и последними — цитаты, свёрнутой цитатой «Подробнее»: в ленте видно ответ, а закон
+открывает, кому интересно. Простой ответ пишут руками из самой записи — ничего сверх её текста.
 Три записи — slova, zamysel, shtraf — о запрете пропаганды наркотиков, который артисты зовут «запретом
 слов» (владелец 09.10.2026: самая больная тема для тех, кто выпускает треки, а в боте про неё было
 пусто). Они показывают текст закона и больше ничего: ни «что делать», ни совета, как переписать
@@ -147,8 +151,17 @@ def pending() -> list[dict]:
     return [item for item in load() if not (config.ARCHIVE / f"{RUBRIC}-{item['id']}.json").exists()]
 
 
+TODO = "Что делать. "  # так начинается абзац записи с практическим выводом
+
+
 def _parts(item: dict) -> list[str]:
-    return [f"<b>ПАМЯТКА: {html.escape(item['title'])}</b>", *map(html.escape, item["text"])]
+    """Запись: вопрос, простой ответ, «Что делать» и цитаты свёрнутым блоком (Telegram раскрывает его нажатием)."""
+    text = [html.escape(part) for part in item["text"]]
+    more = [part for part in text if not part.startswith(TODO)]
+    return [f"{ICONS.get(item.get('topic'), ICONS[LAW])} <b>{html.escape(item.get('ask') or item['title'])}</b>",
+            *([html.escape(item["short"])] if item.get("short") else []),
+            *(f"📌 <b>Что делать</b>\n{part.removeprefix(TODO)}" for part in text if part.startswith(TODO)),
+            *([f"<blockquote expandable>📖 <b>Подробнее</b>\n" + "\n\n".join(more) + "</blockquote>"] if more else [])]
 
 
 def build(item: dict) -> dict:
@@ -158,7 +171,8 @@ def build(item: dict) -> dict:
     lines = ([(item["bot"], item["start"])] if item.get("bot") else []) + [(CALL, RUBRIC)]
     calls = [f'{icon} <a href="{base}{start}">{html.escape(words)}</a>'
              for (icon, _, words), start in ((line.partition(" "), start) for line, start in lines)]
-    return {"rubric": RUBRIC, "id": item["id"], "title": item["title"], "text": "\n\n".join(_parts(item) + ["\n".join(calls)])}
+    return {"rubric": RUBRIC, "id": item["id"], "title": item.get("ask") or item["title"],
+            "text": "\n\n".join(_parts(item) + ["\n".join(calls)])}
 
 
 def label(item: dict) -> str:
@@ -591,8 +605,10 @@ def _selftest_card() -> None:
     x0, y0, x1, y1 = card.AD_BOX
     empty: dict[str, object] = {}
     for item in load():
-        lines, size = card.poster(item["title"], x1 - x0, y1 - y0)
-        assert " ".join(lines) == " ".join(item["title"].upper().split()), f"{item['id']}: слова заголовка целы и по порядку"
+        head = build(item)["title"]
+        assert head == item["ask"], f"{item['id']}: щит подписан вопросом записи"
+        lines, size = card.poster(head, x1 - x0, y1 - y0)
+        assert " ".join(lines) == " ".join(head.upper().split()), f"{item['id']}: слова заголовка целы и по порядку"
         assert size >= card.AD_MIN, f"{item['id']}: заголовок длинен для карточки — кегль {size}, нужен от {card.AD_MIN}"
         image = picture(build(item))
         assert image.size == (card.WIDTH, card.HEIGHT), item["id"]
@@ -696,7 +712,7 @@ def _selftest_text() -> None:
                      "&" * config.TEKST_CHARS):
             texts, _ = report(found(long))
             assert len(texts) > 1 and all(len(telegram.sanitize(text)) <= telegram.MAX_TEXT for text in texts), [len(text) for text in texts]
-            assert all(text.count("<blockquote>") == text.count("</blockquote>") and text.count("<b>") == text.count("</b>") for text in texts)
+            assert all(text.count("<blockquote") == text.count("</blockquote>") and text.count("<b>") == text.count("</b>") for text in texts)
             whole = "\n\n".join(texts)
             assert whole.count("<blockquote>") == len(topics) and "<blockquote></blockquote>" not in whole and texts[-1].endswith(TEXT_NOTE)
             assert all(any("\n\n".join(_law(topic)) in text for text in texts) for topic in topics), "закон темы — целиком в одном сообщении"
@@ -776,6 +792,9 @@ def _selftest() -> None:
     for item in base:
         text, cited = build(item)["text"], " ".join(item.get("sources") or [])
         assert re.fullmatch(r"[a-z0-9-]+", item["id"]) and not item["id"].isdigit() and cited, f"{item['id']}: нет источника"
+        # Пост начинается с простого ответа, «Что делать» — отдельным блоком, цитаты — свёрнутым (владелец 21.10.2026).
+        assert item.get("short") and text.split("\n\n")[1] == html.escape(item["short"]), f"{item['id']}: простой ответ — вторым абзацем"
+        assert text.count("<blockquote expandable>") == 1 and TODO not in text, f"{item['id']}: подробности — свёрнутым блоком"
         # Конец поста зовёт в бота: своя строка — в биты или сведение, последней у каждой записи — призыв в раздел.
         own = bool(item.get("bot"))
         assert item.get("topic") in ICONS and text.count("<a href") == 1 + own, f"{item['id']}: тема и ссылки в бота"
@@ -897,7 +916,7 @@ def _selftest() -> None:
             assert found() == [], "находка среды в её сутки не пишется — памятка ещё не вышла, но запись в базе есть"
             assert not took(at("06T10:00")), "релиз вторника — обычного дня — памятка не забирает"
             state.now = lambda: at("07T12:30")
-            assert air() == "a" and sent[0]["text"].startswith("<b>ПАМЯТКА: запись a</b>\n\nТекст.\n\n⚖️ <a ") and not lines
+            assert air() == "a" and sent[0]["text"].startswith("⚖️ <b>запись a</b>\n\n<blockquote expandable>📖 <b>Подробнее</b>\nТекст.</blockquote>\n\n⚖️ <a ") and not lines
             assert air() == "" and len(sent) == 1, "одна запись в сутки"
             assert day() and not publish.release_due(), "памятка вышла — релиз в эти сутки не выходит"
             state.now = lambda: at("08T02:00")

@@ -289,7 +289,7 @@ def memo(item: dict, items: list[dict]) -> str:
     Сбоку на компьютере — все вопросы той же темы, открытый подсвечен: колонка для чтения узкая, и место справа пустовало."""
     door = item.get("start", "").partition("_")[0]
     words, where = (item["bot"], door) if item.get("bot") and door in START else (pamyatka.CALL, pamyatka.RUBRIC)
-    text = "".join(f"<p>{esc(part)}</p>" for part in item["text"])
+    text = "".join(f"<p>{esc(part)}</p>" for part in [item.get("short", ""), *item["text"]] if part)  # простой ответ — первым
     note = f'<p class="note">{esc(pamyatka.NOTE)}</p>' if item.get("topic") == pamyatka.LAW else ""
     here = ' aria-current="page"'
     near = "".join(f'<li><a href="../{other["id"]}/"{here if other is item else ""}>{esc(other.get("ask") or other["title"])}</a></li>'
@@ -308,7 +308,7 @@ def memo(item: dict, items: list[dict]) -> str:
 <aside class="near"><h2>{esc(pamyatka.TOPICS.get(item.get('topic'), 'ПАМЯТКА'))}</h2><ul class="list">{near}</ul></aside>
 </div>"""
     title = f"{item.get('ask') or item['title']} — ПАМЯТКА артиста | ПЛЁНКА"
-    return page(f"pamyatka/{item['id']}/", title, describe(" ".join(item["text"])), body)
+    return page(f"pamyatka/{item['id']}/", title, describe(" ".join([item.get("short", ""), *item["text"]])), body)
 
 
 def memos(items: list[dict]) -> str:
