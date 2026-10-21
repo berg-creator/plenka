@@ -68,7 +68,7 @@ EXAMPLES_MAX = 3
 FONTS = "https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&display=swap"
 # Подтверждение прав на сайт: тег пришлёт Вебмастер Яндекса и Search Console — вставить сюда значение
 # content из их <meta>. Пусто — тега нет.
-VERIFY = {"yandex-verification": "", "google-site-verification": ""}
+VERIFY = {"yandex-verification": "", "google-site-verification": "5N4ix15mKNEyY_K91yrGlyapvMQ0ocXvHlnzaDlegbc"}
 INDEXNOW = "https://yandex.com/indexnow"
 KEY = "77f668f6f32aa68ca3470f9473adadc5"  # ключ IndexNow: лежит файлом <KEY>.txt в корне сайта
 # Метки ссылок в бота: раздел, куда ведёт ссылка, + «_sajt». Каждая стоит в service.SOURCES — сверяет селфтест.
