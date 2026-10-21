@@ -54,3 +54,23 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Яндекс узнаёт о страницах сразу, без Вебмастера (sajt.ping). Сайт к этому шагу уже выложен,
+  # поэтому сбой здесь его не трогает.
+  ping:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Назвать страницы Яндексу
+        run: python -m src.sajt --ping

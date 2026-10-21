@@ -33,11 +33,16 @@ data/hand_examples.json. Правка в боте меняет сайт тем �
 а канонический адрес и карта сайта — от SITE. Свой домен — сменить SITE, больше ничего.
 robots.txt на адресе проекта лежит не в корне домена, и поисковики его там не читают: карту
 сайта владелец отдаёт им сам в Вебмастере и Search Console; со своим доменом файл заработает.
+Яндексу страницы из карты сайта называет IndexNow после каждой выкладки (`--ping`, шаг sajt.yml):
+ему не нужен ни Вебмастер, ни вход владельца — права на сайт доказывает файл с ключом на самом сайте,
+поэтому ключ открытый. Google IndexNow не принимает, а пинг карты сайта отключил в 2023 году —
+ему карту отдаёт только Search Console.
 Записи о «запрете слов» (slova, zamysel, shtraf) — только текст закона, как в боте: сайт к ним
 не добавляет ни совета, ни «что делать».
 
     python -m src.sajt --build _site    собрать сайт в папку
     python -m src.sajt --selftest       страницы, ссылки, метки и границы — без сети
+    python -m src.sajt --ping           назвать Яндексу страницы выложенного сайта (IndexNow)
 """
 
 from __future__ import annotations
@@ -49,6 +54,8 @@ import re
 import shutil
 import sys
 import tempfile
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from . import config, pamyatka, skleyka
@@ -62,6 +69,8 @@ FONTS = "https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&displa
 # Подтверждение прав на сайт: тег пришлёт Вебмастер Яндекса и Search Console — вставить сюда значение
 # content из их <meta>. Пусто — тега нет.
 VERIFY = {"yandex-verification": "", "google-site-verification": ""}
+INDEXNOW = "https://yandex.com/indexnow"
+KEY = "77f668f6f32aa68ca3470f9473adadc5"  # ключ IndexNow: лежит файлом <KEY>.txt в корне сайта
 # Метки ссылок в бота: раздел, куда ведёт ссылка, + «_sajt». Каждая стоит в service.SOURCES — сверяет селфтест.
 START = {"skleyka": "skleyka_sajt", "bity": "bity_sajt", "ocenka": "ocenka_sajt", pamyatka.RUBRIC: "pamyatka_sajt"}
 LAW_ONLY = ("slova", "zamysel", "shtraf")  # записи о «запрете слов»: только текст закона, как в боте
@@ -710,7 +719,21 @@ def build(out: Path) -> list[str]:
     (out / "sitemap.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n'
                                      f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n')
     (out / "robots.txt").write_text(f"User-agent: *\nAllow: /\n\nSitemap: {SITE}sitemap.xml\n")
+    (out / f"{KEY}.txt").write_text(KEY)
     return list(pages)
+
+
+def ping() -> None:
+    """Назвать Яндексу страницы выложенного сайта: адреса — из живой карты сайта, а не из сборки."""
+    fetch = lambda url: urllib.request.urlopen(url, timeout=30).read().decode()
+    # Без ключа на сайте Яндекс отвергнет запрос не сразу, а молча при проверке — поэтому сверка до него.
+    if fetch(f"{SITE}{KEY}.txt").strip() != KEY:
+        raise SystemExit("sajt: ключа IndexNow на сайте нет — выкладка не дошла")
+    urls = re.findall(r"<loc>([^<]+)</loc>", fetch(f"{SITE}sitemap.xml"))
+    body = {"host": urllib.parse.urlsplit(SITE).netloc, "key": KEY, "keyLocation": f"{SITE}{KEY}.txt", "urlList": urls}
+    request = urllib.request.Request(INDEXNOW, json.dumps(body).encode(), {"Content-Type": "application/json; charset=utf-8"})
+    with urllib.request.urlopen(request, timeout=30) as answer:
+        print(f"sajt: IndexNow ответил {answer.status}, страниц {len(urls)}")
 
 
 def _selftest() -> None:
@@ -781,6 +804,7 @@ def _selftest() -> None:
         sitemap = (out / "sitemap.xml").read_text()
         assert sitemap.count("<loc>") == len(paths) and f"<loc>{SITE}pamyatka/free/</loc>" in sitemap
         assert f"Sitemap: {SITE}sitemap.xml" in (out / "robots.txt").read_text()
+        assert (out / f"{KEY}.txt").read_text() == KEY and re.fullmatch(r"[0-9a-f]{32}", KEY)
         assert plural(2, "трек", "трека", "треков") == "2 трека" and plural(11, "а", "б", "в") == "11 в" \
             and plural(21, "а", "б", "в") == "21 а" and plural(64, "а", "б", "в") == "64 б"
         assert describe("слово " * 60).endswith("…") and len(describe("слово " * 60)) <= 156
@@ -791,9 +815,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Открытый сайт бота ПЛЁНКИ для поисковиков")
     parser.add_argument("--build", type=Path, metavar="ПАПКА", help="собрать сайт в папку (она очищается)")
     parser.add_argument("--selftest", action="store_true", help="проверить сборку без сети")
+    parser.add_argument("--ping", action="store_true", help="назвать Яндексу страницы выложенного сайта (IndexNow)")
     args = parser.parse_args()
     if args.selftest:
         _selftest()
+    elif args.ping:
+        ping()
     elif args.build:
         paths = build(args.build)
         print(f"sajt: {len(paths)} страниц в {args.build}")
