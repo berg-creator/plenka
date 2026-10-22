@@ -14,6 +14,14 @@ blvckmorphine «backdoor E PHRY 143».
 с настроением «злой»; вторая, на перелом, — «backdoor» набора 14 (растяжка −2,1 %), бриф называет её парой этому
 образцу. Петля blvckmorphine — на условиях автора; два прошлых бита на петлях без условий.
 
+Днём того же дня — заказ владельца (поле order): «давай может сегодняшний бит по этой методике соберем» — свои пресеты
+Serum по рецептам продюсеров (NEXT.md, раздел 158; рецепты — data/private/биты/serum-разведка.md). Петли, барабаны,
+808 и ноты — утренние; мелодия, пэд и арп — на трёх своих пресетах (поле preset), по рецептам, ближним к Carti и Opium:
+мелодия — №2 Faith Monaco «Magic Spectrum», пэд — №5 ICONv2 (OsamaSon, Ken Carson), арп — №6 Ghostplayer (Yeat, Ken
+Carson, Destroy Lonely). Свой пресет утреннему биту — брак, заказу — можно; образец остаётся: темп и рисунок бита
+сверяются с ним, как у заказа-брата. Пресеты проверены числами на Маке (собраны и открыты заново плагином, нота
+звучит), на слух — никем.
+
     python -m src.noty --build content/beats/20261022-kai-angel-playboi-carti-140-c
 """
 from __future__ import annotations
@@ -30,6 +38,8 @@ K14 = "KITS/14 - 300 Subs Kit/"
 INFO = dict(
     title="Kai Angel x Playboi Carti — Турникет",
     sample="QPnXmEUP1LI",
+    order="22.10.2026: «давай может сегодняшний бит по этой методике соберем» — свои пресеты Serum по рецептам "
+          "продюсеров западной сцены (NEXT.md, раздел 158); петли, барабаны, 808 и ноты — утренние, музыка — на своих пресетах",
     bpm=140, key="C", scale=[0, 3, 4, 5, 6, 7, 8, 11], bars=88,
     loop=K01 + "Loops/Trap - Synth_03(140BPM).wav",
     switch={"вид": "разом", "такт": 45, "петля": K14 + "Loops/backdoor E PHRY 143.wav",
@@ -115,17 +125,39 @@ INFO = dict(
         "вторым; после — соль, опора второй петли, с уходами на ми, до и си. Рисунки на восемь тактов, в частях разные; "
         "слайды — в конце тактов 8, 24, 40, 56 и 72. На 808 перегруз Fruity Blood Overdrive «Drive» — бит «злой»; "
         "не нужен — выключи слот",
-        "арп — корневая нота канала — 48",
-        "не проверены на слух: мелодия на Serum «LD - Luxury», пэд «PD - Cloudlifter» и арп «ARP #17 (C4)» набора 13 "
-        "(арп ты пометил «берём» под Playboi Carti) — с этими петлями их никто не слушал; пресеты Serum силу нот могут "
-        "не слышать — тогда акценты мелодии пропадут. Арп длится 8,9 с, ноты у него короткие: проект гасит ноту с её концом. "
+        "свои пресеты Serum — по заказу: мелодия, пэд и арп на своих пресетах по рецептам продюсеров сцены Carti и Opium "
+        "(разведка — data/private/биты/serum-разведка.md, раздел 3; что из рецепта ставится в Serum 1 — раздел 4). "
+        "Проверено числами: каждый пресет плагин на Маке собрал, записанный файл открыл заново с теми же ручками, нота C5 "
+        "звучит без тишины и перегруза. На слух их не слушал никто. Чего снаружи не поставить ни в одном рецепте: "
+        "проводку модуляций (LFO и огибающие на цели), таблицу волн, слои на шинах Serum 2 — это остаётся от основы",
+        "мелодия — «PLENKA Turn Lead 1022», рецепт №2 Faith Monaco «Magic Spectrum» (она продюсер на MUSIC Playboi Carti): "
+        "основа «SY Hypersaw Basic [SD]» — суперпила; расстройка голосов почти в ноль (у неё «D-tune pretty much down to "
+        "zero»), warp Bend + на пиле 35%, второй генератор включён с PWM 40% (у неё PWM на квадрате; какая волна во втором "
+        "генераторе основы, снаружи не видно), спад около 3 с без удержания (у неё «the decay is about 3», «no release or "
+        "sustain»), отпуск 10 мс вместо нуля — от щелчка, перегруз Zero-Square 30% на весь пресет, ревер 35%, многополосный "
+        "компрессор 50%, верхняя полоса EQ фильтром от 3,6 кГц; дилей основы выключен — эхо мелодии стоит в fx местами. "
+        "Её LFO на срез и на EQ, S&H на панораму шума, конвольвер и ревер Hall — проводка или Serum 2, их нет. Было «LD - Luxury»",
+        "пэд — «PLENKA Turn Pad 1022», рецепт №5 ICONv2 (как он делает синты OsamaSon и Ken Carson): основа «LD Power 5ths "
+        "[FP]» из его списка; голосов унисона 3 («I usually keep my unison low»), квинта второго генератора снята (+7 → 0: "
+        "пэд сам играет два звука, а ре и фа-диез сверху легли бы мимо петли), фильтр Reverb (из его любимых: «the combs, "
+        "the sample hold, the ring mod, and the reverb»), шум генератора 25% (у него шум «used a lot in um Ken sounds»; вид "
+        "шума — от основы), Dimension 50%, многополосный компрессор 50%, срез верха EQ от 2,6 кГц — с фильтром Reverb и "
+        "шумом нота посветлела с 1368 до 3283 Гц, со срезом — 1507; портаменто основы снято. Саб квадратом на две октавы "
+        "вниз, как у него, не ставил: он лёг бы на 808. Было «PD - Cloudlifter»",
+        "арп — «PLENKA Turn Crush 1022», рецепт №6 Ghostplayer (плак Yeat, Ken Carson, Destroy Lonely): основа «PL Crushed "
+        "Pluck [AS]» — плак без удержания, как у него («bring down the sustain so we have a shorter Plucky sound»); "
+        "Downsample («that bit Crush effect») в основе стоял с мокрым 0 — у меня сила 40%, мокрое 50%; многополосный "
+        "компрессор 40% («replicates the famous sound of Ott… bring down the ratio and mix»), Dimension 35%, срез верха EQ "
+        "от 3,6 кГц, дилей выключен. Его LFO на четыре такта по срезу EQ — проводка, её нет. Было «ARP #17 (C4)» набора 13 "
+        "(ты пометил его «берём» под Playboi Carti): вернуть — поставь его на канал арпа, корневая нота канала — 48",
+        "пресеты Serum силу нот могут не слышать — тогда акценты мелодии пропадут. "
         "Хэт «HI HAT #15» и клэп «CLAP #38» набора 13 — ближайшие по тембру к ударам образца, в таблице твоих звуков их нет; "
         "бочка «KICK #14» — с твоей меткой под артистов образца. Переходы «FX #10», «FX #6» и «FX #19» набора 13 никто не слышал",
     ],
     sounds={
-        "мелодия": "Serum/User/Monosounds - Starter/Leads/LD - Luxury.fxp",
-        "пэд": "Serum/User/Monosounds - Starter/Pads/PD - Cloudlifter.fxp",
-        "арп": K13 + "Oneshots/Arps - ARP #17 (C4).wav",
+        "мелодия": "Serum/Synth/SY Hypersaw Basic [SD].fxp",       # основа своих пресетов (preset):
+        "пэд": "Serum/Leads/LD Power 5ths [FP].fxp",               # не соберётся пресет — играет основа
+        "арп": "Serum/Plucked/PL Crushed Pluck [AS].fxp",
         "808": K13 + "808s/808 #18.wav",
         "бочка": K13 + "Kicks/KICK #14.wav",
         "бочка 2": K13 + "Kicks/KICK #14.wav",                       # та же бочка — кик как перк
@@ -136,6 +168,22 @@ INFO = dict(
         "подъезд": K13 + "FX/FX #10.wav",
         "подъезд 2": K13 + "FX/FX #6.wav",
         "переход": K13 + "FX/FX #19.wav",
+    },
+    # Свои пресеты по рецептам разведки (заказ). Режимы — именем подписи плагина, доли — по `serum --knobs`
+    preset={
+        "мелодия": {"имя": "PLENKA Turn Lead 1022", "основа": "Serum/Synth/SY Hypersaw Basic [SD].fxp",      # №2 Faith Monaco
+                    "ручки": {"a_unidet": 0.1, "warposca": "Bend +", "a_warp": 0.35, "osc_b_on": 1, "warposcb": "PWM",
+                              "b_warp": 0.6, "b_vol": 0.55, "env1_dec_s": 0.62, "env1_sus_db": 0, "env1_rel_ms": 0.2,
+                              "dist_enable": 1, "dist_mode": "Zero-Square", "dist_drv": 0.3, "rev_enable": 1, "verb_wet": 0.35,
+                              "comp_enable": 1, "comp_wet": 0.5, "eq_typh": 1, "eq_frqh_hz": 0.75, "dly_enable": 0}},
+        "пэд": {"имя": "PLENKA Turn Pad 1022", "основа": "Serum/Leads/LD Power 5ths [FP].fxp",                 # №5 ICONv2
+                "ручки": {"b_semi_semitones": 0.5, "a_unison": 0.1, "fil_type": "Reverb", "noise_level": 0.25,
+                          "hypdim_mix": 0.5, "comp_enable": 1, "comp_wet": 0.5, "porttime_ms": 0,
+                          "eq_enable": 1, "eq_typh": 1, "eq_frqh_hz": 0.7}},
+        "арп": {"имя": "PLENKA Turn Crush 1022", "основа": "Serum/Plucked/PL Crushed Pluck [AS].fxp",          # №6 Ghostplayer
+                "ручки": {"dist_mode": "Downsample", "dist_drv": 0.4, "dist_wet": 0.5, "comp_enable": 1, "comp_wet": 0.4,
+                          "hyp_enable": 1, "hyp_wet": 0, "hypdim_mix": 0.35, "eq_enable": 1, "eq_typh": 1,
+                          "eq_frqh_hz": 0.75, "dly_enable": 0}},
     },
     fx={
         "петля": "Fruity Love Philter — петля под фильтром, в тактах 1–4 и 41–44 → "
