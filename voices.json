@@ -6,9 +6,7 @@
   "krysa": "nvXpWPpd8u197B31xCgx",
   "mama": "goOusBgYY4shRr7hI5dN",
   "golub": "JwnYNVjo4TS8id0L3Prq",
-  "lisa": "Omzbw9RaF42HrM7E1wN2"
- },
- "voices": {
+  "lisa": "Omzbw9RaF42HrM7E1wN2",
   "syn": "xmhf1HfXWWcBTVmVuZ1k"
  },
  "lines": [
@@ -44,5 +42,6 @@
     "seed": 1
    }
   ]
- ]
+ ],
+ "voices": {}
 }
