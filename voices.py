@@ -48,8 +48,11 @@ def design(hero: str, h: dict, out: str) -> list:
 def main() -> None:
     spec, out = json.load(open(sys.argv[1])), sys.argv[2]
     os.makedirs(out, exist_ok=True)
-    sub = json.loads(call("/v1/user/subscription"))
-    print("тариф:", sub.get("tier"), "знаков:", sub.get("character_count"), "из", sub.get("character_limit"))
+    try:  # у ключа может не быть права user_read — тариф тогда не узнать, но озвучке это не мешает
+        sub = json.loads(call("/v1/user/subscription"))
+        print("тариф:", sub.get("tier"), "знаков:", sub.get("character_count"), "из", sub.get("character_limit"))
+    except RuntimeError as e:
+        print("тариф не узнать:", str(e)[:120])
     result, failed = {}, []
     for hero, h in spec["heroes"].items():
         assert 100 <= len(h["sample"]) <= 1000, f"{hero}: образец {len(h['sample'])} знаков, нужно 100–1000"
