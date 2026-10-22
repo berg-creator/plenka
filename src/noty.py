@@ -1876,7 +1876,7 @@ def about(info: dict, tracks: dict[str, list[N]] | None = None) -> str:
            "файл ляжет в Serum → User → «00 - Сегодня» (нужно Rescan), итог проверки — в записке той же папки в браузере FL. "
            "Плагином на Маке проверяется, что пресет открывается и нота звучит без тишины и перегруза; на слух его не проверял никто:",
            *(f"• {part} — «{p.get('имя')}»: основа {p.get('основа')}; ручки: "
-             + ", ".join(f"{k} {v:g}" for k, v in (p.get("ручки") or {}).items())
+             + ", ".join(f"{k} «{v}»" if isinstance(v, str) else f"{k} {v:g}" for k, v in (p.get("ручки") or {}).items())
              for part, p in info["preset"].items() if isinstance(p, dict)), ""] if isinstance(info.get("preset"), dict) else []),
         *(line for mark, who in CREDIT if any(mark in n for names in _sounds(info).values() for n in _names(names))
           for line in (f"В описание ролика — строка об авторе звуков, её требует лицензия: {who}", "")),
@@ -2604,8 +2604,8 @@ def _checks() -> None:
                 assert why in (kits / "о бите.txt").read_text("utf-8") and not list(serum.iterdir()), why
         finally:
             plug.VST3, config.SERUM_PYTHON = real
-        lay(None, {}, kits, serum, {"KITS": lib, "Serum": pres}, listed, preset={"мелодия": mine["мелодия"] | {"ручки": {"lfo1_rate": .5}}})
-        assert "ручки «lfo1_rate» нет в списке" in (kits / "о бите.txt").read_text("utf-8"), "битое поле на Маке — строка, а не ручка плагина"
+        lay(None, {}, kits, serum, {"KITS": lib, "Serum": pres}, listed, preset={"мелодия": mine["мелодия"] | {"ручки": {"a_pan": .5}}})
+        assert "ручки «a_pan» нет в списке" in (kits / "о бите.txt").read_text("utf-8"), "битое поле на Маке — строка, а не ручка плагина"
         lay(tmp / "out" / "beat", {}, kits, serum, {"KITS": lib, "Serum": pres}, listed)
         demo = runpy.run_path(str(tmp / "beat" / "make.py"))["compose"]
         # Дорожка петли на весь бит. Петля — два такта на 120 и ещё десять кадров сверху: отсчёт помнит своё место,
@@ -2782,13 +2782,24 @@ def _checks() -> None:
     mine = {"имя": "PLENKA Dym 1006", "основа": fxp, "ручки": {"eq_enable": 1, "eq_typh": 1, "eq_frqh_hz": .7}}
     assert flaws({"мелодия": mine}, known()) == [] and "preset" not in "\n".join(problems(info | {"order": "x", "preset": {"мелодия": mine}}, plain)), \
         "поле верной формы проходит"
-    for patch, why in (({"ручки": {"lfo1_rate": .5}}, "нет в списке serum.KNOBS"), ({"ручки": {"fil_reso": .9}}, "нужна доля от 0 до 0.6"),
+    # Ручки рецептов разведки (22.10.2026): режим — именем подписи плагина, ступени и сила модуляции — долей
+    new = {"fil_type": "Peak 12", "fil_reso": 1, "warposca": "FM (from B)", "a_warp": .75, "b_octave_oct": .75,
+           "b_semi_semitones": 10 / 24, "dist_mode": "Zero-Square", "dly_enable": 1, "dly_mode": "Ping-Pong",
+           "suboscshape": "Square", "lfo1_rate": .3, "mod10_amt": .7, "env2_dec_s": .5, "macro_1": .4, "hyp_enable": 1}
+    assert flaws({"мелодия": mine | {"ручки": new}}, known()) == [], "новые ручки и режимы в пределах проходят"
+    assert "fil_type «Peak 12»" in about(info | {"preset": {"мелодия": mine | {"ручки": new}}}), "режим — именем в записке"
+    for knobs, why in (({"fil_type": "Peak"}, "похожие: Peak 12, Peak 24"), ({"dly_mode": "ping"}, "похожие: Ping-Pong"),
+                       ({"warposcb": "FM (from B)"}, "такого нет"), ({"fil_type": 14 / 95}, "режим пишется именем"),
+                       ({"dist_mode": "S&H"}, "serum.MODES"), ({"porttime_ms": .9}, "нужна доля от 0 до 0.75"),
+                       ({"lfo9_rate": .5}, "нет в списке serum.KNOBS"), ({"dly_enable": .5}, "выключатель")):
+        assert why in "\n".join(flaws({"мелодия": mine | {"ручки": knobs}}, known())), (knobs, why)
+    for patch, why in (({"ручки": {"a_pan": .5}}, "нет в списке serum.KNOBS"), ({"ручки": {"dist_drv": .9}}, "нужна доля от 0 до 0.8"),
                        ({"ручки": {"fil_reso": "0.3"}}, "нужна доля"), ({"ручки": {"eq_enable": .5}}, "выключатель"),
                        ({"ручки": {}}, "ни одной ручки"), ({"имя": "Дым"}, "имя — латиница"), ({"имя": "../x"}, "имя — латиница"),
                        ({"основа": "Serum/User/такого нет.fxp"}, "нет среди пресетов"), ({"основа": own[0]}, "нет среди пресетов")):
         assert why in "\n".join(flaws({"мелодия": mine | patch}, known())), (patch, why)
     assert "три поля" in flaws({"мелодия": {"имя": "x"}}, known())[0] and "нужен словарь" in flaws(["x"], known())[0]
-    assert "нет в списке serum.KNOBS" in "\n".join(problems(info | {"preset": {"мелодия": mine | {"ручки": {"lfo1_rate": .5}}}}, plain)), \
+    assert "нет в списке serum.KNOBS" in "\n".join(problems(info | {"preset": {"мелодия": mine | {"ручки": {"a_pan": .5}}}}, plain)), \
         "неизвестная ручка — брак сборки"
     assert "нужна доля" in "\n".join(problems(info | {"preset": {"мелодия": mine | {"ручки": {"fil_reso": 2}}}}, plain)), "число вне пределов — брак"
     assert "не партия синтезатора" in "\n".join(problems(info | {"preset": {"хэт": mine}}, plain)), "пресет — только партии Serum"
