@@ -1,0 +1,33 @@
+{
+ "mode": "design",
+ "heroes": {
+  "batya": {
+   "describe": "Comedic cartoon character voice: a huge grumpy middle-aged Russian dad who is a boar. Very deep, hoarse, raspy bass, slow and heavy, out of breath, snorts and grunts like a pig between words. Native Russian speaker. Clean studio audio.",
+   "sample": "Опять в шкафу читаешь?! Я тебе сколько раз говорил — вылезай оттуда! ...Сынок. А где свёл? Мать, не мешай, у нас дубль!"
+  },
+  "syn": {
+   "describe": "Comedic cartoon character voice: a 19-year-old Russian hamster who wants to be a rapper. High-pitched, squeaky, voice cracking like a teenager, whiny and easily offended, talks fast. Native Russian speaker. Clean studio audio.",
+   "sample": "Батя, закрой, у меня дубль! Ну ма-ам, ну я же записываю! Я... я звучу? Я реально звучу?! Пацаны, я звучу!"
+  },
+  "mama": {
+   "describe": "Comedic cartoon character voice: a fussy Russian mother hen in her fifties. Shrill, loud, clucking, sing-song, stretches vowels, caring but nagging. Native Russian speaker. Clean studio audio.",
+   "sample": "Сыночка, кушать! Сыночка-а-а, котлетки стынут! Оба! Кушать, я кому сказала! Сколько можно в этом шкафу сидеть?!"
+  },
+  "lisa": {
+   "describe": "Comedic cartoon character voice: a snobby young Russian woman who is a fox. Fashionable, nasal, bored and condescending, lazy drawl, vocal fry, rolls her eyes while talking. Native Russian speaker. Clean studio audio.",
+   "sample": "Это что вообще? Бит громче тебя. Я тебя вообще не слышу. Всё, я к соседу. У него хотя бы трек на Яндекс Музыке."
+  },
+  "krysa": {
+   "describe": "Comedic cartoon character voice: a shady Russian rat who is a sound engineer and a hustler. Sly, whispery, slight lisp, fast smooth talk, smug and lazy, sounds like he is cheating you. Native Russian speaker. Clean studio audio.",
+   "sample": "Сведу. Пять тысяч. Предоплата. Завтра скину, братан, отвечаю. ...Готово. Добавил ревера. За мастеринг ещё пятёрочку."
+  },
+  "golub": {
+   "describe": "Comedic cartoon character voice: a homeless Russian street pigeon, old and wheezy. Croaky, raspy, mumbling, coughs a little, friendly drunk-uncle energy, coos like a pigeon. Native Russian speaker. Clean studio audio.",
+   "sample": "Слышь, малой, чё грустишь? Дождь, понимаю. Кефир будешь? Да не боись, свежий. Вчерашний. Ну как хочешь, мне больше."
+  },
+  "diktor": {
+   "describe": "Smooth velvety deep male TV commercial announcer, very enthusiastic and polished, big smile in the voice, classic Russian television advertisement delivery. Native Russian speaker. Clean studio audio.",
+   "sample": "Смотри, какого бота нашёл! Кидаешь голос и бит — получаешь сведённый трек. Бесплатно! ПЛЁНКА. Ссылка в описании!"
+  }
+ }
+}
