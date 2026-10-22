@@ -87,11 +87,10 @@ def main() -> None:
         print("тариф:", sub.get("tier"), "знаков:", sub.get("character_count"), "из", sub.get("character_limit"))
     except RuntimeError as e:
         print("тариф не узнать:", str(e)[:120])
-    if spec["mode"] == "speak":
+    if spec.get("lines"):
         speak(spec, out)
-        return
     result, failed = {}, []
-    for hero, h in spec["heroes"].items():
+    for hero, h in spec.get("heroes", {}).items():
         assert 100 <= len(h["sample"]) <= 1000, f"{hero}: образец {len(h['sample'])} знаков, нужно 100–1000"
         try:
             result[hero] = design(hero, h, out)
