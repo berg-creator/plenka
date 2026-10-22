@@ -298,6 +298,10 @@ LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient", "Trap")
 # Набор 11 — звуки из сети: в него кладут только годное на раздачу, поэтому в список он идёт целиком. Петли — папка Loops
 NET = "KITS/11 - Сеть Kit"
 NET_LOOPS = NET + "/Loops"
+# Живые звуки с высотой (владелец 21.10.2026: «делать свои уникальные звуки» из живых записей; свисток, звонок, сова):
+# одиночный звук с нотой замера в скобках (`zamer --root`), как в наборе 12. Музыкой бит берёт их только одобренными —
+# «берём» на странице меток (`metki.deck`); таблица волн того же звука — в Serum, папка Tables/PLENKA Live (`serum --table`)
+LIVE = NET + "/Live"
 # Набор 12 — банк «The Glorified Zenology Bank» (@aye.shark, audiovault.co). Владелец, 06.10.2026: «звуки бери и для раздачи.
 # я куплю банк»; страница товара: «All sounds are 100% Royalty Free! Just credit ya boy» — отсюда его строка в CREDIT.
 # Одиночные звуки идут в список только с нотой в скобках: её дал замер высоты (`zamer.root`), а звук, где замер
@@ -310,7 +314,9 @@ CREDIT = (("/Boss DR-660 - ", "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0, ar
           ("/VocalSet - ", "VocalSet by Julia Wilkins, Prem Seetharaman, Alison Wahl and Bryan Pardo, CC BY 4.0, "
                            "zenodo.org/records/1193957"),
           (f"/{GLORY.partition('/')[2]}/", "The Glorified Zenology Bank by @aye.shark, "
-                                           "audiovault.co/products/the-glorified-zenology-bank"))
+                                           "audiovault.co/products/the-glorified-zenology-bank"),
+          ("/Gravity Sound - ", "sound effects by Gravity Sound, CC BY 4.0, commons.wikimedia.org/wiki/Category:Audio_files_by_Gravity_Sound"),
+          ("/Are shyde - ", "Doorbell by Are shyde, CC BY 4.0, commons.wikimedia.org/wiki/File:Doorbell.wav"))
 NOTES = "C C# D D# E F F# G G# A A# B".split()
 # Петля под мелодию: звучащих нот в ней от трёх до восьми. Меньше — мотиву не из чего собраться, больше —
 # хрома не разобрала нот (шум, пласт), и сверять мелодию не с чем. Из 487 замеренных петель годятся 349 (05.10.2026)

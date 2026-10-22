@@ -379,6 +379,9 @@
    "archive": "https://cdn.mos.musicradar.com/audio/samples/sampleradar-lo-fi-acoustic-sample-pack.zip",
    "take": [{"folder": "Loops", "match": "/Piano/Loops/Piano Loop \\d+ \\((?P<bpm>100)BPM\\)\\.wav$"}],
    "taken": "17.10.2026 руками под настроение «грустный»: лоу-фай пианино 100 BPM, только минор по замеру — в наборе петель: 4, 5 МБ"
-  }
+  },
+  {"id": "commons-cc0-live", "name": "Commons", "page": "https://commons.wikimedia.org/wiki/File:Car_Horn.wav", "terms": "CC0 1.0 у каждого файла — своя страница Commons (и Freesound, откуда файл перенесён); автора называть не нужно", "taken": "22.10.2026 руками, живые звуки: Car horn (F5) в Live (гудок машины, 15HPanska_Ruttner_Jan, freesound.org/people/15HPanska_Ruttner_Jan/sounds/461679), Karabiner click (Rudmer_Rotteveel, freesound.org/people/Rudmer_Rotteveel/sounds/457456) и Typewriter ding (_stubb, freesound.org/people/_stubb/sounds/406243) в Percs; ещё две таблицы Serum (Tables/PLENKA Live): гудок электрички X'Trapolis 100 (MrActiniuM) и мяуканье сиамской кошки (freemaster2, freesound.org/people/freemaster2/sounds/66518)"},
+  {"id": "gravity-sound", "name": "Gravity Sound", "page": "https://web.archive.org/web/20191228085806/https://www.gravitysound.studio/free-music-sound-effects", "terms": "CC BY 4.0 — автора называть: sound effects by Gravity Sound", "taken": "22.10.2026 руками, с commons.wikimedia.org: Alarm beep (G5) в Live; Can hit, Glass flick, Pill bottle shake в Percs"},
+  {"id": "are-shyde-doorbell", "name": "Are shyde", "page": "https://commons.wikimedia.org/wiki/File:Doorbell.wav", "terms": "CC BY 4.0 — автора называть: Doorbell by Are shyde", "taken": "22.10.2026 руками: первый удар звонка «динь» — Doorbell ding (G#6) в Live"}
  ]
 }

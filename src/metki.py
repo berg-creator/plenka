@@ -63,12 +63,15 @@ def deck(music: dict, library: set[str], rings=()) -> list[dict]:
     """Карточки по порядку: одобренные петли и звуки музыки (data/beat_music.json), затем барабаны и 808, которые сборка
     вправе взять (`noty.kind` — список библиотеки, кроме петель ударов), по ролям и внутри — по наборам. Бочку и 808
     набора 11 бриф запрещает («бас слабый как и бочка», 06.10.2026) — их нет и здесь. Между ними — замеренные петли
-    набора 11 (`rings`), ещё не одобренные: их «берём» пускает петлю в утренний бит (`noty.approved`), 17.10.2026."""
+    набора 11 (`rings`), ещё не одобренные: их «берём» пускает петлю в утренний бит (`noty.approved`), 17.10.2026,
+    и живые звуки набора 11 (`noty.LIVE`) — их «берём» делает звуком музыки."""
     rows = [{"path": n, "kind": "петля", "bpm": (r or {}).get("bpm") or noty.loop_bpm(n)} for n, r in (music.get("loops") or {}).items()]
     rows += [{"path": n, "kind": (r or {}).get("kind") or "звук"} for n, r in (music.get("sounds") or {}).items()]
     have = {noty._nfc(row["path"]) for row in rows}
     rows += [{"path": n, "kind": "петля", "bpm": noty.loop_bpm(n)} for n in sorted(rings)
              if n.startswith(noty.NET + "/") and noty._nfc(n) not in have]
+    # Живые звуки с нотой замера (`noty.LIVE`, 22.10.2026): в бит идут только после «берём», как петли выше
+    rows += [{"path": n, "kind": "живой звук"} for n in sorted(library) if n.startswith(noty.LIVE + "/") and noty._nfc(n) not in have]
     drums = [n for n in library if noty.kind(n) in ROLES and not (n.startswith(noty.NET + "/") and noty.kind(n) in ("Kicks", "808s"))]
     rows += [{"path": n, "kind": noty.ROLE_WORDS[noty.kind(n)], "role": noty.kind(n)}
              for n in sorted(drums, key=lambda n: (ROLES.index(noty.kind(n)), n.split("/")[1], n))]
@@ -271,10 +274,12 @@ def selftest() -> None:
         music = {"loops": {"KITS/01 - A Kit/Loops/Trap - L(140BPM).wav": {"bpm": 140}},
                  "sounds": {"KITS/13 - X Kit/Oneshots/Lead (C4).wav": {"kind": "лид"}, "Serum/x.fxp": {"kind": "лид"}}}
         library = {"KITS/13 - X Kit/Hats/Hat 1.wav", "KITS/13 - X Kit/Kicks/Kick 1.wav", "KITS/11 - Сеть Kit/Kicks/Сеть - k.wav",
-                   "KITS/11 - Сеть Kit/Percs/Сеть - p.wav", "KITS/13 - X Kit/Oneshots/Lead (C4).wav"}
+                   "KITS/11 - Сеть Kit/Percs/Сеть - p.wav", "KITS/13 - X Kit/Oneshots/Lead (C4).wav",
+                   "KITS/11 - Сеть Kit/Live/Сеть - Whistle (F#7).wav"}
         fresh = "KITS/11 - Сеть Kit/Loops/Сеть - Keys Am 90 BPM.wav"
         cards = deck(music, library, {fresh, *music["loops"], "KITS/01 - A Kit/Loops/Trap - M(140BPM).wav"})
-        assert [c["kind"] for c in cards] == ["петля", "лид", "лид", "петля", "бочка", "хэт", "перк"], [c["kind"] for c in cards]
+        assert [c["kind"] for c in cards] == ["петля", "лид", "лид", "петля", "живой звук", "бочка", "хэт", "перк"], [c["kind"] for c in cards]
+        assert cards[4]["audio"] and cards[4]["path"].endswith("(F#7).wav"), "живой звук набора 11 — на странице, звучит"
         assert cards[3]["path"] == fresh and cards[3]["bpm"] == 90, "новая петля набора 11 — перед барабанами, с темпом"
         assert not cards[2]["audio"] and cards[0]["bpm"] == 140, "пресет не звучит, у петли темп"
         hat = next(c["id"] for c in cards if c["kind"] == "хэт")
