@@ -1,5 +1,5 @@
 {
- "mode": "both",
+ "mode": "design",
  "voice_ids": {
   "batya": "OeUoCdah2ckl693izbFR",
   "diktor": "ZCqq2ckmtA4w5LmO3u8b",
@@ -9,37 +9,10 @@
   "syn": "tcATIVbTqqMx5BQYDbZz",
   "golub": "JwnYNVjo4TS8id0L3Prq"
  },
- "lines": [
-  [
-   "L10a",
-   "diktor",
-   "[enthusiastic, TV commercial] Бот ПЛЁНКА! Кидаешь голос и бит — получаешь готовый трек. Бесплатно!",
-   {
-    "seed": 1
-   }
-  ],
-  [
-   "L10b",
-   "diktor",
-   "[enthusiastic, TV commercial] Бот ПЛЁНКА! Кидаешь голос и бит — получаешь готовый трек. Бесплатно!",
-   {
-    "seed": 2
-   }
-  ],
-  [
-   "L11",
-   "golub",
-   "[gruff, casual] Бывает. ...Кефир будешь?"
-  ]
- ],
  "heroes": {
-  "lisa3": {
-   "describe": "A Russian woman in her early twenties, completely unimpressed. Flat deadpan monotone, low energy, bored, casual, slight vocal fry, natural and understated, not theatrical. Native Russian speaker. Clean studio audio.",
-   "sample": "Это минус? ... Где? ... Прости. Мне нужен сведённый мужчина. Ну, пока. И не звони мне больше, ладно? Я серьёзно."
-  },
-  "syn3": {
-   "describe": "Comedic cartoon character voice: a nervous, anxious young Russian man of nineteen. High-pitched voice that cracks, stutters on first letters, whiny and unsure, gulps, panicky but sincere, classic animated sidekick energy. Native Russian speaker. Clean studio audio.",
-   "sample": "Б-батя, закрой, у меня д-дубль! Т-там мой голос! Ну ма-ам, ну я же з-записываю! Я... я р-реально звучу?! Пацаны!"
+  "syn4": {
+   "describe": "Comedic cartoon character voice: a jittery, insecure young Russian guy of nineteen. High-pitched voice that cracks mid-word, whiny and unsure, nervous little laughs, panicky but sincere, classic animated sidekick energy. Native Russian speaker. Clean studio audio.",
+   "sample": "Батя, закрой, у меня дубль! Ты чего?! Ну ма-ам, ну я же записываю! Я... я реально звучу?! Пацаны! Я звучу!"
   }
  }
 }
