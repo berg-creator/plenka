@@ -45,6 +45,39 @@ def design(hero: str, h: dict, out: str) -> list:
     return ids
 
 
+def keep(hero: str, generated: str) -> str:
+    """Проба голоса → постоянный голос; id пробы живёт недолго, id голоса — всегда."""
+    body = {"voice_name": f"ПЛЁНКА {hero}", "voice_description": f"ПЛЁНКА, ролик «Рэпер из шкафа»: {hero}",
+            "generated_voice_id": generated}
+    try:
+        return json.loads(call("/v1/text-to-voice", body))["voice_id"]
+    except RuntimeError as e:
+        print("text-to-voice:", e, "— пробую create-voice-from-preview")
+        return json.loads(call("/v1/text-to-voice/create-voice-from-preview", body))["voice_id"]
+
+
+def speak(spec: dict, out: str) -> None:
+    # Уже сохранённые голоса (voice_ids) не создаются заново — повтор реплики их не плодит.
+    vids = dict(spec.get("voice_ids", {}))
+    for hero, gen in spec.get("voices", {}).items():
+        if hero not in vids:
+            vids[hero] = keep(hero, gen)
+            print(hero, "голос", vids[hero])
+    json.dump(vids, open(f"{out}/voice_ids.json", "w"), indent=1)
+    failed = []
+    for name, hero, text in spec["lines"]:
+        body = {"text": text, "model_id": "eleven_v3", "voice_settings": {"stability": 0.5}}
+        try:
+            audio = call(f"/v1/text-to-speech/{vids[hero]}?output_format=mp3_44100_128", body)
+            open(f"{out}/{name}-{hero}.mp3", "wb").write(audio)
+            print(name, hero, "ok")
+        except RuntimeError as e:
+            failed.append(name)
+            print(name, hero, "СБОЙ", e)
+    if failed:
+        sys.exit(1)
+
+
 def main() -> None:
     spec, out = json.load(open(sys.argv[1])), sys.argv[2]
     os.makedirs(out, exist_ok=True)
@@ -53,6 +86,9 @@ def main() -> None:
         print("тариф:", sub.get("tier"), "знаков:", sub.get("character_count"), "из", sub.get("character_limit"))
     except RuntimeError as e:
         print("тариф не узнать:", str(e)[:120])
+    if spec["mode"] == "speak":
+        speak(spec, out)
+        return
     result, failed = {}, []
     for hero, h in spec["heroes"].items():
         assert 100 <= len(h["sample"]) <= 1000, f"{hero}: образец {len(h['sample'])} знаков, нужно 100–1000"
