@@ -1,5 +1,5 @@
 {
- "date": "2026-10-17",
+ "date": "2026-10-22",
  "sounds": [
   "KITS/01 - ASAP Rocky Kit/Claps/808-909 - TReImag_FuzzPedals_Clap_01.wav",
   "KITS/01 - ASAP Rocky Kit/Claps/808-909 - TReImag_HogRing_Clap_01.wav",
@@ -2039,6 +2039,7 @@
   "KITS/07 - Crystal Castles Kit/Snares/Obscure DM - XE8 Snare 02.wav",
   "KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - аккорды 115 BPM.wav",
   "KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - замедленная 115 BPM.wav",
+  "KITS/08 - Сиять (Lyric Atmo)/Loops/Rachmaninoff Prelude 1921 - набат 150 BPM.wav",
   "KITS/09 - Scene 2026 Kit/808s/808 - Detroit Bounce (C).wav",
   "KITS/09 - Scene 2026 Kit/808s/808 - Detroit Cutit (C).wav",
   "KITS/09 - Scene 2026 Kit/808s/808 - Detroit Kicker (C).wav",
@@ -5959,6 +5960,7 @@
   "KITS/07 - Crystal Castles Kit/Loops/8-Bit - CS_FMArp C_140-E.wav": "1 | C C# D D# E F F# G G# A A# B | D мажор 0.11 | -17 | E | 25 10 100 16 68 39 38 36 17 76 20 85",
   "KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - аккорды 115 BPM.wav": "4 | C D D# E F G A A# | C мажор 0.00 | -9 | A A C A# | 56 6 21 61 39 78 7 100 6 25 39 6",
   "KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - замедленная 115 BPM.wav": "4 | C D F G A# | F мажор 0.22 | -10 | F G F G | 13 2 11 1 7 100 2 23 2 5 8 2",
+  "KITS/08 - Сиять (Lyric Atmo)/Loops/Rachmaninoff Prelude 1921 - набат 150 BPM.wav": "4 | C D# E G# A# B | G# минор 0.14 | +2 | D# G# D# D# | 19 5 4 100 51 2 5 6 65 2 18 22",
   "KITS/11 - Сеть Kit/Loops/MusicRadar 00s Synths - 00s_Arp[140]-A 140 BPM.wav": "4 | C# D E F G A A# B | A мажор 0.27 | -2 | A A# A A# | 5 46 33 3 76 21 4 31 7 100 27 23",
   "KITS/11 - Сеть Kit/Loops/MusicRadar 00s Synths - 00s_JaySawz[140]-A 140 BPM.wav": "4 | E F G A | A минор 0.19 | -16 | A A A F | 6 1 1 1 35 59 1 21 2 100 1 1",
   "KITS/11 - Сеть Kit/Loops/MusicRadar 00s Synths - 00s_RichSaw[140]-D 140 BPM.wav": "4 | C D E F G A B | A минор 0.06 | -1 | D A B B | 73 1 100 1 33 67 6 30 0 79 0 55",
