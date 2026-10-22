@@ -16,12 +16,31 @@
 получает срок, упавший — строку в записке; бит от своего пресета не зависит никогда. В Actions ни Serum,
 ни pedalboard нет: сборка нот проверяет только форму поля (`flaws`), звук — дело Мака.
 
-Ручки — короткий список `KNOBS`, а не все 349 параметров плагина: срез верха, огибающая громкости, расстройка,
-шум и встроенные эффекты — то, что можно писать, не видя основы. Что ручка сделала с этой основой, показывает замер
-до и после: он идёт в записку. Громкая нота чинится сама — мастер пресета убавляется: автор нот исправить её
-не может, он узнал бы о ней только завтра. Тишина не чинится — пресет не кладётся.
+Ручки — короткий список `KNOBS`, а не все 2397 параметров плагина (2048 из них — MIDI CC по каналам): срез верха,
+огибающая громкости, расстройка, шум и встроенные эффекты — то, что можно писать, не видя основы, — и с 22.10.2026
+то, что просят рецепты пресетов продюсеров (`data/private/биты/serum-разведка.md`, раздел 4): тип фильтра, warp,
+октавы и полутоны, огибающие 2 и 3, LFO, сила слотов модуляции, макросы, Hyper/Dimension, компрессор, дилей,
+фильтр эффектов. Что ручка сделала с этой основой, показывает замер до и после: он идёт в записку. Громкая нота
+чинится сама — мастер пресета убавляется: автор нот исправить её не может, он узнал бы о ней только завтра.
+Тишина не чинится — пресет не кладётся.
 
-Отвергнуто: .vstpreset — браузер Serum его не показывает. Отвергнуто: таблица волн с нуля и матрица модуляций —
+Режим (тип фильтра, warp, дисторшн, дилей, форма саба, компрессор) пишется именем — подписью самого плагина
+(`MODES`, «fil_type»: «Peak 12»), а не долей: у фильтра 96 режимов на шкале 0..1, ступень — 0,0105, и доля,
+посчитанная на глаз, попала бы в соседний. Имя Мак переводит в середину ступени, `--check` сверяет каждое имя
+подписью плагина. Ступени с числом — долей: октава −4..+4 — (октавы + 4) / 8, полутон −12..+12 — (полутоны + 12) / 24;
++22 полутона у B — b_octave_oct 0.75 и b_semi_semitones 10/24. Подписи слов рецептов в Serum 1: «Peak» — Peak 12 или
+Peak 24, «S&H» — SampHold или SampHold-, «Bend» — Bend +, Bend - или Bend +/-, «FM (from Sub)» — FM (Sub), у B
+вместо «FM (from B)» — FM (from A), «ping-pong» — Ping-Pong; Allpasses, Combs, Reverb, Ring Mod, Low 24, PWM, Sync,
+Quantize, FM (from B), Zero-Square, Downsample — так и подписаны. У PWM сила warp перевёрнута: a_warp 0 — 100%.
+
+Сила модуляции — только сила: env2/env3, LFO (rate, rise, delay, smooth) и mod_N_amt (−100..+100, 0.5 — ноль)
+меняют то, что основа уже куда-то ведёт; проводку «откуда → куда» параметры не ставят, и без неё ручка молчит.
+lfo*_rate в режиме BPM — ступени: 0.25 — 4 такта, 0.3 — 2, 0.4 — такт, 0.5 — 1/4; у основы со свободным LFO — герцы.
+Дилей звучит только с dly_enable 1 (dly_wet по умолчанию 30%). hyp_enable один на Hyper и Dimension: включённый,
+он заводит и Hyper с его hyp_wet (по умолчанию 50%) — для одного Dimension hyp_wet 0. Нет среди параметров: режима
+ревера (Hall/Plate), Mono/Legato портаменто (есть только его время, porttime_ms), выбора шума и таблицы волн.
+
+Отвергнуто: .vstpreset — браузер Serum его не показывает. Отвергнуто: таблица волн с нуля и проводка модуляций —
 через параметры плагина они не ставятся, а чанк пресета не разобран. Отвергнуто: сверять записанный файл
 с собранным по яркости — у пресета со случайной фазой она гуляет от запуска к запуску на 16%; сверяются ручки.
 Отвергнуто: класть в репозиторий сами пресеты и таблицы — они чужие и платные.
@@ -61,7 +80,8 @@ REV = {c: i for i, c in enumerate(ABC)}
 # Ручка → пределы доли 0..1. Выключатели (…_on, …_enable) — только 0 или 1. Что значит доля — `--knobs`
 # и раздел «Свой пресет» брифа: подписи там сняты с самого плагина.
 KNOBS = {
-    "filter_on": (0, 1), "fil_cutoff_hz": (.4, 1), "fil_reso": (0, .6), "fil_driv": (0, 1),
+    "filter_on": (0, 1), "fil_cutoff_hz": (.4, 1), "fil_reso": (0, 1), "fil_driv": (0, 1),
+    "fil_var": (0, 1), "fil_mix": (0, 1),
     "env1_atk_ms": (0, .5), "env1_dec_s": (0, 1), "env1_sus_db": (0, 1), "env1_rel_ms": (0, .6),
     "a_unison": (0, .4), "a_unidet": (0, 1), "a_fine_cents": (.4, .6), "a_wtpos": (0, 1),
     "osc_b_on": (0, 1), "b_vol": (0, .85), "b_fine_cents": (.4, .6),
@@ -70,7 +90,38 @@ KNOBS = {
     "cho_enable": (0, 1), "cho_wet": (0, 1),
     "rev_enable": (0, 1), "verb_wet": (0, .6), "verbsize": (0, 1),
     "eq_enable": (0, 1), "eq_typh": (0, 1), "eq_frqh_hz": (.5, 1), "eq_volh_db": (0, 1),
+    # с 22.10.2026 — для рецептов разведки; режимы этих же блоков — в MODES
+    "a_warp": (0, 1), "b_warp": (0, 1), "a_octave_oct": (0, 1), "a_semi_semitones": (0, 1),
+    "b_octave_oct": (0, 1), "b_semi_semitones": (0, 1), "suboscoctave_oct": (0, 1), "porttime_ms": (0, .75),
+    "hyp_enable": (0, 1), "hyp_wet": (0, 1), "hypdim_size": (0, 1), "hypdim_mix": (0, 1),
+    "comp_enable": (0, 1), "comp_wet": (0, 1), "dly_enable": (0, 1), "dly_wet": (0, .6),
+    "fx_fil_enable": (0, 1), "fx_fil_freq_hz": (0, 1), "fx_fil_reso": (0, 1), "fx_fil_wet": (0, 1),
+    **{f"env{n}_{k}": (0, 1) for n in (2, 3) for k in ("atk_ms", "dec_s", "sus", "rel_ms")},
+    **{f"lfo{n}_{k}": (0, 1) for n in range(1, 9) for k in ("rate", "rise", "delay", "smooth")},
+    **{(f"mod_{n}_amt" if n < 10 else f"mod{n}_amt"): (0, 1) for n in range(1, 33)},     # так их зовёт плагин
+    **{f"macro_{n}": (0, 1) for n in range(1, 5)},
 }
+FILTERS = ("MG Low 6, MG Low 12, MG Low 18, MG Low 24, Low 6, Low 12, Low 18, Low 24, High 6, High 12, High 18, "
+           "High 24, Band 12, Band 24, Peak 12, Peak 24, Notch 12, Notch 24, LH 6, LH 12, LB 12, LP 12, LN 12, HB 12, "
+           "HP 12, HN 12, BP 12, BN 12, PP 12, PN 12, NN 12, L/B/H 12, L/B/H 24, L/P/H 12, L/P/H 24, L/N/H 12, "
+           "L/N/H 24, B/P/N 12, B/P/N 24, Cmb +, Cmb -, Cmb L6+, Cmb L6-, Cmb H6+, Cmb H6-, Cmb HL6+, Cmb HL6-, Flg +, "
+           "Flg -, Flg L6+, Flg L6-, Flg H6+, Flg H6-, Flg HL6+, Flg HL6-, Phs 12+, Phs 12-, Phs 24+, Phs 24-, Phs 36+, "
+           "Phs 36-, Phs 48+, Phs 48-, Phs 48L6+, Phs 48L6-, Phs 48H6+, Phs 48H6-, Phs 48HL6+, Phs 48HL6-, FPhs 12HL6+, "
+           "FPhs 12HL6-, Low EQ 6, Low EQ 12, Band EQ 12, High EQ 6, High EQ 12, Ring Mod, Ring Modx2, SampHold, "
+           "SampHold-, Combs, Allpasses, Reverb, French LP, German LP, Add Bass, Formant-I, Formant-II, Formant-III, "
+           "Bandreject, Dist.Comb 1 LP, Dist.Comb 1 BP, Dist.Comb 2 LP, Dist.Comb 2 BP, Scream LP, Scream BP").split(", ")
+WARPS = ("Off, Sync, Sync 1/2 Win., Sync Window, Bend +, Bend -, Bend +/-, PWM, Asym +, Asym -, Asym +/-, Flip, Mirror, "
+         "Remap 1, Remap 2, Remap 3, Remap 4, Quantize, FM (from {0}), AM (from {0}), RM (from {0}), FM (Noise), FM (Sub)")
+DISTS = ("Tube, SoftClip, HardClip, Diode 1, Diode 2, Lin.Fold, Sin Fold, Zero-Square, Downsample, Asym, Rectify, "
+         "X-Shaper, X-Shaper (Asym), Sine Shaper, Stomp Box, Tape Sat.").split(", ")
+# Режим → имя подписью плагина → доля середины его ступени (снято 22.10.2026 проходом шкалы с шагом 0,0005;
+# `--check` сверяет каждое имя). У warp 23 режима на 24 ступенях: выше 0,978 подпись плагина — мусор.
+MODES = {k: {n: i / d for i, n in enumerate(names)} for k, names, d in (
+    ("fil_type", FILTERS, 95), ("fx_fil_type", FILTERS, 95),
+    ("warposca", WARPS.format("B").split(", "), 23), ("warposcb", WARPS.format("A").split(", "), 23),
+    ("dist_mode", DISTS, 15), ("dly_mode", ("Normal", "Ping-Pong", "Tap->Delay"), 2),
+    ("suboscshape", ("Sine", "RoundRect", "Triangle", "Saw", "Square", "Pulse"), 5),
+    ("cmpmbnd", ("Normal", "MultBand"), 1))}
 
 
 def _switch(knob: str) -> bool:
@@ -97,7 +148,12 @@ def flaws(preset, listed: set[str]) -> list[str]:
             out.append(f"preset, {part}: не названо ни одной ручки")
             continue
         for k, v in knobs.items():
-            if k not in KNOBS:
+            if k in MODES:
+                if not isinstance(v, str) or v not in MODES[k]:
+                    near = [n for n in MODES[k] if str(v).strip().lower() in n.lower()][:4]
+                    out.append(f"preset, {part}: {k} = {v!r} — режим пишется именем подписи плагина, такого нет"
+                               + (f"; похожие: {', '.join(near)}" if near else f"; имена — serum.MODES[«{k}»]"))
+            elif k not in KNOBS:
                 out.append(f"preset, {part}: ручки «{k}» нет в списке serum.KNOBS")
             elif isinstance(v, bool) or not isinstance(v, (int, float)) or not KNOBS[k][0] <= v <= KNOBS[k][1]:
                 out.append(f"preset, {part}: {k} = {v!r} — нужна доля от {KNOBS[k][0]:g} до {KNOBS[k][1]:g}")
@@ -234,7 +290,7 @@ def make(base: str, knobs: dict, out: str, name: str) -> dict:
     load_fxp(p, base)
     was = heard(p)[1]
     for k, v in knobs.items():
-        p.parameters[k].raw_value = float(v)
+        p.parameters[k].raw_value = MODES[k][v] if k in MODES else float(v)
     master = None
     for _ in range(QUIETER):                # громкость мастера — куб доли: «70% (-9.3 dB)»
         peak = heard(p)[0]
@@ -269,7 +325,18 @@ def check() -> str:
     x = os.urandom(1001)
     assert _dec(_enc(x)) == x and unpack(pack("check", x)) == ("check", x), "base64 JUCE или заголовок fxp"
     p = _plugin()
+    wrong = []
+    for k, names in MODES.items():          # каждое имя режима — подпись плагина на своей доле
+        was = p.parameters[k].raw_value
+        for n, v in names.items():
+            p.parameters[k].raw_value = v
+            if p.parameters[k].string_value.strip() != n:
+                wrong.append(f"{k} «{n}» ({p.parameters[k].string_value.strip()})")
+        p.parameters[k].raw_value = was
+    assert not wrong, f"подписи плагина разошлись с serum.MODES: {', '.join(wrong[:5])}"
     p.parameters["fil_cutoff_hz"].raw_value, p.parameters["filter_on"].raw_value = .5, 1.0     # 425 Гц: не как у Init
+    # новая ручка и режим: резонанс выше прежнего предела 0.6 и тип фильтра именем
+    p.parameters["fil_reso"].raw_value, p.parameters["fil_type"].raw_value = .9, MODES["fil_type"]["Peak 12"]
     one = heard(p)
     assert one[0] >= PEAK[0], "тишина: Serum не звучит"
     with tempfile.TemporaryDirectory() as tmp:
@@ -289,16 +356,25 @@ def check() -> str:
     two = heard(q)
     assert q.parameters["filter_on"].raw_value == 1 and abs(q.parameters["fil_cutoff_hz"].raw_value - .5) < .005 \
         and abs(one[1] - two[1]) < .1 * one[1], f"fxp вернулся другим: {one} и {two}"
-    return f"Serum {p.version}: звучит, fxp пишется и читается ({one[1]} и {two[1]} Гц, пик {two[0]:.2f}), Audio Unit берёт пресет из состояния проекта FL"
+    kind = q.parameters["fil_type"].string_value.strip()
+    assert kind == "Peak 12" and abs(q.parameters["fil_reso"].raw_value - .9) < .005, f"fxp вернул fil_type «{kind}»"
+    return (f"Serum {p.version}: звучит, fxp пишется и читается ({one[1]} и {two[1]} Гц, пик {two[0]:.2f}; fil_type "
+            f"читается подписью «{kind}», fil_reso 0.9), {sum(map(len, MODES.values()))} имён режимов сверены подписями "
+            "плагина, Audio Unit берёт пресет из состояния проекта FL")
 
 
 def knobs() -> str:
     """Подписи плагина на краях и в середине пределов каждой ручки — из них таблица раздела «Свой пресет» брифа."""
-    p, out = _plugin(), []
+    p = _plugin()
+    for k in ("warposca", "warposcb"):      # без режима warp сила подписана «no Warp type»
+        p.parameters[k].raw_value = MODES[k]["Bend +"]
+    out = [f"{k} (режим, пишется именем): " + ", ".join(names) for k, names in MODES.items()]
     for k, (lo, hi) in KNOBS.items():
         said = []
         for v in ((lo, hi) if _switch(k) else (lo, lo + (hi - lo) / 4, (lo + hi) / 2, hi - (hi - lo) / 4, hi)):
             p.parameters[k].raw_value = v
+            # подписи силы warp, rise и delay LFO плагин обновляет только в обработке звука
+            p([], duration=.02, sample_rate=SR, num_channels=2, buffer_size=512, reset=False)
             said.append(f"{v:g} — {p.parameters[k].string_value.strip()}")
         out.append(f"{k} ({p.parameters[k].label or ''}): " + "; ".join(said))
     return "\n".join(out)
