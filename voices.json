@@ -5,25 +5,25 @@
   "diktor": "ZCqq2ckmtA4w5LmO3u8b",
   "krysa": "nvXpWPpd8u197B31xCgx",
   "mama": "goOusBgYY4shRr7hI5dN",
-  "syn": "tcATIVbTqqMx5BQYDbZz",
-  "golub": "JwnYNVjo4TS8id0L3Prq"
+  "golub": "JwnYNVjo4TS8id0L3Prq",
+  "lisa": "Omzbw9RaF42HrM7E1wN2"
  },
  "voices": {
-  "lisa": "Omzbw9RaF42HrM7E1wN2"
+  "syn": "xmhf1HfXWWcBTVmVuZ1k"
  },
  "lines": [
   [
-   "X1",
-   "lisa",
-   "[deadpan, unimpressed] Ты читаешь, как заложник. ... ... [flat, deadpan] Моргни два раза, если тебя держат в шкафу. ... ... [sighs, deadpan] Прости. Мне нужен сведённый мужчина. ... А ты — демка.",
+   "Y1",
+   "syn",
+   "[outraged] Батя, закрой, у меня дубль! ... ... [offended, voice cracking] Т-ты чего?! ... ... [confused] Чё это сейчас было? ... ... [gasps, amazed] Я... я реально звучу?!",
    {
     "seed": 1
    }
   ],
   [
-   "X2",
-   "lisa",
-   "[deadpan, unimpressed] Ты читаешь, как заложник. ... ... [flat, deadpan] Моргни два раза, если тебя держат в шкафу. ... ... [sighs, deadpan] Прости. Мне нужен сведённый мужчина. ... А ты — демка.",
+   "Y2",
+   "syn",
+   "[outraged] Батя, закрой, у меня дубль! ... ... [offended, voice cracking] Т-ты чего?! ... ... [confused] Чё это сейчас было? ... ... [gasps, amazed] Я... я реально звучу?!",
    {
     "seed": 2
    }
