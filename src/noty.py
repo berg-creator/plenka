@@ -425,6 +425,16 @@ FLIPS = ("KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - а
 # по заказу: откуда набор 06, известно лишь из его README (MusicRadar SampleRadar), сам пак не сверен — раздавать ли бит
 # на этой петле, решает владелец. Темп — число перед «BPM», как у `FLIPS`; баса в петле нет, опоры тактов в замере случайны
 FITTED = ("KITS/06 - Bad Bunny Kit/Loops/Afrobeat - AB_GuitarA110E-01 - как в проекте 208 BPM.wav",)
+# Струны с Looperman под заказ на 23.10.2026 (владелец: «величественный мощный бит», «сделай все возможное для этого»):
+# «Knights Of The Golden Order» автора DarrenHirst (looperman.com/loops/detail/406454, выложена 05.09.2025), оркестровые
+# струны, 120 BPM, фа минор, восемь тактов. Страница: «free … for your commercial and non-commercial use on a royalty free
+# basis (subject to our terms and conditions)»; условия сайта (looperman.com/help/terms) дают «copy, reproduce, edit, adapt,
+# modify, remix, use, incorporate and otherwise exploit the specified Loops in new and original recordings… without any
+# further obligation (whether payment or otherwise)», раздавать саму петлю нельзя, качать скриптами — тоже: поэтому петля
+# лежит отдельным набором, а не в наборе 11 и не в `data/net_sources.json`. Своих условий у автора нет. Риск: сайт
+# не проверяет, что петля действительно его, — Content ID может прийти от настоящего владельца звука. Только биту по заказу,
+# как `FITTED`; темп — число перед «BPM», перегонка под темп бита (`fit_loop`) — как у любой петли
+LOOPERMAN = ("KITS/15 - Looperman/Loops/Knights Of The Golden Order - DarrenHirst 120 BPM.wav",)
 # Синт-петли наборов 07 и 03, которые владелец 17.10.2026 выбрал на слух из прослушки 103 петель: арпеджио B и C
 # из MusicRadar «8-bit bonanza» — каждое всеми 15 копиями (темпы 100–140, тональности A, C, E: с перегонкой ±2 полутона
 # они закрывают темпы образцов) — и Lo-Fi Synth Loop 01 и 04. Оба пака по README наборов — MusicRadar SampleRadar,
@@ -433,8 +443,8 @@ FITTED = ("KITS/06 - Bad Bunny Kit/Loops/Afrobeat - AB_GuitarA110E-01 - как �
 PICKED = (*(f"KITS/07 - Crystal Castles Kit/Loops/8-Bit - CS_FMArp {arp}_{bpm}-{key}.wav"
             for arp in "BC" for bpm in range(100, 141, 10) for key in "ACE"),
           *(f"KITS/03 - SpaceGhostPurrp Kit/Loops/Lo-Fi - Synth Loop {n:02} (130BPM).wav" for n in (1, 4)))
-LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS, *FITTED, *PICKED))
-LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS, *FITTED, *PICKED)      # откуда петля вправе быть
+LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS, *FITTED, *LOOPERMAN, *PICKED))
+LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS, *FITTED, *LOOPERMAN, *PICKED)      # откуда петля вправе быть
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 # Переход — звук в пустом такте, аудиоклипом в плейлисте. Владелец 09.10.2026 доделал так утренний «Фонарь»: удары набора 13
 # в тактах 16, 32 и 48, где петля молчит, и подъезд — звук набора 14 задом наперёд, обрезанный границей такта 33; три из
@@ -942,11 +952,12 @@ def loop_bpm(name: str) -> int | None:
     видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои. У петли наборов 11 и 12
     (узнаётся по папке, поэтому имя нужно полное) темп — число перед «BPM»: «… Am 140 BPM» — 140, нет его — None.
     У двух петель набора 14 (`SHARED`) — последнее число имени, у петель из столетних записей (`FLIPS`) и гитары из проекта
-    владельца (`FITTED`) — как в наборе 11, у петель, выбранных на слух (`PICKED`), — как у видов набора 01."""
+    владельца (`FITTED`) и струн с Looperman (`LOOPERMAN`) — как в наборе 11, у петель, выбранных на слух (`PICKED`), —
+    как у видов набора 01."""
     stem = name.rsplit("/", 1)[-1]
     if name in SHARED:
         return int(re.findall(r"\d{2,3}", stem)[-1])
-    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")) or name in FLIPS + FITTED:
+    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")) or name in FLIPS + FITTED + LOOPERMAN:
         return int(m[1]) if (m := re.search(r"(?<!\d)(\d{2,3})\s*BPM", stem, re.I)) else None
     if name not in PICKED and (not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS))
                                or re.search(r"Beat(?!\d+_Topline)|Bass|Drum|Whoop|Vocal", stem)):
@@ -1113,6 +1124,8 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
             out.append(f"{word}: «{name}» — петля, нарезанная из столетней записи под заказ владельца: только биту по заказу (order)")
         elif name in FITTED and not info.get("order"):
             out.append(f"{word}: «{name}» — петля из проекта владельца, подогнанная под его темп: только биту по заказу (order)")
+        elif name in LOOPERMAN and not info.get("order"):
+            out.append(f"{word}: «{name}» — петля с Looperman под заказ владельца: только биту по заказу (order)")
         elif not m:
             out.append(f"{word}: «{name}» не замерена по звуку (не в 1, 2, 4 или 8 тактов или не скачана из iCloud) — "
                        "бери петлю из замера: python3 -m src.noty --loop СЛОВО")
@@ -3177,6 +3190,12 @@ def _checks() -> None:
     assert all(loop_bpm(n) == 208 and n in known() and heard[n]["bars"] == 4 for n in FITTED), "гитара из проекта: темп и замер"
     assert not any(w in "\n".join(_loop(fit, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "по заказу")), _loop(fit, share)
     assert "из проекта владельца, подогнанная под его темп" in "\n".join(_loop(fit | {"order": ""}, share)), "утром её не берут"
+    # Струны с Looperman (`LOOPERMAN`, заказ на 23.10.2026): темп 120 перед «BPM», в списке, замерены в восемь тактов,
+    # перегонка под темп бита — как у любой петли (134, темп «Palace», — два полутона вверх); берёт их только заказ
+    knight = shared | dict(bpm=134, loop=LOOPERMAN[0], scale=_scale(heard, *LOOPERMAN))
+    assert all(loop_bpm(n) == 120 and n in known() and heard[n]["bars"] == 8 for n in LOOPERMAN), "струны с Looperman: темп и замер"
+    assert not any(w in "\n".join(_loop(knight, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "под заказ")), _loop(knight, share)
+    assert "петля с Looperman под заказ" in "\n".join(_loop(knight | {"order": ""}, share)), "утром их не берут"
     assert "после перелома играет вторая петля" in "\n".join(problems(looped | {"switch": {"такт": 9, "переход": "x"}}, drums)), \
         "без заказа перелом бита петлёй требует вторую"
     said = about(shared)
