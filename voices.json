@@ -3,52 +3,34 @@
  "voice_ids": {
   "batya": "OeUoCdah2ckl693izbFR",
   "diktor": "ZCqq2ckmtA4w5LmO3u8b",
-  "golub": "HTmAmXfNgEmrs15vdOH6",
   "krysa": "nvXpWPpd8u197B31xCgx",
   "lisa": "ci53DXTkDAsvItG3cXBM",
   "mama": "goOusBgYY4shRr7hI5dN",
   "syn": "tcATIVbTqqMx5BQYDbZz"
  },
+ "voices": {
+  "golub": "JwnYNVjo4TS8id0L3Prq"
+ },
  "lines": [
   [
-   "B1",
-   "batya",
-   "[shouting, angry] Опять в шкафу читаешь?! ... ... [quietly, deeply touched, voice trembling, gruff] Сынок... А где свёл? ... ... [annoyed, gruff] Мать, у нас дубль!",
-   {
-    "voice_settings": {
-     "stability": 0.0
-    }
-   }
+   "L09",
+   "golub",
+   "[raspy, lazy] Слышь, малой. Чё грустишь, а?"
   ],
   [
-   "B2",
-   "batya",
-   "[shouting, angry] Опять в шкафу читаешь?! ... ... [quietly, deeply touched, voice trembling, gruff] Сынок... А где свёл? ... ... [annoyed, gruff] Мать, у нас дубль!",
-   {
-    "seed": 1
-   }
-  ],
-  [
-   "B3",
-   "batya",
-   "[shouting, angry] Опять в шкафу читаешь?! ... ... [quietly, deeply touched, voice trembling, gruff] Сынок... А где свёл? ... ... [annoyed, gruff] Мать, у нас дубль!",
-   {
-    "seed": 2
-   }
+   "L11",
+   "golub",
+   "[casual] ...Кефир будешь?"
   ]
  ],
  "heroes": {
-  "lisa2": {
-   "describe": "Comedic cartoon character voice: an arrogant, haughty young Russian woman who is a fox. Dripping with sarcasm and contempt, condescending, slow mocking drawl, exaggerated eye-rolling intonation, snobby, scoffs and smirks while talking. Native Russian speaker. Clean studio audio.",
-   "sample": "Ой, а это что вообще? Это ты так читаешь? Мило. Бит громче тебя. Я тебя вообще не слышу. Всё, я к соседу. У него хотя бы трек на Яндекс Музыке."
+  "lisa3": {
+   "describe": "A young Russian Gen Z girl, completely unimpressed. Flat deadpan monotone, low energy, bored, casual, slight vocal fry, natural and understated, not theatrical, not cartoonish. Native Russian speaker. Clean studio audio.",
+   "sample": "Бит прикольный. А ты где? ... Всё, я к Вадику. У него двенадцать прослушиваний. Ну, пока. И не звони мне больше, ладно?"
   },
-  "golub2": {
-   "describe": "Comedic cartoon character voice: a Russian street pigeon who is a 90s gopnik bandit thug. Low, rough, raspy, husky chain-smoker voice, lazy street slang delivery, stretched 'слышь', menacing but friendly, prison-yard swagger. Native Russian speaker. Clean studio audio.",
-   "sample": "Слышь, малой. Чё грустишь, а? Дождь, понимаю. Кефир будешь? Да не боись, свежий. Вчерашний. Чё, не будешь? Ну как хочешь, мне больше."
-  },
-  "syn2": {
-   "describe": "Comedic cartoon character voice: a 22-year-old Russian guy, a dim-witted wannabe rapper who is a hamster. Adult young male voice, dopey and slow-witted, slightly nasal, mumbly, overconfident, says everything with dumb sincerity. Not squeaky, not a child. Native Russian speaker. Clean studio audio.",
-   "sample": "Батя, закрой, у меня дубль! Ну ма-ам, ну я же записываю! Я... я звучу? Я реально звучу?! Пацаны, я звучу!"
+  "syn3": {
+   "describe": "Comedic cartoon character voice: a nervous anxious 14-year-old Russian boy. High-pitched teenage voice that cracks, stutters on first letters, whiny and unsure, gulps, panicky but sincere, like a cartoon sidekick teen. Native Russian speaker. Clean studio audio.",
+   "sample": "Б-батя, закрой, у меня д-дубль! Ну ма-ам, ну я же з-записываю! Я... я р-реально звучу?! Пацаны! Я з-звучу!"
   }
  }
 }
