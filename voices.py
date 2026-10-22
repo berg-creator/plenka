@@ -65,8 +65,9 @@ def speak(spec: dict, out: str) -> None:
             print(hero, "голос", vids[hero])
     json.dump(vids, open(f"{out}/voice_ids.json", "w"), indent=1)
     failed = []
-    for name, hero, text in spec["lines"]:
+    for name, hero, text, *extra in spec["lines"]:
         body = {"text": text, "model_id": "eleven_v3", "voice_settings": {"stability": 0.5}}
+        body.update(*extra)  # своя устойчивость или seed у реплики
         try:
             audio = call(f"/v1/text-to-speech/{vids[hero]}?output_format=mp3_44100_128", body)
             open(f"{out}/{name}-{hero}.mp3", "wb").write(audio)
