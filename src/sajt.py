@@ -140,7 +140,7 @@ def page(path: str, title: str, description: str, body: str, player: bool = Fals
 {script}</head>
 <body>
 <header class="top"><div class="wrap bar">
-<a class="brand" href="{home}" aria-label="ПЛЁНКА"><img src="{up}icon.png" alt="" width="32" height="32"><span>ПЛЁНКА</span></a>
+<a class="brand" href="{home}" aria-label="ПЛЁНКА"><video src="{up}wheel.mp4" poster="{up}icon.png" width="32" height="32" autoplay muted loop playsinline aria-hidden="true"></video><span>ПЛЁНКА</span></a>
 <nav><a href="{home}"{here if path == "" else ""}>Сведение</a><a href="{up}pamyatka/"{here if path.startswith("pamyatka/") else ""}>Памятка</a></nav>
 <a class="go" href="{bot('skleyka')}"><span class="ico">🎛</span><span>Свести<span class="wide"> бесплатно</span></span></a>
 </div></header>
@@ -366,7 +366,7 @@ border-bottom:1px solid var(--line)}
 .bar{display:flex;align-items:center;gap:22px;height:62px}
 .brand{display:flex;align-items:center;gap:10px;margin-right:auto;color:var(--text);text-decoration:none;
 font-family:var(--head);font-weight:700;font-size:23px;letter-spacing:.05em}
-.brand img{border-radius:50%}
+.brand video{border-radius:50%}
 nav{display:flex;gap:22px}
 nav a{color:var(--soft);text-decoration:none;padding:6px 0;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
 nav a:hover{color:var(--text)}
@@ -711,6 +711,8 @@ def build(out: Path) -> list[str]:
     (out / "style.css").write_text(CSS)
     (out / "player.js").write_text(JS)
     shutil.copy(SOUND / "icon.png", out / "icon.png")
+    # колесо крутится, как аватарка канала: только кольцо, кнопки плеера стоят (src/make_avatar_video.py)
+    shutil.copy(SOUND / "wheel.mp4", out / "wheel.mp4")
     (out / "zvuk").mkdir()
     sounds = [*MAIN, *(f"primer-{n}-{side}.mp3" for n in examples() for side in ("do", "posle"))]
     for name in sounds:
