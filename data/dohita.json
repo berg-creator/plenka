@@ -146,7 +146,78 @@
           ]
         }
       ]
+    },
+    {
+      "id": "1944341",
+      "by": "auto",
+      "added_at": "2026-10-23T10:44:50+00:00",
+      "artist": "MAYOT",
+      "deezer_id": 1944341,
+      "term": "два года",
+      "lines": [
+        {
+          "text": "Из Тюмени. Первый раз записался дома у знакомых: кореш занял у него две тысячи и вместо долга предложил запись. Самый ранний трек пролежал два года до релиза.",
+          "sources": [
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "Mayot — рэпер из Тюмени, представитель Melon Music и автор очень крутых песен."
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "Начинается история с того, что мой кореш попросил взаймы две тысячи. Я ему их дал и про это забыл."
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "У моих корешей есть студия дома. Давай мы тебе запишем трек чётко, и я тебе не буду должен эту двушку"
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "Самый ранний трек был записан еще за два года до релиза."
+            }
+          ]
+        },
+        {
+          "text": "Учился, но вместо занятий ходил в студию. Уехал в Москву следом за DooMee — на студию, названную в честь их банды Melon Music.",
+          "sources": [
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "Моя ситуация была такой: я учился в шараге, но вместо занятий ходил в студию."
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "И DooMee поехал работать звукарем на студию, которую в честь нашей банды назвали Melon Music."
+            }
+          ]
+        }
+      ],
+      "quote": {
+        "text": "Я понимал, что начинается моя новая жизнь. Здесь меня никто не знает как Артёма Никитина. Меня все будут знать как Mayot.",
+        "url": "https://the-flow.ru/new-flow/vol6-mayot"
+      },
+      "after": [
+        {
+          "text": "Потом «Ауди» с GHETTO GARDEN подхватил TikTok: пошёл мем «делает вид, что шарит», и в Apple Music трек встал в топ.",
+          "sources": [
+            {
+              "url": "https://api.deezer.com/artist/1944341/albums",
+              "quote": "GHETTO GARDEN, 2020-09-04"
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "Заходишь в TikTok, там \"Ауди\" — вообще жесть какое вирусное видео."
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "Да, получился мем \"делает вид, что шарит\"."
+            },
+            {
+              "url": "https://the-flow.ru/new-flow/vol6-mayot",
+              "quote": "В Apple Music у меня \"Ауди\" в топе."
+            }
+          ]
+        }
+      ]
     }
   ],
-  "searched_at": "2026-10-20T14:42:56+00:00"
+  "searched_at": "2026-10-23T10:44:50+00:00"
 }
