@@ -87,8 +87,11 @@ def words(text: str, shared: dict) -> str:
 
 def shot_cmd(doc: dict, folder: Path, key: str, seed: int | None = None) -> list[str]:
     frame = doc["frames"][key]
-    return ["caffeinate", "-dims", str(FLUX), "--model", "flux2-klein-4b", "-q", "8",
-            "--image-paths", *[str(folder / ref) for ref in frame["refs"]],
+    refs = [str(folder / ref) for ref in frame.get("refs", [])]
+    # образец героя рисуется с нуля: правка без картинок у mflux не идёт
+    return ["caffeinate", "-dims", str(FLUX if refs else FLUX.with_name("mflux-generate-flux2")),
+            "--model", "flux2-klein-4b", "-q", "8",
+            *(["--image-paths", *refs] if refs else []),
             "--width", str(W), "--height", str(H), "--steps", "4",
             "--seed", str(seed or frame.get("seed", SEED_SHOT)),
             "--prompt", words(frame["prompt"], doc.get("vars", {})),
