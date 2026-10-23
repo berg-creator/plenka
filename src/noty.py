@@ -286,9 +286,15 @@ CHOSEN = {"Serum/User/Monosounds - Starter/Leads/LEAD - Phazing Bell.fxp": "ме
 # Библиотека владельца на Маке. Путь звука в паспорте — «KITS/…» или «Serum/…»
 LIBRARY = {"KITS": Path.home() / "Documents" / "Image-Line" / "FL Studio" / "KITS",
            "Serum": Path("/Library/Audio/Presets/Xfer Records/Serum Presets/Presets")}
-# В список идёт то, что можно ставить в бит на раздачу. Оркестровых сэмплов Lex Luger (KITS/01) в нём нет:
+# Порядок в KITS (владелец 24.10.2026: «сделай эти киты основными, а остальные отдели в папку старые киты»): основные
+# наборы (15 и дальше) — в корне, прежние 01–14, Maxeyy и папки _SERUM, _SOURCE — в «Старые киты», а сохранённые биты
+# (`flp.keep`) — в «00 - Прошлые биты», а не каждый рядом с «Сегодня». Путь старого звука стал на папку глубже: набор
+# звука — `kit_of`, а не второй сегмент пути
+OLD = "Старые киты"
+PAST = "00 - Прошлые биты"
+# В список идёт то, что можно ставить в бит на раздачу. Оркестровых сэмплов Lex Luger (KITS/Старые киты/01) в нём нет:
 # набор взят с archive.org без указанной лицензии — сборка откажет им, как любому неназванному звуку.
-LISTED = (("KITS/09 - Scene 2026 Kit", "**/*.wav"), ("KITS/10 - Кино Kit", "**/*.wav"), ("Serum", "**/*.fxp"))
+LISTED = (("KITS/Старые киты/09 - Scene 2026 Kit", "**/*.wav"), ("KITS/Старые киты/10 - Кино Kit", "**/*.wav"), ("Serum", "**/*.fxp"))
 # Родной синтезатор FL заводским пресетом по имени: «Sytrus/Another fat saw» — им владелец 09.10.2026 сам заменил мелодию
 # «Фонаря». В список звуков такие имена не идут: копировать нечего, пресет Мак берёт из поставки FL (`flp.today`), а нет
 # его там — строка в записке. Отвергнуто: вписать имя в data/beat_sounds.json — `--sounds` переписывает список с диска
@@ -297,10 +303,10 @@ NATIVE = "Sytrus/"
 # Музыка петлёй. Папка Loops плоская: вид петли — приставка имени. Только MusicRadar — royalty-free по README набора.
 # Trap (17.10.2026) — синт-петли набора MusicRadar «trap samples» на 140: барабаны, бас, свисты и голос из него — не петли.
 # Из битов набора (`Trap - BeatNN_…`) петля — только топлайн: его владелец выбрал на слух в тот же день, прочее — бит целиком
-LOOPS = "KITS/01 - ASAP Rocky Kit/Loops"
+LOOPS = "KITS/Старые киты/01 - ASAP Rocky Kit/Loops"
 LOOP_KINDS = ("Western Gtr", "Acoustic Gtr", "Country Crunk", "Ambient", "Trap")
 # Набор 11 — звуки из сети: в него кладут только годное на раздачу, поэтому в список он идёт целиком. Петли — папка Loops
-NET = "KITS/11 - Сеть Kit"
+NET = "KITS/Старые киты/11 - Сеть Kit"
 NET_LOOPS = NET + "/Loops"
 # Живые звуки с высотой (владелец 21.10.2026: «делать свои уникальные звуки» из живых записей; свисток, звонок, сова):
 # одиночный звук с нотой замера в скобках (`zamer --root`), как в наборе 12. Музыкой бит берёт их только одобренными —
@@ -311,7 +317,7 @@ LIVE = NET + "/Live"
 # Одиночные звуки идут в список только с нотой в скобках: её дал замер высоты (`zamer.root`), а звук, где замер
 # неуверен, имени с нотой не получил — партия от неверной корневой ноты фальшивит вся. Петли — восемь тактов, вырезанные
 # из файлов банка в WAV (сами файлы — MP3 на сотню тактов со слоями): темп — число перед «BPM», как в наборе 11
-GLORY = "KITS/12 - Glorified Kit"
+GLORY = "KITS/Старые киты/12 - Glorified Kit"
 GLORY_LOOPS = GLORY + "/Loops"
 # CC BY и банк Glorified: автора звука надо назвать в описании ролика. Строку несёт записка — автор нот о ней забудет
 CREDIT = (("/Boss DR-660 - ", "DR 660 Sample Pack by Shpitz Audio, CC BY 3.0, archive.org/details/DR660Samples"),
@@ -365,21 +371,21 @@ LISTED += ((LOOPS, "*.wav"), (NET, "**/*.wav"), (GLORY, "Oneshots/* (*).wav"), (
 ROLES = ("Kicks", "808s", "Hats", "Open Hats", "Claps", "Snares", "Percs")
 # Папки, чьих длин в списке нет (`sized`): барабаны и 808 гаснут сами или отсечкой, петля идёт дорожкой, а не нотами
 BEATEN = {*ROLES, "Hihats", "Openhats", "Loops"}
-OWN = {"KITS/01 - ASAP Rocky Kit": ("808-909", "MusicRadar 808"), "KITS/03 - SpaceGhostPurrp Kit": ("Lo-Fi", "Horrorcore"),
-       "KITS/05 - Black Kray x Goth Money Kit": ("Icedancer",), "KITS/07 - Crystal Castles Kit": ("Obscure DM", "Korg DDM")}
+OWN = {"KITS/Старые киты/01 - ASAP Rocky Kit": ("808-909", "MusicRadar 808"), "KITS/Старые киты/03 - SpaceGhostPurrp Kit": ("Lo-Fi", "Horrorcore"),
+       "KITS/Старые киты/05 - Black Kray x Goth Money Kit": ("Icedancer",), "KITS/Старые киты/07 - Crystal Castles Kit": ("Obscure DM", "Korg DDM")}
 LISTED += tuple((kit, f"{role}/{source} - *.wav") for kit, sources in OWN.items() for source in sources for role in ROLES)
-LISTED += tuple(("KITS/Maxeyy Stash V5", f"{role}/*.wav")
+LISTED += tuple(("KITS/Старые киты/Maxeyy Stash V5", f"{role}/*.wav")
                 for role in ("Kicks", "808s", "Hihats", "Openhats", "Claps", "Snares", "Percs", "FX", "Risers & Crashes"))
 # Наборы 13 «Afterlife» и 14 «300 Subs» (blvckmorphine, из загрузок владельца 07.10.2026): барабаны и 808 условий не несут
 # («Enjoy the sounds»), одиночные звуки — по правилу набора 12, только с нотой замера в скобках. Петли обоих (Loops,
 # Percussion Loops) — 50/50 с доходов, тег @blvckmorphine и «prod. имя x blvckmorphine» (TERMS.txt рядом): в бит на раздачу
 # не идут, в LISTED их нет намеренно — кроме тех, что владелец взял на условиях автора (`SHARED`)
-LISTED += tuple((kit, f"{role}/*.wav") for kit in ("KITS/13 - Afterlife Kit", "KITS/14 - 300 Subs Kit") for role in ROLES)
-LISTED += (("KITS/13 - Afterlife Kit", "Oneshots/* (*).wav"),)
+LISTED += tuple((kit, f"{role}/*.wav") for kit in ("KITS/Старые киты/13 - Afterlife Kit", "KITS/Старые киты/14 - 300 Subs Kit") for role in ROLES)
+LISTED += (("KITS/Старые киты/13 - Afterlife Kit", "Oneshots/* (*).wav"),)
 # FX обоих наборов — звуки перехода (`MOVES`). Условия автора их не касаются: TERMS.txt лежит только в Loops и Percussion
 # Loops, зовётся «LOOP TERMS», и каждое обязательство в нём — про «these loops» («50/50 split … generated from songs using
 # these loops»); в папках FX и в корне наборов условий нет, как и у барабанов (прочитано 09.10.2026)
-LISTED += tuple((kit, "FX/*.wav") for kit in ("KITS/13 - Afterlife Kit", "KITS/14 - 300 Subs Kit"))
+LISTED += tuple((kit, "FX/*.wav") for kit in ("KITS/Старые киты/13 - Afterlife Kit", "KITS/Старые киты/14 - 300 Subs Kit"))
 # Петли blvckmorphine на условиях автора: подпись, отметка и половина дохода. 08.10.2026 владелец взял две — «там 2 моих
 # любимых. выше весёлый, ниже злой», «берем луп, а так же делаем свою мелодию, чтобы научится этому» — для заказа,
 # 17.10.2026 — петли обоих наборов и для утреннего бита: звук наших типов — синтезаторы и пресеты, а на Маке только
@@ -391,7 +397,7 @@ LISTED += tuple((kit, "FX/*.wav") for kit in ("KITS/13 - Afterlife Kit", "KITS/1
 # наш 808 не встал бы. Не взяты: где бас вычитается только до −18…−25 дБ (0646, 2065, 25436, 2696, 39466, 43687,
 # 54785, 56634, abyss, laugh — остаток баса на уровне музыки, замер нот врёт), где не сходится вовсе (3067, 59673,
 # alone) и где такт баса дробный (45789 — 46,5, 59645 — 26,5: раскладку `stack` и дорожку петли режут целыми тактами)
-SHARED = {f"KITS/{name}": at for name, at in (
+SHARED = {f"KITS/{OLD}/{name}": at for name, at in (
     ("13 - Afterlife Kit/Loops/04566 B MAJOR 160.wav", 40), ("13 - Afterlife Kit/Loops/3462 E MINOR 147.wav", 40),
     ("13 - Afterlife Kit/Loops/4257 D MINOR 135.wav", 54), ("14 - 300 Subs Kit/Loops/BLEEDING G# MINOR 147.wav", 29),
     ("14 - 300 Subs Kit/Loops/DECAY F# PHRY 160.wav", 44), ("14 - 300 Subs Kit/Loops/FALLEN C MAJOR 145.wav", 39),
@@ -418,9 +424,9 @@ SHARED_PEAK = .9            # пик дорожки петли после выч
 # за годы войны) срок вышел не позже 2017 года; статьи ГК 22.10.2026 дословно не сверены — pravo.gov.ru не отвечал. Условий
 # archive.org никто не читал, и «можно раздавать» за них никто не говорил. Мотив вступления и тихие аккорды за ним — на сетке
 # 150 BPM, на пять полутонов ниже вместе со скоростью: соль-диез минор (оцифровка шла быстрее записи — до-диез минор +64 цента)
-FLIPS = ("KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - аккорды 115 BPM.wav",
-         "KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - замедленная 115 BPM.wav",
-         "KITS/08 - Сиять (Lyric Atmo)/Loops/Rachmaninoff Prelude 1921 - набат 150 BPM.wav")
+FLIPS = ("KITS/Старые киты/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - аккорды 115 BPM.wav",
+         "KITS/Старые киты/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - замедленная 115 BPM.wav",
+         "KITS/Старые киты/08 - Сиять (Lyric Atmo)/Loops/Rachmaninoff Prelude 1921 - набат 150 BPM.wav")
 # Гитара из проекта владельца под заказ на 12.10.2026 («скри на столе (там гитара - основа»; о темпе: «в целом можно и бпм
 # таким же экстримальным оставить (208)»): петля `Afrobeat - AB_GuitarA110E-01` набора 06, два такта на 110, перегнана на Маке
 # так же, как её подогнал FL в его проекте (режим клипа Resample — скорость вместе с высотой, 110 → 104): четыре такта на 208,
@@ -428,7 +434,7 @@ FLIPS = ("KITS/08 - Сиять (Lyric Atmo)/Loops/Lonesome Mamma Blues 1922 - а
 # высоту растяжкой — владельцу нравится то, что звучит в проекте, а там гитара ниже родной на 0,97 полутона. Только биту
 # по заказу: откуда набор 06, известно лишь из его README (MusicRadar SampleRadar), сам пак не сверен — раздавать ли бит
 # на этой петле, решает владелец. Темп — число перед «BPM», как у `FLIPS`; баса в петле нет, опоры тактов в замере случайны
-FITTED = ("KITS/06 - Bad Bunny Kit/Loops/Afrobeat - AB_GuitarA110E-01 - как в проекте 208 BPM.wav",)
+FITTED = ("KITS/Старые киты/06 - Bad Bunny Kit/Loops/Afrobeat - AB_GuitarA110E-01 - как в проекте 208 BPM.wav",)
 # Струны с Looperman под заказ на 23.10.2026 (владелец: «величественный мощный бит», «сделай все возможное для этого»):
 # «Knights Of The Golden Order» автора DarrenHirst (looperman.com/loops/detail/406454, выложена 05.09.2025), оркестровые
 # струны, 120 BPM, фа минор, восемь тактов. Страница: «free … for your commercial and non-commercial use on a royalty free
@@ -487,10 +493,10 @@ LISTED += tuple((kit, f"{role}/*.wav") for kit in XERO for role in (*ROLES, "FX"
 # они закрывают темпы образцов) — и Lo-Fi Synth Loop 01 и 04. Оба пака по README наборов — MusicRadar SampleRadar,
 # royalty-free, как Trap набора 01; на сайте сами паки не сверены. Именами, а не папкой: прочие петли наборов не слушаны,
 # а в наборе 03 рядом лежат петли Horrorcore с несверенной лицензией. Темп — число в имени, как у видов `LOOP_KINDS`
-PICKED = (*(f"KITS/07 - Crystal Castles Kit/Loops/8-Bit - CS_FMArp {arp}_{bpm}-{key}.wav"
+PICKED = (*(f"KITS/Старые киты/07 - Crystal Castles Kit/Loops/8-Bit - CS_FMArp {arp}_{bpm}-{key}.wav"
             for arp in "BC" for bpm in range(100, 141, 10) for key in "ACE"),
-          *(f"KITS/03 - SpaceGhostPurrp Kit/Loops/Lo-Fi - Synth Loop {n:02} (130BPM).wav" for n in (1, 4)))
-LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS, *FITTED, *LOOPERMAN, *OUTOFPLACE, *PICKED))
+          *(f"KITS/Старые киты/03 - SpaceGhostPurrp Kit/Loops/Lo-Fi - Synth Loop {n:02} (130BPM).wav" for n in (1, 4)))
+LISTED += tuple((base, f"{sub}/{file}") for base, sub, file in (name.rsplit("/", 2) for name in (*SHARED, *FLIPS, *FITTED, *LOOPERMAN, *OUTOFPLACE, *PICKED)))
 LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS, *FITTED, *LOOPERMAN, *OUTOFPLACE, *PICKED)      # откуда петля вправе быть
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 # Переход — звук в пустом такте, аудиоклипом в плейлисте. Владелец 09.10.2026 доделал так утренний «Фонарь»: удары набора 13
@@ -1699,6 +1705,17 @@ def _palette(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     return out
 
 
+def _first() -> str:
+    """Любой звук списка для селфтестов — тот же, что до 24.10.2026: первый из старых наборов, а не петля нового набора."""
+    return min(n for n in known() if n.startswith(f"KITS/{OLD}/"))
+
+
+def kit_of(name: str) -> str:
+    """Набор звука «KITS/<набор>/…»: у старых — папка после «Старые киты» (`OLD`). Не набор KITS — второй сегмент."""
+    parts = name.split("/")
+    return parts[2] if parts[1:2] == [OLD] and len(parts) > 3 else parts[1] if len(parts) > 2 else parts[0]
+
+
 def kind(name: str) -> str | None:
     """Вид удара по папке звука: «…/Snares/…» — клэп (`KIND`). None — не барабан и не 808: пресет Serum в папке Percs
     и петля ударов («E808_Loop_Hats_105-08» набора 01 лежит среди хэтов) — тембр её первого удара о ней ничего не говорит."""
@@ -1820,11 +1837,12 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
     was = f"«{old.get('title', 'прошлый бит')}»"
     out = [f"образец «{info['sample']}» — как в {was}: возьми следующий из data/beat_samples.json"] \
         if info.get("sample") and info["sample"] == old.get("sample") else []
-    out += [f"петля «{name}» — как в {was}: возьми другую" for name in _pair(info) if name in _pair(old)]
+    prev = [_moved(n) for n in _pair(old)]
+    out += [f"петля «{name}» — как в {was}: возьми другую" for name in _pair(info) if name in prev]
     # Петля blvckmorphine и outofplace — половина дохода автору (владелец, 17.10.2026): не два утра подряд, после неё —
     # петля без условий
     if not info.get("order") and any(n in SHARED or n in OUTOFPLACE for n in _pair(info)) \
-            and any(n in SHARED or n in OUTOFPLACE for n in _pair(old)):
+            and any(n in SHARED or n in OUTOFPLACE for n in prev):
         out.append(f"петля с условиями автора ({SHARED_BY} или outofplace) — и в {was}: два утра подряд нельзя, "
                    "сегодня петля без условий автора")
     a, b = _lead(tracks), _lead(old_tracks)
@@ -1844,6 +1862,12 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
             out.append(f"мелодия повторяет {was}: ритм тот же в {rhythm:.0%} тактов, ходы те же на {same:.0%} — "
                        "другой приём, другая длина фразы, другое начало")
     return out
+
+
+def _moved(name: str) -> str:
+    """Имя звука из паспорта до 24.10.2026, когда старые наборы лежали в корне KITS, — именем после переезда в `OLD`."""
+    # ponytail: нужно, пока --prev несёт паспорта до переезда (до 26.10.2026); потом убрать
+    return re.sub(r"^KITS/(?=(?:0[1-9]|1[0-4]) - |Maxeyy Stash V5/|_SERUM MIDI|_SOURCE MACHINES)", f"KITS/{OLD}/", name)
 
 
 def _sounds(info: dict) -> dict:
@@ -2431,7 +2455,7 @@ def aside(make: Path, out: Path) -> str:
 def gather(kits: Path | None = None, serum: Path | None = None) -> str:
     """Свежая ветка claude/beats-* → папки «Сегодня» в браузере FL и в пресетах Serum. Собранное второй
     раз не трогается: помощник на Маке заходит сюда раз в десять минут. Спал Мак — соберёт, проснувшись.
-    Проект, сохранённый владельцем в «Сегодня» после сборки, перед чисткой переезжает рядом со звуками (`flp.keep`)."""
+    Проект, сохранённый владельцем в «Сегодня» после сборки, перед чисткой переезжает со звуками в «00 - Прошлые биты» (`flp.keep`)."""
     from . import config, flp
 
     def git(*args: str) -> str:
@@ -2472,7 +2496,7 @@ def gather(kits: Path | None = None, serum: Path | None = None) -> str:
         with (kits / "о бите.txt").open("a", encoding="utf-8") as f:
             f.write(f"\n\n{saved}")
     (kits / ".бит").write_text(_mark(mark, seen, missed), "utf-8")
-    return f"{beat}: {done}" + (", вчерашний проект владельца сохранён рядом" if saved else "")
+    return f"{beat}: {done}" + (f", вчерашний проект владельца сохранён в «{PAST}»" if saved else "")
 
 
 def loop_card(word: str, bpm: int | None = None) -> str:
@@ -2598,7 +2622,7 @@ def _checks() -> None:
         mid(tmp / "a.mid", 156, _track("a", notes))
         assert read_mid(tmp / "a.mid") == (len(flat(notes)),) * 2
         (tmp / "beat").mkdir()
-        one = min(known())                          # любой звук из списка: имена в нём меняет только Мак владельца
+        one = _first()     # любой звук из списка: имена в нём меняет только Мак владельца
         # Пробный бит: 16 тактов, с девятого — другой: клэп с 8 уходит на 4 и 12, хэт и мелодия — другим рисунком;
         # такты 8 и 16 пустые. Высоты — доводами: петлям ниже нужны ноты из их замера. Ноты мелодии встык: музыка утром
         # молчит не дольше `LOUD`, и короткие ноты с паузами браковались бы как пустой бит
@@ -2860,10 +2884,10 @@ def _checks() -> None:
     named = "\n".join(problems(info | {"sounds": {"мелодия": "KITS/такого нет.wav"}}, plain))
     assert "нет в списке" in named and "хэт: партии не назван звук" in named, named
     # Переход: партия без нот — один звук из списка и такты внутри бита строкой fx; неизвестный звук и такт за концом — брак
-    boom = sorted(n for n in known() if n.startswith(("KITS/13 - Afterlife Kit/FX/", "KITS/14 - 300 Subs Kit/FX/")))
+    boom = sorted(n for n in known() if n.startswith(("KITS/Старые киты/13 - Afterlife Kit/FX/", "KITS/Старые киты/14 - 300 Subs Kit/FX/")))
     hop = lambda sound, row: "\n".join(problems(info | {"sounds": {"мелодия": own[0], "подъезд": sound}, "fx": {"мелодия": "нет", "подъезд": row}}, plain))
     assert boom and "подъезд" not in hop(boom[0], "71%, задом наперёд, в тактах 1"), "noty --sounds на Маке: FX наборов 13 и 14"
-    assert "подъезд: звука «KITS/13 - Afterlife Kit/FX/нет.wav» нет в списке" in hop("KITS/13 - Afterlife Kit/FX/нет.wav", "в тактах 1")
+    assert "подъезд: звука «KITS/Старые киты/13 - Afterlife Kit/FX/нет.wav» нет в списке" in hop("KITS/Старые киты/13 - Afterlife Kit/FX/нет.wav", "в тактах 1")
     assert all("подъезд: переходу нужна строка в fx с тактами внутри бита" in hop(boom[0], row) for row in ("в тактах 2", "в тактах 1–2", "в такте 1", ""))
     assert "подъезд: переходу нужен один звук .wav" in hop(boom[:2], "в тактах 1") and "подъезд: переходу" in hop("Serum/x.fxp", "в тактах 1")
     assert "переходу" not in "\n".join(problems(info | {"sounds": {"мелодия": own[0], "переход": boom[0]}}, plain | {"переход": [N(0, 1)]})), \
@@ -2966,7 +2990,7 @@ def _checks() -> None:
     looped = base | dict(bpm=170, sample="s170", scale=sorted({NOTES.index(x) for x in heard[loop]["notes"] + heard[two]["notes"]}),
                           loop=loop, rests=[(8, 9), (12.5, 13)], tonal=["808", "мелодия", "пэд"],
                           switch={"такт": 9, "петля": two, "переход": "такт тишины, вторая петля входит с первой доли"},
-                          sounds=dict.fromkeys(drums, min(known())),
+                          sounds=dict.fromkeys(drums, _first()),
                           fx={"808": "Fruity Fast Dist", "мелодия": "без обработки", "пэд": "без обработки",
                               "петля": "Gross Beat", "петля 2": "Gross Beat"})
     assert problems(looped, drums) == [] and problems(looped | {"bpm": 85, "sample": "s85"}, drums) == [], problems(looped, drums)
@@ -2983,7 +3007,7 @@ def _checks() -> None:
             in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 85"
     for bpm in (172, 84, 98):       # +0,2, −0,2 и +2,5 полутона — перегонка в пределах
         assert "сдвигом высоты" not in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 85"
-    for alien in ("KITS/01 - ASAP Rocky Kit/Loops/Lex Luger - Strings140.wav", loop.replace(LOOPS, "KITS/09 - Scene 2026 Kit")):
+    for alien in ("KITS/Старые киты/01 - ASAP Rocky Kit/Loops/Lex Luger - Strings140.wav", loop.replace(LOOPS, "KITS/Старые киты/09 - Scene 2026 Kit")):
         assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": alien}, drums)), alien
     unheard = next(n for n in sorted(known()) if n.startswith(LOOPS) and loop_bpm(n) and n not in heard)
     assert "не замерена по звуку" in "\n".join(problems(looped | {"loop": unheard}, drums)), unheard
@@ -3020,7 +3044,7 @@ def _checks() -> None:
         assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": bare}, drums)), "петля без темпа в имени"
     # Длинный звук на коротких нотах — строка в записке, а не брак: остинато шестнадцатыми на файле в 6,87 с («Фонарь»,
     # 09.10.2026). Длины в списке нет, звук короче двух секунд, ноты длинные (пэд на такт), 808 и барабаны — молчим
-    drone, pluck = "KITS/13 - Afterlife Kit/Oneshots/Arps - ARP #6 (C5).wav", "KITS/щипок.wav"
+    drone, pluck = "KITS/Старые киты/13 - Afterlife Kit/Oneshots/Arps - ARP #6 (C5).wav", "KITS/щипок.wav"
     tight, wide = [N(i, 1, 60) for i in range(16)], [N(0, 16, 60), N(16, 16, 62), N(32, .5, 64)]
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
         config.BEAT_SOUNDS.write_text(json.dumps({"sounds": [], "lengths": {drone: 6.87, pluck: 1.2}}), encoding="utf-8")
@@ -3049,7 +3073,7 @@ def _checks() -> None:
     for alien in (own[-1], fxp):
         said = "\n".join(problems(base | {"sounds": base["sounds"] | {"мелодия": alien}}, demo()))
         assert f"мелодия: звук «{alien}» — не из одобренных владельцем" in said, said
-    assert problems(base | {"sounds": dict.fromkeys(base["sounds"], own[-1]) | {"мелодия": min(known())}}, demo()) == [], \
+    assert problems(base | {"sounds": dict.fromkeys(base["sounds"], own[-1]) | {"мелодия": _first()}}, demo()) == [], \
         "барабаны и 808 — по общему списку"
     chosen = next(iter(CHOSEN))     # звук, который владелец сам поставил на мелодию: одобрен, и «Bell» в имени — не брак
     assert chosen in known() and problems(base | {"sounds": base["sounds"] | {"мелодия": chosen}}, demo()) == [], \
@@ -3108,7 +3132,7 @@ def _checks() -> None:
         and "скелет «Г»" in "\n".join(problems(looped | {"skeleton": "six speed"}, drums)) \
         and "скелет «Г»" not in "\n".join(problems(looped | {"skeleton": "ровный → Six Speed"}, drums)), "петля под «Six Speed» — брак"
     under = {**demo(), "бочка": [N(n.pos, 1, 60) for n in demo()["808"]]}
-    named = base | {"sounds": dict.fromkeys(under, min(known()))}
+    named = base | {"sounds": dict.fromkeys(under, _first())}
     assert "бочка стоит почти под каждой" in "\n".join(problems(named, under)) \
         and "бочка стоит" not in "\n".join(problems(named | {"order": "барабаны как в X"}, under)), "мерка лидеров — не для заказа"
     # До перелома хэт заказа — рисунок названного трека (здесь ровные шестнадцатые), мерка владельца — после него
@@ -3158,17 +3182,21 @@ def _checks() -> None:
     # прочие петли наборов 13 и 14 мимо, — темп — последнее число имени; второй петли бит на раскладке вправе не называть:
     # после перелома музыку держат партии. Подпись, отметку и долю автора записка называет сама, а в каталог бота велит
     # класть его только с полем loop
-    gay, evil = (f"KITS/14 - 300 Subs Kit/Loops/{n}.wav" for n in ("call at night B MAJOR 135", "DECAY F# PHRY 160"))
+    gay, evil = (f"KITS/Старые киты/14 - 300 Subs Kit/Loops/{n}.wav" for n in ("call at night B MAJOR 135", "DECAY F# PHRY 160"))
     with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(LIBRARY, {"KITS": Path(tmp), "Serum": Path(tmp) / "нет"}):
-        for name in (*SHARED, "KITS/14 - 300 Subs Kit/Loops/abyss C MINOR 132.wav", "KITS/14 - 300 Subs Kit/Loops/TERMS.txt",
-                     "KITS/14 - 300 Subs Kit/Percussion Loops/perc 135.wav", "KITS/13 - Afterlife Kit/Loops/any A MINOR 140.wav"):
+        for name in (*SHARED, "KITS/Старые киты/14 - 300 Subs Kit/Loops/abyss C MINOR 132.wav", "KITS/Старые киты/14 - 300 Subs Kit/Loops/TERMS.txt",
+                     "KITS/Старые киты/14 - 300 Subs Kit/Percussion Loops/perc 135.wav", "KITS/Старые киты/13 - Afterlife Kit/Loops/any A MINOR 140.wav"):
             (Path(tmp) / name.partition("/")[2]).parent.mkdir(parents=True, exist_ok=True)
             (Path(tmp) / name.partition("/")[2]).touch()
         assert library() == sorted(SHARED), f"наборы 13 и 14: из петель в список — только названные в SHARED, а не {library()}"
         for kit in ("13 - Afterlife Kit", "14 - 300 Subs Kit"):     # FX обоих — в списке: условия автора говорят о петлях
-            (Path(tmp) / kit / "FX").mkdir()
-            (Path(tmp) / kit / "FX" / "FX #1.wav").touch()
-        assert [n.split("/", 1)[1] for n in library() if n not in SHARED] == ["13 - Afterlife Kit/FX/FX #1.wav", "14 - 300 Subs Kit/FX/FX #1.wav"]
+            (Path(tmp) / OLD / kit / "FX").mkdir()
+            (Path(tmp) / OLD / kit / "FX" / "FX #1.wav").touch()
+        assert [n.split("/", 1)[1] for n in library() if n not in SHARED] == [f"{OLD}/13 - Afterlife Kit/FX/FX #1.wav", f"{OLD}/14 - 300 Subs Kit/FX/FX #1.wav"]
+        assert [kit_of(n) for n in sorted(SHARED)[:1]] == ["13 - Afterlife Kit"] and kit_of("KITS/15 - Looperman/Loops/x.wav") == "15 - Looperman" \
+            and kit_of("Serum/User/x.fxp") == "User", "набор звука — и в корне KITS, и в «Старые киты»"
+        assert _moved("KITS/14 - 300 Subs Kit/Loops/x.wav") == f"KITS/{OLD}/14 - 300 Subs Kit/Loops/x.wav" \
+            and _moved("KITS/15 - Looperman/a.wav") == "KITS/15 - Looperman/a.wav" == _moved(_moved("KITS/15 - Looperman/a.wav")), "паспорт до переезда"
     assert (loop_bpm(gay), loop_bpm(evil)) == (135, 160) and not loop_bpm(gay.replace("call at night", "abyss")) \
         and set(SHARED) <= known() and all(heard[n]["bars"] == SHARED_BARS for n in SHARED), "темп и замер петель blvckmorphine"
     share = demo(35, (71, 75, 66, 68))
@@ -3188,7 +3216,7 @@ def _checks() -> None:
         return [N(128 + b * 16, 16, k) for b in range(7) for k in bars[b % len(bars)]]
 
     def more(*names):
-        return shared | {"tonal": shared["tonal"] + list(names), "sounds": shared["sounds"] | dict.fromkeys(names, min(known())),
+        return shared | {"tonal": shared["tonal"] + list(names), "sounds": shared["sounds"] | dict.fromkeys(names, _first()),
                          "fx": shared["fx"] | dict.fromkeys(names, "без обработки")}
 
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
@@ -3219,7 +3247,7 @@ def _checks() -> None:
     # Такт баса автора у каждого файла раскладки свой — и в записке, и в дорожке петли; два утра подряд на петлях
     # blvckmorphine — брак сверки с прошлым битом
     morning = shared | {"order": "", "sample": "s135"}
-    bleed = "KITS/14 - 300 Subs Kit/Loops/BLEEDING G# MINOR 147.wav"
+    bleed = "KITS/Старые киты/14 - 300 Subs Kit/Loops/BLEEDING G# MINOR 147.wav"
     assert (SHARED[gay], SHARED[bleed]) == (44, 29) and "такты 45–48 — бас автора" in "\n".join(_loop_note(morning)) \
         and "такты 30–33 — бас автора" in "\n".join(_loop_note(morning | {"loop": bleed, "bpm": 147})), "такт баса — свой у файла"
     # Та же петля в бите на 140: перегнана на +1 полутон, и ноты партий сверяются уже с её сдвинутыми нотами — ноты,
@@ -3312,7 +3340,7 @@ def _checks() -> None:
     said = "\n".join(problems(base, gone))
     assert "808 играет только по одну сторону" in said and "музыка играет только по одну сторону" in said, said
     swap = {**demo(), "хэт": [n for n in demo()["хэт"] if n.pos < 128], "хэт 2": [n for n in demo()["хэт"] if n.pos >= 128]}
-    assert "хэт играет только по одну сторону" in "\n".join(problems(base | {"sounds": dict.fromkeys(swap, min(known()))}, swap)), \
+    assert "хэт играет только по одну сторону" in "\n".join(problems(base | {"sounds": dict.fromkeys(swap, _first())}, swap)), \
         "после перелома другой звук хэта — общего не осталось"
     sibling = next(n for n in sorted(heard) if _riff(n) == _riff(loop) and n != loop)
     assert "тот же риф" in "\n".join(problems(looped | {"switch": looped["switch"] | {"петля": sibling}}, drums)), sibling
@@ -3444,7 +3472,7 @@ def _selftest() -> None:
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SAMPLES", Path(tmp) / "samples.json"), \
             mock.patch.object(config, "BEAT_MUSIC", Path(tmp) / "music.json"):
         config.BEAT_SAMPLES.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
-        config.BEAT_MUSIC.write_text(json.dumps({"sounds": {min(known()): {"kind": "лид", "bright": 2400}, NATIVE + "Another fat saw": {"kind": "лид"}},
+        config.BEAT_MUSIC.write_text(json.dumps({"sounds": {_first(): {"kind": "лид", "bright": 2400}, NATIVE + "Another fat saw": {"kind": "лид"}},
                                                  "loops": {name: {"bpm": loop_bpm(name)} for name in loops()}},
                                                 ensure_ascii=False), encoding="utf-8")
         _checks()

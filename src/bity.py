@@ -852,11 +852,11 @@ def how_project(beat: dict) -> tuple[Path, dict] | None:
     не важны), темп — тоже. Из нескольких копий — та, где больше часов работы (их FL пишет в сам файл): 10.10.2026
     «Фонарь» владелец пересохранил в свою папку битов, а в KITS осталась копия на 46 минут работы раньше."""
     from . import flp
-    from .noty import LIBRARY
+    from .noty import LIBRARY, PAST
 
     kits = LIBRARY["KITS"]
     want = ({name.casefold() for name in beat["artists"]}, beat["title"].casefold())
-    files = [*kits.glob("00 - */*.flp"), *(f for d in (config.PRIVATE / "биты", Path.home() / "FLP", kits.parent / "Projects")
+    files = [*kits.glob("00 - */*.flp"), *kits.glob(f"{PAST}/00 - */*.flp"), *(f for d in (config.PRIVATE / "биты", Path.home() / "FLP", kits.parent / "Projects")
                                           if d.is_dir() for f in d.rglob("*.flp") if "Backup" not in f.parts)]
     found = []
     for f in files:
@@ -904,13 +904,15 @@ def _move(got: dict, i: int, slot: int) -> str:
 
 def _bass(got: dict) -> str:
     """808: звук, набор, если он лежит в своей папке KITS, и сайдчейн от бочки."""
+    from .noty import kit_of
+
     i, kick = _ins(got, "808"), _ins(got, "бочка")
     if i is None:
         return ""
     parts = []
     if ch := next((c for c in got["channels"] if c["insert"] == i and c["kind"] == "сэмплер" and c["sound"]), None):
         path = ch["sound"].replace("\\", "/").split("/")
-        kit = path[path.index("KITS") + 1] if "KITS" in path[:-2] else ""
+        kit = kit_of("/".join(path[path.index("KITS"):])) if "KITS" in path[:-2] else ""
         kit = "" if kit.startswith("00 - ") else re.sub(r"^\d+ - ", "", kit)    # «00 - …» — папка бита, набор не назван
         parts.append(f"«{path[-1].rsplit('.', 1)[0].split(' — ')[-1]}»" + (f" из {kit}" if kit else ""))
     if kick is not None and (kick, i) in got["duck"] and "Fruity Limiter" in got["inserts"][i]["slots"].values():
@@ -972,7 +974,7 @@ def how_send(beat_id: str, dry_run: bool) -> int:
     found = how_project(beat)
     if not found:
         print(f"Проект бита №{beat_id} не нашёл: нужен «{' x '.join(beat['artists'])} — {beat['title']}.flp» "
-              f"в {config.PRIVATE / 'биты'}, KITS/00 - …, ~/FLP или Projects, темп {beat.get('bpm')}.")
+              f"в {config.PRIVATE / 'биты'}, KITS/00 - Прошлые биты, ~/FLP или Projects, темп {beat.get('bpm')}.")
         return 1
     path, got = found
     factory = PRESETS[1].with_name("Generators")   # имя канала-синтезатора — заводской пресет, если такой файл есть
@@ -1063,8 +1065,8 @@ def _how_test() -> None:
         clip = lambda name, at, **kw: {"name": name, "kind": "аудиоклип", "insert": 0, "plugin": "", "sound": f"/KITS/00 - x/{name}.wav", "at": at, **kw}
         return {"bpm": 140.0, "markers": [[1, "вступление"], [33, "перелом"]], "duck": [(2, 1)], "gross": {(5, 1): ("Chaos 5", "Empty")},
                 "channels": [{"name": "808 #1", "kind": "сэмплер", "insert": 1, "plugin": "",
-                              "sound": "%FLStudioUserData%/KITS/13 - Afterlife Kit/808s/808 #1.wav"},
-                             {"name": "бочка", "kind": "сэмплер", "insert": 2, "plugin": "", "sound": "%FLStudioUserData%/KITS/00 - 20261009 Бит/Бочка — Kick #2.wav"},
+                              "sound": "%FLStudioUserData%/KITS/Старые киты/13 - Afterlife Kit/808s/808 #1.wav"},
+                             {"name": "бочка", "kind": "сэмплер", "insert": 2, "plugin": "", "sound": "%FLStudioUserData%/KITS/00 - Прошлые биты/00 - 20261009 Бит/Бочка — Kick #2.wav"},
                              {"name": "Another fat saw", "kind": "плагин", "insert": 3, "plugin": "Sytrus", "sound": None, "preset": "Another fat saw"},
                              clip("FX #9", [(124.0, 128.0)]), clip("Fx #3", [(123.0, 128.0)], back=True),
                              clip("Петля — на весь бит", [(0.0, 400.0)]),
@@ -1089,7 +1091,7 @@ def _how_test() -> None:
     assert how_hook({**bare, "channels": [c for c in bare["channels"] if not c.get("preset")]}) == "808 — «808 #1» из Afterlife Kit"
     assert how_hook({"markers": [], "channels": [], "links": [], "inserts": {}, "duck": [], "patterns": {}}) == ""
     cut = fake()
-    cut["channels"][0]["sound"] = "%FLStudioUserData%/KITS/00 - 20261009 Пыль/808 — 808 #1.wav"        # папка бита: набор не назван
+    cut["channels"][0]["sound"] = "%FLStudioUserData%/KITS/00 - Прошлые биты/00 - 20261009 Пыль/808 — 808 #1.wav"        # папка бита: набор не назван
     assert _bass(cut) == "808 — «808 #1», сайдчейн от бочки в Fruity Limiter", _bass(cut)
     text = how_text("7", beat, how_hook(fake()), True)
     assert text == ("🎚 <b>Секрет бита «Пыль»</b>\nХэт — Gross Beat, ячейка «Chaos 5».\n\nKai Angel x 9mice type beat, 140 BPM, Fm\n"

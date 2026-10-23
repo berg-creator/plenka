@@ -74,10 +74,10 @@ def deck(music: dict, library: set[str], rings=()) -> list[dict]:
     rows += [{"path": n, "kind": "живой звук"} for n in sorted(library) if n.startswith(noty.LIVE + "/") and noty._nfc(n) not in have]
     drums = [n for n in library if noty.kind(n) in ROLES and not (n.startswith(noty.NET + "/") and noty.kind(n) in ("Kicks", "808s"))]
     rows += [{"path": n, "kind": noty.ROLE_WORDS[noty.kind(n)], "role": noty.kind(n)}
-             for n in sorted(drums, key=lambda n: (ROLES.index(noty.kind(n)), n.split("/")[1], n))]
+             for n in sorted(drums, key=lambda n: (ROLES.index(noty.kind(n)), noty.kit_of(n), n))]
     for i, row in enumerate(rows):
         path = row["path"] = noty._nfc(row["path"])
-        row |= {"id": i, "kit": path.split("/")[1] if path.count("/") > 1 else path.split("/")[0],
+        row |= {"id": i, "kit": noty.kit_of(path),
                 "name": path.rsplit("/", 1)[-1], "audio": path.startswith("KITS/") and path.lower().endswith(".wav")}
     return rows
 
@@ -273,10 +273,10 @@ def selftest() -> None:
         (kits / "13 - X Kit" / "Hats" / "Hat 1.wav").write_bytes(b"RIFF-hat")
         music = {"loops": {"KITS/01 - A Kit/Loops/Trap - L(140BPM).wav": {"bpm": 140}},
                  "sounds": {"KITS/13 - X Kit/Oneshots/Lead (C4).wav": {"kind": "лид"}, "Serum/x.fxp": {"kind": "лид"}}}
-        library = {"KITS/13 - X Kit/Hats/Hat 1.wav", "KITS/13 - X Kit/Kicks/Kick 1.wav", "KITS/11 - Сеть Kit/Kicks/Сеть - k.wav",
-                   "KITS/11 - Сеть Kit/Percs/Сеть - p.wav", "KITS/13 - X Kit/Oneshots/Lead (C4).wav",
-                   "KITS/11 - Сеть Kit/Live/Сеть - Whistle (F#7).wav"}
-        fresh = "KITS/11 - Сеть Kit/Loops/Сеть - Keys Am 90 BPM.wav"
+        library = {"KITS/13 - X Kit/Hats/Hat 1.wav", "KITS/13 - X Kit/Kicks/Kick 1.wav", "KITS/Старые киты/11 - Сеть Kit/Kicks/Сеть - k.wav",
+                   "KITS/Старые киты/11 - Сеть Kit/Percs/Сеть - p.wav", "KITS/13 - X Kit/Oneshots/Lead (C4).wav",
+                   "KITS/Старые киты/11 - Сеть Kit/Live/Сеть - Whistle (F#7).wav"}
+        fresh = "KITS/Старые киты/11 - Сеть Kit/Loops/Сеть - Keys Am 90 BPM.wav"
         cards = deck(music, library, {fresh, *music["loops"], "KITS/01 - A Kit/Loops/Trap - M(140BPM).wav"})
         assert [c["kind"] for c in cards] == ["петля", "лид", "лид", "петля", "живой звук", "бочка", "хэт", "перк"], [c["kind"] for c in cards]
         assert cards[4]["audio"] and cards[4]["path"].endswith("(F#7).wav"), "живой звук набора 11 — на странице, звучит"
@@ -323,7 +323,7 @@ def selftest() -> None:
             # Сборка: «мимо» выпадает из музыки, «берём» — в одобренных: барабан, петля и звук музыки
             lead, bad = "KITS/13 - X Kit/Oneshots/Lead (C4).wav", "KITS/13 - X Kit/Oneshots/Pad (C4).wav"
             config.BEAT_MUSIC.write_text(json.dumps({"sounds": {lead: {}, bad: {}}}), encoding="utf-8")
-            ring, keys = "KITS/11 - Сеть Kit/Loops/Keys 90BPM.wav", "KITS/13 - X Kit/Oneshots/Keys (C4).wav"
+            ring, keys = "KITS/Старые киты/11 - Сеть Kit/Loops/Keys 90BPM.wav", "KITS/13 - X Kit/Oneshots/Keys (C4).wav"
             config.BEAT_TAGS.write_text(json.dumps({bad: {"v": "no"}, cards[hat]["path"]: {"v": "yes", "like": [], "mood": []},
                                                     ring: {"v": "yes"}, keys: {"v": "yes"}}), encoding="utf-8")
             with mock.patch.object(noty, "loops", lambda: {ring: {}}):
