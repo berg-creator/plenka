@@ -104,6 +104,10 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 Одобрены они словом владельца, а не прослушкой, поэтому в `data/beat_music.json` их нет: `_palette` пропускает `SHARED`
 сам. Отвергнуто: резать петлю в библиотеку отдельным файлом — библиотека владельца в iCloud, писать в неё сборке
 незачем, а исходный файл со слоями ему самому полезнее целым.
+Петли outofplace (`OUTOFPLACE`, 24.10.2026: «сделай эти киты основными») сделаны наоборот — вырезаны на Маке в WAV минус
+бас автора, как петли банка Glorified: их файлы — MP3 FL Studio без ровной сетки слоёв, раскладкой `SHARED` их не прочесть,
+а MP3 сборка не читает. Условия у них того же рода (подпись, доля 50/50, обязательный тег), их тоже называет `_shared`,
+и правило «не два утра подряд» общее; одобрены они словом владельца — списком в `data/beat_music.json`.
 
 Свой пресет (владелец, 06.10.2026: «использует интернет и собственные пресеты», раньше — «пресеты уникальные
 для меня»). Автор нот звука не слышит и на Мак ничего не кладёт, поэтому пишет в паспорт только данные — поле preset:
@@ -432,9 +436,52 @@ FITTED = ("KITS/06 - Bad Bunny Kit/Loops/Afrobeat - AB_GuitarA110E-01 - как �
 # modify, remix, use, incorporate and otherwise exploit the specified Loops in new and original recordings… without any
 # further obligation (whether payment or otherwise)», раздавать саму петлю нельзя, качать скриптами — тоже: поэтому петля
 # лежит отдельным набором, а не в наборе 11 и не в `data/net_sources.json`. Своих условий у автора нет. Риск: сайт
-# не проверяет, что петля действительно его, — Content ID может прийти от настоящего владельца звука. Только биту по заказу,
-# как `FITTED`; темп — число перед «BPM», перегонка под темп бита (`fit_loop`) — как у любой петли
-LOOPERMAN = ("KITS/15 - Looperman/Loops/Knights Of The Golden Order - DarrenHirst 120 BPM.wav",)
+# не проверяет, что петля действительно его, — Content ID может прийти от настоящего владельца звука.
+# 24.10.2026 владелец добавил ещё шесть из своих загрузок («впредь их и используй (и мелодии и киты)… сделай эти киты
+# основными») — и петли набора берёт утренний бит, а не только заказ. Страницы прочитаны 24.10.2026, своих условий
+# ни у одного автора нет (описания — «Have fun!», «Comment tracks», строй и темп): Heaven Rain — prodbyivn, 406501, 74;
+# Revolving Synth — yymusik, 420005, 114, Fm; Nostalgic Piano Loop — KUR0ZENO, 420313, на странице 140 и 16 тактов —
+# в имени 70: такт петли — два такта бита, и фраза в 16 тактов цела; Sakura Violin и Piano Chords — YOSHI4745, 421486
+# и 421487, 140, Dm; Slow Emotional Piano — ThomT1, 429676, 72 («or 144»): файл короче четырёх тактов на 0,09 с,
+# дополнен тишиной до ровных четырёх — играно без сетки, поэтому растягивать было нечего. Темп — число перед «BPM»
+LOOPERMAN = tuple(f"KITS/15 - Looperman/Loops/{n} BPM.wav" for n in (
+    "Knights Of The Golden Order - DarrenHirst 120", "Heaven Rain - prodbyivn 74", "Revolving Synth - yymusik 114",
+    "Nostalgic Piano Loop - KUR0ZENO 70", "Sakura Violin - YOSHI4745 140", "Piano Chords - YOSHI4745 140",
+    "Slow Emotional Piano - ThomT1 72"))
+# Петли outofplace.cc (наборы 16–18, загрузки владельца 24.10.2026: «впредь их и используй… сделай эти киты основными») —
+# для утреннего бита, как петли blvckmorphine, и на тех же по сути условиях (!TERMS @outofplace.cc.txt в каждом наборе):
+# «You must credit Producers listed», «Tags must be included in all beats (If they have one)», лизы с петлями не продавать,
+# эксклюзив — только договорившись с лупмейкером, продажа бита — «split sales with the loopmaker (50/50)», мейджор — делить
+# паблишинг; «ALL SAMPLES ARE NOT ROYALTY-FREE!». Значение — лупмейкер (как в имени файла) и обязательный тег (файл в Tags
+# набора 18 или пусто): теги лежат только у петель final fantasy, у parad1se их нет.
+# Файлы набора — MP3 FL Studio на 80–230 тактов: петля целиком (40 тактов с вариантами), дальше слои по одному и бас
+# автора один, без раскладки по ровной сетке, как у `SHARED`. Поэтому петля — восемь тактов полной части, вырезанные
+# на Маке в WAV, как у `GLORY`: минус бас автора, лежащий в файле отдельно (задержка LAME — 1105 отсчётов, пик 0,9).
+# Взяты, где остаток баса ниже 120 Гц тише музыки петли на 20 дБ и больше (SAINT — на 34, STAR — на 44, DETOX — на 21);
+# «strike» и «dual» — восемь тактов, где баса нет вовсе. Не взяты: ZAP, FONT, U+ME, SEPTEMBER, contact — бас не вычитается
+# (остаток на уровне музыки), IGORTHIAGO — остаток на 18 дБ ниже, CUTE — 185 и бас в каждом такте. Исходники — рядом,
+# папка «Исходники MP3». Тональность — только замер (`zamer --loops`): буква в имени у Looperman уже врала
+OUTOFPLACE = {f"KITS/{name} BPM.wav": (by, tag) for name, by, tag in (
+    ("16 - outofplace Saint/Loops/1553 SAINT - parad1se 144", "parad1se", ""),
+    ("16 - outofplace Saint/Loops/1543 SONG - parad1se 144", "parad1se", ""),
+    ("16 - outofplace Saint/Loops/1552 DETOX - parad1se 140", "parad1se", ""),
+    ("17 - outofplace Pyramidz/Loops/1508 STAR - parad1se 129", "parad1se", ""),
+    ("17 - outofplace Pyramidz/Loops/1509 PRISON - parad1se 135", "parad1se", ""),
+    ("18 - outofplace Final Fantasy/Loops/patiant - fucknineteen x prodby.xero 136", "fucknineteen x prodby.xero",
+     "nineteen_tag_2022.wav и xero tag (auto).wav"),
+    ("18 - outofplace Final Fantasy/Loops/strike - iwaskosmo x xero 129", "iwaskosmo x prodby.xero",
+     "iwaskosmo_tag_reverb_2024.wav и xero tag (auto).wav"),
+    ("18 - outofplace Final Fantasy/Loops/dual - prodsleepy x prodby.xero 128", "prodsleepy x prodby.xero",
+     "Sleepy Tag.wav и xero tag (auto).wav"))}
+OUTOFPLACE_TAGS = "KITS/18 - outofplace Final Fantasy/Tags"
+# Барабаны и 808 наборов @prodby.xero (19–23, те же загрузки): владелец велел ставить их наравне со своими. Условий у четырёх
+# бесплатных версий нет (в них только купон), у демо Clams Casino — запрет продавать и перевыкладывать сам набор; его папку
+# samples («Samples in the samples folder do not belong to me») на Мак не клали вовсе, как и «ESSDEEKID Deconstructed»
+# набора UK — звуки, вынутые из чужих треков. Папки ролей — как у источников владельца; одиночные звуки — по правилу
+# набора 12, только с нотой замера в скобках (`Oneshots`, 30 из 53), пресеты Serum 2 и чужих плагинов — в «Пресеты», мимо списка
+XERO = tuple(f"KITS/{n}" for n in ("19 - XERO Ken Carson Xperiment", "20 - XERO UK Underground", "21 - XERO Anarchy",
+                                    "22 - XERO Cinematrix Eclipse", "23 - XERO Clams Casino"))
+LISTED += tuple((kit, f"{role}/*.wav") for kit in XERO for role in (*ROLES, "FX")) + tuple((kit, "Oneshots/* (*).wav") for kit in XERO)
 # Синт-петли наборов 07 и 03, которые владелец 17.10.2026 выбрал на слух из прослушки 103 петель: арпеджио B и C
 # из MusicRadar «8-bit bonanza» — каждое всеми 15 копиями (темпы 100–140, тональности A, C, E: с перегонкой ±2 полутона
 # они закрывают темпы образцов) — и Lo-Fi Synth Loop 01 и 04. Оба пака по README наборов — MusicRadar SampleRadar,
@@ -443,8 +490,8 @@ LOOPERMAN = ("KITS/15 - Looperman/Loops/Knights Of The Golden Order - DarrenHirs
 PICKED = (*(f"KITS/07 - Crystal Castles Kit/Loops/8-Bit - CS_FMArp {arp}_{bpm}-{key}.wav"
             for arp in "BC" for bpm in range(100, 141, 10) for key in "ACE"),
           *(f"KITS/03 - SpaceGhostPurrp Kit/Loops/Lo-Fi - Synth Loop {n:02} (130BPM).wav" for n in (1, 4)))
-LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS, *FITTED, *LOOPERMAN, *PICKED))
-LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS, *FITTED, *LOOPERMAN, *PICKED)      # откуда петля вправе быть
+LISTED += tuple((name.rsplit("/", 2)[0], name.split("/", 2)[2]) for name in (*SHARED, *FLIPS, *FITTED, *LOOPERMAN, *OUTOFPLACE, *PICKED))
+LOOP_HOMES = (LOOPS + "/", NET_LOOPS + "/", GLORY_LOOPS + "/", *SHARED, *FLIPS, *FITTED, *LOOPERMAN, *OUTOFPLACE, *PICKED)      # откуда петля вправе быть
 HARMONY = ("аккорд", "пэд", "гитар", "перебор")      # партии, чей регистр занят: второму голосу там не место
 # Переход — звук в пустом такте, аудиоклипом в плейлисте. Владелец 09.10.2026 доделал так утренний «Фонарь»: удары набора 13
 # в тактах 16, 32 и 48, где петля молчит, и подъезд — звук набора 14 задом наперёд, обрезанный границей такта 33; три из
@@ -952,12 +999,12 @@ def loop_bpm(name: str) -> int | None:
     видов, без темпа в имени (аккорды Western Gtr) или это барабаны и бас: у бита они свои. У петли наборов 11 и 12
     (узнаётся по папке, поэтому имя нужно полное) темп — число перед «BPM»: «… Am 140 BPM» — 140, нет его — None.
     У двух петель набора 14 (`SHARED`) — последнее число имени, у петель из столетних записей (`FLIPS`) и гитары из проекта
-    владельца (`FITTED`) и струн с Looperman (`LOOPERMAN`) — как в наборе 11, у петель, выбранных на слух (`PICKED`), —
+    владельца (`FITTED`), петель Looperman (`LOOPERMAN`) и outofplace (`OUTOFPLACE`) — как в наборе 11, у петель, выбранных на слух (`PICKED`), —
     как у видов набора 01."""
     stem = name.rsplit("/", 1)[-1]
     if name in SHARED:
         return int(re.findall(r"\d{2,3}", stem)[-1])
-    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")) or name in FLIPS + FITTED + LOOPERMAN:
+    if name.startswith((NET_LOOPS + "/", GLORY_LOOPS + "/")) or name in FLIPS + FITTED + LOOPERMAN or name in OUTOFPLACE:
         return int(m[1]) if (m := re.search(r"(?<!\d)(\d{2,3})\s*BPM", stem, re.I)) else None
     if name not in PICKED and (not stem.startswith(tuple(f"{k} - " for k in LOOP_KINDS))
                                or re.search(r"Beat(?!\d+_Topline)|Bass|Drum|Whoop|Vocal", stem)):
@@ -1124,8 +1171,6 @@ def _loop(info: dict, tracks: dict[str, list[N]]) -> list[str]:
             out.append(f"{word}: «{name}» — петля, нарезанная из столетней записи под заказ владельца: только биту по заказу (order)")
         elif name in FITTED and not info.get("order"):
             out.append(f"{word}: «{name}» — петля из проекта владельца, подогнанная под его темп: только биту по заказу (order)")
-        elif name in LOOPERMAN and not info.get("order"):
-            out.append(f"{word}: «{name}» — петля с Looperman под заказ владельца: только биту по заказу (order)")
         elif not m:
             out.append(f"{word}: «{name}» не замерена по звуку (не в 1, 2, 4 или 8 тактов или не скачана из iCloud) — "
                        "бери петлю из замера: python3 -m src.noty --loop СЛОВО")
@@ -1776,9 +1821,12 @@ def echoes(info: dict, tracks: dict[str, list[N]], old: dict, old_tracks: dict[s
     out = [f"образец «{info['sample']}» — как в {was}: возьми следующий из data/beat_samples.json"] \
         if info.get("sample") and info["sample"] == old.get("sample") else []
     out += [f"петля «{name}» — как в {was}: возьми другую" for name in _pair(info) if name in _pair(old)]
-    # Петля blvckmorphine — половина дохода автору (владелец, 17.10.2026): не два утра подряд, после неё — петля без условий
-    if not info.get("order") and any(n in SHARED for n in _pair(info)) and any(n in SHARED for n in _pair(old)):
-        out.append(f"петля {SHARED_BY} — и в {was}: два утра подряд нельзя, сегодня петля без условий автора")
+    # Петля blvckmorphine и outofplace — половина дохода автору (владелец, 17.10.2026): не два утра подряд, после неё —
+    # петля без условий
+    if not info.get("order") and any(n in SHARED or n in OUTOFPLACE for n in _pair(info)) \
+            and any(n in SHARED or n in OUTOFPLACE for n in _pair(old)):
+        out.append(f"петля с условиями автора ({SHARED_BY} или outofplace) — и в {was}: два утра подряд нельзя, "
+                   "сегодня петля без условий автора")
     a, b = _lead(tracks), _lead(old_tracks)
     if len(a) > 3 and len(b) > 3:
         def bars(notes):                # рисунок такта: места нот в нём
@@ -1810,12 +1858,23 @@ def _when(rests) -> str:
 
 
 def _shared(info: dict) -> list[str]:
-    """Условия автора петли (`SHARED`, TERMS.txt набора) — строками записки: подпись, отметка, доля. Автор нот о них
-    забудет, а владелец читает записку перед тем, как выложить бит."""
-    if not any(name in SHARED for name in _pair(info)):
-        return []
+    """Условия автора петли (`SHARED`, TERMS.txt набора; `OUTOFPLACE`, !TERMS набора) — строками записки: подпись, отметка,
+    доля, обязательный тег. Автор нот о них забудет, а владелец читает записку перед тем, как выложить бит."""
     from . import config
-    return [f"Петля — {SHARED_BY}, на его условиях. Подпись бита везде, где он выходит: {config.BEAT_CREDIT} x {SHARED_BY}",
+    out = []
+    for name in _pair(info):
+        if name in OUTOFPLACE:
+            by, tag = OUTOFPLACE[name]
+            out += [f"Петля — {by} (набор @outofplace.cc), на условиях набора. Подпись бита везде, где он выходит: "
+                    f"{config.BEAT_CREDIT} x {by}; в каждой публикации — отметка лупмейкера.",
+                    *([f"Тег лупмейкера в бите обязателен: {tag} — в {OUTOFPLACE_TAGS}, вставь в начало бита."] if tag else []),
+                    "Лизы с этой петлёй не продавать; продажа бита — 50/50 с лупмейкером, эксклюзив — только договорившись с ним; "
+                    "релиз на мейджоре — делить паблишинг. Петля не royalty-free.",
+                    f"В каталог бота — только с полем loop: имя лупмейкера в Instagram (в файле — {by.split(' x ')[0]}) в записи "
+                    "бита (data/beats.json): тогда бот называет условия автора петли. Подписью «бит …» в личку бота такой бит не шли.", ""]
+    if not any(name in SHARED for name in _pair(info)):
+        return out
+    return out + [f"Петля — {SHARED_BY}, на его условиях. Подпись бита везде, где он выходит: {config.BEAT_CREDIT} x {SHARED_BY}",
             f"В каждой публикации бита и трека на нём — отметка @{SHARED_BY}.",
             "Половина любого дохода с бита и с трека на нём — автору петли; перед крупным релизом — написать ему.",
             f"В каталог бота — только с полем loop: «{SHARED_BY}» в записи бита (data/beats.json): тогда бот называет условия "
@@ -1844,6 +1903,9 @@ def _loop_note(info: dict) -> list[str]:
     if pair[0] in SHARED:
         out.append("В дорожке — музыка петли без баса её автора: он вычтен, низ ведёт твой 808. Сам файл петли лежит рядом: "
                    f"после первых восьми тактов в нём слои петли по отдельности, такты {SHARED[pair[0]] + 1}–{SHARED[pair[0]] + SHARED_BARS} — бас автора.")
+    if pair[0] in OUTOFPLACE:
+        out.append("Петля — восемь тактов из файла набора без баса её автора (он вычтен), низ ведёт твой 808; опоры замера — без него. "
+                   "Целый файл со слоями и басом автора — в папке «Исходники MP3» набора.")
     out += [f"{'Вторая петля' if i else 'Петля'}: звучат ноты {' '.join(m['notes'])}; опора по её тактам — {' '.join(m['roots'])}; "
             f"тоника, скорее всего, {m['key']}." for i, name in enumerate(pair) if (m := heard.get(name))]
     out.append("Ноты и опоры — замер звука петли, а не буква в имени файла; замер грубый: обертон громкой ноты он считает нотой.")
@@ -3190,12 +3252,24 @@ def _checks() -> None:
     assert all(loop_bpm(n) == 208 and n in known() and heard[n]["bars"] == 4 for n in FITTED), "гитара из проекта: темп и замер"
     assert not any(w in "\n".join(_loop(fit, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "по заказу")), _loop(fit, share)
     assert "из проекта владельца, подогнанная под его темп" in "\n".join(_loop(fit | {"order": ""}, share)), "утром её не берут"
-    # Струны с Looperman (`LOOPERMAN`, заказ на 23.10.2026): темп 120 перед «BPM», в списке, замерены в восемь тактов,
-    # перегонка под темп бита — как у любой петли (134, темп «Palace», — два полутона вверх); берёт их только заказ
-    knight = shared | dict(bpm=134, loop=LOOPERMAN[0], scale=_scale(heard, *LOOPERMAN))
-    assert all(loop_bpm(n) == 120 and n in known() and heard[n]["bars"] == 8 for n in LOOPERMAN), "струны с Looperman: темп и замер"
-    assert not any(w in "\n".join(_loop(knight, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "под заказ")), _loop(knight, share)
-    assert "петля с Looperman под заказ" in "\n".join(_loop(knight | {"order": ""}, share)), "утром их не берут"
+    # Петли Looperman (`LOOPERMAN`; струны — заказ на 23.10.2026, ещё шесть — 24.10.2026): темп — число перед «BPM», в списке,
+    # замерены в четыре или восемь тактов, перегонка под темп бита — как у любой петли (134, темп «Palace», — два полутона
+    # вверх от 120); с 24.10.2026 их берёт и утренний бит
+    knight = shared | dict(bpm=134, loop=LOOPERMAN[0], scale=_scale(heard, LOOPERMAN[0]))
+    assert [loop_bpm(n) for n in LOOPERMAN] == [120, 74, 114, 70, 140, 140, 72] \
+        and all(n in known() and heard[n]["bars"] in (4, 8) for n in LOOPERMAN), "петли Looperman: темп и замер"
+    assert not any(w in "\n".join(_loop(knight, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "заказ")), _loop(knight, share)
+    assert not any(w in "\n".join(_loop(knight | {"order": ""}, share)) for w in ("заказ", "не из разрешённых")), "утром их берут"
+    # Петли outofplace (`OUTOFPLACE`, 24.10.2026): восемь тактов в WAV, темп перед «BPM», в списке и в замере; утренний бит
+    # их берёт, записка называет лупмейкера, долю и обязательный тег, два утра подряд с петлями авторов — брак
+    saint, dual = (next(n for n in OUTOFPLACE if w in n) for w in ("1553 SAINT", "dual"))
+    assert loop_bpm(saint) == 144 and all(n in known() and heard[n]["bars"] == 8 for n in OUTOFPLACE), "петли outofplace: темп и замер"
+    said = "\n".join(_shared(morning | {"loop": saint}))
+    assert f"{config.BEAT_CREDIT} x parad1se" in said and "50/50" in said and "Тег" not in said, said
+    assert "Sleepy Tag.wav и xero tag (auto).wav" in "\n".join(_shared(morning | {"loop": dual})), "тег final fantasy обязателен"
+    assert "два утра подряд нельзя" in "\n".join(echoes(morning | {"loop": saint}, share, morning | {"loop": dual}, share)) \
+        and "два утра подряд нельзя" in "\n".join(echoes(morning | {"loop": saint}, share, morning, share)) \
+        and "два утра подряд" not in "\n".join(echoes(morning | {"loop": saint}, share, looped, drums)), "outofplace — не два утра подряд"
     assert "после перелома играет вторая петля" in "\n".join(problems(looped | {"switch": {"такт": 9, "переход": "x"}}, drums)), \
         "без заказа перелом бита петлёй требует вторую"
     said = about(shared)
