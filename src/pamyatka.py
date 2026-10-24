@@ -29,9 +29,10 @@
 по печатному виду страницы (?docview&page=1&print=1&nd=…&rdk=…): обычный вид длинный документ
 обрывает молча, а печатный отдаёт его целиком и пишет дату, на которую текст действует; поправки,
 ещё не внесённые в текст, ИПС показывает в списке редакций пометкой «не готова» — их читать отдельно.
-Конец поста зовёт в бота: значок и короткая строка, целиком ссылка. Своя строка записи — поле bot,
-метка ссылки — поле start: про бит «free» она ведёт в список битов, про запись голоса — в сведение
-(отдельной проверки голоса в боте нет: замер записи, skleyka.gauge, идёт внутри сведения и человеку
+Пост зовёт в бота: значок и короткая строка, целиком ссылка. Своя строка записи — поле bot,
+метка ссылки — поле start — стоит сразу под простым ответом (владелец 24.10.2026 о записи zamysel: верхний
+короткий текст должен сразу подводить к функции в боте): про бит «free» она ведёт в список битов, про запись
+голоса — в сведение, про «запрет слов» — в «🔎 Проверить текст» (отдельной проверки голоса в боте нет: замер записи, skleyka.gauge, идёт внутри сведения и человеку
 не показывается). Последней строкой каждого поста шаблон ставит призыв CALL — «Лучше пишите ПЛЁНКЕ»
 со ссылкой на раздел в боте (владелец 09.10.2026; с 10.10.2026 — под каждым постом). Команд в тексте поста нет:
 в канале Telegram подсвечивает /команду, а нажатие никуда не ведёт.
@@ -154,25 +155,26 @@ def pending() -> list[dict]:
 TODO = "Что делать. "  # так начинается абзац записи с практическим выводом
 
 
-def _parts(item: dict) -> list[str]:
-    """Запись: вопрос, простой ответ, «Что делать» и цитаты свёрнутым блоком (Telegram раскрывает его нажатием)."""
+def _parts(item: dict, own: str = "") -> list[str]:
+    """Запись: вопрос, простой ответ, под ним своя строка про бота (own), «Что делать» и цитаты свёрнутым
+    блоком (Telegram раскрывает его нажатием)."""
     text = [html.escape(part) for part in item["text"]]
     more = [part for part in text if not part.startswith(TODO)]
     return [f"{ICONS.get(item.get('topic'), ICONS[LAW])} <b>{html.escape(item.get('ask') or item['title'])}</b>",
-            *([html.escape(item["short"])] if item.get("short") else []),
+            *([html.escape(item["short"])] if item.get("short") else []), *([own] if own else []),
             *(f"📌 <b>Что делать</b>\n{part.removeprefix(TODO)}" for part in text if part.startswith(TODO)),
             *([f"<blockquote expandable>📖 <b>Подробнее</b>\n" + "\n\n".join(more) + "</blockquote>"] if more else [])]
 
 
 def build(item: dict) -> dict:
-    """Пост канала: запись, под ней своя строка про бота, если она есть, и последней — призыв CALL в раздел
-    (владелец 10.10.2026: ссылка на сам раздел нужна в каждом посте, а не только там, где нет своей строки)."""
-    base = f"https://t.me/{config.BOT_HANDLE.lstrip('@')}?start="
-    lines = ([(item["bot"], item["start"])] if item.get("bot") else []) + [(CALL, RUBRIC)]
-    calls = [f'{icon} <a href="{base}{start}">{html.escape(words)}</a>'
-             for (icon, _, words), start in ((line.partition(" "), start) for line, start in lines)]
+    """Пост канала: запись, своя строка про бота под простым ответом, если она есть, и последней — призыв CALL
+    в раздел (владелец 10.10.2026: ссылка на сам раздел нужна в каждом посте, а не только там, где нет своей строки)."""
+    def call(line: str, start: str) -> str:
+        icon, _, words = line.partition(" ")
+        return f'{icon} <a href="https://t.me/{config.BOT_HANDLE.lstrip("@")}?start={start}">{html.escape(words)}</a>'
+    own = call(item["bot"], item["start"]) if item.get("bot") else ""
     return {"rubric": RUBRIC, "id": item["id"], "title": item.get("ask") or item["title"],
-            "text": "\n\n".join(_parts(item) + ["\n".join(calls)])}
+            "text": "\n\n".join(_parts(item, own) + [call(CALL, RUBRIC)])}
 
 
 def label(item: dict) -> str:
@@ -217,7 +219,7 @@ def answer(item: dict) -> tuple[str, list[list[dict]]]:
     back = f"{PICK}{topic}.{mine.index(item['id']) // config.PAMYATKA_PAGE}" if topic in TOPICS else HOME
     rows = [[{"text": DOORS[door], "callback_data": f"s:{door}"}]] if item.get("bot") and door in DOORS else []
     rows += [[{"text": TEXT_BUTTON, "callback_data": TEXT_KEY}]] if item["id"] == SLOVA else []
-    return ("\n\n".join(_parts(item) + ([html.escape(item["bot"])] if item.get("bot") else [])),
+    return ("\n\n".join(_parts(item, html.escape(item.get("bot", "")))),
             rows + [[{"text": BACK, "callback_data": back}]])
 
 
@@ -248,6 +250,7 @@ SLOVA = "slova"  # запись базы о «запрете слов»: её т
 # Кнопка: на экране раздела и под записью slova; «s:tekst:ok» — «Подписался», вход уже посчитан (service).
 TEXT_KEY = "s:tekst"
 TEXT_BUTTON = "🔎 Проверить текст"
+DOORS["tekst"] = TEXT_BUTTON  # своя строка записи о запрете (zamysel) зовёт сразу в проверку текста
 TEXT_HEAD = "🔎 <b>ПРОВЕРКА ТЕКСТА</b>"
 # Текст трека — ответом на сообщение с этой меткой, как у ДВОЙНИКА (svedenie.INTRO_MARK): без ответа
 # он ушёл бы в ПРОЯВКУ. Помнить, о чём спросил, боту не нужно — и хранить про человека нечего.
@@ -805,7 +808,9 @@ def _selftest() -> None:
         # Раздел в боте: вопрос влезает в кнопку, её данные — в 64 байта, ответ — без призыва и ссылки.
         reply, keys = answer(item)
         assert 0 < len(item.get("ask") or "") <= 36 and len(f"{PICK}{item['id']}".encode()) <= 64, f"{item['id']}: кнопка"
-        assert reply == text.rsplit("\n\n", 1)[0] + (f"\n\n{html.escape(item['bot'])}" if item.get("bot") else ""), item["id"]
+        assert reply == re.sub(r'<a href="[^"]+">([^<]+)</a>', r"\1", text.rsplit("\n\n", 1)[0]), item["id"]
+        assert not own or text.split("\n\n")[2].endswith(f'?start={item["start"]}">{html.escape(item["bot"].partition(" ")[2])}</a>'), \
+            f"{item['id']}: своя строка — сразу под простым ответом"
         assert telegram.visible_len(reply) <= telegram.MAX_TEXT and keys[-1][0]["text"] == BACK
         assert [key["callback_data"] for row in keys for key in row] == \
             [f"s:{item.get('start', '').partition('_')[0]}"] * bool(item.get("bot")) + [TEXT_KEY] * (item["id"] == SLOVA) + \

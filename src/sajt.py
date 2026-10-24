@@ -798,7 +798,9 @@ def _selftest() -> None:
             assert len(html.unescape(line)) <= pamyatka.LINE_MAX, f"строка в бота длиннее строки телефона: {line}"
             if item["id"] in LAW_ONLY:
                 article = re.search(r"<article[^>]*>(.+)</article>", text, re.S)[1]
-                assert "что делать" not in article.casefold() and not item.get("bot"), f"только текст закона: {item['id']}"
+                # Своя строка у такой записи — только в проверку текста (zamysel): это не совет, а функция бота.
+                assert "что делать" not in article.casefold() and item.get("start", "tekst_").startswith("tekst_"), \
+                    f"только текст закона: {item['id']}"
         article = lambda name: re.search(r"<article[^>]*>(.+)</article>", (out / "pamyatka" / name / "index.html").read_text(), re.S)[1]
         assert "start=bity_sajt" in article("free"), "запись про бит — в биты"
         assert "start=skleyka_sajt" in article("shum"), "запись о голосе — в сведение"
