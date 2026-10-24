@@ -1663,6 +1663,9 @@ def _vkladysh(chat_id: str, track: dict) -> None:
         *([[{"text": "💿 Альбом", "callback_data": _cb("album", track["album"])}]] if track.get("album") else []),
         [{"text": "🔔 Следить за артистом", "callback_data": _cb("watch", who)}],
         [{"text": "🎞 Разбор вкуса", "callback_data": _cb("razbor", who)}],
+        # Артист кидает ссылку на свой трек без /otbor — и получал карточку, думая, что подал заявку
+        # (AXPLORED, 22.10.2026). Кнопка открывает ОТБОР, как в меню; ссылку он присылает ещё раз.
+        [{"text": "🎙 Это мой трек — в ОТБОР", "callback_data": f"{CALLBACK_PREFIX}otbor"}],
     ])
 
 
@@ -2255,7 +2258,7 @@ def _selftest() -> None:
                 handle_callback({"id": "q", "data": _cb("album", code), "from": {"id": 77701},
                                  "message": {"chat": {"id": 55501}, "message_id": 1}}, {})
             assert cards == ["Dirt", "DIRT"] and replies[-1][0] == ALBUM_MISSING, (cards, replies[-1])
-            assert len(replies[-2][1]) == 2, "под карточкой альбома кнопки «Альбом» нет"
+            assert all(row[0]["text"] != "💿 Альбом" for row in replies[-2][1]), "под карточкой альбома кнопки «Альбом» нет"
             cards.clear()
             for n, text in enumerate(("Bones — Dirt", "/start vkladysh", "/vkladysh")):
                 handle_message({"chat": {"id": 55501, "type": "private"}, "from": {"id": 77701},
@@ -2264,6 +2267,7 @@ def _selftest() -> None:
             vkladysh.find, vkladysh.send, vkladysh.album = real_vk
         assert cards == ["Dirt"], cards
         assert replies[-3][0] == VKLADYSH_NEXT and replies[-3][1][1][0]["callback_data"] == _cb("razbor", "Bones")
+        assert replies[-3][1][-1][0]["callback_data"] == f"{CALLBACK_PREFIX}otbor", replies[-3][1]
         assert [text for text, _ in replies[-2:]] == [VKLADYSH] * 2, replies[-2:]
         assert state.read_json(SOURCES_FILE, {})[_today()]["vkladysh"] == 1
         # Имя артиста в посте: /start a_<id> — карточка сразу, «🔔 Следить» ведёт в СЛЕЖУ, метка одна — a.
