@@ -102,6 +102,7 @@ SOURCES = {"yt": "YouTube", "tt": "TikTok", "vk": "ВКонтакте", "chat": 
            # про бит «free» — список битов. Сам раздел и каждую открытую запись считает _memo — подписями
            # pamyatka.OPENED и pamyatka.label, как «БИТ ПЛЁНКИ: выдан».
            pamyatka.RUBRIC: "ПАМЯТКА, ссылка из поста канала", "bity_pamyatka": "БИТЫ, пост ПАМЯТКА",
+           "tekst_pamyatka": "ПРОВЕРКА ТЕКСТА, пост ПАМЯТКА",
            # Открытый сайт бота (src/sajt.py): человек пришёл из поиска. Метка — на раздел, куда ведёт ссылка,
            # слово «сайт» в подписи — общее: --sources | grep сайт.
            "skleyka_sajt": "СВЕДЕНИЕ, сайт", "bity_sajt": "БИТЫ, сайт", "pamyatka_sajt": "ПАМЯТКА, сайт",
@@ -1506,6 +1507,15 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
         if _subscribed(chat_id, user_id, admin, retry="bity"):
             bity.listing(chat_id)
         return False
+    if kind == "menu" and link == "tekst":
+        # ?start=tekst_<место> — сразу «🔎 Проверить текст», как кнопка s:tekst: пост ПАМЯТКИ о запрете
+        # зовёт кинуть текст, а не листать раздел. Переход и вход считаются до проверки подписки.
+        if body in SOURCES:
+            count_source(body)
+        count_source(pamyatka.TEXT_OPENED)
+        if _subscribed(chat_id, user_id, admin, retry="tekst:ok"):
+            telegram.send_message(chat_id, pamyatka.TEXT_ASK, ask=pamyatka.TEXT_HINT)
+        return False
     if kind == "pamyatka" or kind == "menu" and (body == pamyatka.RUBRIC or link == pamyatka.RUBRIC and body in SOURCES):
         # ПАМЯТКА — справочник без модели и без подписки: текст после команды не разбирается.
         # ?start=pamyatka_<место> из SOURCES — тот же вход со своей меткой (сайт — pamyatka_sajt).
@@ -2465,6 +2475,10 @@ def _selftest() -> None:
             say("/start bity_pamyatka", 13)
             assert replies[listed][0] == bity.LIST.format(credit=config.BEAT_CREDIT) and len(replies) == listed + 1
             assert state.read_json(SOURCES_FILE, {})[_today()]["bity_pamyatka"] == 1
+            # Ссылка поста ПАМЯТКИ о запрете — сразу вопрос проверки текста, а не вход раздела.
+            say("/start tekst_pamyatka", 14)
+            assert replies[-1][0] == pamyatka.TEXT_ASK and len(replies) == listed + 2
+            assert state.read_json(SOURCES_FILE, {})[_today()]["tekst_pamyatka"] == 1
             bity.save({})
             say("/bity", 7)
             assert replies[-1] == (bity.EMPTY, [[skleyka.BEAT_BUTTON]])

@@ -510,6 +510,63 @@
   },
   "KITS/23 - XERO Clams Casino/Oneshots/pad 5 (F4).wav": {
    "kind": "пэд"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Acoustic Guitar 4 (A4).wav": {
+   "kind": "гитара"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Acoustic Guitar 5 (A5).wav": {
+   "kind": "гитара"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Bass 26 (E2).wav": {
+   "kind": "бас"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Bass 28 (A2).wav": {
+   "kind": "бас"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Brass 25 (D2).wav": {
+   "kind": "медь"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Cello 7 (D3).wav": {
+   "kind": "струн"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Electric Guitar 6 (D#5).wav": {
+   "kind": "гитара"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/High Spiccato 14 (C5).wav": {
+   "kind": "струн"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/High Violin 13 (C6).wav": {
+   "kind": "струн"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Horn 23 (G2).wav": {
+   "kind": "медь"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Mid Violin 12 (C6).wav": {
+   "kind": "струн"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Piano 1 (F6).wav": {
+   "kind": "пианино"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Piano 2 (F6).wav": {
+   "kind": "пианино"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Piano 3 (C7).wav": {
+   "kind": "пианино"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Strings Pluck 9 (C6).wav": {
+   "kind": "струн"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Synth 17 (C6).wav": {
+   "kind": "синт"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Trumpet 16 (A5).wav": {
+   "kind": "медь"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Violin 10 (C5).wav": {
+   "kind": "струн"
+  },
+  "KITS/24 - threelane Regalia/Oneshots/Violin 11 (C#5).wav": {
+   "kind": "струн"
   }
  },
  "loops": {
@@ -827,6 +884,27 @@
   },
   "KITS/15 - Looperman/Loops/Slow Emotional Piano - ThomT1 72 BPM.wav": {
    "bpm": 72
+  },
+  "KITS/15 - Looperman/Loops/Clams Type Loop Devastate - Giantproductions 145 BPM.wav": {
+   "bpm": 145
+  },
+  "KITS/15 - Looperman/Loops/Clams Type Vocal Chop Synthetic Machinery - Giantproductions 145 BPM.wav": {
+   "bpm": 145
+  },
+  "KITS/15 - Looperman/Loops/Clamscasino Chopped Loop Guardian Angel - Glitchmuzik 110 BPM.wav": {
+   "bpm": 110
+  },
+  "KITS/15 - Looperman/Loops/Drake x Central Cee Type - Landsharkszn 140 BPM.wav": {
+   "bpm": 140
+  },
+  "KITS/15 - Looperman/Loops/M45-xyz Weird Vocal - Xefaxm45 140 BPM.wav": {
+   "bpm": 140
+  },
+  "KITS/15 - Looperman/Loops/Tatar Female Vocal - Cami1ya 70 BPM.wav": {
+   "bpm": 70
+  },
+  "KITS/15 - Looperman/Loops/Vocal Chop Gotta - Deobeats 136 BPM.wav": {
+   "bpm": 136
   }
  },
  "drums": [
@@ -999,6 +1077,187 @@
   "KITS/23 - XERO Clams Casino/Snares/snare + casino (47).wav",
   "KITS/23 - XERO Clams Casino/Snares/snare + casino (59).wav",
   "KITS/23 - XERO Clams Casino/Snares/snare + casino (68).wav",
-  "KITS/23 - XERO Clams Casino/Snares/snare + casino (8).wav"
+  "KITS/23 - XERO Clams Casino/Snares/snare + casino (8).wav",
+  "KITS/24 - threelane Regalia/808s/1. 808 [Must Have] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/10. 808 [Organ] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/11. 808 [Melodic] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/12. 808 [Legend] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/13. 808 [Blackout] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/14. 808 [Heavy] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/15. 808 [Insta] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/16. 808 [Pluggnb] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/17. 808 [Cute] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/18. 808 [Envy] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/19. 808 [Ultra] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/2. 808 [Spinz] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/20. 808 [Arielle] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/21. 808 [Echo] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/22. 808 [Punch] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/23. 808 [Ctm] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/24. 808 [Phantom] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/25. 808 [Pow] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/26. 808 [Zap] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/27. 808 [Electro] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/28. 808 [Phase] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/29. 808 [Snowball] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/3. 808 [Regalia] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/30. 808 [Venom] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/4. 808 [Low] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/5. 808 [Murder] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/6. 808 [Power] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/7. 808 [Style] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/8. 808 [Angels] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/808s/9. 808 [The End] (C) + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/1. Clap [Favorite] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/10. Clap [Useful] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/11. Clap [Kind] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/12. Clap [Regalia] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/13. Clap [2000] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/14. Clap [Echo] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/15. Clap [Trend] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/16. Clap [Dark] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/17. Clap [Snare] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/18. Clap [High] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/19. Clap [Rock] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/2. Clap [Champion] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/20. Clap [Future] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/21. Clap [Pan] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/22. Clap [Soft] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/23. Clap [Gold] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/24. Clap [Down] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/25. Clap [Cam] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/26. Clap [Flap] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/27. Clap [Baby] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/28. Clap [Noise] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/29. Clap [Double] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/3. Clap [Chains] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/30. Clap [Three in One] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/4. Clap [Pluggnb] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/5. Clap [Clock] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/6. Clap [Atmospheric] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/7. Clap [Magic] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/8. Clap [Ambient] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Claps/9. Clap [Hands] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/1. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/10. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/11. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/12. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/13. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/14. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/15. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/16. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/17. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/18. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/19. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/2. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/20. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/21. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/22. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/23. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/24. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/25. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/3. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/4. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/5. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/6. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/7. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/8. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Hats/9. Hi-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/1. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/10. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/11. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/12. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/13. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/14. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/15. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/16. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/17. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/18. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/19. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/2. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/20. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/3. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/4. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/5. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/6. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/7. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/8. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Kicks/9. Kick + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/1. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/10. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/11. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/12. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/13. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/14. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/15. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/16. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/17. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/18. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/19. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/2. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/20. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/3. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/4. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/5. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/6. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/7. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/8. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Open Hats/9. Open-Hat + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/1. Perc [Bell] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/10. Perc [Start] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/11. Perc [Tire] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/12. Perc [Wind] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/13. Perc [Triangle] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/14. Perc [Blade] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/15. Perc [Low Shake] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/16. Perc [Soft Rim] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/17. Perc [Tom] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/18. Perc [Chime] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/2. Perc [Shake] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/21. Perc [Reload] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/23. Perc [Crystal] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/25. Perc [SWAG] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/26. Perc [Whistle] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/27. Perc [Star] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/28. Perc [Zap] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/29. Perc [Wolf] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/3. Perc [Spoons] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/30. Perc [Rocks] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/31. Perc [Pulse] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/32. Perc [Knock] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/33. Perc [Electricity] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/34. Perc [Laser Hit] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/35. Perc [Organic] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/4. Perc [Laser] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/5. Perc [Toy Bullet] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/6. Perc [Rim] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/7. Perc [Drop] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/8. Perc [Magic Bell] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Percs/9. Perc [Coin] + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/1. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/10. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/11. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/12. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/13. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/14. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/15. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/16. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/17. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/18. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/19. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/2. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/20. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/21. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/22. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/23. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/24. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/25. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/3. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/4. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/5. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/6. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/7. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/8. Snare + @threelane!.wav",
+  "KITS/24 - threelane Regalia/Snares/9. Snare + @threelane!.wav"
  ]
 }

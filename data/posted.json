@@ -1343,6 +1343,12 @@
       "file": "dohita-74526042.json",
       "published_at": "2026-10-23T10:00:39+00:00",
       "rubric": "dohita"
+    },
+    {
+      "chat": "channel",
+      "file": "pamyatka-zamysel.json",
+      "published_at": "2026-10-24T11:35:51+00:00",
+      "rubric": "pamyatka"
     }
   ],
   "photos": [
