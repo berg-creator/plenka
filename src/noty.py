@@ -449,11 +449,21 @@ FITTED = ("KITS/Старые киты/06 - Bad Bunny Kit/Loops/Afrobeat - AB_Gui
 # Revolving Synth — yymusik, 420005, 114, Fm; Nostalgic Piano Loop — KUR0ZENO, 420313, на странице 140 и 16 тактов —
 # в имени 70: такт петли — два такта бита, и фраза в 16 тактов цела; Sakura Violin и Piano Chords — YOSHI4745, 421486
 # и 421487, 140, Dm; Slow Emotional Piano — ThomT1, 429676, 72 («or 144»): файл короче четырёх тактов на 0,09 с,
-# дополнен тишиной до ровных четырёх — играно без сетки, поэтому растягивать было нечего. Темп — число перед «BPM»
+# дополнен тишиной до ровных четырёх — играно без сетки, поэтому растягивать было нечего. Темп — число перед «BPM».
+# Днём 24.10.2026 — ещё семь, вокальные (страницы прочитаны в тот же день, в описаниях ни чужого сэмпла, ни условий сверх
+# сайта): M45-xyz — Xefaxm45, 430641, 140, «Chopped my vocals»; Vocal Chop Gotta — Deobeats, 431205, 136, Bm; Tatar Female
+# Vocal — Cami1ya, 431486, 70; Drake x Central Cee Type — Landsharkszn, 433134, 140, Dm; Clams Type Vocal Chop Synthetic
+# Machinery и Clams Type Loop Devastate — Giantproductions, 434196 и 434372, 145; Clamscasino Chopped Loop Guardian Angel —
+# Glitchmuzik, 430629, 110, Dm, «This loop was made by : GlitchMuzik» (трека Clams Casino с таким названием поиск не нашёл).
+# Лежат в наборе, но не в списке: Midsommar Vocal2 (Cami1ya, 431484) — имя называет фильм, и Chill Soul Sample Chop
+# (Herewegon1ko, 426437) — «sample chop», нарезка чужой записи; откуда звук, страницы не говорят
 LOOPERMAN = tuple(f"KITS/15 - Looperman/Loops/{n} BPM.wav" for n in (
     "Knights Of The Golden Order - DarrenHirst 120", "Heaven Rain - prodbyivn 74", "Revolving Synth - yymusik 114",
     "Nostalgic Piano Loop - KUR0ZENO 70", "Sakura Violin - YOSHI4745 140", "Piano Chords - YOSHI4745 140",
-    "Slow Emotional Piano - ThomT1 72"))
+    "Slow Emotional Piano - ThomT1 72", "M45-xyz Weird Vocal - Xefaxm45 140", "Vocal Chop Gotta - Deobeats 136",
+    "Tatar Female Vocal - Cami1ya 70", "Drake x Central Cee Type - Landsharkszn 140",
+    "Clams Type Vocal Chop Synthetic Machinery - Giantproductions 145", "Clams Type Loop Devastate - Giantproductions 145",
+    "Clamscasino Chopped Loop Guardian Angel - Glitchmuzik 110"))
 # Петли outofplace.cc (наборы 16–18, загрузки владельца 24.10.2026: «впредь их и используй… сделай эти киты основными») —
 # для утреннего бита, как петли blvckmorphine, и на тех же по сути условиях (!TERMS @outofplace.cc.txt в каждом наборе):
 # «You must credit Producers listed», «Tags must be included in all beats (If they have one)», лизы с петлями не продавать,
@@ -488,6 +498,31 @@ OUTOFPLACE_TAGS = "KITS/18 - outofplace Final Fantasy/Tags"
 XERO = tuple(f"KITS/{n}" for n in ("19 - XERO Ken Carson Xperiment", "20 - XERO UK Underground", "21 - XERO Anarchy",
                                     "22 - XERO Cinematrix Eclipse", "23 - XERO Clams Casino"))
 LISTED += tuple((kit, f"{role}/*.wav") for kit in XERO for role in (*ROLES, "FX")) + tuple((kit, "Oneshots/* (*).wav") for kit in XERO)
+# Звуки-эффекты XERO Cinematrix (брамы, подъезды, суб-дропы, варгорны…, днём 24.10.2026 — под бит «как саундтрек»): без
+# высоты, им нота замера не нужна, — для перехода и подъезда, как FX. Только WAV: MP3 сборка не читает (удары, «Booms»)
+LISTED += tuple((XERO[3], f"One Shots/{d}/*.wav") for d in (
+    "Abstract Bass Hits & Growls", "Accents", "Bass Drops & Downers", "Braams", "Risers", "Stingers", "Sub Kicks",
+    "Swipes & Swooshes", "Tension Builders", "Transitions", "Warhorns"))
+# Набор 24 — @threelane! «1K Drum Kit (Regalia)», загрузки владельца 24.10.2026 («новые паки тоже для утренних битов»).
+# Условия в наборе одни — «Tag + Terms/loops usage terms!.txt», и они о петлях: «These loops are not royalty-free», продажа
+# бита — 50/50, мейджор — 50/50 и написать автору, подпись «(Prod. YourName & threelane!)» желательна. Петель в списке нет:
+# в архиве одна из пачки («7. … pills», 96 тактов со слоями, бас автора по сетке не вычитается), остальные — в части архива,
+# которой у владельца нет (Google Диск отдал «…-1-001.zip»). Барабаны, 808, FX, подъезды (Risers) и кинематографичные удары
+# (Cinematic) — без условий, как у XERO; одиночные звуки — по правилу набора 12, только с нотой замера (`Oneshots`, 19 из 30;
+# «Vocal» мимо — чей голос, неизвестно). Пять звуков, чьё имя называет чужое произведение (Smeshariki, Mario, Lego, Dune,
+# Minecraft), — в «Мимо списка». Голоса, природа, текстуры и экспериментальные звуки не в списке: откуда они, набор не говорит
+THREELANE = "KITS/24 - threelane Regalia"
+LISTED += tuple((THREELANE, f"{role}/*.wav") for role in (*ROLES, "FX", "Risers", "Cinematic")) + ((THREELANE, "Oneshots/* (*).wav"),)
+# Набор 25 — «Beyond the Stars Free sample pack» (те же загрузки). Условий в паке нет никаких: ни файла, ни строки в тегах,
+# и страницы пака поиск не нашёл, поэтому его звук в бит на раздачу не идёт — кроме ударных VSCO 2 Community Edition
+# (Versilian Studios, CC0: автора называть не нужно; github.com/sgossner/VSCO-2-CE). 205 одиночных ударных пака названы
+# как файлы VSCO, у 23 семейств звук сверен с оригиналом — отсчёты те же (md5 звука), пак лишь дописал теги и обложку;
+# они — в «VSCO Percussion». Ещё 22 с похожими именами (BellTree, BrakeDrum, Guiro, Ratchet, Tumba) в VSCO CE нет — мимо.
+# Оркестр нотами (скрипки, виолончели, медь, флейты, арфа, литавры, колокола), брамы, удары и подъезды — рендер FL Studio 20
+# (тег файлов); из какой библиотеки и на каких условиях, пак не говорит. В барабаны утра VSCO не идёт: это не ударные
+# бита, а литавры, гонг, тарелки — для перехода и партии по названию
+BEYOND = "KITS/25 - Beyond the Stars"
+LISTED += ((BEYOND, "VSCO Percussion/*.wav"),)
 # Синт-петли наборов 07 и 03, которые владелец 17.10.2026 выбрал на слух из прослушки 103 петель: арпеджио B и C
 # из MusicRadar «8-bit bonanza» — каждое всеми 15 копиями (темпы 100–140, тональности A, C, E: с перегонкой ±2 полутона
 # они закрывают темпы образцов) — и Lo-Fi Synth Loop 01 и 04. Оба пака по README наборов — MusicRadar SampleRadar,
@@ -3284,7 +3319,7 @@ def _checks() -> None:
     # замерены в четыре или восемь тактов, перегонка под темп бита — как у любой петли (134, темп «Palace», — два полутона
     # вверх от 120); с 24.10.2026 их берёт и утренний бит
     knight = shared | dict(bpm=134, loop=LOOPERMAN[0], scale=_scale(heard, LOOPERMAN[0]))
-    assert [loop_bpm(n) for n in LOOPERMAN] == [120, 74, 114, 70, 140, 140, 72] \
+    assert [loop_bpm(n) for n in LOOPERMAN] == [120, 74, 114, 70, 140, 140, 72, 140, 136, 70, 140, 145, 145, 110] \
         and all(n in known() and heard[n]["bars"] in (4, 8) for n in LOOPERMAN), "петли Looperman: темп и замер"
     assert not any(w in "\n".join(_loop(knight, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "заказ")), _loop(knight, share)
     assert not any(w in "\n".join(_loop(knight | {"order": ""}, share)) for w in ("заказ", "не из разрешённых")), "утром их берут"
