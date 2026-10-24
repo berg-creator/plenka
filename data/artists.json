@@ -1670,7 +1670,7 @@
       "deezer_id": 2528,
       "itunes_id": 462455,
       "name": "Ghostface Killah",
-      "seen_at": "2026-10-21",
+      "seen_at": "2026-10-24",
       "tags": [],
       "tier": "scene"
     },
@@ -1713,9 +1713,33 @@
       "seen_at": "2026-10-23",
       "tags": [],
       "tier": "auto"
+    },
+    {
+      "deezer_id": 102856132,
+      "itunes_id": 1526056495,
+      "name": "молодой калуга",
+      "seen_at": "2026-10-24",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 8323782,
+      "itunes_id": 829760702,
+      "name": "Westside Gunn",
+      "seen_at": "2026-10-24",
+      "tags": [],
+      "tier": "auto"
+    },
+    {
+      "deezer_id": 104548662,
+      "itunes_id": 192573656,
+      "name": "Pharrell",
+      "seen_at": "2026-10-24",
+      "tags": [],
+      "tier": "scene"
     }
   ],
-  "grown_at": "2026-10-23",
+  "grown_at": "2026-10-24",
   "ids_updated_at": "2026-09-19T07:27:26+00:00",
   "note": "Поля itunes_id / deezer_id / youtube_channel_id заполняет скрипт `python -m src.resolve_ids`. Вручную их вписывать не надо. tier: core — ядро вкуса, scene — смежная сцена, legend — классика и наследие, ru — русский андеграунд, ru_pop — русский мейнстрим (нужен для инфоповодов и юмора, не для рубрики РЕЛИЗ). auto — найденные сами по прессе сцены (`python -m src.newcomers`, раз в сутки после сбора): у них есть seen_at, рэп-пресса переводит их в scene и, замолчав на 90 дней, обратно, полгода тишины выводит из сбора, год — из базы. Закрепить такого руками — поставить свой tier и убрать seen_at.",
   "version": 1
