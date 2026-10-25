@@ -297,7 +297,7 @@ def tags(beat: dict) -> str:
 def about(beat_id: str, beat: dict) -> str:
     """Описание ролика: скачать и свести — в боте (путь через меню, не ссылка), условия, темп, хэштеги."""
     tempo = " · ".join(filter(None, (beat["bpm"] and f"BPM: {beat['bpm']}", beat["key"] and f"Тональность: {beat['key']}")))
-    hashtags = " ".join([*(f"#{re.sub(r'\W', '', name.casefold().replace('ё', 'е'))}typebeat" for name in beat["artists"][:3]),
+    hashtags = " ".join([*(f"#{re.sub(r'\W', '', name.casefold().replace('ё', 'е').replace('a$ap', 'asap'))}typebeat" for name in beat["artists"][:3]),
                          "#typebeat", *(() if beat.get("loop") else ("#freeforprofit",))])
     return ABOUT.format(format=(Path(beat.get("name", "")).suffix.lstrip(".").upper() or "WAV"), bot=config.BOT_HANDLE,
                         terms=_terms(beat, ABOUT_FREE, ABOUT_LOOPED), tempo=tempo + "\n" if tempo else "", hashtags=hashtags)
