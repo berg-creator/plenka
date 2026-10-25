@@ -24,3 +24,4 @@
 {"at": "2026-10-15T21:33:04+00:00", "kind": "taste", "query": "Кща", "matched": false}
 {"at": "2026-10-16T17:28:09+00:00", "kind": "taste", "query": "у меня 51 сек", "matched": false}
 {"at": "2026-10-21T11:15:42+00:00", "kind": "roots", "query": "А можно обложку для трека", "matched": true, "verdict": "ОБЛОЖКА ТОЖЕ ПИШЕТСЯ ПОД МУЗЫКУ"}
+{"at": "2026-10-25T12:09:03+00:00", "kind": "roots", "query": "KUNTEYNIR", "matched": true, "verdict": "ОТКУДА ВЗЯЛСЯ KUNTEYNIR"}
