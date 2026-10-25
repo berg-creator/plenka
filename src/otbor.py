@@ -858,6 +858,19 @@ def week_of(application: dict) -> str:
     return monday
 
 
+def _loud(artist: str) -> str:
+    """Имя в шапке поста: капсом, а @ник из подписи — ссылкой на его Telegram, уже без «@»
+    (владелец, 25.10.2026: «чтобы ник ссылкой был — и самого исполнителя, и фит»)."""
+    return "".join(f'<a href="https://t.me/{part[1:]}">{html.escape(part[1:].upper())}</a>' if NICK.fullmatch(part)
+                   else html.escape(part.upper()) for part in re.split(f"({NICK.pattern})", artist))
+
+
+def _only(url: str) -> str:
+    """Площадка, где трек артиста может лежать один, — её имя; магазин — пусто."""
+    host = urlparse(url).netloc.casefold()
+    return "SoundCloud" if host.endswith("soundcloud.com") else "YouTube" if host.endswith(("youtube.com", "youtu.be")) else ""
+
+
 def build_post(application: dict) -> dict:
     """Пост шаблоном: имя, трек, кто прислал, слова артиста, ссылки. О звуке — ничего.
     У трека на бит недели (week_of) первой строкой метка с названием бита, а в посте — поле week:
@@ -871,7 +884,7 @@ def build_post(application: dict) -> dict:
         beat = bity.load().get(application["beat"], {}).get("title", "")
     parts = [
         *([WEEK_MARK.format(beat=esc(beat))] if week else []),
-        f"<b>{esc(artist.upper())} — «{esc(title.upper())}»</b>",
+        f"<b>{_loud(artist)} — «{esc(title.upper())}»</b>",
         WEEK_SENT if week else "Трек прислал в отбор сам артист.",  # где слушать — строкой publish.track_note
     ]
     if application.get("quote"):
@@ -883,8 +896,13 @@ def build_post(application: dict) -> dict:
     if pages:
         links.append("▸ Артист — " + " · ".join(pages))
     if application.get("url"):
-        # Строку разворачивает в площадки publish.listen — как у поста о релизе.
-        links.append(f'▸ <a href="{esc(application["url"])}">Слушать</a>')
+        if only := _only(application["url"]):
+            # Трек лежит на одной площадке: поиск по остальным, как у релиза, вёл бы в пустоту
+            # (AXPLORED, 25.10.2026 — только SoundCloud). Строку publish.listen не разворачивает.
+            links.append(f'▸ Слушать на <a href="{esc(application["url"])}">{only}</a>')
+        else:
+            # Строку разворачивает в площадки publish.listen — как у поста о релизе.
+            links.append(f'▸ <a href="{esc(application["url"])}">Слушать</a>')
     if links:
         parts.append("\n".join(links))
     if application.get("skleyka"):
@@ -1211,7 +1229,11 @@ def _selftest() -> None:
         callback(2, 2, "quiet")
         assert len(load()["queue"]) == 2 and "quote" not in load()["queue"][1]
         assert load()["queue"][1]["artist"] == "Ghost Tape feat. @kent_nick" and load()["queue"][1]["reel"] is False
-        assert "<b>GHOST TAPE FEAT. @KENT_NICK — «ПОДВАЛ»</b>" in build_post(load()["queue"][1])["text"]
+        ghost = build_post(load()["queue"][1])["text"]
+        assert '<b>GHOST TAPE FEAT. <a href="https://t.me/kent_nick">KENT_NICK</a> — «ПОДВАЛ»</b>' in ghost, ghost
+        # Трек только на SoundCloud: одна его ссылка, без поиска по магазинам, где трека нет.
+        assert '▸ Слушать на <a href="https://soundcloud.com/ghost/tape">SoundCloud</a>' in ghost
+        assert publish.listen(ghost, "Ghost Tape", "Подвал") == ghost
 
         # 3. Файлом без команды: заявка открывается сама, ни ссылки, ни площадки — сразу подпись.
         handle(msg(3, document={"file_id": "DOC", "mime_type": "audio/mpeg"}))
