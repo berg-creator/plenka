@@ -6,8 +6,8 @@
 поэтому каждый артист — подписчик, а его круг, пришедший на пост, — ещё несколько
 (раздел «Третий актив» в GROWTH.md, решение владельца 16.09.2026).
 
-Приём — разговор в личке в три шага: трек, пара слов от артиста, согласие
-на ролик. Трек присылают как удобно — «Артист — Трек», ссылкой или файлом.
+Приём — разговор в личке в три шага: трек, подпись, пара слов от артиста.
+Трек присылают файлом или ссылкой, понимается и «Артист — Трек».
 Из ссылки имя и название бот достаёт сам: у Apple, Deezer и Яндекса — по id
 из адреса, у Spotify — из встраиваемого плеера, у YouTube и SoundCloud —
 по oEmbed. Дальше трек ищется в iTunes и Deezer: оттуда отрывок, обложка
@@ -15,11 +15,23 @@
 Мой блог» разобрался бы в артиста и трек и сошёл бы за выложенный релиз.
 VK и Звук без входа ничего не отдают — человека просят написать «Артист — Трек».
 
-Владелец ничего не проверяет и не утверждает, поэтому все проверки здесь,
-и отказ — одной фразой: подписка, один трек в неделю, артист ещё не известен
-(нет в data/artists.json и мало фанатов на Deezer), трек выложен хоть на одной
-площадке, длительность 1–8 минут, без повторов. Выложенность — не прихоть:
-канал трек не слушает, а площадка его уже приняла.
+Проверки — здесь, отказ — одной фразой: подписка, один трек в неделю, артист ещё
+не известен (нет в data/artists.json и мало фанатов на Deezer), длительность 1–8 минут,
+без повторов. Площадка не нужна (владелец, 25.10.2026: «не надо, чтобы прям на площадках
+это всё было»): за месяц отбор выпустил один пост, а из шести брошенных заявок четыре встали
+на просьбе дать ссылку на выложенный трек — у артиста он лежит файлом или на одном
+SoundCloud. Раньше выложенность заменяла прослушку («площадка трек уже приняла»), теперь
+пост отбора выходит по «✅» владельца (PUBLISH_TARGET=admin) — он и слушает. Канал
+переключат на автопилот — невыложенный трек пойдёт без чьего-либо уха; тогда проверку
+вернуть сюда.
+
+Подпись поста пишет артист (take_name): «Ник — Трек», фит — «Ник feat. Ник — Трек», а @ник
+из Telegram Telegram сам делает ссылкой (владелец, 25.10.2026: AXPLORED попросил дописать
+ник кента, с которым фитанулся). Ссылка и теги файла дают только подсказку — кнопку
+с готовой подписью. @ник не сверяется: чужой ник в подписи заметит владелец до «✅».
+Тем же решением убран шаг согласия на ролик: рутина роликов выключена, а без согласия
+трек в ролик не идёт (reel — всегда ложь). Нет ссылки — нет и обложки, и кадр поста —
+карточка с именем, как у трека из СВЕДЕНИЯ (ниже).
 
 Исключение — трек, сведённый ботом (владелец, 06.10.2026). Кнопка под готовым
 треком СВЕДЕНИЯ вела сюда же, в отбор с площадкой, а человек получил трек минуту
@@ -33,7 +45,7 @@ VK и Звук без входа ничего не отдают — челове
 не подписаться: известное каналу или Deezer имя — отказ. Обложки у такого трека
 нет, а фото по имени было бы лицом тёзки, поэтому кадр поста — карточка с именем
 и названием (card.cover, поле mixed); во ВКонтакте пост не дублируется — слушать
-там было бы нечего. Обычный отбор не изменился: там трек по-прежнему выложен.
+там было бы нечего.
 
 Под треком в комментариях висит анонимный опрос «как вам» (comments.OTBOR_POLL):
 послушал и отметился там же. Выходит каждый, кто прошёл проверки,
@@ -124,26 +136,19 @@ HINT = (
     "Пришли свой трек — он выйдет в канале отдельным постом с твоим именем, "
     "а сам трек встанет под постом.\n\n"
     "Как удобно:\n"
-    "· ссылкой на любую площадку\n"
-    "· текстом <i>Артист — Трек</i>\n"
-    "· файлом\n\n"
+    "· файлом\n"
+    "· ссылкой — SoundCloud, YouTube, любая площадка\n\n"
     "Условия:\n"
-    "· трек твой и уже на площадках\n"
+    "· трек твой — выкладывать на площадки не обязательно\n"
     "· один трек в неделю\n"
     "· в канал — один трек в сутки, по очереди\n\n"
     # Та же строка, что в меню бота (service.MENU): «нужна подписка» читалась как платная.
     f'Всё <b>бесплатно</b> — достаточно подписаться на <a href="https://t.me/{config.CHANNEL_HANDLE.lstrip("@")}">канал</a>.'
 )
-FORMAT = "Не понял, какой трек. Пришли ссылку или напиши <i>Артист — Трек</i>."
-NO_LINK = ("Эту ссылку не разобрал — VK и Звук без входа ничего не отдают. "
-           "Напиши просто <i>Артист — Трек</i>.")
-ASK_LINK = ("Файл принял. Теперь ссылку, где трек уже выложен, или <i>Артист — Трек</i>: "
-            "канал выпускает только то, что вышло на площадке.")
-NOT_FOUND = ("Не нашёл «{name}» ни в Apple Music, ни в Deezer. Пришли ссылку, где трек "
-             "выложен: Spotify, Яндекс, YouTube или SoundCloud.\n\n"
-             "Ещё не выложен и лежит вокалом и битом — сведу: /svedenie")
-NEED_FILE = ("Нашёл «{name}», но площадка не отдаёт даже отрывка — под постом было бы "
-             "нечего слушать. Пришли сам трек файлом: mp3 или m4a до 20 МБ.")
+FORMAT = "Не понял, какой трек. Пришли его файлом — mp3 или m4a."
+NO_LINK = "Эту ссылку не разобрал — VK и Звук без входа ничего не отдают. Пришли трек файлом."
+NEED_FILE = ("Пришли сам трек файлом — mp3 или m4a до 20 МБ: он встанет под постом.\n\n"
+             "Лежит вокалом и битом — сведу: /svedenie")
 TOO_BIG = "Файл больше 20 МБ — Telegram не отдаёт такие ботам. Пришли mp3 полегче."
 BAD_FILE = "Файл не прочитался ({reason}). Пришли другой — mp3 или m4a."
 
@@ -165,8 +170,6 @@ WORDS = (
 )
 BAD_WORDS = ("Так в пост не поставить: нужно 25–160 знаков, без мата, ссылок, @ников "
              "и капса. Перепиши или жми «Без слов».")
-CONSENT = ("Последнее: можно взять трек в ролик канала на YouTube и в TikTok? "
-           "На выход в канал ответ не влияет.")
 ACCEPTED = ("Принято ✅ Ты {place}-й в очереди. В канал выходит один трек в сутки, днём. "
             "Выйдет — пришлю ссылку.")
 # Трек на бит недели места в очереди не называет: он выходит раньше обычных заявок.
@@ -194,21 +197,28 @@ PUBLISHED = "Вышло: {link}\n\nПерешли своим — пусть сл
 # У трека из СВЕДЕНИЯ площадок нет — вкладыша и слов о нём тоже.
 PUBLISHED_CARD = " Ниже — вкладыш трека со всеми площадками: его можно выложить у себя."
 
-# Трек из СВЕДЕНИЯ (mixed): подпись пишет человек — в магазинах трека нет, сверять её не с чем.
+# Подпись пишет человек (take_name): у трека без площадки сверять её не с чем, а фит площадка
+# часто не называет. @ник Telegram сам делает ссылкой.
+NAME_HOW = ("Как подписать? Напиши: <i>Ник — Трек</i>.\n"
+            "С фитом: <i>Ник feat. Ник — Трек</i>. @ник из Telegram станет ссылкой.")
+ASK_NAME = "Трек принял. " + NAME_HOW
+SAME_NAME = "\n\nИли жми кнопку, если подпись верная."
 MIX_NAME = ("Выложу этот трек в канал ПЛЁНКИ: пост с твоим именем, трек под ним.\n\n"
-            "Как подписать? Напиши: <i>Артист — Трек</i>.\n\n"
+            + NAME_HOW + "\n\n"
             "В канал уйдёт именно эта версия. Хочешь поправить звук — сначала поправь, "
             "потом жми «🎙» под новым треком.")
 # Длиннее имя и название не влезают в плеер Telegram (64 знака) и в строку карточки.
 NAME_MAX = 60
-BAD_NAME = (f"Так не подписать. Напиши <i>Артист — Трек</i>: имя и название до {NAME_MAX} знаков, "
-            "без мата, ссылок и @ников.")
+BAD_NAME = (f"Так не подписать. Напиши <i>Ник — Трек</i>: имя и название до {NAME_MAX} знаков, "
+            "без мата и ссылок.")
+# @ник Telegram: буква, дальше буквы, цифры и подчёркивание, всего 5–32 знака.
+NICK = re.compile(r"@[A-Za-z]\w{3,31}")
 MIX_KNOWN = "Имя {artist} уже занято известным артистом. Подпиши иначе — так, чтобы вас не спутали."
 # Советы — те же, что при отказе в ручном сведении (skleyka.TAKE_FLAWS): замер один.
 MIX_FLAWS = ("🎙 В канал эту запись не возьму: дело в записи голоса, а запись сведением не исправить.\n\n"
              "{flaws}\n\n"
              "Перезапиши голос, сведи заново — /svedenie — и жми «🎙» под новым треком.")
-MIX_FAILED = "Не вышло — что-то сломалось у меня. Напиши подпись ещё раз: <i>Артист — Трек</i>."
+MIX_FAILED = "Не вышло — что-то сломалось у меня. Напиши подпись ещё раз: <i>Ник — Трек</i>."
 
 
 def _cb(choice: str) -> str:
@@ -218,8 +228,6 @@ def _cb(choice: str) -> str:
 QUIET_BUTTONS = [[{"text": "Без слов", "callback_data": _cb("quiet")}]]
 # Кнопкой, а не «напиши отмена» (владелец, 16.09.2026); слово по-прежнему работает.
 CANCEL_BUTTONS = [[{"text": "Отмена", "callback_data": _cb("cancel")}]]
-CONSENT_BUTTONS = [[{"text": "Можно", "callback_data": _cb("yes")},
-                    {"text": "Нет", "callback_data": _cb("no")}]]
 
 
 # ─────────────────────────── поиск трека ───────────────────────────
@@ -593,15 +601,24 @@ def mixed(chat_id: str, user_id: str, track_id: str = "", *, admin: bool = False
     telegram.send_message(chat_id, denied or MIX_NAME, buttons=None if denied else CANCEL_BUTTONS)
 
 
+def ask_name(draft: dict) -> tuple[str, list[list[dict]]]:
+    """Просьба подписать трек; подпись со ссылки или из тегов файла — кнопкой «✅ …»."""
+    if not draft.get("artist"):
+        return ASK_NAME, CANCEL_BUTTONS
+    name = f"{draft['artist']} — {draft['title']}"
+    return ASK_NAME + SAME_NAME, [[{"text": f"✅ {name}"[:64], "callback_data": _cb("name")}], *CANCEL_BUTTONS]
+
+
 def take_name(draft: dict, text: str, data: dict, chat_id: str) -> str:
-    """Подпись трека из СВЕДЕНИЯ — «Артист — Трек» словами человека, через фильтр слов о треке
-    (брань, ссылки, @ники). Известное имя — отказ с просьбой подписать своим: площадка за артиста
-    здесь не ручается, и подписаться чужим именем иначе мог бы любой. Заявка при этом открыта —
-    человек пишет подпись заново. Дальше плеер и вопрос о словах, как у трека с площадки.
+    """Подпись трека — «Ник — Трек» словами человека, фит через feat., через фильтр слов о треке
+    (брань, ссылки); @ник Telegram можно. Известное имя — отказ с просьбой подписать своим: площадка
+    за артиста здесь не ручается, и подписаться чужим именем иначе мог бы любой. Заявка при этом
+    открыта — человек пишет подпись заново. Дальше плеер и вопрос о словах.
     """
     text = " ".join(text.split())
     parts = [part.strip() for part in DASH.split(text, maxsplit=1)]
-    if len(parts) != 2 or not all(parts) or max(map(len, parts)) > NAME_MAX or RUDE.search(text) or JUNK.search(text):
+    if len(parts) != 2 or not all(parts) or max(map(len, parts)) > NAME_MAX or RUDE.search(text) \
+            or JUNK.search(NICK.sub("", text)):
         return BAD_NAME
     artist, title = parts
     if known(artist):
@@ -610,12 +627,14 @@ def take_name(draft: dict, text: str, data: dict, chat_id: str) -> str:
         draft["stage"] = "refused"
         return REPEAT
     draft.update(artist=artist, title=title)
-    file_id = draft["file_id"]
+    file_id = draft.get("file_id")
     reply = _player(draft, chat_id)
-    if "file_id" not in draft:
-        # Плеер не вышел, а файл здесь наш, не человека: «пришли другой» сказать некому.
-        draft["file_id"] = file_id
-        return MIX_FAILED
+    if draft["stage"] == "name":  # плеер не вышел
+        if draft.get("skleyka"):
+            # Файл здесь наш, не человека: «пришли другой» сказать некому.
+            draft["file_id"] = file_id
+            return MIX_FAILED
+        draft["stage"] = "track"  # «пришли другой» — следующий файл примет take_track
     return reply
 
 
@@ -647,12 +666,14 @@ def handle(message: dict, *, admin: bool = False) -> None:
     buttons = None
     if draft["stage"] == "words":
         reply, buttons = take_words(draft, text)
-    elif draft["stage"] == "consent":
-        reply, buttons = CONSENT, CONSENT_BUTTONS
-    elif draft["stage"] == "name":
+        if not reply:
+            submit(data, chat_id, user_id, admin=admin)
+            return
+    elif draft["stage"] == "name" and (draft.get("skleyka") or not (track_file(message) or URL.search(text))):
         reply = take_name(draft, text, data, chat_id)
     else:
-        reply = take_track(draft, message, text, data, chat_id)
+        # Новый файл или ссылка вместо подписи — трек заново.
+        reply, buttons = take_track(draft, message, text, data, chat_id)
     if draft["stage"] == "refused":
         data["drafts"].pop(chat_id)
     save(data)
@@ -660,55 +681,51 @@ def handle(message: dict, *, admin: bool = False) -> None:
         telegram.send_message(chat_id, reply, buttons=buttons)
 
 
-def take_track(draft: dict, message: dict, text: str, data: dict, chat_id: str) -> str:
-    """Копит в черновике, что известно о треке, и спрашивает недостающее.
+def take_track(draft: dict, message: dict, text: str, data: dict, chat_id: str) -> tuple[str, list | None]:
+    """Копит в черновике, что известно о треке: файл, если играть нечего, иначе — подпись.
 
-    Ответ — текст человеку; пусто, когда ответом стал плеер с вопросом о словах.
-    Отказ ставит черновику stage=refused, и handle его закрывает.
+    Ответ — текст человеку и кнопки. Отказ ставит черновику stage=refused, и handle его закрывает.
     """
     from .moderate import track_file
 
     file = track_file(message)
     if file:
         if file.get("file_size", 0) > telegram.MAX_DOWNLOAD:
-            return TOO_BIG
+            return TOO_BIG, None
         draft["file_id"] = file["file_id"]
-        # Теги файла — подсказка: нашёлся по ним в магазине — ссылка не нужна.
+        # Теги файла — подсказка подписи; нашёлся по ним в магазине — ещё и ссылка с обложкой.
         tags = message.get("audio") or {}
         if not draft.get("artist") and tags.get("performer") and tags.get("title") and not URL.search(text):
-            draft.update(lookup(tags["performer"], tags["title"]))
+            draft.update(lookup(tags["performer"], tags["title"]) or {"artist": tags["performer"], "title": tags["title"]})
 
     if link := URL.search(text):
         found = by_link(link.group(0))
         if not found:
-            return NO_LINK
+            return NO_LINK, None
         draft.update(found)
     elif len(parts := DASH.split(text, maxsplit=1)) == 2:
         artist, title = (part.strip() for part in parts)
-        found = lookup(artist, title)
-        if not found:
-            return NOT_FOUND.format(name=html.escape(f"{artist} — {title}"))
-        draft.update(found)
+        draft.update(lookup(artist, title) or {"artist": artist, "title": title})
     elif not file:
-        return FORMAT
+        return FORMAT, None
 
-    if not draft.get("artist"):
-        return ASK_LINK
-    name = html.escape(f"{draft['artist']} — {draft['title']}")
-    if not draft.get("published"):
-        return NOT_FOUND.format(name=name)
-
-    track_key = key(draft["artist"], draft["title"])
-    if any(item.get("key") == track_key for item in (*data["queue"], *data["done"])):
+    # Трек с площадки — сразу сверка: известный артист и повтор отказываются до подписи.
+    # Подпись из тегов или слов человека проверит take_name — по ней тегам веры нет.
+    if draft.get("url"):
+        if any(item.get("key") == key(draft["artist"], draft["title"]) for item in (*data["queue"], *data["done"])):
+            draft["stage"] = "refused"
+            return REPEAT, None
+        if denied := known(draft["artist"], draft.get("deezer_artist")):
+            draft["stage"] = "refused"
+            return denied, None
+    # Длина из магазина известна сразу — не просить подпись у трека, который всё равно не возьмём.
+    if draft.get("seconds") and not MIN_SECONDS <= draft["seconds"] <= MAX_SECONDS:
         draft["stage"] = "refused"
-        return REPEAT
-    denied = known(draft["artist"], draft.get("deezer_artist"))
-    if denied:
-        draft["stage"] = "refused"
-        return denied
+        return LENGTH.format(length=_clock(draft["seconds"])), None
     if not (draft.get("file_id") or draft.get("preview")):
-        return NEED_FILE.format(name=name)
-    return _player(draft, chat_id)
+        return NEED_FILE, None
+    draft["stage"] = "name"
+    return ask_name(draft)
 
 
 def _player(draft: dict, chat_id: str) -> str:
@@ -754,8 +771,9 @@ def _audio(draft: dict, work: Path) -> tuple[bytes | str, int, bytes | None]:
     return draft["preview"], draft.get("seconds") or 0, None
 
 
-def take_words(draft: dict, text: str) -> tuple[str, list[list[dict]]]:
-    """Слова артиста о треке — через тот же фильтр, что отзывы YouTube под постом."""
+def take_words(draft: dict, text: str) -> tuple[str, list[list[dict]] | None]:
+    """Слова артиста о треке — через тот же фильтр, что отзывы YouTube под постом.
+    Пусто — слова приняты, заявка подаётся (handle)."""
     pages = {field: found.group(0) for field, (_, pattern) in PAGES.items() if (found := pattern.search(text))}
     for _, pattern in PAGES.values():
         text = pattern.sub("", text)
@@ -766,14 +784,13 @@ def take_words(draft: dict, text: str) -> tuple[str, list[list[dict]]]:
         draft[field] = link if link.startswith("http") else f"https://{link}"
     if words:
         draft["quote"] = words
-    draft["stage"] = "consent"
-    return CONSENT, CONSENT_BUTTONS
+    return "", None
 
 
 def callback(chat_id: str | int, user_id: str | int, choice: str, *, admin: bool = False) -> None:
     """Кнопки отбора: пустой выбор — открыть заявку, mix:<трек> — трек из СВЕДЕНИЯ без площадки
-    (skleyka — та же кнопка до 06.10.2026, без номера трека), cancel — закрыть, quiet — без слов,
-    yes/no — ролик."""
+    (skleyka — та же кнопка до 06.10.2026, без номера трека), cancel — закрыть, name — подпись
+    из подсказки, quiet — без слов. yes/no (согласие на ролик, до 25.10.2026) — «заявка закрыта»."""
     chat_id = str(chat_id)
     if choice == "":
         start(chat_id, user_id, admin=admin)
@@ -788,11 +805,14 @@ def callback(chat_id: str | int, user_id: str | int, choice: str, *, admin: bool
     data = load()
     draft = data["drafts"].get(chat_id)
     if draft and choice == "quiet" and draft["stage"] == "words":
-        draft["stage"] = "consent"
+        submit(data, chat_id, str(user_id), admin=admin)
+    elif draft and choice == "name" and draft["stage"] == "name" and draft.get("artist"):
+        reply = take_name(draft, f"{draft['artist']} — {draft['title']}", data, chat_id)
+        if draft["stage"] == "refused":
+            data["drafts"].pop(chat_id)
         save(data)
-        telegram.send_message(chat_id, CONSENT, buttons=CONSENT_BUTTONS)
-    elif draft and choice in ("yes", "no") and draft["stage"] == "consent":
-        submit(data, chat_id, str(user_id), reel=choice == "yes", admin=admin)
+        if reply:
+            telegram.send_message(chat_id, reply)
     else:
         telegram.send_message(chat_id, CLOSED)
 
@@ -800,13 +820,13 @@ def callback(chat_id: str | int, user_id: str | int, choice: str, *, admin: bool
 FIELDS = ("artist", "title", "url", "cover", "track_file_id", "seconds", "quote", "skleyka", "beat", *PAGES)
 
 
-def submit(data: dict, chat_id: str, user_id: str, *, reel: bool, admin: bool) -> None:
+def submit(data: dict, chat_id: str, user_id: str, *, admin: bool) -> None:
     draft = data["drafts"].pop(chat_id)
     denied = refusal(data, chat_id, user_id, admin=admin, beat=draft.get("beat", ""))
     if not denied:
         data["queue"].append({
             **{field: draft[field] for field in FIELDS if draft.get(field)},
-            "chat": chat_id, "at": state.iso(), "reel": reel, "key": key(draft["artist"], draft["title"]),
+            "chat": chat_id, "at": state.iso(), "reel": False, "key": key(draft["artist"], draft["title"]),
         })
     save(data)
     telegram.send_message(chat_id, denied or (ACCEPTED_WEEK if week_of(data["queue"][-1])
@@ -879,9 +899,9 @@ def build_post(application: dict) -> dict:
         "artist": artist,
         "track": title,
         "cover": application.get("cover", ""),
-        # Сведён ботом и площадки нет (mixed): кадр поста — карточка с именем, а не фото по имени
-        # (card.cover), и во ВКонтакте пост не идёт — слушать там нечего (publish.crosspost_vk).
-        **({"mixed": True} if application.get("skleyka") and not application.get("url") else {}),
+        # Площадки нет (mixed) — сведён ботом или прислан файлом: кадр поста — карточка с именем,
+        # а не фото по имени (card.cover), и во ВКонтакте пост не идёт — слушать там нечего.
+        **({"mixed": True} if not application.get("url") else {}),
         **({"week": week, "kicker": WEEK_KICKER} if week else {}),  # kicker — надпись на карточке (card.cover)
         "full_track_file_id": application.get("track_file_id", ""),
         # Согласие на ролик — в открытый архив: по нему бриф роликов собирает
@@ -1167,12 +1187,12 @@ def _selftest() -> None:
         start(1, 1)
         assert last("1") == HINT
         handle(msg(1, "Nobody Home — Night Drive"))
+        assert last("1") == ASK_NAME + SAME_NAME, said[-3:]
+        callback(1, 1, "name")
         assert played[-1]["audio"] == "https://audio/p.m4a" and "Беру" in last("1"), said[-3:]
         handle(msg(1, "КАПСОМ ОРУ ПРО СВОЙ ТРЕК ЦЕЛЫХ ТРИДЦАТЬ ЗНАКОВ"))
         assert last("1") == BAD_WORDS
         handle(msg(1, "Записал за одну ночь в гараже у друга https://vk.com/nobodyhome t.me/nobodyhome_music"))
-        assert last("1") == CONSENT
-        callback(1, 1, "yes")
         assert last("1").startswith("Принято") and "1-й" in last("1")
         queued = load()["queue"][0]
         assert queued["vk"] == "https://vk.com/nobodyhome" and queued["track_file_id"] == "PLAYER-1"
@@ -1180,20 +1200,32 @@ def _selftest() -> None:
         assert queued["quote"] == "Записал за одну ночь в гараже у друга", queued["quote"]
 
         # 2. Ссылкой, которой нет в магазинах: нужен файл — перезаливается и становится плеером.
+        # Подпись — своя, с фитом и @ником: площадка фита не называла.
         start(2, 2)
         handle(msg(2, "https://soundcloud.com/ghost/tape"))
-        assert "файлом" in last("2")
+        assert last("2") == NEED_FILE
         handle(msg(2, audio={"file_id": "RAW", "file_size": 5 * 2**20}))
+        assert last("2") == ASK_NAME + SAME_NAME
+        handle(msg(2, "Ghost Tape feat. @kent_nick — Подвал"))
         assert played[-1]["audio"] == b"mp3" and played[-1]["seconds"] == 200
         callback(2, 2, "quiet")
-        callback(2, 2, "no")
         assert len(load()["queue"]) == 2 and "quote" not in load()["queue"][1]
+        assert load()["queue"][1]["artist"] == "Ghost Tape feat. @kent_nick" and load()["queue"][1]["reel"] is False
+        assert "<b>GHOST TAPE FEAT. @KENT_NICK — «ПОДВАЛ»</b>" in build_post(load()["queue"][1])["text"]
 
-        # 3. Файлом без команды: заявка открывается сама, дальше просят ссылку.
+        # 3. Файлом без команды: заявка открывается сама, ни ссылки, ни площадки — сразу подпись.
         handle(msg(3, document={"file_id": "DOC", "mime_type": "audio/mpeg"}))
-        assert said[-2] == ("3", HINT) and last("3") == ASK_LINK
+        assert said[-2] == ("3", HINT) and last("3") == ASK_NAME
+        handle(msg(3, "Демо — https://x.ru"))  # ссылка вместо подписи — трек заново, а эту не разобрать
+        assert last("3") == NO_LINK and load()["drafts"]["3"]["stage"] == "name", last("3")
         handle(msg(3, "https://soundcloud.com/ghost/tape"))
         assert last("3") == REPEAT and not active(3), "повтор трека прошёл"
+        handle(msg(3, document={"file_id": "DOC", "mime_type": "audio/mpeg"}))
+        for bad in ("Демо t.me/demo — Трек", "Демо — сука трек", "просто слова"):
+            handle(msg(3, bad))
+            assert last("3") == BAD_NAME and load()["drafts"]["3"]["stage"] == "name", (bad, last("3"))
+        handle(msg(3, "Ghost Tape — Подвал"))
+        assert last("3") == REPEAT and not active(3), "повтор по подписи прошёл"
 
         # Отказы: известный по базе и по фанатам, не выложенный, длина, подписка, неделя.
         store[("Kizaru", "Money")] = {**store[("Nobody Home", "Night Drive")], "artist": "Kizaru", "title": "Money"}
@@ -1208,7 +1240,7 @@ def _selftest() -> None:
             assert last("4").startswith(refusal_start) and not active(4), (text, last("4"))
         start(4, 4)
         handle(msg(4, "Nobody Else — Lost"))
-        assert last("4").startswith("Не нашёл") and active(4), "невыложенный трек прошёл"
+        assert last("4") == NEED_FILE and active(4), "невыложенный трек без файла — просьба файла"
         callback(4, 4, "cancel")
         assert last("4") == CANCELLED and not active(4)
         start(5, 5)
@@ -1257,7 +1289,7 @@ def _selftest() -> None:
         with mock.patch("src.skleyka.song", song), mock.patch("src.skleyka.STALE", "устарело"):
             callback(6, 6, "mix:t6")
             assert last("6") == MIX_NAME and "именно эта версия" in MIX_NAME and load()["drafts"]["6"]["stage"] == "name"
-            for text, reply in (("просто слова", BAD_NAME), ("Лил Пи @lilpi — Рейс", BAD_NAME),
+            for text, reply in (("просто слова", BAD_NAME), ("Лил Пи t.me/lilpi — Рейс", BAD_NAME),
                                 ("Лил Пи — сука любовь", BAD_NAME), (f"Лил Пи — {'я' * (NAME_MAX + 1)}", BAD_NAME),
                                 ("Kizaru — Мой трек", "Имя Kizaru уже занято известным артистом. Подпиши иначе — так, чтобы вас не спутали."),
                                 ("Big Name — Мой трек", "Имя Big Name уже занято известным артистом. Подпиши иначе — так, чтобы вас не спутали.")):
@@ -1267,7 +1299,6 @@ def _selftest() -> None:
             assert reloaded[-1] == "MIX6" and played[-1]["audio"] == b"mp3" and "Беру: <b>Лил Пи — Ночной рейс</b>" in last("6")
             assert (played[-1]["performer"], played[-1]["title"]) == ("Лил Пи", "Ночной рейс")
             callback(6, 6, "quiet")
-            callback(6, 6, "yes")
             sent = load()["queue"][-1]
             assert last("6").startswith("Принято") and sent["skleyka"] and sent["track_file_id"] == "PLAYER-6" \
                 and not {"url", "cover"} & set(sent) and sent["key"] == key("Лил Пи", "Ночной рейс"), sent
@@ -1305,6 +1336,7 @@ def _selftest() -> None:
             f"СВЕДЕНИЕ</a>.\n\nПришли свой — {config.BOT_HANDLE}"), post["text"]
         assert post["mixed"] and not post["cover"] and post["full_track_file_id"] == "PLAYER-6"
         assert "mixed" not in build_post(queued) and "mixed" not in build_post({**queued, "skleyka": True})
+        assert build_post({"artist": "A", "title": "B"})["mixed"], "файл без площадки — карточка, не фото тёзки"
         shown = publish.track_note(publish.listen(post["text"], post["artist"], post["track"]), post)
         assert shown == f"{post['text']}\n\n{publish.TRACK_ALONE}", shown
         # Кадр — карточка с именем: фото по имени было бы лицом тёзки. Во ВКонтакте пост не идёт.
@@ -1372,7 +1404,6 @@ def _selftest() -> None:
             callback(9, 9, "mix:t9")
             handle(msg(9, "Ваня — Гараж"))
             callback(9, 9, "quiet")
-            callback(9, 9, "yes")
             entry = load()["queue"][-1]
             assert entry["beat"] == "3" and last("9") == ACCEPTED_WEEK and week_of(entry) == "2026-09-14", (entry, last("9"))
             post = build_post(entry)
@@ -1397,7 +1428,7 @@ def _selftest() -> None:
             # выходил), но не больше двух в сутки и не чаще раза в три часа.
             clock(17, 10)
             data = load()
-            assert [item["artist"] for item in data["queue"]] == ["Ghost Tape", "Ваня"], data["queue"]
+            assert [item["artist"] for item in data["queue"]] == ["Ghost Tape feat. @kent_nick", "Ваня"], data["queue"]
             data["queue"] += [{**entry, "chat": str(chat), "title": title, "key": key("Ваня", title)}
                               for chat, title in ((10, "Двор"), (11, "Мост"))]
             save(data)
@@ -1506,7 +1537,7 @@ def _selftest() -> None:
         "artist": "Rick Astley", "title": "Never Gonna Give You Up"}
     assert _match("Nobody Home & Ghost", "Night Drive (feat. Ghost) - Single", "nobody home", "Night Drive")
     assert not _match("Nobody Homeless", "Night Drive", "Nobody Home", "Night Drive")
-    print("отбор: три способа прислать, трек из СВЕДЕНИЯ без площадки (брак записи и чужое имя — отказ, старая кнопка — "
+    print("отбор: три способа прислать, файл без площадки — сразу подпись, подпись с фитом и @ником, ссылка и мат в ней — отказ, трек из СВЕДЕНИЯ без площадки (брак записи и чужое имя — отказ, старая кнопка — "
           "последний готовый, «💿» — обычный отбор без метки), отказы, пост шаблоном и без площадок, выход раз в день, "
           "весть и вкладыш артисту; бит недели: метка у трека с битом недели, без неё — чужой бит, прошлая неделя "
           "и заявка после субботы, трек недели раньше обычных — два в сутки и раз в три часа, один трек на бит от человека, итога нет при двух треках и без единого «🔥», "
