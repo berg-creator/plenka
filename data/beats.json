@@ -164,6 +164,9 @@
     "bpm": 134,
     "clip": "BAACAgIAAxkDAAIe_2rd6Mk_BASCOhvVrnk_NFbugxrwAALHqAACgOTxSgU4XAuIbdPVPQQ",
     "file_id": "BQACAgIAAxkDAAIe_mrd6MPUyiBh1HPywh3doZlV34zjAALEqAACgOTxSmU97AZ_lOiMPQQ",
+    "hits": {
+      "menu": 1
+    },
     "key": "Em",
     "kind": "document",
     "message": 7934,
@@ -182,6 +185,7 @@
     "at": "2026-10-26T14:25:13+00:00",
     "bpm": 148,
     "clip": "BAACAgIAAxkDAAIfU2rfZAhuPF2GBdhR0uIENCU4RiRuAAKgqwACgOT5SjvHPGbzWoT_PQQ",
+    "day": "2026-10-30",
     "file_id": "BQACAgIAAxkDAAIfUmrfYskYtYTZo0-2aY2ELGbQXJjrAAKJqwACgOT5SnosflEWNCoPPQQ",
     "key": "Fm",
     "kind": "document",
@@ -191,7 +195,6 @@
     "photo": 11602236,
     "size": 39969002,
     "title": "Сажа",
-    "video": true,
-    "day": "2026-10-30"
+    "video": true
   }
 }
