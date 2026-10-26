@@ -1,0 +1,13 @@
+{
+ "mode": "design",
+ "heroes": {
+  "optimus": {
+   "describe": "A very deep, powerful, resonant male voice of a giant heroic robot leader, speaking Russian with a native Russian accent. Slow, commanding, noble and solemn delivery like an epic movie trailer narrator, with a subtle metallic resonance. Very low pitch, bass-heavy, perfect studio audio quality.",
+   "sample": "Бит, под который удобно думать, что ты... Оптимус Прайм. Автоботы, по машинам! Эта планета под нашей защитой."
+  },
+  "surovyy": {
+   "describe": "An extremely deep, gravelly, rough male voice of a huge menacing monster warrior, speaking Russian with a native Russian accent. Growling and raspy, theatrical and comically over-serious, slow and heavy delivery. Very low pitch, perfect studio audio quality.",
+   "sample": "Бит, под который удобно думать, что ты... Оптимус Прайм. Автоботы, по машинам! Эта планета под нашей защитой."
+  }
+ }
+}

@@ -1,0 +1,20 @@
+name: voices
+# Разовая озвучка ролика: ElevenLabs не пускает адреса Мака даже через VPN, из Actions — пускает.
+# Ветка claude/voices-* живёт только на время ролика, в main не сливается.
+on:
+  push:
+    branches: ["claude/voices-*"]
+jobs:
+  voices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 voices.py voices.json out
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voices
+          path: out
