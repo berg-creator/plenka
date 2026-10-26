@@ -2429,6 +2429,7 @@ def paid(message: dict) -> None:
     data["paid"].setdefault(chat, []).append({"item": item, "charge": charge, "stars": payment.get("total_amount"),
                                               "at": state.iso()})
     save(data)
+    _count(PAY_COUNT["deposit" if item.startswith(DEPOSIT) else "bought"])
     if item.startswith(DEPOSIT):
         _deposited(data, chat, item.removeprefix(DEPOSIT), message.get("from") or {}, charge, payment.get("total_amount"))
         return
@@ -2940,6 +2941,7 @@ def callback(chat_id: str | int, user_id: str | int, subject: str, *, admin: boo
         telegram.send_message(chat_id, INVITE.format(link=link))
         return
     if head == "s":
+        _count(PAY_COUNT["stars"])
         _invoices(chat_id)
         return
     if head == "k":
@@ -3145,9 +3147,11 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
     track = tracks.get(track_id)
     track = track if track and track["chat"] == chat_id else None
     bad, measured = _gauged(track)
+    _count(PAY_COUNT["press"])
     if bad:
         telegram.send_message(chat_id, HAND_NO.format(flaws="\n\n".join(f"• {TAKE_FLAWS[key][1]}" for key in bad)))
         if not track.get("sifted"):
+            _count(PAY_COUNT["flaw"])
             telegram.send_message(config.secret("TELEGRAM_ADMIN_ID"), HAND_SIFTED.format(
                 why=", ".join(TAKE_FLAWS[key][0] for key in bad), who=_client(who, chat_id),
                 track=track_id, take=measured) + f"{QUESTION_TAG}{chat_id}")
@@ -3155,6 +3159,7 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
             save(data)
         return
     if not track:
+        _count(PAY_COUNT["first"])
         telegram.send_message(chat_id, HAND_FIRST, buttons=_examples_keys())
     elif track.get("sale") or _deposit(data, track_id):
         telegram.send_message(chat_id, HAND + HAND_TRACKS)
@@ -3163,6 +3168,10 @@ def _hand(data: dict, chat_id: str, track_id: str, who: dict) -> None:
     elif track.get("refused"):
         telegram.send_message(chat_id, HAND_REFUSED)
     else:
+        if not track.get("billed"):
+            _count(PAY_COUNT["bill"])
+            track["billed"] = state.iso()
+            save(data)
         _bill(chat_id, track_id)
 
 
@@ -4276,6 +4285,13 @@ SWAPPED = ("🔁 Голос перенёс с {old} BPM на {new} BPM, перв
            "Встал не на ту долю — напиши словами, куда подвинуть.\n")
 # Счётчик (service --sources): нажатия и готовые треки после них, только числа по дню.
 BEAT_COUNT = {"find": "СВЕДЕНИЕ: нет бита", "swap": "СВЕДЕНИЕ: чужой бит", "own": "БИТ ПЛЁНКИ"}
+# Счётчик продаж (service --sources | grep -E "ЗВУКОРЕЖИССЁР|ЗВЁЗДЫ"), владелец 26.10.2026: снижать ли цену,
+# решается по тому, сколько дошли до счёта и сколько из них заплатили, а не догадкой. Нажатия считаются все,
+# а счёт задатка и брак записи — раз на трек: повтор нажатия раздувал бы «дошли до счёта». Нажатие без
+# готового трека не дедуплицируется — трека нет, а id людей в счётчик не идут.
+PAY_COUNT = {"press": "ЗВУКОРЕЖИССЁР: нажал «🎧»", "first": "ЗВУКОРЕЖИССЁР: нет готового трека",
+             "flaw": "ЗВУКОРЕЖИССЁР: брак записи", "bill": "ЗВУКОРЕЖИССЁР: счёт задатка",
+             "deposit": "ЗВУКОРЕЖИССЁР: задаток внесён", "stars": "ЗВЁЗДЫ: открыл счета", "bought": "ЗВЁЗДЫ: купили"}
 SAID_BPM = re.compile(r"\b(\d{2,3})\s*bpm\b|\bbpm\W{0,3}(\d{2,3})\b", re.IGNORECASE)
 
 
@@ -6269,6 +6285,11 @@ def _selftest() -> None:
         assert all(part in HAND_DEPOSIT for part in ("задаток — 150 ⭐️", "как 300 ₽", "1200 ₽ за вокал + бит", "2200 ₽ по дорожкам",
                                                      "задаток вернётся", "остаётся за работу", "прямо в Telegram")) \
             and "Напиши ему" not in HAND_DEPOSIT and len(DEPOSIT_TITLE) <= 32 and len(DEPOSIT_ABOUT) <= 255
+        def tally() -> dict:
+            return dict(state.read_json(service.SOURCES_FILE, {}).get(service._today(), {}))
+
+        before = tally()
+        assert before.get(PAY_COUNT["first"]), "нажатие без готового трека считается"
         for _ in range(2):  # нажатие и повтор до оплаты: условия и счёт человеку, владельцу — ничего
             count, calls[:] = len(sent), []
             callback(5, 5, "u", who={"first_name": "Лил", "last_name": "Пи"})
@@ -6276,6 +6297,9 @@ def _selftest() -> None:
                 and "hand" not in load()["tracks"]["t5"], "до задатка заявка владельцу не уходит"
         calls[:] = []
         deposit(5, "t5", "d5", {"first_name": "Лил", "last_name": "Пи"})
+        after = tally()
+        assert [after.get(PAY_COUNT[key], 0) - before.get(PAY_COUNT[key], 0) for key in ("press", "bill", "deposit")] \
+            == [2, 1, 1], "два нажатия до оплаты — два нажатия и один счёт задатка, оплата — одна"
         person, card, lost, line = sent[-4:]
         assert person == DEPOSIT_PAID.format(stars=150) and "@molodyedengi" in person and "придёт сюда" in person
         assert line.startswith(f"🎧 Заказ t5 · {QUESTION_TAG}5\nЗадаток 150 ⭐️ внесён.") \
@@ -6290,6 +6314,7 @@ def _selftest() -> None:
         count, calls[:] = len(sent), []
         deposit(5, "t5", "d5", {"first_name": "Лил"})
         assert len(sent) == count and not calls and len(load()["paid"]["5"]) == 1, "повтор того же платежа молчит"
+        assert tally()[PAY_COUNT["deposit"]] == after[PAY_COUNT["deposit"]], "повтор платежа счётчик не трогает"
         callback(5, 5, "t5:u", who={"username": "lilpi"})
         assert sent[count:] == [HAND + HAND_TRACKS] and not calls \
             and sent[-1].endswith("что хочешь получить, — дорожки у него уже есть."), "нажатие после задатка — владельцу ничего"
