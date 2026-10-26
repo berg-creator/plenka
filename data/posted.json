@@ -1355,6 +1355,12 @@
       "file": "20261025-0904-otbor-371d36a5e875af8b.json",
       "published_at": "2026-10-25T11:35:11+00:00",
       "rubric": "otbor"
+    },
+    {
+      "chat": "channel",
+      "file": "beat-8.json",
+      "published_at": "2026-10-26T12:12:29+00:00",
+      "rubric": "beat"
     }
   ],
   "photos": [
