@@ -1100,8 +1100,11 @@ def today(kits: Path, serum: Path, plan: dict, base: Path = BASE, db: Path = DB,
         # Мягкий клиппер последним слотом, всегда включён, post — заводской или ниже: выше нуля дорожка не выйдет (`_levels`)
         if last and last[0]["key"] == DRIVE[0] and not last[0]["spans"] and len(last[1]) == 8 and int.from_bytes(last[1][4:], "little") <= 128:
             capped.add(i)
+        # В моно — только первая бочка, вход сайдчейна: «бочка 2» — кик-перк, его дробь ходит по ушам, и владелец
+        # в «Испарине» (25.10.2026) снял с неё моно, оставив его у бочки
         inserts[i] = {"name": row if i else None, "plugins": loaded, "to": number.get(bus) if i and bus != row.lower() else None,
-                      "level": LEAD if sung and i == lead else LEVEL.get(kind), "auto": clips, "mono": bool(kind) and "бочк" in row.lower()}
+                      "level": LEAD if sung and i == lead else LEVEL.get(kind), "auto": clips,
+                      "mono": bool(kind) and row.lower() == (kick or "").lower()}
     if kick:                                # бочка идёт своим путём и ещё в дорожку 808 — с уровнем 0, только для компрессора
         inserts[number[kick.lower()]]["duck"] = ducked
     # Состояния эквалайзеров — одним заходом в плагин на весь бит. Не ответил — Pro-Q 4 стоит в слоте без настроек
