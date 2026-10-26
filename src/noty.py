@@ -12,7 +12,11 @@ type beat'ов, приём мелодии — с третьего артиста
 Теперь паспорт называет один ролик полем sample (data/beat_samples.json: ролики type beat'ов с замером src/zamer.py),
 и `_sample` сверяет числом то, что видно в нотах: темп ровно, рисунок хэта, бочки и 808 — рядом с замером образца;
 образец прошлого бита — брак (`echoes`). Музыка — только звуками, которые владелец прослушал и одобрил
-(data/beat_music.json, `_palette`: «звуки все в целом норм»): пресет Serum и звук из сети на музыке — брак.
+(data/beat_music.json, `_palette`: «звуки все в целом норм»).
+С 26.10.2026 утренний бит — только новые наборы (15–25, корень KITS) и плагины FL (`_old`, владелец: «в любом случае
+не используя старые лупы, старые паки, используй новые звуки», «Или используя плагины в FL, там типа Serum»): звук
+«Старых китов» в любой партии и в петле и звук из сети — брак, звук нового набора из списка одобрен его словом, пресет
+Serum и Sytrus на музыке не брак, петля — Looperman или outofplace. Заказ (order) правило не трогает.
 Поля form, melody, twist, color, mix, mood, skeleton и switch больше не обязательны, сверки чередования и день
 свободной смеси убраны; перелом — только когда он есть у образца. Заказ (order) образца не требует.
 Заказ «бит-брат трека» (владелец, 08.10.2026: «собери бит брата» — о треке Платины «НЕО — original mix») образец несёт:
@@ -92,7 +96,7 @@ data/beat_sounds.json (сборка отказывает звуку, котор�
 
 Петля на условиях автора (владелец, 08.10.2026: «берем луп, а так же делаем свою мелодию, чтобы научится этому» — о двух
 любимых петлях набора 14, с которых их автор, blvckmorphine, берёт половину дохода, подпись и отметку). С 17.10.2026
-в списке двенадцать петель наборов 13 и 14 (`SHARED`), и берёт их утренний бит тоже: звук наших типов — синтезаторы
+в списке двенадцать петель наборов 13 и 14 (`SHARED`), и до 26.10.2026 их брал утренний бит тоже (теперь — только заказ, `_old`): звук наших типов — синтезаторы
 и пресеты, а на Маке только Serum 1 и звуки FL, автор нот звука не слышит, — музыку несёт записанная петля. Не два утра
 подряд (`echoes`): каждая — доля автору.
 Файл такой петли — раскладка: петля вместе с басом автора, её слои по отдельности и бас один; дорожка на весь бит
@@ -388,7 +392,7 @@ LISTED += (("KITS/Старые киты/13 - Afterlife Kit", "Oneshots/* (*).wav
 LISTED += tuple((kit, "FX/*.wav") for kit in ("KITS/Старые киты/13 - Afterlife Kit", "KITS/Старые киты/14 - 300 Subs Kit"))
 # Петли blvckmorphine на условиях автора: подпись, отметка и половина дохода. 08.10.2026 владелец взял две — «там 2 моих
 # любимых. выше весёлый, ниже злой», «берем луп, а так же делаем свою мелодию, чтобы научится этому» — для заказа,
-# 17.10.2026 — петли обоих наборов и для утреннего бита: звук наших типов — синтезаторы и пресеты, а на Маке только
+# 17.10.2026 — петли обоих наборов и для утреннего бита (до 26.10.2026: утро теперь — только новые наборы, `_old`): звук наших типов — синтезаторы и пресеты, а на Маке только
 # Serum 1 и звуки FL. Темп — последнее число имени, слова «BPM» в нём нет.
 # Файл — не петля, а раскладка: такты 1–8 — петля в четыре такта дважды вместе с басом автора (он громче музыки на
 # 18–23 дБ), дальше слои по отдельности, потом бас один — с такта, у каждого файла своего. Значение — этот такт, счёт
@@ -456,14 +460,27 @@ FITTED = ("KITS/Старые киты/06 - Bad Bunny Kit/Loops/Afrobeat - AB_Gui
 # Machinery и Clams Type Loop Devastate — Giantproductions, 434196 и 434372, 145; Clamscasino Chopped Loop Guardian Angel —
 # Glitchmuzik, 430629, 110, Dm, «This loop was made by : GlitchMuzik» (трека Clams Casino с таким названием поиск не нашёл).
 # Лежат в наборе, но не в списке: Midsommar Vocal2 (Cami1ya, 431484) — имя называет фильм, и Chill Soul Sample Chop
-# (Herewegon1ko, 426437) — «sample chop», нарезка чужой записи; откуда звук, страницы не говорят
+# (Herewegon1ko, 426437) — «sample chop», нарезка чужой записи; откуда звук, страницы не говорят.
+# 26.10.2026 — ещё восемь из загрузок 25.10 (владелец: «новые лупы с Лупермана. Впредь используй в битах… утренних»),
+# страницы прочитаны в тот же день, условий сверх сайта ни у одной: Imogen Heap X Female Vocals — ripvanwillow, 422988, 150,
+# «I sang into a vocoder then chopped it» — голос автора, имя певицы — только «тип», как Drake x Central Cee; Helio Prod
+# Sconthetrack — ScOnTheTrack, 435222, 167, гитара — на странице 16 тактов, в файле первые восемь: гармония (A# C D C
+# по два такта) сыграна дважды, вторые восемь — тот же ход вживую, и 83,5 в имя не ляжет; Distorted Guitar Strumming
+# With Topline Melody — Pirate123213, 434932, 111, «from an old song I was making»; Emotional Acoustic Guitar — Gioan,
+# 433634, 130; Shaboozey Western Type Loop — SadBeatAlways, 433493, 135; Dreamy Distant Piano — T0mmyy, 423292, 90,
+# «a single preset in omnisphere»; Forever Ambient Cinematic Synth Part 1 — prodbyzhenis, 431517, на странице 140 и
+# 16 тактов — в имени 70, как у Nostalgic Piano; Simple Ethereal Ambient Cinematic Choir — xXMagicDzXx, 424149, 60
 LOOPERMAN = tuple(f"KITS/15 - Looperman/Loops/{n} BPM.wav" for n in (
     "Knights Of The Golden Order - DarrenHirst 120", "Heaven Rain - prodbyivn 74", "Revolving Synth - yymusik 114",
     "Nostalgic Piano Loop - KUR0ZENO 70", "Sakura Violin - YOSHI4745 140", "Piano Chords - YOSHI4745 140",
     "Slow Emotional Piano - ThomT1 72", "M45-xyz Weird Vocal - Xefaxm45 140", "Vocal Chop Gotta - Deobeats 136",
     "Tatar Female Vocal - Cami1ya 70", "Drake x Central Cee Type - Landsharkszn 140",
     "Clams Type Vocal Chop Synthetic Machinery - Giantproductions 145", "Clams Type Loop Devastate - Giantproductions 145",
-    "Clamscasino Chopped Loop Guardian Angel - Glitchmuzik 110"))
+    "Clamscasino Chopped Loop Guardian Angel - Glitchmuzik 110", "Imogen Heap X Female Vocals - ripvanwillow 150",
+    "Helio Prod Sconthetrack - ScOnTheTrack 167", "Distorted Guitar Strumming With Topline Melody - Pirate123213 111",
+    "Emotional Acoustic Guitar - Gioan 130", "Shaboozey Western Type Loop - SadBeatAlways 135",
+    "Dreamy Distant Piano - T0mmyy 90", "Forever Ambient Cinematic Synth Part 1 - prodbyzhenis 70",
+    "Simple Ethereal Ambient Cinematic Choir - xXMagicDzXx 60"))
 # Петли outofplace.cc (наборы 16–18, загрузки владельца 24.10.2026: «впредь их и используй… сделай эти киты основными») —
 # для утреннего бита, как петли blvckmorphine, и на тех же по сути условиях (!TERMS @outofplace.cc.txt в каждом наборе):
 # «You must credit Producers listed», «Tags must be included in all beats (If they have one)», лизы с петлями не продавать,
@@ -879,7 +896,7 @@ def problems(info: dict, tracks: dict[str, list[N]]) -> list[str]:
                 if isinstance(info["preset"], dict)
                 and (part not in tracks or part not in info.get("tonal", ()) or any(w in part for w in SAMPLED))]
     if not info.get("order"):
-        out += _sample(info, tracks) + _palette(info, tracks) + _kit(info) + _dense(info, tracks) + _drums(info, tracks)
+        out += _sample(info, tracks) + _old(info) + _palette(info, tracks) + _kit(info) + _dense(info, tracks) + _drums(info, tracks)
         if (_picked(info) or {}).get("order"):      # утром такой бит спорил бы со словами владельца о «Заело»: «пустовато»
             out.append(f"sample: образец «{info['sample']}» — только для заказа владельца (поле order его записи): "
                        "утренний бит берёт следующий из data/beat_samples.json")
@@ -1718,31 +1735,48 @@ def owned(k: str, drums: set[str] | None = None) -> set[str] | None:
     return mine if len(mine) >= KIT_OWNED else None
 
 
+def fresh(name: str) -> bool:
+    """Звук новых наборов — корня KITS (15 и дальше), а не «Старых китов» (`OLD`)."""
+    return name.startswith("KITS/") and not name.startswith(f"KITS/{OLD}/")
+
+
+def _old(info: dict) -> list[str]:
+    """Утренний бит — только новые наборы и плагины FL (владелец, 26.10.2026: «Только новые драм-киты, которые я скачивал.
+    И новые петли. Либо пиши мелодии сам… Или используя плагины в FL, там типа Serum… в любом случае не используя старые
+    лупы, старые паки, используй новые звуки»). Звук из «Старых китов» в любой партии — барабаны, 808, музыка, переход —
+    и в петле брак; звук из сети (поле net) — тоже: Мак кладёт его в набор 11, а тот среди старых. Заказ (order) сюда
+    не заходит. Отвергнуто: вычистить старое из data/beat_music.json — по нему страница меток показывает звуки, а правило
+    в коде держит и звук, которого в списке нет."""
+    said = "утром только новые наборы 15–25 и плагины FL (владелец, 26.10.2026: «не используя старые лупы, старые паки»)"
+    named = [(part, n) for part, names in (info.get("sounds") or {}).items() for n in _names(names)]
+    out = [f"{part}: «{n}» — из старых наборов (KITS/{OLD}): {said}"
+           for part, n in named + list(zip(("loop", "switch, вторая петля"), _pair(info))) if _nfc(n).startswith(f"KITS/{OLD}/")]
+    return out + ([f"net: звук из сети ложится в набор 11 — он среди старых: {said}"] if info.get("net") else [])
+
+
 def _palette(info: dict, tracks: dict[str, list[N]]) -> list[str]:
     """Музыка утреннего бита — только одобренными звуками (владелец, 07.10.2026: «дело в самих звуках»; 08.10.2026,
-    прослушав 210 звуков: «звуки все в целом норм»). Звук партии с высотой, кроме 808 и баса, и петля — из
-    data/beat_music.json. Пресет Serum, свой пресет (поле preset) и звук по адресу из сети на такой партии — брак:
-    их владелец не слышал. Барабаны и 808 идут по общему списку, заказ (order) сюда не заходит."""
+    прослушав 210 звуков: «звуки все в целом норм»). С 26.10.2026 одобрены его словом и все звуки новых наборов из списка
+    (`fresh`), а пресеты Serum — библиотеки и свой (поле preset) — и Sytrus на музыке не брак: «Или используя плагины в FL,
+    там типа Serum». Петля — только Looperman или outofplace. Метка «мимо» по-прежнему брак. Барабаны и 808 идут
+    по общему списку, старые наборы — `_old`, заказ (order) сюда не заходит."""
     sounds, rings, _ = approved()
-    if not (sounds or rings):
-        return ["data/beat_music.json пуст или не найден: звуки музыки, одобренные владельцем, кладёт Мак — "
-                "без списка утренний бит не собрать"]
+    no = {n for n, t in tags().items() if t.get("v") == "no"}
+    sounds |= {n for n in map(_nfc, known()) if fresh(n)} - no
     music = [name for name in tracks if name in info.get("tonal", ()) and not any(w in name for w in SAMPLED)]
     named = info.get("sounds") or {}
-    out = [f"{part}: звук «{n}» — не из одобренных владельцем (data/beat_music.json): музыка утреннего бита — только из них"
-           for part in music for n in _names(named.get(part, ())) if _nfc(n) not in sounds]
-    # Петли blvckmorphine (`SHARED`) владелец 17.10.2026 взял для утра решением, а не прослушкой: в списке их нет
-    out += [f"loop: петля «{n}» — не из одобренных владельцем (data/beat_music.json, loops) и не из петель {SHARED_BY} (SHARED): "
-            "нет подходящей — музыка нотами" for n in _pair(info) if n not in rings and n not in SHARED]
-    out += [f"{field}, {part}: {word} на музыке — только биту по заказу (order)"
-            for field, word in (("preset", "свой пресет Serum"), ("net", "звук из сети"))
-            for part in (info.get(field) if isinstance(info.get(field), dict) else ()) if part in music]
+    out = [f"{part}: звук «{n}» — не из одобренных владельцем (data/beat_music.json) и не из новых наборов: "
+           "музыка утреннего бита — звуки новых наборов, Serum или Sytrus"
+           for part in music for n in map(_nfc, _names(named.get(part, ()))) if n in no or n not in sounds and not n.startswith(("Serum/", NATIVE))]
+    out += [f"loop: петля «{n}» — утром только петли Looperman или outofplace (владелец, 26.10.2026: «Лучше, конечно, на петлях»): "
+            "нет подходящей — музыка нотами" for n in _pair(info)
+            if not n.startswith(f"KITS/{OLD}/") and (_nfc(n) in no or (n not in LOOPERMAN and n not in OUTOFPLACE))]
     return out
 
 
 def _first() -> str:
-    """Любой звук списка для селфтестов — тот же, что до 24.10.2026: первый из старых наборов, а не петля нового набора."""
-    return min(n for n in known() if n.startswith(f"KITS/{OLD}/"))
+    """Любой звук списка для селфтестов: с 26.10.2026 — первый клэп новых наборов, как до того первый клэп старых (`_old`)."""
+    return min(n for n in known() if fresh(n) and "/Claps/" in n)
 
 
 def kit_of(name: str) -> str:
@@ -2919,13 +2953,16 @@ def _checks() -> None:
     named = "\n".join(problems(info | {"sounds": {"мелодия": "KITS/такого нет.wav"}}, plain))
     assert "нет в списке" in named and "хэт: партии не назван звук" in named, named
     # Переход: партия без нот — один звук из списка и такты внутри бита строкой fx; неизвестный звук и такт за концом — брак
-    boom = sorted(n for n in known() if n.startswith(("KITS/Старые киты/13 - Afterlife Kit/FX/", "KITS/Старые киты/14 - 300 Subs Kit/FX/")))
-    hop = lambda sound, row: "\n".join(problems(info | {"sounds": {"мелодия": own[0], "подъезд": sound}, "fx": {"мелодия": "нет", "подъезд": row}}, plain))
-    assert boom and "подъезд" not in hop(boom[0], "71%, задом наперёд, в тактах 1"), "noty --sounds на Маке: FX наборов 13 и 14"
-    assert "подъезд: звука «KITS/Старые киты/13 - Afterlife Kit/FX/нет.wav» нет в списке" in hop("KITS/Старые киты/13 - Afterlife Kit/FX/нет.wav", "в тактах 1")
+    # С 26.10.2026 утром только новые наборы (`_old`): переход — FX набора 24, а не наборов 13 и 14
+    boom = sorted(n for n in known() if n.startswith(f"{THREELANE}/FX/"))
+    hop = lambda sound, row: "\n".join(problems(info | {"sounds": {"мелодия": _first(), "подъезд": sound}, "fx": {"мелодия": "нет", "подъезд": row}}, plain))
+    assert boom and "подъезд" not in hop(boom[0], "71%, задом наперёд, в тактах 1"), "noty --sounds на Маке: FX набора 24"
+    assert "подъезд: звука «KITS/24 - threelane Regalia/FX/нет.wav» нет в списке" in hop("KITS/24 - threelane Regalia/FX/нет.wav", "в тактах 1")
+    old = sorted(n for n in known() if n.startswith(("KITS/Старые киты/13 - Afterlife Kit/FX/", "KITS/Старые киты/14 - 300 Subs Kit/FX/")))
+    assert old and "подъезд: «" + old[0] + "» — из старых наборов" in hop(old[0], "в тактах 1"), "FX старых наборов утром — брак"
     assert all("подъезд: переходу нужна строка в fx с тактами внутри бита" in hop(boom[0], row) for row in ("в тактах 2", "в тактах 1–2", "в такте 1", ""))
     assert "подъезд: переходу нужен один звук .wav" in hop(boom[:2], "в тактах 1") and "подъезд: переходу" in hop("Serum/x.fxp", "в тактах 1")
-    assert "переходу" not in "\n".join(problems(info | {"sounds": {"мелодия": own[0], "переход": boom[0]}}, plain | {"переход": [N(0, 1)]})), \
+    assert "переходу" not in "\n".join(problems(info | {"sounds": {"мелодия": _first(), "переход": boom[0]}}, plain | {"переход": [N(0, 1)]})), \
         "партия с нотами — обычная партия, как бы её ни звали"
     # Свой пресет Serum: сборка проверяет форму поля без звука — основа из списка, ручки из известных, доли в пределах
     from .serum import _dec, _enc, flaws, pack, unpack
@@ -3012,7 +3049,9 @@ def _checks() -> None:
     assert today.get("bars") == 4 and len(today["roots"]) == 4 and {"A", "B", "F#", "G#"} <= set(today["notes"]), \
         "в data/beat_sounds.json нет замера петель: на Маке — zamer --loops"
     assert not any("RevRev85" in n for n in heard), "петля в два с половиной такта в замер не идёт"
-    fit = sorted(n for n, m in heard.items() if n in known() and loop_bpm(n) == 85 and LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1])
+    # С 26.10.2026 утром только петли новых наборов (`_old`, `_palette`): пара — петли Looperman на 70, а не набора 01 на 85
+    fit = sorted(n for n, m in heard.items() if n in LOOPERMAN and n in known() and loop_bpm(n) == 70
+                 and LOOP_NOTES[0] <= len(m["notes"]) <= LOOP_NOTES[1])
     loop, two = next((a, b) for a in fit for b in fit if _riff(a) != _riff(b)
                      and len(set(heard[a]["notes"]) & set(heard[b]["notes"])) >= LOOP_COMMON
                      and (heard[a]["notes"], heard[a]["roots"]) != (heard[b]["notes"], heard[b]["roots"]))
@@ -3022,27 +3061,27 @@ def _checks() -> None:
     drums = demo(24 + pcs[0], keys)
     # тело под петлёй: у утреннего бита на петле своих партий от двух (`_dense`); такты 8 и 16 молчат, как мелодия
     drums["пэд"] = [N(x * 16, 16, 48 + pcs[0]) for x in range(16) if x % 8 != 7]
-    looped = base | dict(bpm=170, sample="s170", scale=sorted({NOTES.index(x) for x in heard[loop]["notes"] + heard[two]["notes"]}),
+    looped = base | dict(bpm=140, sample="s140", scale=sorted({NOTES.index(x) for x in heard[loop]["notes"] + heard[two]["notes"]}),
                           loop=loop, rests=[(8, 9), (12.5, 13)], tonal=["808", "мелодия", "пэд"],
                           switch={"такт": 9, "петля": two, "переход": "такт тишины, вторая петля входит с первой доли"},
                           sounds=dict.fromkeys(drums, _first()),
                           fx={"808": "Fruity Fast Dist", "мелодия": "без обработки", "пэд": "без обработки",
                               "петля": "Gross Beat", "петля 2": "Gross Beat"})
-    assert problems(looped, drums) == [] and problems(looped | {"bpm": 85, "sample": "s85"}, drums) == [], problems(looped, drums)
+    assert problems(looped, drums) == [] and problems(looped | {"bpm": 70, "sample": "s70"}, drums) == [], problems(looped, drums)
     solo = {k: v for k, v in looped.items() if k != "switch"}              # перелома у образца нет — петля одна на весь бит
     assert problems(solo, drums) == [] and "Перелом" not in about(solo) and "Вторая петля" not in about(solo), problems(solo, drums)
     note = about(looped)
-    assert "Петля: 85 → 170, такт петли — два такта бита, без перегонки." in note and f"• петля — {loop}" in note \
+    assert "Петля: 70 → 140, такт петли — два такта бита, без перегонки." in note and f"• петля — {loop}" in note \
         and f"• петля 2 — {two}" in note and "Петля молчит: такт 8, с 12.5 до 13" in note and "Перелом: с такта 9" in note, note
     assert f"Петля: звучат ноты {' '.join(heard[loop]['notes'])}; опора по её тактам — {' '.join(heard[loop]['roots'])}" in note \
         and "Вторая петля: звучат ноты" in note and "на слух не сверена" not in note, note
     assert _sounds(looped)["петля 2"] == two and "вторая половина" not in _when([(1, 5)]) and _when([(1, 5), (16, 17)]) == "такты 1–4, такт 16"
-    for bpm in (140, 60):           # петля на 85: 140 — это 170 на −3 полутона, 60 — 85 на −6
-        assert "сдвигом высоты не больше 2 полутонов: ей годится темп бита 74–98 или вдвое быстрее, 148–196" \
-            in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 85"
-    for bpm in (172, 84, 98):       # +0,2, −0,2 и +2,5 полутона — перегонка в пределах
-        assert "сдвигом высоты" not in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 85"
-    for alien in ("KITS/Старые киты/01 - ASAP Rocky Kit/Loops/Lex Luger - Strings140.wav", loop.replace(LOOPS, "KITS/Старые киты/09 - Scene 2026 Kit")):
+    for bpm in (115, 50):           # петля на 70: 115 — это 140 на −3,4 полутона, 50 — 70 на −5,8
+        assert "сдвигом высоты не больше 2 полутонов: ей годится темп бита 61–80 или вдвое быстрее, 122–161" \
+            in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 70"
+    for bpm in (142, 69, 80):       # +0,2, −0,2 и +2,3 полутона — перегонка в пределах
+        assert "сдвигом высоты" not in "\n".join(problems(looped | {"bpm": bpm}, drums)), f"темп {bpm} при петле на 70"
+    for alien in ("KITS/Старые киты/01 - ASAP Rocky Kit/Loops/Lex Luger - Strings140.wav", loop.replace("15 - Looperman", "09 - Scene 2026 Kit")):
         assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": alien}, drums)), alien
     unheard = next(n for n in sorted(known()) if n.startswith(LOOPS) and loop_bpm(n) and n not in heard)
     assert "не замерена по звуку" in "\n".join(problems(looped | {"loop": unheard}, drums)), unheard
@@ -3063,9 +3102,9 @@ def _checks() -> None:
     assert f"петля «{two}»" in "\n".join(echoes(looped, drums, looped | {"loop": two, "switch": {}}, drums)), "и вторая петля тоже"
     # Петля набора 11 — наравне с MusicRadar: темп — число перед «BPM»; без него, мимо папки Loops и в чужом наборе — не петля.
     # Замера набора в репозитории может не быть, поэтому список и замер подменены: вторая петля — под именем из набора 11
-    net = f"{NET_LOOPS}/Сеть - гитара Am 85 BPM.wav"
-    bare = net.replace(" 85 BPM", "")
-    assert loop_bpm(net) == 85 and loop_bpm(net.replace("85 BPM", "85bpm")) == 85 and not loop_bpm(bare) \
+    net = f"{NET_LOOPS}/Сеть - гитара Am 70 BPM.wav"
+    bare = net.replace(" 70 BPM", "")
+    assert loop_bpm(net) == 70 and loop_bpm(net.replace("70 BPM", "70bpm")) == 70 and not loop_bpm(bare) \
         and not loop_bpm(net.replace("/Loops/", "/Percs/")) and not loop_bpm(f"{LOOPS}/Cymatics - Guitar 85 BPM.wav"), "темп петли набора 11"
     from unittest import mock
     from . import config
@@ -3075,7 +3114,7 @@ def _checks() -> None:
                                                          "loops": data["loops"] | {net: data["loops"][two]}}), encoding="utf-8")
         netted = looped | {"order": "петля из сети", "switch": looped["switch"] | {"петля": net}}
         assert problems(netted, drums) == [], problems(netted, drums)
-        assert f"{net} — 85 BPM" in loop_card("гитара Am 85") and "общих" in loop_card("гитара Am 85"), loop_card("гитара Am 85")
+        assert f"{net} — 70 BPM" in loop_card("гитара Am 70") and "общих" in loop_card("гитара Am 70"), loop_card("гитара Am 70")
         assert "не из разрешённых петель" in "\n".join(problems(looped | {"loop": bare}, drums)), "петля без темпа в имени"
     # Длинный звук на коротких нотах — строка в записке, а не брак: остинато шестнадцатыми на файле в 6,87 с («Фонарь»,
     # 09.10.2026). Длины в списке нет, звук короче двух секунд, ноты длинные (пэд на такт), 808 и барабаны — молчим
@@ -3103,24 +3142,29 @@ def _checks() -> None:
     assert "sample: хэт/такт — 16, а у образца 8: бит — брат образца, годится от 4 до 12" in said, said
     with mock.patch.object(config, "BEAT_SAMPLES", Path("нет такого файла.json")):
         assert "файл пуст или не найден" in "\n".join(problems(base, demo())) and "Образец" not in about(base)
-    # Музыка — только звуками, которые одобрил владелец: чужой звук, пресет Serum звуком и своим пресетом, звук из сети
-    # и чужая петля на музыке — брак; барабанам и 808 этот список не указ; списка нет — понятный брак
-    for alien in (own[-1], fxp):
-        said = "\n".join(problems(base | {"sounds": base["sounds"] | {"мелодия": alien}}, demo()))
-        assert f"мелодия: звук «{alien}» — не из одобренных владельцем" in said, said
-    assert problems(base | {"sounds": dict.fromkeys(base["sounds"], own[-1]) | {"мелодия": _first()}}, demo()) == [], \
-        "барабаны и 808 — по общему списку"
+    # Утренний бит — только новые наборы и плагины FL (владелец, 26.10.2026: «используй новые звуки», «используя плагины
+    # в FL, там типа Serum»): звук старых наборов в любой партии, их петля и звук из сети — брак (`_old`), заказу — можно;
+    # звук нового набора из списка одобрен без прослушки, пресет Serum звуком и своим пресетом и Sytrus — проходят;
+    # «мимо» на звуке нового набора — брак; списка одобренных нет — новым наборам он не нужен
+    lead = next(n for n in sorted(known()) if n.startswith(f"{THREELANE}/Oneshots/"))
+    for ok in (lead, fxp, NATIVE + "Чужой"):
+        assert problems(base | {"sounds": base["sounds"] | {"мелодия": ok}}, demo()) == [], problems(base | {"sounds": base["sounds"] | {"мелодия": ok}}, demo())
+    stale = dict.fromkeys(base["sounds"], own[-1])
+    said = "\n".join(problems(base | {"sounds": stale}, demo()))
+    assert all(f"{part}: «{own[-1]}» — из старых наборов" in said for part in base["sounds"]), said
+    assert "из старых наборов" not in "\n".join(problems(base | {"order": "x", "sounds": stale}, demo())), "заказу старые наборы можно"
+    assert "net: звук из сети ложится в набор 11" in "\n".join(_old(base | {"net": {"мелодия": "x"}})), "звук из сети — в старый набор"
+    config.BEAT_TAGS.write_text(json.dumps({lead: {"v": "no"}, fxp: {"v": "no"}}), encoding="utf-8")
+    assert all(f"мелодия: звук «{n}» — не из одобренных" in "\n".join(problems(base | {"sounds": base["sounds"] | {"мелодия": n}}, demo()))
+               for n in (lead, fxp)), "«мимо» — брак и звуку нового набора, и пресету Serum"
+    config.BEAT_TAGS.unlink()
     chosen = next(iter(CHOSEN))     # звук, который владелец сам поставил на мелодию: одобрен, и «Bell» в имени — не брак
     assert chosen in known() and problems(base | {"sounds": base["sounds"] | {"мелодия": chosen}}, demo()) == [], \
         problems(base | {"sounds": base["sounds"] | {"мелодия": chosen}}, demo())
-    # Sytrus заводским пресетом: в списке библиотеки его нет и не должно быть, а одобрен владельцем один — остальные утром брак
-    for name, why in (("Another fat saw", ""), ("Чужой", "мелодия: звук «Sytrus/Чужой» — не из одобренных владельцем")):
-        said = "\n".join(problems(base | {"sounds": base["sounds"] | {"мелодия": NATIVE + name}}, demo()))
-        assert (why in said if why else not said) and "нет в списке data/beat_sounds.json" not in said, said
-    assert "preset, мелодия: свой пресет Serum на музыке — только биту по заказу" in "\n".join(problems(base | {"preset": {"мелодия": mine}}, demo()))
-    assert f"loop: петля «{unheard}» — не из одобренных владельцем" in "\n".join(problems(looped | {"loop": unheard}, drums))
+    assert "preset" not in "\n".join(problems(base | {"preset": {"мелодия": mine}}, demo())), "свой пресет Serum утром — не брак"
+    assert f"loop: «{unheard}» — из старых наборов" in "\n".join(problems(looped | {"loop": unheard}, drums))
     with mock.patch.object(config, "BEAT_MUSIC", Path("нет такого файла.json")):
-        assert "data/beat_music.json пуст или не найден" in "\n".join(problems(base, demo()))
+        assert problems(base, demo()) == [], problems(base, demo())
     # Барабаны по звуку образца (тембр у селфтеста свой: двенадцать хэтов, яркость через 500 Гц): хэт далеко от хэта образца —
     # брак, близкий проходит; у образца без замера барабанов и у заказа правило молчит; метка «мимо» — брак и 808;
     # одобренных хэтов от KIT_OWNED — хэт не из них брак, из них проходит; одобренных меньше — хэт идёт как раньше
@@ -3154,7 +3198,7 @@ def _checks() -> None:
     assert "нет поля sample" in "\n".join(problems(ordered | {"order": ""}, drums)) and problems(ordered, drums) == [], problems(ordered, drums)
     assert problems(ordered | {"sounds": looped["sounds"] | {"мелодия": fxp}, "preset": {"мелодия": mine}}, drums) == [], "заказу список не указ"
     assert f"петля «{loop}»" in "\n".join(echoes(ordered, drums, looped, drums)), "а петля прошлого бита — повтор и у заказа"
-    assert "сдвигом высоты не больше" in "\n".join(problems(ordered | {"bpm": 140}, drums)), "заказ остальных правил не отменяет"
+    assert "сдвигом высоты не больше" in "\n".join(problems(ordered | {"bpm": 115}, drums)), "заказ остальных правил не отменяет"
     # Заказ «бит-брат трека» образец несёт: темп и рисунок сверяются с ним; утреннему биту образец заказа — брак
     twin = base | {"order": "собери бит брата", "sample": "брат"}
     assert problems(twin, demo()) == [], problems(twin, demo())
@@ -3257,10 +3301,12 @@ def _checks() -> None:
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_SOUNDS", Path(tmp) / "sounds.json"):
         laid()
         assert problems(shared, share) == [] and "stack" not in loops()[gay], problems(shared, share)
-        # Утренний бит (17.10.2026) берёт раскладку тоже и после перелома тоже вправе обойтись без второй петли; своих
-        # партий у него от двух (`_dense`) — вторая, пэд, входит после перелома, где петля молчит, как в «Фонаре»
+        # Утренний бит брал раскладку с 17.10.2026 по 26.10.2026 — теперь она из старых наборов, и это его единственный брак:
+        # после перелома он вправе обойтись без второй петли, своих партий у него от двух (`_dense`) — вторая, пэд, входит
+        # после перелома, где петля молчит, как в «Фонаре»
         morning, body = more("пэд") | {"order": "", "sample": "s135"}, share | {"пэд": pad((59, 66))}
-        assert problems(morning, body) == [], problems(morning, body)
+        said = problems(morning, body)
+        assert len(said) == 1 and said[0].startswith(f"loop: «{gay}» — из старых наборов"), said
         assert "своих партий музыки, кроме 808, — 1" in "\n".join(problems(shared | {"order": "", "sample": "s135"}, share))
         four = share | {name: pad((59, 66), (64, 71)) for name in ("пэд", "остинато", "тень")}
         assert "от одной до трёх" in "\n".join(problems(more("пэд", "остинато", "тень"), four)), "без склада партий музыки — до трёх"
@@ -3315,11 +3361,12 @@ def _checks() -> None:
     assert all(loop_bpm(n) == 208 and n in known() and heard[n]["bars"] == 4 for n in FITTED), "гитара из проекта: темп и замер"
     assert not any(w in "\n".join(_loop(fit, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "по заказу")), _loop(fit, share)
     assert "из проекта владельца, подогнанная под его темп" in "\n".join(_loop(fit | {"order": ""}, share)), "утром её не берут"
-    # Петли Looperman (`LOOPERMAN`; струны — заказ на 23.10.2026, ещё шесть — 24.10.2026): темп — число перед «BPM», в списке,
+    # Петли Looperman (`LOOPERMAN`; струны — заказ на 23.10.2026, ещё тринадцать — 24.10.2026, восемь — 26.10.2026): темп — число перед «BPM», в списке,
     # замерены в четыре или восемь тактов, перегонка под темп бита — как у любой петли (134, темп «Palace», — два полутона
     # вверх от 120); с 24.10.2026 их берёт и утренний бит
     knight = shared | dict(bpm=134, loop=LOOPERMAN[0], scale=_scale(heard, LOOPERMAN[0]))
-    assert [loop_bpm(n) for n in LOOPERMAN] == [120, 74, 114, 70, 140, 140, 72, 140, 136, 70, 140, 145, 145, 110] \
+    assert [loop_bpm(n) for n in LOOPERMAN] == [120, 74, 114, 70, 140, 140, 72, 140, 136, 70, 140, 145, 145, 110,
+                                             150, 167, 111, 130, 135, 90, 70, 60] \
         and all(n in known() and heard[n]["bars"] in (4, 8) for n in LOOPERMAN), "петли Looperman: темп и замер"
     assert not any(w in "\n".join(_loop(knight, share)) for w in ("не из разрешённых", "не замерена", "темп бита", "заказ")), _loop(knight, share)
     assert not any(w in "\n".join(_loop(knight | {"order": ""}, share)) for w in ("заказ", "не из разрешённых")), "утром их берут"
@@ -3339,21 +3386,22 @@ def _checks() -> None:
     assert f"{config.BEAT_CREDIT} x {SHARED_BY}" in said and f"отметка @{SHARED_BY}" in said and "Половина любого дохода" in said \
         and "боту с подписью" not in said and "с такта 9, после перелома, она молчит" in said and "без баса её автора" in said, said
     assert SHARED_BY not in about(looped) and "боту с подписью" in about(looped), "условия автора — только у бита на его петле"
-    # Звук по адресу из сети (поле net): сборка смотрит форму и адрес без сети, записка говорит, что его никто не слышал
+    # Звук по адресу из сети (поле net): сборка смотрит форму и адрес без сети, записка говорит, что его никто не слышал;
+    # с 26.10.2026 он только биту по заказу — Мак кладёт его в набор 11, а тот среди старых (`_old`)
     wav = "https://freewavesamples.com/files/Kawai-K1r-Aah-C4.wav"
-    assert problems(base | {"net": {"перк": wav}}, demo()) == [] and "из сети" not in about(base) \
+    assert problems(base | {"order": "x", "net": {"перк": wav}}, demo()) == [] and "из сети" not in about(base) \
         and "На слух звук из сети не проверен" in about(base | {"net": {"мелодия": wav}}), "разрешённый адрес принят, записка честна"
     assert "net_sources" in "\n".join(problems(base | {"net": {"мелодия": "https://example.com/files/Aah.wav"}}, demo())) \
         and "такой партии" in "\n".join(problems(base | {"net": {"орган": wav}}, demo())), "чужой адрес и чужая партия — брак сборки"
-    assert "net, мелодия: звук из сети на музыке — только биту по заказу" in "\n".join(problems(base | {"net": {"мелодия": wav}}, demo()))
+    assert "net: звук из сети ложится в набор 11" in "\n".join(problems(base | {"net": {"перк": wav}}, demo())), "утром — брак"
     with tempfile.TemporaryDirectory() as tmp:          # сборка бита петлёй отдаёт Маку план дорожки и обе петли
         tmp = Path(tmp)
         (tmp / "petlya").mkdir()
         laid = code.replace("low=29, keys=(65, 68, 72, 67)", f"low={24 + pcs[0]}, keys={keys!r}") + (     # и пэд, как у `looped`
             f"_bare = compose\ndef compose():\n    return _bare() | {{'пэд': [N(x * 16, 16, {48 + pcs[0]}) for x in range(16) if x % 8 != 7]}}\n")
-        (tmp / "petlya" / "make.py").write_text(f"INFO = {looped | {'net': {'перк': wav}}!r}\n" + laid, encoding="utf-8")
+        (tmp / "petlya" / "make.py").write_text(f"INFO = {looped | {'net': {'перк': wav}, 'order': 'звук из сети'}!r}\n" + laid, encoding="utf-8")
         archive = build(tmp / "petlya", tmp / "out")
-        assert json.loads(archive.with_suffix(".loop.json").read_text("utf-8")) == {"bpm": 170, "bars": 16, "rests": [[8, 9], [12.5, 13]],
+        assert json.loads(archive.with_suffix(".loop.json").read_text("utf-8")) == {"bpm": 140, "bars": 16, "rests": [[8, 9], [12.5, 13]],
                                                                                     "switch": 9}
         assert json.loads(archive.with_suffix(".sounds.json").read_text("utf-8"))["петля 2"] == two
         assert json.loads(archive.with_suffix(".net.json").read_text("utf-8")) == {"перк": wav} and _net(tmp / "нет.json", tmp) == [], \
@@ -3377,8 +3425,10 @@ def _checks() -> None:
     swap = {**demo(), "хэт": [n for n in demo()["хэт"] if n.pos < 128], "хэт 2": [n for n in demo()["хэт"] if n.pos >= 128]}
     assert "хэт играет только по одну сторону" in "\n".join(problems(base | {"sounds": dict.fromkeys(swap, _first())}, swap)), \
         "после перелома другой звук хэта — общего не осталось"
-    sibling = next(n for n in sorted(heard) if _riff(n) == _riff(loop) and n != loop)
-    assert "тот же риф" in "\n".join(problems(looped | {"switch": looped["switch"] | {"петля": sibling}}, drums)), sibling
+    # Риф — у вариантов одной петли набора 01 (у петель Looperman вариантов нет): здесь не важно, что набор старый
+    six = f"{LOOPS}/Acoustic Gtr - AC_SixStr120B-01.wav"
+    sibling = next(n for n in sorted(heard) if _riff(n) == _riff(six) and n != six)
+    assert "тот же риф" in "\n".join(problems(looped | {"bpm": 120, "loop": six, "switch": looped["switch"] | {"петля": sibling}}, drums)), sibling
     assert "после перелома играет вторая петля" in "\n".join(problems(looped | {"switch": {"такт": 9, "переход": "x"}}, drums))
     mixed = f"{LOOPS}/Acoustic Gtr - AC_GuitarMix120B-04.wav"               # тот же риф, сведённый с другими гитарами
     assert "те же ноты и те же опоры" in "\n".join(problems(looped | {"bpm": 120, "loop": mixed.replace("GuitarMix120B-04", "SixStr120B-01"),
@@ -3462,8 +3512,8 @@ def _checks() -> None:
     flp.selftest()
     print("ноты: приёмы, партитура FL, MIDI, отбраковка, один бит — один образец (брат образца проходит; чужой темп, неизвестный id, "
           "образец прошлого бита и хэт далеко от образца — брак; заказ без образца проходит; заказ-брат с образцом сверяется с ним, утром образец заказа — брак, "
-          "хэт по кругу и музыка без пауз проходят только у заказа, чей образец сам так устроен), музыка только одобренными звуками "
-          "(чужой звук, пресет Serum и звук из сети на музыке — брак), сладкое — брак, сухое проходит, пустой утренний бит (музыка молчит дольше четверти, долгий провал барабанов, на петле одна своя партия) — брак, плотный и заказ проходят, бит целиком (бочка с клэпом) позже 9-го такта и те же сильные удары бочки такт за тактом — брак, кик-перк — не бочка, мелодия и петля прошлого бита — "
+          "хэт по кругу и музыка без пауз проходят только у заказа, чей образец сам так устроен), утром только новые наборы и плагины FL "
+          "(звук старых наборов в любой партии, их петля и звук из сети — брак, звук нового набора, Serum и Sytrus проходят, «мимо» — брак, заказу старые можно), сладкое — брак, сухое проходит, пустой утренний бит (музыка молчит дольше четверти, долгий провал барабанов, на петле одна своя партия) — брак, плотный и заказ проходят, бит целиком (бочка с клэпом) позже 9-го такта и те же сильные удары бочки такт за тактом — брак, кик-перк — не бочка, мелодия и петля прошлого бита — "
           "повтор, музыка петлёй по замеру звука (темп ровно, мелодия нотами петли, паузы), перелом — когда он есть у образца: «разом» "
           "(другие каркас, хэт и музыка, вторая петля) и «ступенями» (на сменах барабаны держатся, 808 и музыка меняются), "
           "дорожка петли на весь бит, звуки по списку и папка «Сегодня», "
@@ -3496,7 +3546,7 @@ def _selftest() -> None:
     from . import config
     z = {"hat_per_bar": 8, "kick_per_bar": 0, "b808_per_bar": 0}
     rows = [{"id": f"s{bpm}", "url": f"https://youtu.be/s{bpm}", "title": f"(free) a x b type beat — {bpm}", "like": ["A", "B"],
-             "views": None, "bpm": bpm, "key": None, "zamer": z | {"bpm": bpm}, "note": ""} for bpm in (140, 170, 85, 135)]
+             "views": None, "bpm": bpm, "key": None, "zamer": z | {"bpm": bpm}, "note": ""} for bpm in (140, 170, 85, 135, 70)]
     rows.append(rows[0] | {"id": "вдвое", "zamer": {"bpm": 70, "hat_per_bar": 16}})
     rows.append(rows[0] | {"id": "кит", "zamer": z | {"bpm": 140, "kit": {"Hats": [6000, 10, .3]}}})     # тембр хэта образца
     # Образцы заказа «бит-брат трека»: у «брата» хэт ровный (дробь и триоли в пятой части тактов) и музыка молчит такт
