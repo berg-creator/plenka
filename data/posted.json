@@ -1361,6 +1361,12 @@
       "file": "beat-8.json",
       "published_at": "2026-10-26T12:12:29+00:00",
       "rubric": "beat"
+    },
+    {
+      "chat": "channel",
+      "file": "quiz-2026-10-27.json",
+      "published_at": "2026-10-27T14:40:52+00:00",
+      "rubric": "quiz"
     }
   ],
   "photos": [
