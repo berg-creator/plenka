@@ -133,6 +133,14 @@ TikTok ссылки на чужие площадки режет в охвате,
 Реальные кадры события — фотографии со страниц источников по og:image, той же
 дорогой, что картинка новости в канале. Видео чужих роликов не берутся вовсе.
 
+Длинный горизонтальный ролик для YouTube — `"wide": true` (владелец, 27.10.2026): та же сборка
+в кадре 1920×1080, кадры режутся под 16:9 вокруг `focus`, разметка — WIDE_LAYOUT поверх вертикальной
+на время сборки (`layout`), а не второй набор функций: ролик тот же, меняются только поля и размер.
+Версий две, YouTube и ВКонтакте: TikTok и канал ждут вертикальный кадр. Из той же записи — шортсы,
+`"shorts": [{"from": N, "to": M}]` по номерам строк: голос пишется один раз, кусок собирается обычным
+вертикальным роликом из тех же дублей (`cut`). Монтажа «длинный → шортсы» по готовому файлу нет:
+перекадрировать 16:9 в 9:16 значит потерять две трети кадра, а сборка с нуля режет каждую картинку заново.
+
     python -m src.reels --check content/reels/20260914-kanye.json    проверка без сети
     python -m src.reels --send content/reels/20260914-kanye.json --dry-run
     python -m src.reels --preview content/reels/20260914-kanye.json --voice ПАПКА
@@ -144,6 +152,7 @@ from __future__ import annotations
 
 import argparse
 import array
+import contextlib
 import dataclasses
 import functools
 import html
@@ -338,6 +347,24 @@ KEY_MARK = "*"
 KEY_SIZE = 96
 KEY_RED = (235, 30, 30, 255)
 TOP_MARK = ".top"
+
+# Кадр ролика: вертикальный 9:16 — Shorts, TikTok, VK Клипы и канал; `"wide": true` в сценарии —
+# длинный ролик YouTube 16:9. Сборка берёт размер и разметку из `layout`, отправка — из `size`.
+TALL, WIDE = (1080, 1920), (1920, 1080)
+# Разметка широкого кадра на время его сборки. Наложений площадки у длинного ролика YouTube нет,
+# и зоны — просто поля. Кегли и метка те же в точках: короткая сторона у обоих кадров 1080,
+# на экране телефона буквы того же размера. Субтитр — внизу кадра. Концовка — аватар меньше,
+# адрес и приманка под ним тем же шагом, что в вертикальной, стопкой по центру высоты.
+# Панорама на размытую подложку не встаёт (BLUR_WIDER): широкий кадр её просто обрезает.
+WIDE_LAYOUT = {
+    "SAFE_LEFT": 0.04, "SAFE_RIGHT": 0.96, "SAFE_TOP": 0.06, "SAFE_BOTTOM": 0.94, "SAFE_TEXT": 0.92,
+    "BADGE_XY": (round(0.04 * WIDE[0]), round(0.06 * WIDE[1])), "CAPTION_TOP": 200,
+    "SUB_LOW": 0.85, "SUB_HIGH": 0.2,
+    "PLATE_WHEEL": 440, "PLATE_TOP": 183, "ENDING_Y": 0.694, "BAIT_Y": 0.8,
+    "BLUR_WIDER": float("inf"),
+}
+# Шортс — кусок длинного ролика (поле `shorts`): id длинного и номер куска.
+SHORT_ID = re.compile(r"-s\d+$")
 
 GIPHY_SEARCH = "https://api.giphy.com/v1/gifs/search"
 # Видео по id отдаётся без ключа: автор может закрепить конкретный мем.
@@ -586,6 +613,19 @@ def problems(script, name: str = "") -> list[str]:
         if "subtitle" in line and not ("say" in line and _filled(line["subtitle"])):
             errors.append(f"{where}: subtitle — непустая строка у фразы: её текст в субтитрах, числа цифрами")
         errors += _screens_problems(line.get("screen"), where, sources if isinstance(sources, list) else [])
+    if "wide" in script and not isinstance(script["wide"], bool):
+        errors.append("wide: true — длинный ролик YouTube 16:9, false или без поля — вертикальный")
+    shorts = script.get("shorts", [])
+    if not isinstance(shorts, list):
+        errors.append("shorts: список кусков вида {\"from\": 1, \"to\": 9}")
+        shorts = []
+    for number, piece in enumerate(shorts, 1):
+        edges = [piece.get(key) for key in ("from", "to")] if isinstance(piece, dict) else []
+        if not (len(edges) == 2 and all(isinstance(n, int) and not isinstance(n, bool) for n in edges)
+                and 1 <= edges[0] <= edges[1] <= len(lines)):
+            errors.append(f"shorts, кусок {number}: from и to — номера строк сценария от 1 до {len(lines)}, from не больше to")
+        elif not any(isinstance(line, dict) and "say" in line for line in lines[edges[0] - 1:edges[1]]):
+            errors.append(f"shorts, кусок {number}: в строках {edges[0]}–{edges[1]} нет ни одной фразы")
     return errors
 
 
@@ -1647,7 +1687,7 @@ def _sub_ink(text: str):
 
 
 def subtitle(text: str, up: bool, scale: float = 1.0):
-    """Кадр субтитра: прозрачный 1080×1920, кусок стоит на своей высоте, кегль SUB_SIZE до двух строк.
+    """Кадр субтитра: прозрачный во весь кадр, кусок стоит на своей высоте, кегль SUB_SIZE до двух строк.
 
     `scale` — кадр пружинки (SUB_POP): кусок крупнее вокруг того же центра, но низ
     вместе с ореолом не ниже SAFE_BOTTOM — там подпись площадки.
@@ -1841,7 +1881,7 @@ def cut_sounds(track: Path, cuts: list[float], flashes: list[float], work: Path)
 def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, ending_at: float,
          text: str = BAIT, plate_at: float | None = None, bare: Path | None = None) -> None:
     """Вжигает субтитры, метку и адрес на концовке одним проходом и пишет четыре файла: YouTube, TikTok,
-    ВКонтакте и свой канал.
+    ВКонтакте и свой канал; широкий кадр — два, YouTube и ВКонтакте.
 
     Не в отрезки: кусок субтитра переходит через склейку кадров. Все куски —
     один вход: список кадров с длительностями (concat), пустой прозрачный кадр
@@ -1907,6 +1947,8 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
     # кадр входа не позже кадра ролика, и на границе она не опаздывает на кадр от адреса.
     plate_frame, end_frame = round(plate_at * clips.FPS), round(ending_at * clips.FPS)
     edge = (plate_frame - 0.5) / clips.FPS
+    # У широкого (длинный ролик YouTube) версий две: TikTok и канал ждут вертикальный кадр.
+    tall = clips.HEIGHT > clips.WIDTH
     clips.run([
         # reinit_filter 0: отрезки ролика разные по цветовому диапазону (фото — pc, видео — tv),
         # и на каждой смене ffmpeg пересобирал граф, теряя вход субтитров до конца ролика.
@@ -1917,25 +1959,96 @@ def burn(video: Path, placed: list[tuple[str, float, float, bool]], work: Path, 
         "-loop", "1", "-framerate", f"{clips.FPS}", "-i", str(work / "ending-vk.png"),
         "-i", str(wheel), "-i", str(bare or raw),
         "-filter_complex",
-        "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,split=3[b1][b2][b3];"
+        "[1:v]format=rgba[s];[0:v][s]overlay=0:0:eof_action=pass:format=auto,"
+        + ("split=3[b1][b2][b3];" if tall else "split=2[b1][b3];") +
         f"[6:v]setpts=PTS-STARTPTS+{edge:.4f}/TB,split=2[p1][p2];"
         f"[2:v]format=rgba[m];[b1][m]overlay=0:0:shortest=1:enable='lt(t,{edge:.4f})'[marked];"
         f"[marked][p1]overlay=0:0:shortest=1[plated];"
         f"[3:v]format=rgba[e];[plated][e]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[main];"
         f"[4:v]format=rgba[mv];[b3][mv]overlay=0:0:shortest=1:enable='lt(t,{edge:.4f})'[markedvk];"
         f"[markedvk][p2]overlay=0:0:shortest=1[platedvk];"
-        f"[5:v]format=rgba[ev];[platedvk][ev]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[vk];"
-        f"[b2]trim=end_frame={end_frame},format=yuv420p,split=2[tt][tc];"
-        f"[7:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ta];"
-        f"[0:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ca]",
+        f"[5:v]format=rgba[ev];[platedvk][ev]overlay=0:0:shortest=1:enable='gte(t,{edge:.4f})',format=yuv420p[vk]"
+        + (f";[b2]trim=end_frame={end_frame},format=yuv420p,split=2[tt][tc];"
+           f"[7:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ta];"
+           f"[0:a]atrim=end={ending_at:.3f},afade=t=out:st={max(ending_at - TIKTOK_FADE, 0):.3f}:d={TIKTOK_FADE}[ca]"
+           if tall else ""),
         "-map", "[main]", "-map", "7:a", *encode, "-c:a", "copy", str(video),
-        "-map", "[tt]", "-map", "[ta]", *encode, "-c:a", "aac", "-b:a", "160k", str(tiktok(video)),
         "-map", "[vk]", "-map", "7:a", *encode, "-c:a", "copy", str(vk(video)),
-        "-map", "[tc]", "-map", "[ca]", *encode, "-c:a", "aac", "-b:a", "160k", str(channel(video)),
+        *(["-map", "[tt]", "-map", "[ta]", *encode, "-c:a", "aac", "-b:a", "160k", str(tiktok(video)),
+           "-map", "[tc]", "-map", "[ca]", *encode, "-c:a", "aac", "-b:a", "160k", str(channel(video))] if tall else []),
     ])
 
 
+def size(script: dict) -> tuple[int, int]:
+    """Ширина и высота ролика: и сборке, и отправке — без них Telegram на телефоне перекосит кадр."""
+    return WIDE if script.get("wide") else TALL
+
+
+@contextlib.contextmanager
+def layout(script: dict):
+    """Сборка в кадре сценария: широкий подменяет размер кадра clips и разметку WIDE_LAYOUT, вертикальный — как был.
+
+    ponytail: глобальные модуля на время сборки — один ролик за раз в процессе; собирать
+    два разом в одном процессе — тогда размер и разметку передавать параметрами.
+    """
+    from . import clips
+
+    if not script.get("wide"):
+        yield
+        return
+    saved, sides = {name: globals()[name] for name in WIDE_LAYOUT}, (clips.WIDTH, clips.HEIGHT)
+    globals().update(WIDE_LAYOUT)
+    clips.WIDTH, clips.HEIGHT = WIDE
+    # Буквы субтитров запомнены под ширину кадра.
+    _sub_ink.cache_clear()
+    try:
+        yield
+    finally:
+        globals().update(saved)
+        clips.WIDTH, clips.HEIGHT = sides
+        _sub_ink.cache_clear()
+
+
+def cut(script: dict, number: int, voices: Path | None, work: Path) -> tuple[dict, Path | None]:
+    """Шортс `number` из поля `shorts`: сценарий из строк from…to и папка дублей под их номера.
+
+    Владелец записывает голос один раз — на длинный ролик. Шортс собирается обычным
+    вертикальным роликом, как если бы в сценарии были только эти строки: дубли
+    и картинки строк from…to встают ссылками под номера с единицы, а фон зала
+    и наложения — под своими именами. Чужие номера в папку не идут: дубль строки 3
+    длинного ролика стал бы строкой 3 шортса.
+    """
+    first, last = script["shorts"][number - 1]["from"], script["shorts"][number - 1]["to"]
+    part = {key: value for key, value in script.items() if key not in ("wide", "shorts")}
+    part.update(id=f"{script['id']}-s{number}", lines=script["lines"][first - 1:last],
+                piece=f"шортс {number}: строки {first}–{last}")
+    if voices is None:
+        return part, None
+    folder = work / part["id"]
+    (folder / "pics").mkdir(parents=True)
+
+    def renamed(name: str) -> str:
+        # «12.ogg» и «12-3.jpg» — строка 12: в шортс под своим номером, вне куска — мимо.
+        found = re.fullmatch(r"(\d+)([.-].*)", name)
+        if not found:
+            return name
+        line = int(found.group(1))
+        return f"{line - first + 1}{found.group(2)}" if first <= line <= last else ""
+
+    pics = voices / "pics"
+    for path in [*voices.iterdir(), *(pics.iterdir() if pics.is_dir() else [])]:
+        if path != pics and (name := renamed(path.name)):
+            (folder / path.parent.relative_to(voices) / name).symlink_to(path.resolve())
+    return part, folder
+
+
 def build(script: dict, voices: Path | None) -> tuple[Path, Path]:
+    """Собирает ролик и превью в кадре сценария (`layout`). Возвращает (ролик, превью)."""
+    with layout(script):
+        return _build(script, voices)
+
+
+def _build(script: dict, voices: Path | None) -> tuple[Path, Path]:
     """Собирает ролик и превью. Возвращает (ролик, превью).
 
     `voices` — папка дублей; её pics/ с картинками владельца заменяет кадры строк.
@@ -2061,7 +2174,7 @@ def package(script: dict) -> str:
         f"<b>Название</b>\n{field(script['title'])}\n\n"
         f"<b>Описание YouTube</b>\n{described('yt')}\n\n"
         f"<b>ВКонтакте</b>\n{described('vk')}\n\n"
-        f"<b>TikTok</b>\n{described('tt')}\n\n"
+        + ("" if script.get("wide") else f"<b>TikTok</b>\n{described('tt')}\n\n") +
         f"<b>Теги</b>\n{field(', '.join(script['tags']))}\n\n"
         f"{comment}Выложить: <b>{when(script)}</b>"
     )
@@ -2072,7 +2185,22 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
     from . import telegram
 
     admin = config.secret("TELEGRAM_ADMIN_ID")
-    topic = f"<b>{html.escape(script['topic'], quote=False)}</b>"
+    topic = f"<b>{html.escape(script['topic'], quote=False)}</b>" + (f" · {script['piece']}" if "piece" in script else "")
+    width, height = size(script)
+
+    def post(path: Path, text: str, **kw) -> None:
+        if path.stat().st_size <= telegram.MAX_UPLOAD:
+            telegram.send_video_file(admin, path, text, width=width, height=height, **kw)
+            return
+        # Длинный ролик в 1080p тяжелее 50 МБ, которые принимает Bot API, а служебный вход бота
+        # живёт только в дежурстве: файл ждёт в артефакте этого запуска (reels.yml, «Сохранить ролик»).
+        run = os.environ.get("GITHUB_RUN_ID")
+        where = (f'<a href="{os.environ.get("GITHUB_SERVER_URL", "https://github.com")}/'
+                 f'{os.environ.get("GITHUB_REPOSITORY", "")}/actions/runs/{run}">в артефакте запуска</a>, 14 дней'
+                 if run else f"на диске: {path}")
+        telegram.send_message(admin, f"{text}\n{path.name}: {path.stat().st_size / 2 ** 20:.0f} МБ — больше 50 МБ "
+                                     f"Telegram, файл {where}")
+
     # С 23.09.2026 бит вшит во все четыре версии, и звук площадки поверх не нужен: подпись
     # «без музыки, добавь в приложении» после этого врала владельцу (замечено 26.09).
     # У передачи (`music`: null) бита нет нигде: своя музыка — отбивки в фоне зала,
@@ -2081,18 +2209,20 @@ def deliver(script: dict, video: Path, cover: Path) -> None:
     beat = bed(script) is not None
     music = ("бит уже в ролике, звук площадки не добавляй" if beat
              else "музыка уже в ролике: трек героя добавь в приложении на телефоне, громкость на ноль")
-    telegram.send_video_file(admin, video, f"{topic}\nдля YouTube — {music}")
+    post(video, f"{topic}\nдля YouTube — {music}")
     if vk(video).exists():
-        telegram.send_video_file(admin, vk(video), f"{topic}\nдля ВКонтакте — {music}; адрес канала без значка Telegram")
-    if tiktok(video).exists():
-        telegram.send_video_file(admin, tiktok(video), f"{topic}\nдля TikTok — {music}; без концовки и адреса канала")
-    if channel(video).exists():
+        post(vk(video), f"{topic}\nдля ВКонтакте — {music}; адрес канала без значка Telegram")
+    # У широкого их нет; старые файлы того же id с прошлой вертикальной сборки не уходят.
+    tall = not script.get("wide")
+    if tall and tiktok(video).exists():
+        post(tiktok(video), f"{topic}\nдля TikTok — {music}; без концовки и адреса канала")
+    if tall and channel(video).exists():
         # Кнопка — под этой версией: вид TikTok-версии (в своём канале звать в канал
         # незачем), но с битом, а file_id нажатого сообщения и есть ролик, который выйдет.
-        telegram.send_video_file(admin, channel(video), f"{topic}\nдля канала — {'с битом' if beat else 'как для TikTok'}",
-                                 buttons=[[{"text": "📺 В канал", "callback_data": f"{CALLBACK}:{script['id']}"}]])
+        post(channel(video), f"{topic}\nдля канала — {'с битом' if beat else 'как для TikTok'}",
+             buttons=[[{"text": "📺 В канал", "callback_data": f"{CALLBACK}:{script['id']}"}]])
     # Превью документом, а не фото: фото Telegram пережимает до 1280 точек
-    # по длинной стороне, а обложке нужен кадр 1080×1920 как есть. Отправки
+    # по длинной стороне, а обложке нужен кадр как есть. Отправки
     # документа в telegram.py нет — метод API зовётся напрямую.
     with cover.open("rb") as handle:
         telegram._call("sendDocument", {"chat_id": admin}, files={"document": (cover.name, handle, "image/jpeg")})
@@ -2190,7 +2320,9 @@ def to_channel(reel_id: str, message: dict) -> str:
     if path.exists():
         return "Уже в канале"
     video = message.get("video") or {}
-    script = state.read_json(config.PRIVATE / "reels" / reel_id / "script.json", {})
+    # У шортса своей папки нет: подпись и комментарий — длинного ролика, из которого он нарезан.
+    script = (state.read_json(config.PRIVATE / "reels" / reel_id / "script.json", {})
+              or state.read_json(config.PRIVATE / "reels" / SHORT_ID.sub("", reel_id) / "script.json", {}))
     if not video.get("file_id") or not script:
         return "Не нашёл ролик — пришли «собери» ещё раз"
     post = {"rubric": "reel", "reel": reel_id, "text": channel_text(script), "video": video["file_id"],
@@ -2347,6 +2479,40 @@ def _selftest() -> None:
         ([{"kind": "card", "text": "т"}, {"kind": "stock"}], "кадр 2"),
     ):
         broken(word, lines=[{"say": "Фраза", "screen": screen}])
+
+    # Шортс берёт только свои строки: дубли и картинки куска — под номерами с единицы,
+    # фон зала — под своим именем, дубль строки вне куска в папку не идёт.
+    broken("wide", wide="да")
+    broken("shorts", shorts=[{"from": 3, "to": 2}])
+    broken("shorts", shorts=[{"from": 1, "to": len(good["lines"]) + 1}])
+    broken("нет ни одной фразы", shorts=[{"from": 3, "to": 3}])
+    with tempfile.TemporaryDirectory() as tmp:
+        voices = Path(tmp) / "voices"
+        (voices / "pics").mkdir(parents=True)
+        for name in ("1.ogg", "2.ogg", "4.m4a", "zal.wav", "pics/2-1.jpg", "pics/2-1.top", "pics/4-1.jpg"):
+            (voices / name).write_text(name)
+        whole = {**good, "wide": True, "shorts": [{"from": 2, "to": 4}]}
+        assert problems(whole, good["id"]) == [], problems(whole, good["id"])
+        part, folder = cut(whole, 1, voices, Path(tmp))
+        assert part["id"] == f"{good['id']}-s1" and ID_FORMAT.fullmatch(part["id"]) and SHORT_ID.sub("", part["id"]) == good["id"]
+        assert part["lines"] == good["lines"][1:4] and "wide" not in part and "shorts" not in part and spoken_frames(part) == [1, 3]
+        inside = sorted(str(p.relative_to(folder)) for p in folder.rglob("*") if p.is_file())
+        assert inside == ["1.ogg", "3.m4a", "pics/1-1.jpg", "pics/1-1.top", "pics/3-1.jpg", "zal.wav"], inside
+        assert (folder / "1.ogg").read_text() == "2.ogg" and (folder / "pics" / "3-1.jpg").read_text() == "pics/4-1.jpg"
+
+    # Широкий кадр (поле wide): 1920×1080, субтитр внизу и в полях, концовка — аватар, под ним адрес
+    # и приманка, всё в кадре; после сборки разметка снова вертикальная.
+    with tempfile.TemporaryDirectory() as tmp, layout({"wide": True}):
+        from . import clips
+
+        assert storyboard({**good, "lines": good["lines"][:1]}, Path(tmp), [2.0])[0].layer.size == WIDE
+        low, up = inked(subtitle("общественной безопасности", False)), inked(subtitle("Куплет", True))
+        assert 0.75 * WIDE[1] < low[1] and low[3] <= SAFE_BOTTOM * WIDE[1], low
+        assert SAFE_LEFT * WIDE[0] <= low[0] and low[2] <= SAFE_RIGHT * WIDE[0] and up[1] > BADGE_XY[1] + BADGE_HEIGHT, (low, up)
+        mark = ending().getbbox()
+        assert PLATE_TOP + PLATE_WHEEL < mark[1] and mark[3] <= SAFE_BOTTOM * WIDE[1], mark
+        assert (clips.WIDTH, clips.HEIGHT) == WIDE and BLUR_WIDER == float("inf")
+    assert subtitle("Куплет", False).size == TALL and BADGE_XY == (76, 250) and SUB_LOW == 0.75
 
     # Раскадровка: кадр на каждый screen, строка делится между своими кадрами,
     # границы стоят на кадрах видео и в сумме дают ровно длину ролика.
@@ -2902,6 +3068,15 @@ def _selftest() -> None:
                 assert published[0][0] == "tt" and published[0][2]["width"] == 1080
                 assert published[0][1] == f"<b>{good['title']}</b>", published[0][1]
                 assert state.read_json(config.POSTED_FILE, {})["items"][0]["rubric"] == "reel"
+                # Шортс своей папки не имеет: подпись — длинного ролика, отметка — своя.
+                assert to_channel(f"{good['id']}-s1", pressed) == "Ролик в канале" and len(published) == 2
+                # Широкий — две версии, размеры 1920×1080 в отправке: иначе телефон перекосит кадр.
+                sizes = []
+                with mock.patch.object(telegram, "send_video_file",
+                                       lambda chat, path, text, **kw: sizes.append((path, kw["width"], kw["height"]))):
+                    deliver({**good, "wide": True}, video, video.with_suffix(".jpg"))
+                assert sizes == [(video, *WIDE)], sizes
+                assert "TikTok" not in package({**good, "wide": True}) and "TikTok" in package(good)
             gorod = channel_text({"title": "T", "description": f"Кидай город: {GOROD_LINK}mayot #плёнка"})
             assert f'href="https://{GOROD_LINK}mayot">Кидай город — скажем</a>' in gorod, gorod
         finally:
@@ -2938,7 +3113,9 @@ def main() -> int:
             return 1
         if args.check:
             print(f"Сценарий {path.name} годен: фраз {len(spoken_frames(script))}, строк {len(script['lines'])}, "
-                  f"кадров {sum(len(screens(line)) for line in script['lines'])}.")
+                  f"кадров {sum(len(screens(line)) for line in script['lines'])}"
+                  + (", широкий 16:9" if script.get("wide") else "")
+                  + (f", шортсов {len(script['shorts'])}" if script.get("shorts") else "") + ".")
             return 0
 
     config.load_dotenv()
@@ -2964,30 +3141,37 @@ def main() -> int:
 
     from . import clips
 
-    try:
-        video, cover = build(script, voices)
-    except clips.ClipError as exc:
-        print(f"Ролик не собрался: {exc}")
-        return 1
-    size = video.stat().st_size / 1024 / 1024
-    print(f"Готов: {video.relative_to(config.ROOT)} ({size:.1f} МБ), превью {cover.relative_to(config.ROOT)}")
+    # Шортсы — из тех же дублей, следом за длинным роликом; черновик с Мака — только сам ролик.
+    numbers = [] if args.draft else range(1, len(script.get("shorts", [])) + 1)
+    failed = False
+    with tempfile.TemporaryDirectory(prefix="plenka-shorts-") as tmp:
+        for part, folder in [(script, voices), *(cut(script, number, voices, Path(tmp)) for number in numbers)]:
+            try:
+                video, cover = build(part, folder)
+            except clips.ClipError as exc:
+                print(f"Ролик {part['id']} не собрался: {exc}")
+                failed = True
+                continue
+            megabytes = video.stat().st_size / 1024 / 1024
+            print(f"Готов: {video.relative_to(config.ROOT)} ({megabytes:.1f} МБ), превью {cover.relative_to(config.ROOT)}")
 
-    if args.draft and not args.dry_run:
-        from . import telegram
+            if args.draft and not args.dry_run:
+                from . import telegram
 
-        telegram.send_video_file(
-            config.secret("TELEGRAM_ADMIN_ID"), video,
-            f"<b>{html.escape(script['topic'], quote=False)}</b>\nчерновик: всё ок — пришлю версии для площадок",
-            buttons=[[{"text": "✅ Всё ок", "callback_data": f"{OK}:{script['id']}"},
-                      {"text": "✏️ Исправить", "callback_data": f"{FIX}:{script['id']}"}]])
-        print("Черновик ушёл владельцу.")
-        return 0
-    if args.preview or args.dry_run:
-        print(f"\nПакет владельцу — ролик, превью файлом и текст:\n\n{package(script)}")
-        return 0
-    deliver(script, video, cover)
-    print("Пакет ушёл владельцу.")
-    return 0
+                width, height = size(part)
+                telegram.send_video_file(
+                    config.secret("TELEGRAM_ADMIN_ID"), video,
+                    f"<b>{html.escape(part['topic'], quote=False)}</b>\nчерновик: всё ок — пришлю версии для площадок",
+                    width=width, height=height,
+                    buttons=[[{"text": "✅ Всё ок", "callback_data": f"{OK}:{part['id']}"},
+                              {"text": "✏️ Исправить", "callback_data": f"{FIX}:{part['id']}"}]])
+                print("Черновик ушёл владельцу.")
+            elif args.preview or args.dry_run:
+                print(f"\nПакет владельцу — ролик, превью файлом и текст:\n\n{package(part)}")
+            else:
+                deliver(part, video, cover)
+                print(f"Пакет {part['id']} ушёл владельцу.")
+    return int(failed)
 
 
 if __name__ == "__main__":

@@ -94,7 +94,9 @@ jobs:
   build:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Длинный ролик 16:9 на пять минут и шесть-восемь шортсов из него (поля wide и shorts)
+    # собираются одним запуском: полчаса им мало, обычному вертикальному хватает с запасом.
+    timeout-minutes: 120
     permissions:
       contents: read
     steps:
