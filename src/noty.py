@@ -2083,6 +2083,25 @@ def about(info: dict, tracks: dict[str, list[N]] | None = None) -> str:
     ])
 
 
+def used(folder: Path) -> set[str]:
+    """Названия прошлых битов: каталог бота и make.py веток битов, какие видит git, кроме ветки самого бита. 28.10.2026
+    утро назвало бит «Наждак» — так звался бит №3 каталога: «не из прошлых» в брифе не удержалось, поэтому сверяет код.
+    У рутины в клоне все ветки; в Actions их нет — там сверка только с каталогом."""
+    from . import config, state
+    names = {row.get("title", "") for row in state.read_json(config.BEATS_FILE, {}).values()}
+    try:
+        refs = subprocess.run(["git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/claude/beats-*"],
+                              capture_output=True, text=True, timeout=30).stdout.split()
+    except OSError:
+        refs = []
+    for ref in refs:
+        bid = ref.rsplit("beats-", 1)[1]
+        if bid != folder.name:
+            text = subprocess.run(["git", "show", f"{ref}:content/beats/{bid}/make.py"], capture_output=True, text=True).stdout
+            names |= set(re.findall(r'title="[^"]*—\s*([^"]+)"', text))
+    return {re.sub(r"\s+v\d+$", "", n.strip().lower()) for n in names if n.strip()}      # «Витрина v3» — тоже «витрина»
+
+
 def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     """Архив бита из ПАПКА/make.py; рядом — записка .txt, она же подпись при отправке.
     prev — make.py прошлых битов, от вчерашнего назад: тот же образец, та же петля или мелодия, что в двух первых, —
@@ -2090,6 +2109,8 @@ def build(folder: Path, out: Path, prev: tuple[Path, ...] = ()) -> Path:
     made = runpy.run_path(str(folder / "make.py"))
     info, tracks = made["INFO"], made["compose"]()
     bad = problems(info, tracks)
+    if (name := info["title"].split("—")[-1].strip()).lower() in used(folder):
+        bad.append(f"название «{name}» уже было у прошлого бита — придумай своё, одним словом")
     for path in prev[:2]:
         try:
             old = runpy.run_path(str(path))
@@ -3539,6 +3560,9 @@ def selftest() -> None:
     from . import config
     with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEAT_TAGS", Path(tmp) / "tags.json"):
         _selftest()          # метки владельца у селфтеста свои: настоящие пишет страница src/metki.py
+    with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "BEATS_FILE", Path(tmp) / "beats.json"):
+        (Path(tmp) / "beats.json").write_text('{"3": {"title": "Наждак"}}', encoding="utf-8")
+        assert "наждак" in used(Path(tmp) / "x"), "название из каталога бота — повтор"
 
 
 def _selftest() -> None:
