@@ -1367,6 +1367,12 @@
       "file": "quiz-2026-10-27.json",
       "published_at": "2026-10-27T14:40:52+00:00",
       "rubric": "quiz"
+    },
+    {
+      "chat": "channel",
+      "file": "pamyatka-fit.json",
+      "published_at": "2026-10-28T09:11:03+00:00",
+      "rubric": "pamyatka"
     }
   ],
   "photos": [
