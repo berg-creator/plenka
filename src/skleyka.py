@@ -4888,6 +4888,12 @@ TAKE_FLAWS = {
 }
 
 
+# Тот же брак — человеку под готовым треком, над ручками (владелец 28.10.2026): сведение его не уберёт,
+# а без строки человек винит сведение, а не запись. Гребёнку от стола и стены замер не видит: она
+# не тянет хвост после слов, и пять домашних записей с ней 28.10.2026 замер пропустил все.
+TAKE_NOTE = "📼 <b>Про саму запись</b> — это в файле голоса, сведением не убрать:\n{flaws}\n\n"
+
+
 def flaws(found: dict) -> list[str]:
     """Явный брак записи по замеру gauge — ключи TAKE_FLAWS. Пусто — запись берём."""
     noise, room = found.get("noise"), found.get("room")
@@ -5147,7 +5153,7 @@ def run_job(spec_path: Path) -> int:
             except Exception as exc:  # noqa: BLE001 — без контроля трек всё равно уходит
                 print(f"  сведение {spec['job']}: контроль не прошёл: {type(exc).__name__}")
             result.update(ok=True, **_send(spec, master, parts, note + (GUESSED if guessed else ""), service, work,
-                                           movie, swap=guessed, drop=drop))
+                                           movie, swap=guessed, drop=drop, take=result.get("take")))
             if clip:
                 try:
                     result["keyed"] = _offer(spec, clip, rhythm, timing, voice)
@@ -5439,12 +5445,13 @@ def story(vocal: Path, beat: Path, master: Path, work: Path, rhythm: tuple[float
     return out, heard
 
 def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path, movie: Path | None,
-          swap: bool = False, drop: float | None = None) -> dict:
+          swap: bool = False, drop: float | None = None, take: dict | None = None) -> dict:
     """MP3 плеером — его пересылают, WAV документом — его льют на площадки, ручки — отдельным
     сообщением: кнопки на плеере ушли бы вместе с пересылкой. Возвращает file_id ролика ДО/ПОСЛЕ —
     по нему ролик уйдёт владельцу, если артист согласится (_film); нет ролика — пусто, — и номер
     сообщения с MP3: его копию получит звукорежиссёр, если человек попросит свести руками (_hand), —
-    и file_id самого MP3: с ним трек идёт в канал кнопкой «🎙» (song)."""
+    и file_id самого MP3: с ним трек идёт в канал кнопкой «🎙» (song). Явный брак записи по замеру take —
+    советом над ручками (TAKE_NOTE)."""
     chat, knobs = spec["chat"], spec["knobs"]
     # Имя трека — с ведущего голоса: 01.10.2026 первой в архиве лежала «Back L», и трек ушёл под её именем.
     lead = next(name for roles in (("вокал",), VOCAL_SIDE) for name, _, part in parts if part in roles)
@@ -5467,7 +5474,9 @@ def _send(spec: dict, master: Path, parts: list, note: str, service, work: Path,
         sent = telegram.send_video_file(chat, movie, STORY_CAPTION, seconds=round(clips.probe_seconds(movie)))
         film = (sent.get("video") or {}).get("file_id", "")
     ask, left = bool(film) and not spec.get("agreed"), spec["left"]
-    telegram.send_message(chat, TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}",
+    bad = flaws(take or {})
+    telegram.send_message(chat, (TAKE_NOTE.format(flaws="\n\n".join(f"• {TAKE_FLAWS[key][1]}" for key in bad)) if bad else "")
+                          + TUNE.format(left="" if left is None else f" — осталось {left} из {config.SKLEYKA_TWEAKS}",
                                             days=TRACK_DAYS)
                           + (FILM_TERMS if ask else ""), buttons=buttons(spec["track"], knobs, swap=swap, drop=drop, film=ask))
     return {"film": film, "mix": mix.get("message_id"), "song": (mix.get("audio") or {}).get("file_id", "")}
@@ -7190,7 +7199,9 @@ def _selftest() -> None:
         # Готовый трек зовётся по ведущему голосу, а не по первой дорожке; WAV больше MAX_UPLOAD
         # у заявки ссылками уходит по сообщению с MP3: файлов человека, чтобы узнать чат, у неё нет.
         shipped: list[tuple] = []
-        real_send = (telegram.send_audio, telegram.send_document, telegram.send_big, telegram.MAX_UPLOAD)
+        real_send = (telegram.send_audio, telegram.send_document, telegram.send_big, telegram.MAX_UPLOAD, telegram.send_message)
+        tuned: list[str] = []
+        telegram.send_message = lambda chat, text, **_: tuned.append(text) or {}
         telegram.send_audio = lambda chat, data, caption, **kw: shipped.append(("mp3", kw["title"])) \
             or {"message_id": 77, "audio": {"file_id": "MP3"}}
         telegram.send_document = lambda chat, path, *_: shipped.append(("wav", path.name))
@@ -7201,9 +7212,12 @@ def _selftest() -> None:
             went = _send(by_links, Path(shutil.copy(sung, tmp / "ready.wav")), named, "", lambda: "вход", tmp, None)
             assert went == {"film": "", "mix": 77, "song": "MP3"}, "file_id MP3 — в запись трека: с ним трек идёт в канал"
             telegram.MAX_UPLOAD = 1
-            _send(by_links, Path(shutil.copy(sung, tmp / "ready.wav")), named, "", lambda: "вход", tmp, None)
+            _send(by_links, Path(shutil.copy(sung, tmp / "ready.wav")), named, "", lambda: "вход", tmp, None,
+                  take=dict(clean, noise=12.0))
         finally:
-            telegram.send_audio, telegram.send_document, telegram.send_big, telegram.MAX_UPLOAD = real_send
+            telegram.send_audio, telegram.send_document, telegram.send_big, telegram.MAX_UPLOAD, telegram.send_message = real_send
+        assert tuned[0].startswith("Не так?") and tuned[1].startswith("📼") and TAKE_FLAWS["noise"][1] in tuned[1] \
+            and TAKE_FLAWS["clip"][1] not in tuned[1] and TALK_MARK in tuned[1], "брак записи — советом над ручками, чистой — ничего"
         assert shipped == [("mp3", "Основа"), ("wav", "Основа (сведение).wav"),
                            ("mp3", "Основа"), ("big", "Основа (сведение).wav", 77)], shipped
 
