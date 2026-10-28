@@ -35,6 +35,7 @@ import argparse
 import logging
 import os
 import re
+import time
 from datetime import timedelta
 import pathlib
 from pathlib import Path
@@ -1335,6 +1336,21 @@ def _remember(query: str, kind: str, *, matched: bool, verdict: str = "") -> Non
 # Последний /start по чату: (текст, время). Повтор в пределах START_REPEAT секунд — дубль.
 _STARTS: dict[str, tuple[str, int]] = {}
 START_REPEAT = 30
+# Простой текст — ответ на последний вопрос бота, если тот задан не раньше стольких минут (_asked).
+ASKED_MINUTES = 30
+
+
+def _asked(message: dict, chat_id: str) -> str:
+    """На какой вопрос бота отвечает текст: ответом на сообщение — на него, простым текстом —
+    на последний вопрос в этом чате (telegram.ASKED), один раз и не старше ASKED_MINUTES.
+    Владелец отвечает клиенту (QUESTION_TAG) и ручки трека (TALK_MARK) — только ответом: вопросов
+    клиентов бывает несколько, а трек ручек узнаётся по самому сообщению."""
+    pending, at = telegram.ASKED.pop(chat_id, ("", 0.0))
+    if message.get("reply_to_message"):
+        return message["reply_to_message"].get("text", "")
+    if time.monotonic() - at > ASKED_MINUTES * 60 or skleyka.QUESTION_TAG in pending or skleyka.TALK_MARK in pending:
+        return ""
+    return pending
 
 
 def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
@@ -1372,7 +1388,7 @@ def handle_message(message: dict, data: dict, *, ask: bool = True) -> bool:
             return False
 
     # Ответ на вопрос слежения — намерение явное, заявку отбора он закрывает.
-    asked = (message.get("reply_to_message") or {}).get("text", "")
+    asked = _asked(message, chat_id)
     if admin and not text.startswith("/") and skleyka.QUESTION_TAG in asked:
         # Ответ владельца на вопрос человека (src/skleyka.py): кому — по метке в самом вопросе.
         # Первым: в тексте вопроса человек мог написать чужую метку, «напиши словами» например.
@@ -2094,6 +2110,18 @@ def _selftest() -> None:
         assert "Слежу за" in said[-2][0] and said[-1][2] == "Город", said[-2:]
         handle_message(incoming("питер", 6, reply=said[-1][0]), {})
         assert "Санкт-Петербург" in said[-1][0] and state.read_json(WATCH_FILE, {})["cities"]["5"] == "Санкт-Петербург"
+        # Простой текст после вопроса бота — тоже ответ (28.10.2026: артиста писали не ответом); один раз,
+        # не старше ASKED_MINUTES, ответ владельца клиенту и ручки трека — только ответом на сообщение.
+        telegram.ASKED["11"] = (WATCH_ASK, time.monotonic())
+        handle_message(incoming("Баста", 14, chat=11), {})
+        assert "Слежу за" in said[-2][0] and "11" not in telegram.ASKED, said[-2:]
+        telegram.ASKED["11"] = (WATCH_ASK, time.monotonic() - ASKED_MINUTES * 60 - 1)
+        assert _asked(incoming("Баста", 15, chat=11), "11") == "" and "11" not in telegram.ASKED
+        for pending in (f"{skleyka.QUESTION_TAG}55501\n\n{WATCH_MARK}", skleyka.TALK_MARK):
+            telegram.ASKED["11"] = (pending, time.monotonic())
+            assert _asked(incoming("+1", 16, chat=11), "11") == ""
+        telegram.ASKED["11"] = (WATCH_ASK, time.monotonic())
+        assert _asked(incoming("Баста", 17, reply="другое", chat=11), "11") == "другое" and "11" not in telegram.ASKED
 
         # Ссылка из ролика о гастролёре: артист зашит в неё, бот подписывает и спрашивает город.
         handle_message(incoming("/start gorod_basta", 7, chat=6), {})

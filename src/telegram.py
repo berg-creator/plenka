@@ -163,6 +163,11 @@ def _call(method: str, payload: dict[str, Any], files: dict | None = None) -> di
 # первое же сообщение бота без своих кнопок — отдельного сообщения ради этого нет.
 # Живёт в памяти смены: всё ответили инлайн-кнопками — кнопка дождётся следующей.
 UNKEY: set[str] = set()
+# Последний вопрос бота по чату (сообщение с ask): (текст, time.monotonic()). Простой текст после него —
+# тоже ответ (service._asked): 28.10.2026 человек писал артиста не ответом, и заявка закрылась по сроку.
+# Любое следующее сообщение бота без ask вопрос снимает: бот уже сказал другое.
+# ponytail: память одной смены; после перезапуска — только ответом на сообщение, как раньше.
+ASKED: dict[str, tuple[str, float]] = {}
 
 
 def send_message(
@@ -187,7 +192,7 @@ def send_message(
     elif ask:
         # Вопрос с ответом: приложение само открывает ответ на это сообщение,
         # в поле ввода — подсказка ask. Бот узнаёт ответ по reply_to_message,
-        # и помнить, о чём спросил, ему не нужно.
+        # а простой текст без ответа — по ASKED.
         payload["reply_markup"] = json.dumps({"force_reply": True, "input_field_placeholder": ask})
     elif markup or str(chat_id) in UNKEY:
         # Обычная клавиатура или её снятие: кнопка мини-приложения, чей sendData
@@ -200,7 +205,12 @@ def send_message(
         # Ответ на пост, пересланный в чат обсуждений, — это и есть комментарий
         # под постом. Без reply_to сообщение повиснет отдельной репликой в чате.
         payload["reply_parameters"] = json.dumps({"message_id": reply_to})
-    return _call("sendMessage", payload)
+    sent = _call("sendMessage", payload)
+    if ask:
+        ASKED[str(chat_id)] = (text, time.monotonic())
+    else:
+        ASKED.pop(str(chat_id), None)
+    return sent
 
 
 def delete_message(chat_id: str | int, message_id: int) -> None:
