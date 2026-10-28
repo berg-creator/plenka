@@ -457,5 +457,23 @@
     "sources": [
       "https://yandex.ru/support/music/ru/content-requirements/rules — «имя исполнителя, намеренно похоже на популярные поисковые музыкальные запросы или содержит в названии релизов и треков перечисления нескольких поисковых запросов»; «ограничить или исключить его редакционное продвижение, включая размещение в редакционных плейлистах»; «правообладатели должны передавать сервису информацию о том, использовался ли ИИ при его создании и в какой степени, например для генерации вокала, музыки или текста»; «Непредоставление информации об использовании ИИ, а также предоставление неполных или недостоверных сведений считается нарушением правил размещения контента»"
     ]
+  },
+  {
+    "id": "grebyonka",
+    "ask": "Голос на записи тонкий и мутный?",
+    "topic": "golos",
+    "title": "одеяло за спиной, лицом в комнату",
+    "short": "Одна из причин — комната: голос отражается от ближних стен и снова попадает в микрофон. Это гребёнка, и от неё помогает одеяло за спиной.",
+    "text": [
+      "В маленькой комнате голос отражается от стен и через миг снова попадает в микрофон. Такое короткое эхо ухо с трудом отличает от самого голоса: оно ложится на голос гребёнкой, и звук становится тонким и размытым. Конденсаторный микрофон ловит отражения комнаты особенно чутко.",
+      "Что делать. Повесить толстое одеяло дугой в углу и встать к нему спиной, лицом в комнату. Микрофон — в 10–20 сантиметрах от рта. Для рэпа многие звукорежиссёры выбирают динамический микрофон."
+    ],
+    "bot": "🎛 Свести голос с битом",
+    "start": "skleyka_pamyatka",
+    "sources": [
+      "https://www.neumann.com/en-us/knowledge-base/neumann-im-homestudio/homestudio-academy/what-are-the-acoustic-requirements-for-recording-and-mixing — «The kind of very short echoes that occur in small rooms also create unwanted comb filter effects, which make the sound thin and washed out»",
+      "https://www.soundonsound.com/sound-advice/q-how-do-set-acoustic-treatment-recording-vocals — «By placing absorbent material in an arc behind the vocalist or performer, usually around the corner of the room, any sound that would normally be reflected from those walls behind the singer back into the mic gets absorbed instead»; «installed a singer facing back out into the room»",
+      "https://www.shure.com/en-US/insights/how-to-record-and-mix-vocals — «A simple and cost-effective way to reduce room reflections is to hang a duvet or thick blanket behind the singer»; «Condenser microphones in particular are highly sensitive and will capture room reflections in addition to the direct vocal sound»; «For most singers, approximately 10 to 20 centimeters (4-8 inches) from the mic will provide a good starting point»; «Many engineers prefer dynamic microphones for genres such as» … «Rap»"
+    ]
   }
 ]
