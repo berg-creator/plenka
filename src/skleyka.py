@@ -4072,6 +4072,16 @@ def wish(chat_id: str | int, text: str) -> bool:
     if (draft := _draft(data, chat_id)) and found:
         _links(data, chat_id, draft, found)
         return True
+    if draft and _beat_due(draft):
+        # 28.10.2026 человек дважды писал артиста не ответом: бот отвечал WISHED, ничего не искал,
+        # и заявка закрывалась по сроку. На шаге бита короткий текст — артист, вопрос — напоминание.
+        if "?" not in text and len(text) <= 40:
+            beats(chat_id, text)
+        else:
+            draft["at"] = state.iso()
+            save(data)
+            telegram.send_message(chat_id, BEAT_DUE)
+        return True
     if draft:
         draft["at"] = state.iso()  # человек пишет — вопрос о звуке не закрывается сам (STYLE_WAIT)
     elif not job:
@@ -4088,6 +4098,12 @@ def wish(chat_id: str | int, text: str) -> bool:
     save(data)
     telegram.send_message(chat_id, WISHED)
     return True
+
+
+def _beat_due(draft: dict) -> bool:
+    """Шаг бита после «🔎 Нет бита» или после старого бита «🔁»: бот ждёт артиста или новый бит."""
+    plan, step = draft.get("plan") or [], draft["step"]
+    return (draft.get("beat") == "find" or "old" in draft) and step < len(plan) and plan[step] == "бит"
 
 
 def _links(data: dict, chat_id: str, draft: dict, found: list[str]) -> None:
@@ -4281,6 +4297,7 @@ SWAP_FAR = ("🔁 Этот бит — {new} BPM, а голос записан н
             "поплывёт. Нужен бит {range}. Лимит на сутки не потрачен.\n\n")
 SWAP_AGAIN = (f"{BEATS_MARK}? Напиши артиста ответом на это сообщение — найду биты в темпе. "
               f"Есть другой бит — {ASK_MARK} его файлом.")
+BEAT_DUE = f"Жду бит {DRAFT_MINUTES} минут: пришли его файлом или напиши артиста — найду бесплатные биты."
 SWAPPED = ("🔁 Голос перенёс с {old} BPM на {new} BPM, первый такт — на первый такт бита. "
            "Встал не на ту долю — напиши словами, куда подвинуть.\n")
 # Счётчик (service --sources): нажатия и готовые треки после них, только числа по дню.
@@ -5854,6 +5871,13 @@ def _selftest() -> None:
         assert draft["old"]["f"] == "f4" and [f["f"] for f in draft["files"]] == ["f3"] and draft["beat"] == "swap"
         assert sent[-1].startswith("🔁 Принял «old beat.mp3»") and BEATS_MARK in sent[-1] and ASK_MARK in sent[-1]
         assert state.read_json(service.SOURCES_FILE, {})[service._today()] == {BEAT_COUNT["find"]: 1, BEAT_COUNT["swap"]: 1}
+        # Артист не ответом — тоже поиск, а не «Записал»; вопрос на шаге бита — напоминание, что ждём.
+        globals()["beats"], real_beats = lambda chat, text: searched.append((str(chat), text)), beats
+        try:
+            assert wish(7, "madk1d") and searched[-1] == ("7", "madk1d"), searched
+            assert wish(7, "через сколько будет?") and sent[-1] == BEAT_DUE and len(searched) == 2
+        finally:
+            globals()["beats"] = real_beats
         take(file(5, "take 2.wav"))
         later("7")
         assert sent[-1].startswith("Дорожки есть: вокал «") and load()["drafts"]["7"]["asked"] == "style"
