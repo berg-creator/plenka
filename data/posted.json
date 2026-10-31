@@ -1379,6 +1379,12 @@
       "file": "dohita-129513512.json",
       "published_at": "2026-10-30T11:32:25+00:00",
       "rubric": "dohita"
+    },
+    {
+      "chat": "channel",
+      "file": "pamyatka-shtraf.json",
+      "published_at": "2026-10-31T15:45:03+00:00",
+      "rubric": "pamyatka"
     }
   ],
   "photos": [
