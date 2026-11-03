@@ -163,3 +163,5 @@
 {"at": "2026-11-01T18:44:12+00:00", "way": "out", "last": "текст", "last_hours": 28.4, "stay_hours": 29.1}
 {"at": "2026-11-03T02:19:04+00:00", "way": "in", "last": "s:bity", "last_hours": 0.0}
 {"at": "2026-11-03T12:52:35+00:00", "way": "in", "last": "s:bity", "last_hours": 0.0}
+{"at": "2026-11-03T14:41:08+00:00", "way": "in"}
+{"at": "2026-11-03T14:44:06+00:00", "way": "out", "last": "s:sk", "last_hours": 0.0, "stay_hours": 0.0}
