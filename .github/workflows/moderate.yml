@@ -151,6 +151,19 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           echo "STATE_DIR=${GITHUB_WORKSPACE}/private-state" >> "$GITHUB_ENV"
 
+      # Сменщик — в очередь сразу, на старте: крону верить нельзя и при длинных сменах.
+      # Расчёт «в очереди всегда ждёт следующий крон» не сбылся: за 31.10–06.11.2026
+      # смена тринадцать раз кончалась без сменщика, бот молчал от получаса до трёх
+      # часов («ребят, у вас бот сдох», 06.11). Запуск workflow_dispatch встаёт в
+      # группу bot-serve ожидающим и стартует, как только эта смена закончится;
+      # пуш кода или крон его вытесняют — значит, сменщик всё равно есть. Остановить
+      # цепочку — выключить workflow в Actions. Не встал — смена идёт, крон остаётся запасом.
+      - name: Поставить сменщика
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run moderate.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
+
       - name: Дежурить
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
