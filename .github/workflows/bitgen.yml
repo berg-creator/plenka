@@ -1,0 +1,103 @@
+name: Генератор битов
+
+# Бит без Мака и FL (src/bitgen.py): запрос словами → бит → mp3 владельцу в личку.
+# Запуск руками: Actions → «Генератор битов» → Run workflow (с телефона тоже).
+# Петли с Freesound (только CC0 и CC-BY) — если в Secrets есть FREESOUND_TOKEN
+# и включено «петля из сети»; без ключа мелодия синтезируется.
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: "Запрос: жанр, темп, тональность, вайб («trap 140 dark», «дрилл фа минор»)"
+        required: true
+        default: "trap 140 dark"
+      seed:
+        description: "seed (пусто — случайный; тот же seed — тот же бит)"
+        required: false
+        default: ""
+      count:
+        description: "Сколько вариантов (1–4)"
+        required: false
+        default: "2"
+      loop:
+        description: "Петля из сети (Freesound, нужен FREESOUND_TOKEN)"
+        type: boolean
+        default: false
+      short:
+        description: "Только превью ~30 с"
+        type: boolean
+        default: false
+
+concurrency:
+  group: bitgen
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt numpy scipy soundfile librosa
+
+      - name: Поставить ffmpeg
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      # Библиотека петель между запусками: каждый звук качается один раз.
+      - uses: actions/cache@v4
+        if: inputs.loop
+        with:
+          path: ~/.cache/plenka_bitgen
+          key: bitgen-lib-${{ github.run_id }}
+          restore-keys: bitgen-lib-
+
+      - name: Набрать петли с Freesound
+        if: inputs.loop
+        env:
+          FREESOUND_TOKEN: ${{ secrets.FREESOUND_TOKEN }}
+          TEXT: ${{ inputs.text }}
+        run: |
+          [ -n "$FREESOUND_TOKEN" ] || { echo "::warning::нет FREESOUND_TOKEN — мелодия синтезом"; exit 0; }
+          python -m src.sources.freesound --fetch "$TEXT melody loop" --n 8 || echo "::warning::Freesound не ответил"
+          python -m src.sources.freesound --list
+
+      - name: Собрать и отправить
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          TEXT: ${{ inputs.text }}
+          SEED: ${{ inputs.seed }}
+          COUNT: ${{ inputs.count }}
+          SHORT: ${{ inputs.short && '--short' || '' }}
+          LOOP: ${{ !inputs.loop && '--no-loops' || '' }}
+        run: |
+          n=$(( ${COUNT:-1} )); [ $n -ge 1 ] && [ $n -le 4 ] || n=1
+          for i in $(seq 1 $n); do
+            seed=""; [ -n "$SEED" ] && seed="--seed $(( SEED + i - 1 ))"
+            python -m src.bitgen "$TEXT" $seed $SHORT $LOOP --out "out/$i" --send
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bitgen-${{ github.run_id }}
+          path: out/
+          retention-days: 7
+
+      - name: Написать владельцу о поломке
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >
+          curl -sS -o /dev/null "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage"
+          --data-urlencode "chat_id=$TELEGRAM_ADMIN_ID"
+          --data-urlencode "text=⚠️ Генератор битов упал: $RUN"
