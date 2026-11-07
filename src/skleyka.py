@@ -953,7 +953,20 @@ def _gain_track(points: list[tuple[float, float]], seconds: float, path: Path) -
 
 
 def _apply(source: Path, track: Path, dest: Path, before: str = "anull") -> Path:
-    """Громкость source по огибающей _gain_track. Огибающая короче звука обрежет его."""
+    """Громкость source по огибающей _gain_track. Огибающая короче звука продлевается своим
+    последним значением: amultiply кончается с коротким входом, и 07.11.2026 (трек bf0f0c)
+    даблы длиннее ведущего голоса обрезались по его концу — огибающая райдера мерена по ведущему,
+    а контроль писал «голос пропал: слышно 77 с из 100»."""
+    with wave.open(str(track), "rb") as found:
+        rate, values = found.getframerate(), array.array("h", found.readframes(found.getnframes()))
+    if values and (short := math.ceil((clips.probe_seconds(source) + 1) * rate) - len(values)) > 0:
+        values.extend([values[-1]] * short)
+        track = dest.with_name(f"{dest.stem}-gain.wav")
+        with wave.open(str(track), "wb") as longer:
+            longer.setnchannels(1)
+            longer.setsampwidth(2)
+            longer.setframerate(rate)
+            longer.writeframes(values.tobytes())
     _ffmpeg("-i", source, "-i", track, "-filter_complex",
             f"[0:a]{before}[s];[1:a]aresample={RATE},pan=stereo|c0=c0|c1=c0[g];[s][g]amultiply,volume=2",
             *reels.VOICE_CODEC, dest)
@@ -7096,6 +7109,14 @@ def _selftest() -> None:
         assert hushed[1] == band[1] and abs(clips.probe_seconds(hushed[0][1]) - 20) < 0.05 \
             and 6 <= _sound(hushed[0][1])[-1][1] <= 6.05 + BEAT_FADE, _sound(hushed[0][1])
         assert _hush(band, guitar, tmp) == band and _hush(band, None, tmp) == band
+
+        # Огибающая короче звука не режет его (bf0f0c, 07.11.2026: дабл длиннее ведущего обрезался
+        # по огибающей райдера ведущего) — продлевается последним значением: −6 дБ и дальше.
+        long_double = tmp / "apply-double.wav"
+        _ffmpeg("-f", "lavfi", "-i", "sine=f=330:d=12", "-ac", "2", long_double)
+        cut = _apply(long_double, _gain_track([(0.0, -6.0)], 4, tmp / "apply-gain.wav"), tmp / "apply-out.wav")
+        tail_level = loudness(cut, "atrim=start=8,")[0] - loudness(long_double, "atrim=start=8,")[0]
+        assert abs(clips.probe_seconds(cut) - 12) < 0.05 and abs(tail_level + 6) < 0.5, (clips.probe_seconds(cut), tail_level)
 
         # Контроль готового трека: пустое начало, хвост после долгой тишины и пик чинятся — строкой
         # человеку; пропавший голос, голос мимо бита и тишина внутри трека — владельцу, трек цел.
