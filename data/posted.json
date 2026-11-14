@@ -1385,6 +1385,12 @@
       "file": "pamyatka-shtraf.json",
       "published_at": "2026-10-31T15:45:03+00:00",
       "rubric": "pamyatka"
+    },
+    {
+      "chat": "channel",
+      "file": "beat-10.json",
+      "published_at": "2026-11-14T07:12:00+00:00",
+      "rubric": "beat"
     }
   ],
   "photos": [
