@@ -1494,7 +1494,7 @@
       "deezer_id": 5059044,
       "itunes_id": 673556643,
       "name": "Quavo",
-      "seen_at": "2026-11-17",
+      "seen_at": "2026-11-18",
       "tags": [],
       "tier": "scene"
     },
@@ -1510,7 +1510,7 @@
       "deezer_id": 152291,
       "itunes_id": 283347662,
       "name": "Macklemore",
-      "seen_at": "2026-11-13",
+      "seen_at": "2026-11-19",
       "tags": [],
       "tier": "scene"
     },
@@ -1622,9 +1622,9 @@
       "deezer_id": 432022,
       "itunes_id": 167376669,
       "name": "Skepta",
-      "seen_at": "2026-11-11",
+      "seen_at": "2026-11-18",
       "tags": [],
-      "tier": "auto"
+      "tier": "scene"
     },
     {
       "deezer_id": null,
@@ -1662,7 +1662,7 @@
       "deezer_id": 106670252,
       "itunes_id": 1553071344,
       "name": "YASMI",
-      "seen_at": "2026-11-13",
+      "seen_at": "2026-11-18",
       "tags": [],
       "tier": "scene"
     },
@@ -1809,9 +1809,17 @@
       "seen_at": "2026-11-17",
       "tags": [],
       "tier": "auto"
+    },
+    {
+      "deezer_id": 71676102,
+      "itunes_id": 1116295799,
+      "name": "Miyagi",
+      "seen_at": "2026-11-19",
+      "tags": [],
+      "tier": "auto"
     }
   ],
-  "grown_at": "2026-11-18",
+  "grown_at": "2026-11-19",
   "ids_updated_at": "2026-09-19T07:27:26+00:00",
   "note": "Поля itunes_id / deezer_id / youtube_channel_id заполняет скрипт `python -m src.resolve_ids`. Вручную их вписывать не надо. tier: core — ядро вкуса, scene — смежная сцена, legend — классика и наследие, ru — русский андеграунд, ru_pop — русский мейнстрим (нужен для инфоповодов и юмора, не для рубрики РЕЛИЗ). auto — найденные сами по прессе сцены (`python -m src.newcomers`, раз в сутки после сбора): у них есть seen_at, рэп-пресса переводит их в scene и, замолчав на 90 дней, обратно, полгода тишины выводит из сбора, год — из базы. Закрепить такого руками — поставить свой tier и убрать seen_at.",
   "version": 1
